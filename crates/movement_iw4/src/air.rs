@@ -1,6 +1,7 @@
 use playerstate_iw4::{PlayerState, UserCmd};
 
-use crate::{CollisionBackend, MoveBounds, Pml, accelerate, friction, step_slide_move};
+use crate::friction::friction_scaled;
+use crate::{CollisionBackend, MoveBounds, Pml, accelerate, step_slide_move};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AirMoveContext {
@@ -19,7 +20,23 @@ pub fn air_move<C: CollisionBackend>(
     bounds: MoveBounds,
     collision: &C,
 ) {
-    friction(ps, pml, false);
+    air_move_with(ps, pml, cmd, context, bounds, collision, false, |_| 1.0);
+}
+
+/// bo2zm: the air move with Black Ops II's friction (`bo2`) and its ground
+/// friction scaled by `ground_scale` (a dive's slide runs this move).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn air_move_with<C: CollisionBackend>(
+    ps: &mut PlayerState,
+    pml: &Pml,
+    cmd: &UserCmd,
+    context: AirMoveContext,
+    bounds: MoveBounds,
+    collision: &C,
+    bo2: bool,
+    ground_scale: impl FnOnce(&mut PlayerState) -> f32,
+) {
+    friction_scaled(ps, pml, bo2, ground_scale);
 
     steer(ps, pml, cmd, context.player_spectate_speed_scale);
 
@@ -49,8 +66,8 @@ pub fn air_move<C: CollisionBackend>(
 }
 
 /// The player's own push in the air: wish speed from the keys or stick,
-/// air acceleration 1. Also steers a dive (bo2zm).
-pub(crate) fn steer(ps: &mut PlayerState, pml: &Pml, cmd: &UserCmd, spectate_speed_scale: f32) {
+/// air acceleration 1.
+fn steer(ps: &mut PlayerState, pml: &Pml, cmd: &UserCmd, spectate_speed_scale: f32) {
     let command_scale = cmd_scale(ps, cmd, spectate_speed_scale);
     let mut forward = pml.forward;
     let mut right = pml.right;
@@ -84,8 +101,7 @@ fn cmd_scale(ps: &PlayerState, cmd: &UserCmd, spectate_speed_scale: f32) -> f32 
     }
 
     let mut scale = (ps.speed as f32 * largest) / (magnitude * 127.0_f32);
-    // bo2zm: a dive steers at the same 0.4 as a slow walk.
-    if (ps.pm_flags & 0x40) != 0 || ps.leanf != 0.0 || crate::dive::active(ps) {
+    if (ps.pm_flags & 0x40) != 0 || ps.leanf != 0.0 {
         scale *= 0.4_f32;
     }
     scale *= match ps.pm_type {

@@ -17,6 +17,9 @@ bevy-debug = ["bevy/debug", "bevy/track_location"]
 # on this feature is what turns "the interval across bevy's submit set was
 # long" into a statement about where the time went.
 bevy-trace = ["bevy/trace", "bevy/trace_chrome"]
+# The same spans added up per name into a small text file (src/span_stats.rs):
+# a whole match's worth, where a Chrome trace would be gigabytes.
+span-stats = ["bevy/trace", "bevy/debug"]
 
 [dependencies]
 bevy.workspace = true

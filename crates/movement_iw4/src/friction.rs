@@ -2,8 +2,20 @@ use playerstate_iw4::PlayerState;
 
 use crate::Pml;
 
-#[allow(clippy::assign_op_pattern)]
 pub fn friction(ps: &mut PlayerState, pml: &Pml, bo2: bool) {
+    friction_scaled(ps, pml, bo2, |_| 1.0);
+}
+
+/// bo2zm: `ground_scale` scales the ground's friction (a dive's slide); it
+/// is asked only when that friction applies, after a hard landing's or a
+/// jump's own scale.
+#[allow(clippy::assign_op_pattern)]
+pub(crate) fn friction_scaled(
+    ps: &mut PlayerState,
+    pml: &Pml,
+    bo2: bool,
+    ground_scale: impl FnOnce(&mut PlayerState) -> f32,
+) {
     // bo2zm: Black Ops II measures the speed along the ground while walking.
     let speed = if bo2 && pml.walking != 0 {
         velocity_speed(&[ps.velocity[0], ps.velocity[1], 0.0])
@@ -34,6 +46,7 @@ pub fn friction(ps: &mut PlayerState, pml: &Pml, bo2: bool) {
             } else if (flags & 0x2000) != 0 {
                 control *= walking_scale(ps);
             }
+            control *= ground_scale(ps);
 
             drop = control * 5.5;
             drop = drop * pml.frametime + 0.0;

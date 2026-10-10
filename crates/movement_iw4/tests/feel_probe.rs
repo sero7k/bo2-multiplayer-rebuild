@@ -52,11 +52,66 @@ impl CollisionBackend for Floor {
 }
 
 /// The floor and a ceiling at `roof` (none at infinity). A `slick` floor is
-/// ice; a `mantle` floor is a ledge top the player could climb.
+/// ice; a `mantle` floor is a ledge top the player could climb. A `window`
+/// is a thin wall across the way ahead with a window in it.
 struct Room {
     roof: f32,
     slick: bool,
     mantle: bool,
+    window: Option<Window>,
+}
+
+/// A thin wall across +x at x = `wall`, open from z = `sill` to `lintel`.
+#[derive(Clone, Copy)]
+struct Window {
+    wall: f32,
+    sill: f32,
+    lintel: f32,
+}
+
+impl Window {
+    /// Where the box first hits the wall, sill or lintel on its way, and the
+    /// face's normal.
+    fn hit(&self, input: &GroundTraceInput) -> Option<(f32, [f32; 3])> {
+        const EPS: f32 = 0.01;
+        let (s, e) = (input.start, input.end);
+        let at = |f: f32| s[2] + (e[2] - s[2]) * f;
+        let fits = |z: f32| z + input.mins[2] >= self.sill - EPS && z + input.maxs[2] <= self.lintel + EPS;
+        let front = s[0] + input.maxs[0];
+        let back = s[0] + input.mins[0];
+        let dx = e[0] - s[0];
+        if front <= self.wall + EPS {
+            // Not through yet: the box's front reaches the wall this move.
+            if dx <= 0.0 || front + dx <= self.wall + EPS {
+                return None;
+            }
+            let f = ((self.wall - front) / dx).max(0.0);
+            if !fits(at(f)) {
+                return Some((f, [-1.0, 0.0, 0.0]));
+            }
+        } else if back >= self.wall {
+            return None;
+        } else if !fits(s[2]) {
+            return Some((0.0, [-1.0, 0.0, 0.0]));
+        }
+        // In the opening: the sill and lintel are a floor and a ceiling until
+        // the box's back is through.
+        let entered = if front <= self.wall + EPS { ((self.wall - front) / dx).max(0.0) } else { 0.0 };
+        let left = if dx > 0.0 { ((self.wall - back) / dx).min(1.0) } else { 1.0 };
+        let dz = e[2] - s[2];
+        if dz < 0.0 {
+            let f = (self.sill - (s[2] + input.mins[2])) / dz;
+            if (entered..left).contains(&f) {
+                return Some((f, [0.0, 0.0, 1.0]));
+            }
+        } else if dz > 0.0 {
+            let f = (self.lintel - (s[2] + input.maxs[2])) / dz;
+            if (entered..left).contains(&f) {
+                return Some((f, [0.0, 0.0, -1.0]));
+            }
+        }
+        None
+    }
 }
 
 impl CollisionBackend for Room {
@@ -86,6 +141,21 @@ impl CollisionBackend for Room {
                 for i in 0..3 {
                     hit.endpos[i] = input.start[i] + (input.end[i] - input.start[i]) * fraction;
                 }
+            }
+        }
+        if let Some((fraction, normal)) = self.window.and_then(|w| w.hit(&input))
+            && fraction < hit.fraction
+        {
+            hit = Trace {
+                fraction,
+                normal,
+                walkable: u8::from(normal[2] > 0.7),
+                hit_type: 1,
+                endpos: input.end,
+                ..Trace::default()
+            };
+            for i in 0..3 {
+                hit.endpos[i] = input.start[i] + (input.end[i] - input.start[i]) * fraction;
             }
         }
         hit
@@ -118,6 +188,7 @@ fn context(
                 } else {
                     0
                 },
+                bo2: feel.on,
             },
             weapon_move_scale: 1.0,
             old_buttons,
@@ -189,6 +260,8 @@ struct Run {
     mantle: bool,
     /// Walking speed scale from a shellshock (1 = none).
     shock: f32,
+    /// A wall with a window in it ahead.
+    window: Option<Window>,
 }
 
 impl Run {
@@ -212,6 +285,7 @@ impl Run {
             slick: false,
             mantle: false,
             shock: 1.0,
+            window: None,
         }
     }
 
@@ -237,6 +311,7 @@ impl Run {
                     roof: self.roof,
                     slick: self.slick,
                     mantle: self.mantle,
+                    window: self.window,
                 },
                 &FlatMantleAnimLength::default(),
                 &ZeroMantleRootDelta,
@@ -428,21 +503,19 @@ fn omni_sprint_runs_full_speed_any_way_in_bo2() {
 }
 
 #[test]
-fn dive_goes_the_way_you_push() {
-    // Sprinting to the right (yaw 0: right is -y), then diving.
+fn a_dive_keeps_the_runs_direction() {
+    // Sprinting ahead (yaw 0: ahead is +x, right is -y), then diving while
+    // pushing right: BO2 keeps the run's speed and direction, and the push
+    // only steers, a frame of air control at a time.
     let mut run = Run::new(DIVE);
-    run.hold(1000, 0, 127, SPRINT);
-    run.hold(50, 0, 127, SPRINT | PRONE);
-    let mut back = Run::new(DIVE);
-    back.hold(1000, -127, 0, SPRINT);
-    back.hold(50, -127, 0, SPRINT | PRONE);
-    eprintln!(
-        "dive velocity: right {:?}, back {:?}",
-        run.ps.velocity, back.ps.velocity
-    );
-    assert!(flag(&run, movement_iw4::PMF_DIVE) && flag(&back, movement_iw4::PMF_DIVE));
-    assert!(run.ps.velocity[1] < -200.0 && run.ps.velocity[0].abs() < 1.0);
-    assert!(back.ps.velocity[0] < -200.0 && back.ps.velocity[1].abs() < 1.0);
+    run.hold(1000, 127, 0, SPRINT);
+    let sprint = run.ground_speed();
+    run.hold(50, 0, 127, SPRINT | PRONE | STANCE_HELD);
+    eprintln!("sprint {sprint:.1}, dive velocity {:?}", run.ps.velocity);
+    assert!(flag(&run, movement_iw4::PMF_DIVE));
+    assert!((run.ps.velocity[0] - sprint).abs() < 1.0, "the run's speed");
+    // One frame of air control: 9.5 at 50 ms, snapped to a whole number.
+    assert!(run.sideways_speed() <= 10.0, "one frame of steering");
 }
 
 #[test]
@@ -452,34 +525,106 @@ fn dive_rises_to_jump_height_and_lands_with_the_animation() {
     eprintln!("dive: {air_ms} ms in the air, top {top:.1}");
     // pb_dive_prone: 0.733 s from take-off to touch-down.
     assert!((700..=800).contains(&air_ms), "air time {air_ms}");
-    assert!((top - 39.0).abs() < 0.5, "top {top}");
+    // The rise stops at a jump's height, past it by up to a frame's climb
+    // (the test's frames are 50 ms; at 125 fps it is about 3.5).
+    assert!((39.0..=39.0 + 25.0).contains(&top), "top {top}");
     assert!(flag(&run, movement_iw4::PMF_DIVE_SLIDE));
     assert!(flag(&run, playerstate_iw4::pm_flags::PRONE));
+    assert_eq!(run.ps.view_height_target, 11, "the view drops in the air");
+}
+
+#[test]
+fn a_dive_hangs_at_the_top_for_0_4_s() {
+    // At a jump's height the dive stops rising and, until 0.4 s after
+    // take-off, sinks only by a frame's gravity at a time; from the frame at
+    // 0.4 s (BO2's check is "less than 0.4 s") it falls.
+    let mut run = Run::new(DIVE);
+    run.hold(1000, 127, 0, SPRINT);
+    run.hold(50, 127, 0, SPRINT | PRONE | STANCE_HELD);
+    let take_off = run.time;
+    let mut heights = Vec::new();
+    while run.time - take_off < 350 {
+        run.hold(50, 0, 0, SPRINT);
+        heights.push(run.ps.origin[2]);
+    }
+    eprintln!("dive heights to 0.35 s: {heights:.1?}");
+    let top = heights.iter().cloned().fold(0.0, f32::max);
+    let at_350 = *heights.last().unwrap();
+    assert!(at_350 >= 39.0, "still at the top at 0.35 s: {at_350}");
+    assert!(top - at_350 < 10.0, "hung, not fell: {top} to {at_350}");
+    run.hold(50, 0, 0, SPRINT);
+    assert!(
+        run.ps.origin[2] < at_350 - 2.0,
+        "falls at 0.4 s: {at_350} to {}",
+        run.ps.origin[2]
+    );
+}
+
+#[test]
+fn a_dive_goes_through_a_window_a_jump_hits() {
+    // A window 65 high, from 35 to 100 off the floor, 60 ahead of the
+    // player's front: a sprint jump (a standing body, 70 tall) cannot fit;
+    // a dive's body is crouch-height (50) by then, so it goes through.
+    let through = |dive: bool| {
+        let mut run = Run::new(DIVE);
+        run.hold(1000, 127, 0, SPRINT);
+        let wall = run.ps.origin[0] + 15.0 + 60.0;
+        run.window = Some(Window {
+            wall,
+            sill: 35.0,
+            lintel: 100.0,
+        });
+        let take_off = if dive { SPRINT | PRONE | STANCE_HELD } else { SPRINT | JUMP };
+        run.hold(50, 127, 0, take_off);
+        run.hold(1500, 127, 0, SPRINT);
+        eprintln!(
+            "{}: at x {:.1} (wall {wall:.1}), z {:.1}",
+            if dive { "dive" } else { "jump" },
+            run.ps.origin[0],
+            run.ps.origin[2]
+        );
+        run.ps.origin[0] - 15.0 > wall
+    };
+    assert!(!through(false), "a sprint jump hits the wall");
+    assert!(through(true), "a dive goes through the window");
 }
 
 #[test]
 fn a_dive_steers_a_little() {
-    // Dive straight ahead, then push right through the flight: BO2's air
-    // control at 0.4 of the 190 wish speed, about 76 a second each second.
+    // Dive straight ahead, then push right through the flight: BO2's
+    // ordinary air control, acceleration 1 toward the 190 wish speed, 9.5 a
+    // frame at 50 ms. Touch-down is a hard landing, as in BO2 (a fall of
+    // over 12): the speed drops to 0.67 of it, a dive's too.
     let steer = |right: i8| {
         let mut run = Run::new(DIVE);
         run.hold(1000, 127, 0, SPRINT);
         run.hold(50, 127, 0, SPRINT | PRONE | STANCE_HELD);
         assert!(flag(&run, movement_iw4::PMF_DIVE), "dived");
+        let run_speed = run.ps.velocity[0];
+        let mut top_sideways = 0.0_f32;
         while flag(&run, movement_iw4::PMF_DIVE) {
+            top_sideways = top_sideways.max(run.sideways_speed());
             run.hold(50, 0, right, SPRINT);
             assert!(run.time < 5000, "the dive came down");
         }
-        (run.sideways_speed(), run.ps.velocity[0])
+        (top_sideways, run_speed, run.ps.velocity[0])
     };
-    let (still, ahead) = steer(0);
-    let (pushed, pushed_ahead) = steer(127);
-    eprintln!("sideways speed at touch-down: {still:.1} still, {pushed:.1} pushing right");
+    let (still, run_speed, ahead) = steer(0);
+    let (pushed, _, pushed_ahead) = steer(127);
+    eprintln!(
+        "dive: sideways speed in the air {still:.1} still, {pushed:.1} pushing right; \
+         ahead {run_speed:.1} at take-off, {ahead:.1} after touch-down"
+    );
     assert!(still < 0.01);
-    assert!((30.0..=60.0).contains(&pushed), "pushed {pushed}");
+    // 0.6 s of it before touch-down: 12 frames.
+    assert!((110.0..=150.0).contains(&pushed), "pushed {pushed}");
     assert!(
         (pushed_ahead - ahead).abs() < 0.01,
         "pushing sideways keeps the forward speed"
+    );
+    assert!(
+        (ahead - run_speed * 0.67).abs() < 1.0,
+        "touch-down keeps 0.67 of the speed: {run_speed} to {ahead}"
     );
 }
 
@@ -512,11 +657,14 @@ fn dive_slides_pauses_then_holds_prone_without_the_prone_lock() {
         assert_eq!(run.ps.pm_time, 0, "no 1.8 s prone lock");
         run.hold(50, 0, 0, SPRINT);
     }
-    let on_ground = run.time - landed;
-    eprintln!("slide + pause: {on_ground} ms");
-    assert!((400..=450).contains(&on_ground));
+    let slide = run.time - landed;
+    eprintln!("slide: {slide} ms");
+    assert_eq!(slide, 300, "dtp_max_slide_duration");
     assert!(flag(&run, movement_iw4::PMF_DIVE_PRONE));
     assert_eq!(run.ground_speed(), 0.0);
+    // Then 0.1 s still: a push does nothing.
+    run.hold(50, 127, 0, 0);
+    assert_eq!(run.ground_speed(), 0.0, "the still moment");
     run.hold(500, 0, 0, 0);
     assert!(flag(&run, playerstate_iw4::pm_flags::PRONE), "stays prone");
     assert_eq!(run.ps.pm_flags & playerstate_iw4::pm_flags::JUMPING, 0);
@@ -531,17 +679,17 @@ fn a_slide_that_stops_ends_the_dive_at_once() {
     run.ps.velocity = [1.0, 0.0, 0.0];
     run.hold(50, 0, 0, SPRINT);
     assert!(!movement_iw4::dive_to_prone(&run.ps), "the dive ended");
-    while flag(&run, movement_iw4::PMF_DIVE_SLIDE) {
-        run.hold(50, 0, 0, SPRINT);
-    }
     assert_eq!(
         run.ps.dive_end_time,
         landed + 50,
         "the next dive counts from the stop"
     );
-    let held = run.time - landed;
-    eprintln!("stopped slide: free after {held} ms");
-    assert!((150..=200).contains(&held), "only the pause after it");
+    // The still moment, 0.1 s from the stop, then the push moves him.
+    run.hold(50, 127, 0, 0);
+    assert_eq!(run.ground_speed(), 0.0, "still");
+    run.hold(50, 127, 0, 0);
+    eprintln!("crawl after the stop: {:.1}", run.ground_speed());
+    assert!(run.ground_speed() > 0.0, "free 0.1 s after the stop");
 }
 
 /// Dives forward and returns the ground speed on the slide's last frame.
@@ -593,10 +741,11 @@ fn scripts_see_the_dive_from_take_off_to_the_slides_end() {
     }
     let slide = run.time - landed;
     eprintln!("dive seen on the ground for {slide} ms");
-    assert!((250..=300).contains(&slide));
+    assert_eq!(slide, 300);
+    assert_eq!(run.ps.dive_end_time, run.time, "the slide ended this frame");
     assert!(
-        flag(&run, movement_iw4::PMF_DIVE_SLIDE),
-        "the pause still holds him"
+        flag(&run, movement_iw4::PMF_DIVE_PRONE),
+        "then he lies still, prone"
     );
 }
 
@@ -615,7 +764,10 @@ fn getting_up_from_a_dive_is_twice_as_quick() {
     assert_eq!(prone.ps.view_height_current, 11.0);
     let from_prone = ms_to_stand(&mut prone, 0);
     eprintln!("prone to standing: after a dive {from_dive} ms, ordinary {from_prone} ms");
-    assert!(from_dive * 10 <= from_prone * 6);
+    // Both steps (lying to crouched, crouched to standing) take half as
+    // long: 300 ms of view change, not 600. Each step also waits a 50 ms
+    // test frame to start, and the dive's count holds the jump press.
+    assert_eq!((from_dive - 50 - 100) * 2, from_prone - 100);
     dived.hold(50, 0, 0, 0);
     assert!(!flag(&dived, movement_iw4::PMF_DIVE_GETUP), "get-up over");
 }
@@ -653,7 +805,12 @@ fn a_get_up_pressed_mid_dive_is_kept() {
     while flag(&run, movement_iw4::PMF_DIVE) || flag(&run, movement_iw4::PMF_DIVE_SLIDE) {
         run.hold(50, 0, 0, 0);
     }
-    assert!(!flag(&run, movement_iw4::PMF_DIVE_PRONE));
+    // The slide is over: the still moment (0.1 s), the get-up kept...
+    assert!(flag(&run, movement_iw4::PMF_DIVE_PRONE));
+    assert!(flag(&run, movement_iw4::PMF_DIVE_GETUP), "the get-up is kept");
+    run.hold(100, 0, 0, 0);
+    // ...then up the moment it ends, with no key pressed.
+    assert!(!flag(&run, movement_iw4::PMF_DIVE_PRONE), "getting up");
     ms_to_stand(&mut run, 0);
     assert_eq!(run.ps.pm_flags & 3, 0);
 }

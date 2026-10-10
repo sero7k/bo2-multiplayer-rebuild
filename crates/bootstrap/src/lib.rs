@@ -3,6 +3,8 @@ pub mod bench;
 mod frame_owner;
 mod launch;
 mod plugins;
+#[cfg(feature = "span-stats")]
+mod span_stats;
 
 pub use args::{AcceptanceLaunch, LaunchMode, parse_cli};
 pub use launch::launch;

@@ -169,10 +169,19 @@ fn lightmap_slot() -> &'static RwLock<Vec<Option<Arc<T6LightmapPage>>>> {
     &SLOT
 }
 
+static LIGHTMAP_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub fn install_t6_lightmaps(pages: Vec<Option<T6LightmapPage>>) {
     if let Ok(mut s) = lightmap_slot().write() {
         *s = pages.into_iter().map(|p| p.map(Arc::new)).collect();
     }
+    LIGHTMAP_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// bo2mp: bumped whenever the lightmaps are replaced, so a cache of their
+/// light knows to start over.
+pub fn t6_lightmap_generation() -> u64 {
+    LIGHTMAP_GENERATION.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 impl T6LightmapPage {

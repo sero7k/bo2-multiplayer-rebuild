@@ -126,6 +126,31 @@ pub(super) fn install(world: &mut World, vehicles: Vec<super::T6Vehicle>) {
     });
 }
 
+/// The level restarts (`map_restart`): every ride and view link ends, each
+/// player's server vision goes, the rest starts fresh; his zones' vehicles
+/// and the minimap stay.
+pub(super) fn restart(world: &mut World) {
+    let rides: Vec<u32> = streaks(world).rides.keys().copied().collect();
+    for client in rides {
+        ride::end_ride(world, client);
+    }
+    let links: Vec<u32> = streaks(world).view_links.keys().copied().collect();
+    for client in links {
+        view_link::end(world, client);
+    }
+    let old = std::mem::take(&mut *streaks(world));
+    let seen: Vec<u32> = old.server_vision.keys().copied().collect();
+    world.insert_resource(Streaks {
+        vehicle_weapons: old.vehicle_weapons,
+        vehicle_drive: old.vehicle_drive,
+        minimap: old.minimap,
+        ..Default::default()
+    });
+    for client in seen {
+        publish_vision(world, client);
+    }
+}
+
 fn streaks(world: &mut World) -> bevy_ecs::prelude::Mut<'_, Streaks> {
     if !world.contains_resource::<Streaks>() {
         world.insert_resource(Streaks::default());

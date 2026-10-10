@@ -6,7 +6,7 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
-use super::T6PathNode;
+use super::{T6PathNode, T6PathTables};
 
 pub(crate) const NODE_PATH: u32 = 1;
 pub(crate) const NODE_NEGOTIATION_BEGIN: u32 = 17;
@@ -23,6 +23,84 @@ pub(crate) struct Nav {
     /// pile), by entity, until its `connectpaths`; both directions.
     cut_by: HashMap<u32, Vec<(u32, u32)>>,
     cut: HashSet<(u32, u32)>,
+    pub baked: Baked,
+}
+
+impl Nav {
+    /// The nav with the map compiler's node tables.
+    pub(crate) fn with_baked(mut self, baked: Baked) -> Self {
+        self.baked = baked;
+        self
+    }
+}
+
+/// The map compiler's node tables, where the map has them and their size
+/// fits: which node pairs see each other (`vis`, a `vis_n` square, bit
+/// `vis_n * i + j` for i < j) and which a straight walk joins (`smooth`,
+/// bit `smooth_n * i + j`), as BO2's `Path_NodesVisible` and
+/// `Path_NodesSmooth` read them.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Baked {
+    vis_n: usize,
+    vis: Vec<u8>,
+    smooth_n: usize,
+    smooth: Vec<u8>,
+}
+
+impl Baked {
+    /// The tables as the map gave them: each one's side is the node count
+    /// its byte count fits (the map's nodes, or its compiled ones).
+    pub(crate) fn new(t: &T6PathTables, nodes: usize) -> Self {
+        let side = |bytes: &[u8]| {
+            [t.node_count as usize, t.original_count as usize]
+                .into_iter()
+                .filter(|&d| d > 0 && d <= nodes)
+                .find(|&d| bytes.len() == (d * d).div_ceil(8))
+                .or_else(|| {
+                    [t.node_count as usize, t.original_count as usize]
+                        .into_iter()
+                        .filter(|&d| d > 0 && d <= nodes && bytes.len() * 8 >= d * d)
+                        .max()
+                })
+                .unwrap_or(0)
+        };
+        let (vis_n, smooth_n) = (side(&t.vis), side(&t.smooth));
+        Self {
+            vis_n,
+            vis: if vis_n > 0 { t.vis.clone() } else { Vec::new() },
+            smooth_n,
+            smooth: if smooth_n > 0 { t.smooth.clone() } else { Vec::new() },
+        }
+    }
+
+    pub(crate) fn sides(&self) -> (usize, usize) {
+        (self.vis_n, self.smooth_n)
+    }
+
+    /// Do the two nodes see each other (BO2's `Path_NodesVisible`)? None
+    /// past the table (a node added at run time, or a map without one).
+    pub(crate) fn visible(&self, i: u32, j: u32) -> Option<bool> {
+        let (i, j, n) = (i as usize, j as usize, self.vis_n);
+        if i >= n || j >= n {
+            return None;
+        }
+        if i == j {
+            return Some(true);
+        }
+        let k = n * i.min(j) + i.max(j);
+        Some(self.vis[k >> 3] & (1 << (k & 7)) != 0)
+    }
+
+    /// Does a straight walk join the two (BO2's `Path_NodesSmooth`)? No
+    /// past the table.
+    pub(crate) fn smooth(&self, i: u32, j: u32) -> bool {
+        let (i, j, n) = (i as usize, j as usize, self.smooth_n);
+        if i >= n || j >= n {
+            return false;
+        }
+        let k = n * i + j;
+        self.smooth[k >> 3] & (1 << (k & 7)) != 0
+    }
 }
 
 /// Does the segment a -> b pass through the box?

@@ -10,6 +10,8 @@
 //! classes are read: with his stats file (`stats`), the local player's
 //! class is his own, as the front end's Create-a-Class saved it.
 
+use std::sync::{Arc, Mutex, PoisonError};
+
 use bevy_ecs::prelude::World;
 use gsc_t6::{Value, Vm};
 
@@ -40,11 +42,30 @@ struct Item {
     cost: i32,
 }
 
-fn items(world: &World) -> Vec<Item> {
+/// The table's items, read once (its size the key: the table is read
+/// again with the level): the HUD asks each tick, the class scripts at
+/// each spawn.
+#[derive(Default)]
+pub(crate) struct ItemCache(Mutex<Option<((usize, usize), Arc<Vec<Item>>)>>);
+
+fn items(world: &World) -> Arc<Vec<Item>> {
     let zm = world.resource::<Zm>();
     let Some(t) = zm.tables.get(TABLE) else {
-        return Vec::new();
+        return Arc::default();
     };
+    let key = (t.rows, t.cells.len());
+    let mut cache = zm.items.0.lock().unwrap_or_else(PoisonError::into_inner);
+    match &*cache {
+        Some((k, all)) if *k == key => all.clone(),
+        _ => {
+            let all = Arc::new(read_items(t));
+            *cache = Some((key, all.clone()));
+            all
+        }
+    }
+}
+
+fn read_items(t: &super::T6Table) -> Vec<Item> {
     let cell = |r: usize, c: usize| t.cells.get(r * t.columns + c).map_or("", String::as_str);
     let mut out = Vec::new();
     for r in 0..t.rows {
@@ -81,9 +102,9 @@ fn items(world: &World) -> Vec<Item> {
 /// his own are read), the dearest first (the column lists it top down).
 pub(crate) fn streak_picks(world: &World) -> String {
     let mut picks: Vec<(String, i32)> = items(world)
-        .into_iter()
+        .iter()
         .filter(|i| i.slot.starts_with("killstreak") && i.classes.iter().any(|(c, _)| c == "all") && i.cost > 0)
-        .map(|i| (i.icon, i.cost))
+        .map(|i| (i.icon.clone(), i.cost))
         .collect();
     picks.truncate(3);
     picks.sort_by_key(|p| std::cmp::Reverse(p.1));
@@ -291,9 +312,9 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             return Ok(vm.string(""));
         };
         let r = items(world)
-            .into_iter()
+            .iter()
             .find(|i| i.index == index)
-            .map(|i| i.reference)
+            .map(|i| i.reference.clone())
             .unwrap_or_default();
         Ok(vm.string(&r))
     });
@@ -301,9 +322,9 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     f!("getweaponattachments", |vm, world, _, a| {
         let want = text(vm, a, 0);
         let atts = items(world)
-            .into_iter()
+            .iter()
             .find(|i| i.name.eq_ignore_ascii_case(&want) || i.reference == want)
-            .map(|i| i.attachments)
+            .map(|i| i.attachments.clone())
             .unwrap_or_default();
         let v = atts.iter().map(|s| vm.string(s)).collect();
         Ok(list(v))

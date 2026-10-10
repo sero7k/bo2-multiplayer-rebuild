@@ -161,6 +161,7 @@ fn entity_event_sound(
     adopted: Option<Res<net::LastAdoptedSnapshot>>,
     mut output: MessageWriter<WeaponSound>,
     mut play: MessageWriter<crate::AliasCommand>,
+    mut unvoiced: Local<HashSet<(i32, u32)>>,
 ) {
     let event = sound.event.event;
     if event == EntityEventKind::SOUND_ALIAS {
@@ -248,11 +249,15 @@ fn entity_event_sound(
             sound.event.payload.event_parm == 1,
         )
     }) else {
-        diag::warn!(
-            Audio,
-            "audio: entity sound event {} has no authored alias",
-            event.0
-        );
+        // Once for each event and gun: it fired hundreds of times a match.
+        if unvoiced.insert((event.0, sound.event.payload.weapon)) {
+            diag::warn!(
+                Audio,
+                "audio: entity sound event {} has no authored alias (weapon {})",
+                event.0,
+                sound.event.payload.weapon
+            );
+        }
         return;
     };
     output.write(WeaponSound {
@@ -653,10 +658,17 @@ fn grenade_contact(
             .unwrap_or(asset_core::AssetNamespace::Iw4);
         Some((namespace, alias))
     }) else {
+        // (The name the weapon gives that surface, if any: no name, or a
+        // name the loaded sound banks lack.)
+        let named = weapons
+            .as_deref()
+            .and_then(|w| w.0.bounce_sound_of(payload.weapon, surf).map(str::to_owned));
         diag::warn!(
             Audio,
-            "audio: grenade bounce alias for eventParm {} is unavailable (typed gap)",
-            payload.event_parm
+            "audio: grenade bounce alias for eventParm {} is unavailable (weapon {} names {:?}) (typed gap)",
+            payload.event_parm,
+            payload.weapon,
+            named
         );
         return;
     };

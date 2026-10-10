@@ -327,6 +327,14 @@ pub(crate) fn apply_pad_layout_setting(
     binds.apply_pad_layout(usize::from(layout));
 }
 
+/// bo2zm: the "Omni Movement" setting, for the next game this PC starts
+/// (a game reads it once, when it starts; a second PC gets the host's).
+pub(crate) fn push_omni_movement_setting(settings: Res<frame::GameSettings>) {
+    if settings.is_changed() {
+        sim::set_omni_movement(settings.omni_movement);
+    }
+}
+
 fn parse_into<T: std::str::FromStr>(value: &str, slot: &mut T) {
     if let Ok(value) = value.parse() {
         *slot = value;
@@ -367,6 +375,7 @@ fn serialize_settings(settings: &frame::GameSettings, binds: &KeyBinds) -> Strin
             "bo2_quality={}",
             if settings.bo2_fast { "fast" } else { "full" }
         ),
+        format!("omni_movement={}", settings.omni_movement),
         format!("binds_layout={BINDS_LAYOUT}"),
         "unbindall".to_owned(),
     ];
@@ -493,6 +502,7 @@ fn parse_settings(source: &str, settings: &mut frame::GameSettings, binds: &mut 
             "pad_aim_assist" => parse_into(value, &mut settings.pad_aim_assist),
             "pad_prompts" => parse_into(value, &mut settings.pad_prompts),
             "pad_vibration" => parse_into(value, &mut settings.pad_vibration),
+            "omni_movement" => parse_into(value, &mut settings.omni_movement),
             "pad_deadzone_left" => parse_into(value, &mut settings.pad_deadzone_left),
             "pad_deadzone_right" => parse_into(value, &mut settings.pad_deadzone_right),
             // bo2zm: Black Ops II quality, `full` or `fast`.

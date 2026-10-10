@@ -40,7 +40,7 @@ mod t6;
 pub mod t6_playeranim;
 pub mod t6_ragdoll;
 pub use t6::stats::{set_local_match_ranked, set_local_stats_path}; // bo2mp lane C
-pub use t6::{T6Anim, T6Install, T6PathNode, T6Table, T6Vehicle, T6VehicleDrive};
+pub use t6::{T6Anim, T6Install, T6PathNode, T6PathTables, T6Table, T6Vehicle, T6VehicleDrive};
 pub mod t5_destructible;
 mod world;
 pub mod world_objects;
@@ -130,6 +130,7 @@ pub use spawn::{
     spawn_candidate_indices, spawn_candidate_indices_for,
 };
 pub use step::phase_materialize_entity_dobjs;
+pub use step::set_omni_movement;
 pub use world::{
     ClientId, HitvolDumpRow, PendingLocalSound, PendingPlayerCardEvent, PendingPlayerCardKind,
     PendingPrint, PlayerKitCollision, SimBrush, SimClipBsp, SimClipCmodels, SimClipMesh,

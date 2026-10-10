@@ -2224,6 +2224,7 @@ pub(crate) fn load_t6_combat(
         }
         if !c.path_nodes.is_empty() {
             scripts.path_nodes = c.path_nodes.clone();
+            scripts.path_tables = c.path_tables.clone();
         }
         for (name, bytes) in &c.raw_files {
             if name.starts_with("animstatedefs/") && name.ends_with(".asd") {

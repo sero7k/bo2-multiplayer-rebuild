@@ -34,6 +34,7 @@ use sim::t6_playeranim::{
 
 use crate::occupancy::missile::{PosedVerts, T6MissileModel, skin_verts};
 use crate::occupancy::ragdoll::{Ragdoll, joint_points};
+use render_scene::FpvLens;
 
 /// This frame's BO2 player bodies, corpses and ground items, for the
 /// fallback pass.
@@ -87,14 +88,22 @@ struct PosedBody {
     brass: Option<u16>,
 }
 
-/// A system that took long logs it (a frame's stall named).
-struct SlowGuard(std::time::Instant, &'static str);
+/// A system that took long logs it (a frame's stall named), and how much
+/// of that its thread spent working (the rest it waited: on the disk, a
+/// lock, or other programs).
+pub(crate) struct SlowGuard(std::time::Instant, &'static str, Option<f64>);
+
+impl SlowGuard {
+    pub(crate) fn new(name: &'static str) -> Self {
+        Self(std::time::Instant::now(), name, diag::thread_cpu_ms())
+    }
+}
 
 impl Drop for SlowGuard {
     fn drop(&mut self) {
         let ms = self.0.elapsed().as_secs_f64() * 1000.0;
         if ms > 20.0 {
-            diag::warn!(World, "bo2mp slow: {} took {ms:.1} ms", self.1);
+            diag::warn!(World, "bo2mp slow: {} took {ms:.1} ms{}", self.1, diag::busy_note(self.2));
         }
     }
 }
@@ -112,8 +121,9 @@ fn mark_frame<const PART: usize>() {
 /// A frame that came long after the last one, logged with the time each
 /// part of it took (finding stalls). "after Last" is the render world's
 /// extraction and the wait for the frame to show.
-fn log_frame_gaps(mut last: Local<Option<std::time::Instant>>) {
+fn log_frame_gaps(mut last: Local<Option<std::time::Instant>>, mut last_cpu: Local<Option<f64>>) {
     let now = std::time::Instant::now();
+    let cpu = diag::process_cpu_ms();
     let marks = FRAME_MARKS.lock().map(|m| *m).unwrap_or([None; 5]);
     if let Some(prev) = *last {
         let ms = (now - prev).as_secs_f64() * 1000.0;
@@ -124,18 +134,74 @@ fn log_frame_gaps(mut last: Local<Option<std::time::Instant>>) {
             };
             diag::warn!(
                 World,
-                "bo2mp frame gap: {ms:.0} ms (First {} ms, PreUpdate+fixed {} ms, Update {} ms, PostUpdate {} ms, after Last {} ms; Update stretches: {})",
+                "bo2mp frame gap: {ms:.0} ms (First {} ms, PreUpdate+fixed {} ms, Update {} ms, PostUpdate {} ms, after Last {} ms; Update stretches: {}){}",
                 span(marks[0], marks[1]),
                 span(marks[1], marks[2]),
                 span(marks[2], marks[3]),
                 span(marks[3], marks[4]),
                 span(marks[4], Some(now)),
                 slow_update_spans(),
+                match (*last_cpu, cpu) {
+                    (Some(a), Some(b)) => format!(", all threads worked {:.0} ms of it", (b - a).max(0.0)),
+                    _ => String::new(),
+                },
             );
         }
+        add_part_times(&marks, now);
     }
     *last = Some(now);
+    *last_cpu = cpu;
     mark_frame::<0>();
+}
+
+/// Each part's time summed over the last 10 s: the average frame's parts
+/// logged (where a low frame rate's time goes, not only its stalls).
+struct PartTotals {
+    since: std::time::Instant,
+    frames: u32,
+    parts: [f64; 5],
+    update: [f64; 15],
+}
+
+static PART_TOTALS: std::sync::Mutex<Option<PartTotals>> = std::sync::Mutex::new(None);
+
+fn add_part_times(marks: &[Option<std::time::Instant>; 5], now: std::time::Instant) {
+    let ms = |a: Option<std::time::Instant>, b: Option<std::time::Instant>| match (a, b) {
+        (Some(a), Some(b)) if b >= a => (b - a).as_secs_f64() * 1000.0,
+        _ => 0.0,
+    };
+    let update = UPDATE_MARKS.lock().map(|m| *m).unwrap_or([None; 15]);
+    let Ok(mut totals) = PART_TOTALS.lock() else { return };
+    let t = totals.get_or_insert_with(|| PartTotals { since: now, frames: 0, parts: [0.0; 5], update: [0.0; 15] });
+    t.frames += 1;
+    for k in 0..4 {
+        t.parts[k] += ms(marks[k], marks[k + 1]);
+    }
+    t.parts[4] += ms(marks[4], Some(now));
+    for k in 1..update.len() {
+        t.update[k] += ms(update[k - 1], update[k]);
+    }
+    let secs = (now - t.since).as_secs_f64();
+    if secs < 10.0 {
+        return;
+    }
+    let n = f64::from(t.frames.max(1));
+    let stretches: Vec<String> = (1..15)
+        .filter(|k| t.update[*k] / n >= 0.5)
+        .map(|k| format!("{} {:.1}", UPDATE_SPANS[k], t.update[k] / n))
+        .collect();
+    diag::info!(
+        World,
+        "bo2mp frame parts: {:.1} fps over {secs:.0} s, ms per frame: First {:.1}, PreUpdate+fixed {:.1}, Update {:.1}, PostUpdate {:.1}, after Last {:.1}; Update: {}",
+        n / secs,
+        t.parts[0] / n,
+        t.parts[1] / n,
+        t.parts[2] / n,
+        t.parts[3] / n,
+        t.parts[4] / n,
+        stretches.join(", ")
+    );
+    *t = PartTotals { since: now, frames: 0, parts: [0.0; 5], update: [0.0; 15] };
 }
 
 /// When each stretch of Update ended (its client sets in order), for the
@@ -360,6 +426,116 @@ struct BodyLocals {
     /// Each corpse's ragdoll joints last frame and when, while its death
     /// animation still plays (the speed it goes limp at).
     joints_before: HashMap<u16, (Vec<Vec3>, i32)>,
+    /// Each body's composition, kept while what he wears and holds stays.
+    built: HashMap<u16, Built>,
+    spent: BodySpent,
+}
+
+/// What a body's composition is built from: what he wears, what is in his
+/// hand (a gun, or the grenade or equipment he is using), whether he is a
+/// corpse, and the catalogs (a new map has its own).
+#[derive(Clone, PartialEq, Eq)]
+struct BuiltKey {
+    body: String,
+    weapon: u32,
+    offhand: bool,
+    corpse: bool,
+    catalogs: (usize, u64, u64),
+}
+
+/// A body's models on their tags and its bones, built when what he wears
+/// or holds changes rather than every frame, and each animation's tracks
+/// on those bones, found once.
+struct Built {
+    key: BuiltKey,
+    parts: Vec<Part>,
+    dobj: xmodel_runtime::DObj,
+    upper: anim_iw4::PartBits,
+    all: anim_iw4::PartBits,
+    right_gun: Option<usize>,
+    flash: Option<u16>,
+    brass: Option<u16>,
+    head: Option<usize>,
+    mainroot: Option<usize>,
+    tracks: HashMap<usize, (Arc<xmodel_runtime::AnimClip>, Arc<[Option<usize>]>)>,
+    /// The bones it was last skinned in and those vertices: a body whose
+    /// bones have not moved since (a corpse lying still, a settled ragdoll)
+    /// hands on the same vertices, so nothing is skinned or uploaded again.
+    skinned_bones: Vec<Mat4>,
+    skinned: Vec<Arc<PosedVerts>>,
+    /// A corpse at the end of its death animation: where it lay (its
+    /// origin and yaw) and where that rested it on the ground.
+    rested: Option<([f32; 3], f32, Mat4)>,
+}
+
+impl Built {
+    /// An animation's tracks on these bones (found once per clip; the clip
+    /// is kept with them, so its address names it).
+    fn tracks_for(&mut self, clip: &Arc<xmodel_runtime::AnimClip>) -> Arc<[Option<usize>]> {
+        let at = Arc::as_ptr(clip) as usize;
+        if let Some((_, tracks)) = self.tracks.get(&at) {
+            return tracks.clone();
+        }
+        let tracks: Arc<[Option<usize>]> = self.dobj.tracks_for(clip).into();
+        self.tracks.insert(at, (clip.clone(), tracks.clone()));
+        tracks
+    }
+}
+
+/// Where the bodies' time went (ms) since the last log, logged every 10 s
+/// so a slow frame's cause has a name: compositions built, animations
+/// posed, corpses laid on the ground, vertices skinned, guns on the ground.
+#[derive(Default)]
+struct BodySpent {
+    since: Option<std::time::Instant>,
+    frames: u32,
+    bodies: u32,
+    corpses: u32,
+    builds: u32,
+    /// Bodies that kept last frame's vertices (they had not moved).
+    still: u32,
+    /// Bodies away from the view (posed, not drawn or skinned).
+    unseen: u32,
+    build: f64,
+    pose: f64,
+    ground: f64,
+    skin: f64,
+    all: f64,
+    items: f64,
+}
+
+fn ms_since(t: std::time::Instant) -> f64 {
+    t.elapsed().as_secs_f64() * 1000.0
+}
+
+fn log_spent(spent: &mut BodySpent) {
+    let now = std::time::Instant::now();
+    let since = *spent.since.get_or_insert(now);
+    if now.duration_since(since).as_secs_f64() < 10.0 {
+        return;
+    }
+    if spent.frames > 0 && spent.bodies > 0 {
+        let f = f64::from(spent.frames);
+        diag::info!(
+            World,
+            "bo2mp bodies (10 s): {:.1} a frame ({:.1} corpses, {:.1} still, {:.1} off the view), {} rebuilt; ms a frame: {:.2} in all (build {:.2}, pose {:.2}, ground {:.2}, skin {:.2}), guns on the ground {:.2}",
+            f64::from(spent.bodies) / f,
+            f64::from(spent.corpses) / f,
+            f64::from(spent.still) / f,
+            f64::from(spent.unseen) / f,
+            spent.builds,
+            spent.all / f,
+            spent.build / f,
+            spent.pose / f,
+            spent.ground / f,
+            spent.skin / f,
+            spent.items / f
+        );
+    }
+    *spent = BodySpent {
+        since: Some(now),
+        ..Default::default()
+    };
 }
 
 /// A weapon's shape on the ground: its world model and attachments placed
@@ -546,6 +722,159 @@ fn gun_parts(
     out
 }
 
+/// His body's composition (see [`Built`]): the body model, the models on
+/// its tags (a stowed gun at its weapon's stowed placement), and what is in
+/// his hands.
+fn build_body(
+    locals: &mut BodyLocals,
+    key: BuiltKey,
+    fpv: &assets::PreparedFpvMeshes,
+    registry: Option<&asset_game::WeaponRegistry>,
+    catalog: Option<&asset_model::WorldWeaponCatalog>,
+    script: &T6PlayerAnims,
+) -> Option<Built> {
+    let mut names = key.body.split(';');
+    let model = names.next().unwrap_or("");
+    let Some(entry) = fpv.0.get(asset_core::AssetNamespace::T6, model) else {
+        note_once(locals, format!("bo2mp body: {model} is not in the model catalog"));
+        return None;
+    };
+    let mut parts = vec![Part {
+        skel: entry.skel.clone(),
+        materials: materials_of!(entry.material_edges),
+        attach: None,
+        root_bind: None,
+    }];
+    let mut left_hand_model = false;
+    for extra in names {
+        let Some((m, tag)) = extra.split_once('@') else { continue };
+        left_hand_model |= tag == "tag_weapon_left";
+        // A weapon on a tag (the stowed gun on his back): its world
+        // model and attachments.
+        if let Some(index) = m.strip_prefix('#') {
+            if let (Ok(w), Some(registry), Some(catalog)) = (index.parse::<u32>(), registry, catalog) {
+                let base = parts.len();
+                parts.extend(gun_parts(registry, catalog, w, Some((0, tag)), base));
+                // BO2 hangs it at the weapon's own stowed offset and
+                // angle (a launcher slung across his back), not
+                // square on the tag.
+                if let (Some(gun), Some(f)) = (parts.get_mut(base), registry.facts_of(w)) {
+                    let q = asset_model::angles_quat(f.stowed_rotation);
+                    gun.root_bind = Some((Quat::from_array(q).normalize(), Vec3::from_array(f.stowed_offset)));
+                }
+            }
+            continue;
+        }
+        // A model from the character catalog, or a weapon's world model
+        // (BO2's stow_on_hip attaches one at tag_stowed_hip_rear).
+        let found = fpv
+            .0
+            .get(asset_core::AssetNamespace::T6, m)
+            .map(|e| (e.skel.clone(), materials_of!(e.material_edges)))
+            .or_else(|| {
+                let e = catalog?.get(asset_core::AssetNamespace::T6, m)?;
+                Some((e.skel.clone(), materials_of!(e.material_edges)))
+            });
+        let Some((skel, materials)) = found else {
+            note_once(locals, format!("bo2mp body: {m} is not in the model catalog"));
+            continue;
+        };
+        let tag = if tag.is_empty() {
+            parts[0]
+                .skel
+                .pose
+                .as_ref()
+                .zip(skel.pose.as_ref())
+                .map(|(p, c)| xmodel_runtime::empty_tag_attach(p, c))
+                .unwrap_or_default()
+        } else {
+            tag.to_owned()
+        };
+        parts.push(Part {
+            skel,
+            materials,
+            attach: Some(xmodel_runtime::Attach { parent_model: 0, tag }),
+            root_bind: None,
+        });
+    }
+    // The gun in his right hand (a corpse dropped his), and a dual-wield
+    // pair's left-hand gun on tag_weapon_left. While a torso animation
+    // handles a grenade or a piece of equipment (the script's grenadeAnim:
+    // a throw, a claymore planted), that item is in his hand instead of the
+    // gun.
+    let weapon = key.weapon;
+    let mut right_gun = None;
+    if !key.corpse
+        && weapon != 0
+        && let (Some(registry), Some(catalog)) = (registry, catalog)
+    {
+        let base = parts.len();
+        // BO2 holds the riot shield on the left arm (its riotshield
+        // animations brace it there); every other weapon in the right hand.
+        let shield = registry
+            .facts_of(weapon)
+            .is_some_and(|f| script.anim_type_name(f.player_anim_type) == "riotshield");
+        let tag = if shield {
+            "tag_weapon_left"
+        } else {
+            parts[0]
+                .skel
+                .pose
+                .as_ref()
+                .and_then(|p| xmodel_runtime::tp_weapon_attach_tag(&p.bone_names))
+                .unwrap_or("tag_weapon_right")
+        };
+        // The riot shield in his hand is the carried model the script
+        // attaches there (refreshshieldattachment); the weapon's own world
+        // model is the one that lies on the ground.
+        let gun = if shield && left_hand_model {
+            Vec::new()
+        } else {
+            gun_parts(registry, catalog, weapon, Some((0, tag)), base)
+        };
+        if !gun.is_empty() {
+            right_gun = Some(base);
+        }
+        parts.extend(gun);
+        let left = registry.dual_wield_weapon_of(weapon);
+        if !key.offhand && left != 0 && left != weapon {
+            let base = parts.len();
+            parts.extend(gun_parts(registry, catalog, left, Some((0, "tag_weapon_left")), base));
+        }
+    }
+    let Some(dobj) = build_dobj(&parts) else {
+        note_once(locals, format!("bo2mp body: {model} has no skeleton to pose"));
+        return None;
+    };
+    for part in &parts {
+        note_unbound(locals, part);
+    }
+    let gun_tag = |name: &str| {
+        let gun = right_gun?;
+        dobj.bones
+            .iter()
+            .position(|b| b.model == gun && b.name == name)
+            .and_then(|i| u16::try_from(i).ok())
+    };
+    let (flash, brass) = (gun_tag("tag_flash"), gun_tag("tag_brass"));
+    Some(Built {
+        upper: upper_body(&dobj),
+        all: dobj.all_parts(),
+        head: dobj.find("j_head"),
+        mainroot: dobj.find("j_mainroot"),
+        flash,
+        brass,
+        right_gun,
+        parts,
+        dobj,
+        tracks: HashMap::new(),
+        skinned_bones: Vec::new(),
+        skinned: Vec::new(),
+        rested: None,
+        key,
+    })
+}
+
 fn build_dobj(parts: &[Part]) -> Option<xmodel_runtime::DObj> {
     let srcs: Vec<(&xmodel_runtime::ModelPoseSrc, Option<xmodel_runtime::Attach>)> = parts
         .iter()
@@ -553,6 +882,95 @@ fn build_dobj(parts: &[Part]) -> Option<xmodel_runtime::DObj> {
         .collect::<Option<Vec<_>>>()?;
     let binds: Vec<Option<(Quat, Vec3)>> = parts.iter().map(|p| p.root_bind).collect();
     xmodel_runtime::DObj::build_with_root_binds(&srcs, &binds).ok()
+}
+
+/// Bones where they were when last skinned, to a thousandth of an inch (a
+/// settled ragdoll's creep adds up against the skinned pose, so it is
+/// skinned again once it has moved that far).
+fn same_pose(skinned: &[Mat4], now: &[Mat4]) -> bool {
+    !skinned.is_empty() && skinned.len() == now.len() && skinned.iter().zip(now).all(|(a, b)| a.abs_diff_eq(*b, 1e-3))
+}
+
+/// A body this far outside the view (degrees) is still drawn: the camera
+/// may turn that far before the frame is drawn, and its place here is the
+/// one it had when the frame began.
+const VIEW_MARGIN_DEG: f32 = 20.0;
+
+/// How far past a body its shadow may reach (units): a body just outside
+/// the view still draws, for the shadow it casts into it.
+const SHADOW_REACH: f32 = 128.0;
+
+/// The cone the camera sees, VIEW_MARGIN_DEG wider all round: a body
+/// wholly outside it is posed (his gun's flash, his sounds and his ragdoll
+/// go on) but not drawn, so not skinned.
+struct ViewCone {
+    eye: Vec3,
+    forward: Vec3,
+    cos: f32,
+    sin: f32,
+}
+
+impl ViewCone {
+    fn of(cameras: &Query<(&GlobalTransform, &Projection, &Camera), With<FpvLens>>) -> Option<Self> {
+        if std::env::var_os("IW4L_NO_FRUSTUM").is_some() {
+            return None;
+        }
+        let (xf, projection, camera) = cameras.single().ok()?;
+        let Projection::Perspective(p) = projection else {
+            return None;
+        };
+        let aspect = if p.aspect_ratio > 1e-3 {
+            p.aspect_ratio
+        } else {
+            camera
+                .logical_viewport_size()
+                .filter(|v| v.y > 0.0)
+                .map_or(16.0 / 9.0, |v| v.x / v.y)
+        };
+        // Its corners' angle off its middle, and the margin.
+        let half = ((p.fov * 0.5).tan() * (1.0 + aspect * aspect).sqrt()).atan() + VIEW_MARGIN_DEG.to_radians();
+        let (_, rot, eye) = xf.to_scale_rotation_translation();
+        Some(Self {
+            eye,
+            forward: rot * Vec3::NEG_Z,
+            cos: half.cos(),
+            sin: half.sin(),
+        })
+    }
+
+    /// Whether any of a sphere is inside it.
+    fn sees(&self, center: Vec3, radius: f32) -> bool {
+        let d = center - self.eye;
+        let along = d.dot(self.forward);
+        let across = (d.length_squared() - along * along).max(0.0).sqrt();
+        across * self.cos - along * self.sin <= radius
+    }
+}
+
+/// A body skinned after the loop: its bones, and where its models start
+/// in this frame's items.
+struct SkinJob {
+    number: u16,
+    first_item: usize,
+    bones: Vec<Mat4>,
+}
+
+fn skin_one(w: Option<(&xmodel_runtime::DObj, &[Part], &[Mat4])>) -> Option<Vec<Arc<PosedVerts>>> {
+    w.map(|(dobj, parts, bones)| skin_all(dobj, parts, bones))
+}
+
+/// Skins the bodies, several at once across the cores (BO2 skins on its
+/// worker threads too).
+fn skin_bodies(work: &[Option<(&xmodel_runtime::DObj, &[Part], &[Mat4])>]) -> Vec<Option<Vec<Arc<PosedVerts>>>> {
+    match bevy::tasks::ComputeTaskPool::try_get() {
+        Some(pool) if work.len() > 1 => pool.scope(|s| {
+            for w in work {
+                let w = *w;
+                s.spawn(async move { skin_one(w) });
+            }
+        }),
+        _ => work.iter().map(|w| skin_one(*w)).collect(),
+    }
 }
 
 fn skin_all(dobj: &xmodel_runtime::DObj, parts: &[Part], world: &[Mat4]) -> Vec<Arc<PosedVerts>> {
@@ -892,9 +1310,10 @@ fn collect_t6_bodies(
     local: Option<Res<LocalPresentClient>>,
     subject: Option<Res<ViewSubject>>,
     cg_clock: Option<Res<FrameClock>>,
-    (clip, ragdoll_def): (
+    (clip, ragdoll_def, cameras): (
         Option<Res<crate::occupancy::DynEntPhysClip>>,
         Option<Res<sim::t6_ragdoll::T6RagdollRes>>,
+        Query<(&GlobalTransform, &Projection, &Camera), With<FpvLens>>,
     ),
     mut shapes: ResMut<T6ItemShapes>,
     ents: Query<(Entity, &CEntity, &CEntityRuntime)>,
@@ -908,7 +1327,8 @@ fn collect_t6_bodies(
     poses.heads.clear();
     poses.local_corpse_root = None;
     let mut corpse_root_time: Option<i32> = None;
-    let _slow = SlowGuard(std::time::Instant::now(), "t6 bodies");
+    log_spent(&mut locals.spent);
+    let bodies_started = std::time::Instant::now();
     if std::env::var_os("BO2MP_NO_T6BODY").is_some() {
         return;
     }
@@ -955,7 +1375,24 @@ fn collect_t6_bodies(
     };
     let registry = weapons.as_ref().map(|w| &*w.0);
     let catalog = world_weapons.as_ref().map(|w| &w.0).filter(|c| !c.is_empty());
+    let catalogs = (
+        registry.map_or(0, |r| std::ptr::from_ref(r) as usize),
+        catalog.map_or(0, |c| c.identity()),
+        fpv.0.identity(),
+    );
     let fallback = idle_value(&script);
+    let view = ViewCone::of(&cameras);
+    let mut skin_jobs: Vec<SkinJob> = Vec::new();
+    let before = BodySpent {
+        bodies: locals.spent.bodies,
+        corpses: locals.spent.corpses,
+        builds: locals.spent.builds,
+        build: locals.spent.build,
+        pose: locals.spent.pose,
+        ground: locals.spent.ground,
+        skin: locals.spent.skin,
+        ..Default::default()
+    };
     let mut seen: Vec<u16> = Vec::new();
     for (entity, identity, runtime) in &ents {
         let kind = net::remote_body_submit_kind(identity.number(), runtime, gate);
@@ -988,136 +1425,35 @@ fn collect_t6_bodies(
         } else {
             current.to_owned()
         };
-        let mut names = body.split(';');
-        let model = names.next().unwrap_or("");
-        if model.is_empty() {
+        if body.split(';').next().unwrap_or("").is_empty() {
             note_once(&mut locals, format!("bo2mp body: client {} has no body model yet", client.0));
             continue;
         }
-        let Some(entry) = fpv.0.get(asset_core::AssetNamespace::T6, model) else {
-            note_once(&mut locals, format!("bo2mp body: {model} is not in the model catalog"));
-            continue;
-        };
-        let mut parts = vec![Part {
-            skel: entry.skel.clone(),
-            materials: materials_of!(entry.material_edges),
-            attach: None,
-            root_bind: None,
-        }];
-        let mut left_hand_model = false;
-        for extra in names {
-            let Some((m, tag)) = extra.split_once('@') else { continue };
-            left_hand_model |= tag == "tag_weapon_left";
-            // A weapon on a tag (the stowed gun on his back): its world
-            // model and attachments.
-            if let Some(index) = m.strip_prefix('#') {
-                if let (Ok(w), Some(registry), Some(catalog)) = (index.parse::<u32>(), registry, catalog) {
-                    let base = parts.len();
-                    parts.extend(gun_parts(registry, catalog, w, Some((0, tag)), base));
-                    // BO2 hangs it at the weapon's own stowed offset and
-                    // angle (a launcher slung across his back), not
-                    // square on the tag.
-                    if let (Some(gun), Some(f)) = (parts.get_mut(base), registry.facts_of(w)) {
-                        let q = asset_model::angles_quat(f.stowed_rotation);
-                        gun.root_bind = Some((
-                            Quat::from_array(q).normalize(),
-                            Vec3::from_array(f.stowed_offset),
-                        ));
-                    }
-                }
-                continue;
-            }
-            // A model from the character catalog, or a weapon's world model
-            // (BO2's stow_on_hip attaches one at tag_stowed_hip_rear).
-            let found = fpv
-                .0
-                .get(asset_core::AssetNamespace::T6, m)
-                .map(|e| (e.skel.clone(), materials_of!(e.material_edges)))
-                .or_else(|| {
-                    let e = catalog?.get(asset_core::AssetNamespace::T6, m)?;
-                    Some((e.skel.clone(), materials_of!(e.material_edges)))
-                });
-            let Some((skel, materials)) = found else {
-                note_once(&mut locals, format!("bo2mp body: {m} is not in the model catalog"));
-                continue;
-            };
-            let tag = if tag.is_empty() {
-                parts[0]
-                    .skel
-                    .pose
-                    .as_ref()
-                    .zip(skel.pose.as_ref())
-                    .map(|(p, c)| xmodel_runtime::empty_tag_attach(p, c))
-                    .unwrap_or_default()
-            } else {
-                tag.to_owned()
-            };
-            parts.push(Part {
-                skel,
-                materials,
-                attach: Some(xmodel_runtime::Attach {
-                    parent_model: 0,
-                    tag,
-                }),
-                root_bind: None,
-            });
-        }
-        // The gun in his right hand (a corpse dropped his), and a dual-wield
-        // pair's left-hand gun on tag_weapon_left. While a torso animation
-        // handles a grenade or a piece of equipment (the script's
-        // grenadeAnim: a throw, a claymore planted), that item is in his
-        // hand instead of the gun.
         let held_weapon = u32::try_from(runtime.next_state.index).unwrap_or(0);
         let offhand = sim::t6_playeranim::t6_offhand(runtime.next_state.torso_anim);
         let weapon = offhand.unwrap_or(held_weapon);
-        let mut right_gun = None;
-        if !corpse
-            && weapon != 0
-            && let (Some(registry), Some(catalog)) = (registry, catalog)
-        {
-            let base = parts.len();
-            // BO2 holds the riot shield on the left arm (its riotshield
-            // animations brace it there); every other weapon in the right hand.
-            let shield = registry
-                .facts_of(weapon)
-                .is_some_and(|f| script.anim_type_name(f.player_anim_type) == "riotshield");
-            let tag = if shield {
-                "tag_weapon_left"
-            } else {
-                parts[0]
-                    .skel
-                    .pose
-                    .as_ref()
-                    .and_then(|p| xmodel_runtime::tp_weapon_attach_tag(&p.bone_names))
-                    .unwrap_or("tag_weapon_right")
-            };
-            // The riot shield in his hand is the carried model the script
-            // attaches there (refreshshieldattachment); the weapon's own
-            // world model is the one that lies on the ground.
-            let gun = if shield && left_hand_model {
-                Vec::new()
-            } else {
-                gun_parts(registry, catalog, weapon, Some((0, tag)), base)
-            };
-            if !gun.is_empty() {
-                right_gun = Some(base);
-            }
-            parts.extend(gun);
-            let left = registry.dual_wield_weapon_of(weapon);
-            if offhand.is_none() && left != 0 && left != weapon {
-                let base = parts.len();
-                parts.extend(gun_parts(registry, catalog, left, Some((0, "tag_weapon_left")), base));
-            }
-        }
-        let Some(dobj) = build_dobj(&parts) else {
-            note_once(&mut locals, format!("bo2mp body: {model} has no skeleton to pose"));
-            continue;
-        };
-        for part in &parts {
-            note_unbound(&mut locals, part);
-        }
-        // His animations, as the server picked them.
+        // His composition: kept from the last frame while it is the same.
         let number = identity.number();
+        let key = BuiltKey {
+            body,
+            weapon,
+            offhand: offhand.is_some(),
+            corpse,
+            catalogs,
+        };
+        let started = std::time::Instant::now();
+        let built = match locals.built.remove(&number) {
+            Some(b) if b.key == key => Some(b),
+            _ => {
+                locals.spent.builds += 1;
+                build_body(&mut locals, key, &fpv, registry, catalog, &script)
+            }
+        };
+        locals.spent.build += ms_since(started);
+        let Some(mut built) = built else { continue };
+        locals.spent.bodies += 1;
+        locals.spent.corpses += u32::from(corpse);
+        // His animations, as the server picked them.
         seen.push(number);
         let first = !locals.tracks.contains_key(&number);
         let track = locals.tracks.entry(number).or_default();
@@ -1185,10 +1521,22 @@ fn collect_t6_bodies(
         track.seen = now;
         track.corpse = corpse;
         let track = *track;
-        let upper = upper_body(&dobj);
-        let all = dobj.all_parts();
-        let mut clips: Vec<(Arc<xmodel_runtime::AnimClip>, Vec<Option<usize>>, f32, f32, bool)> = Vec::new();
-        for (part, torso_part) in [(&track.legs, false), (&track.torso, true)] {
+        let posing = std::time::Instant::now();
+        // A body its ragdoll has laid to rest lies as it settled (the
+        // ragdoll keeps that pose, below): its death animation is not posed
+        // again only to be thrown away.
+        let settled = {
+            let next = &runtime.next_state;
+            let launched = next.tr_type == 11 && next.tr_duration == 1;
+            corpse
+                && ragdoll_def.is_some()
+                && (10..=12).contains(&next.tr_type)
+                && locals.limp.get(&number).is_some_and(|(r, thrown)| {
+                    r.as_ref().is_some_and(|r| r.asleep()) && (*thrown || !launched)
+                })
+        };
+        let mut clips: Vec<(Arc<xmodel_runtime::AnimClip>, Arc<[Option<usize>]>, f32, f32, bool)> = Vec::new();
+        for (part, torso_part) in [(&track.legs, false), (&track.torso, true)].into_iter().filter(|_| !settled) {
             for (playing, w) in part.weighted(now) {
                 let Some(name) = script.name_of(playing.value) else { continue };
                 let Some(clip) = xanims.0.clip(asset_core::AssetNamespace::T6, name) else {
@@ -1198,60 +1546,69 @@ fn collect_t6_bodies(
                 let duration = clip.duration().max(1e-3);
                 let mut t = playing.phase.max(0.0);
                 t = if clip.looping { t.rem_euclid(duration) } else { t.min(duration) };
-                let tracks = dobj.tracks_for(&clip);
+                let tracks = built.tracks_for(&clip);
                 let weight = if torso_part { w * TORSO_OVER_LEGS } else { w };
                 clips.push((clip, tracks, t, weight, torso_part));
             }
         }
-        if clips.is_empty() {
+        if clips.is_empty() && !settled {
             // Never a bind pose: the script's idle.
             if let Some(clip) = script
                 .name_of(fallback)
                 .and_then(|n| xanims.0.clip(asset_core::AssetNamespace::T6, n))
             {
-                let tracks = dobj.tracks_for(&clip);
+                let tracks = built.tracks_for(&clip);
                 clips.push((clip, tracks, 0.0, 1.0, false));
             } else {
+                locals.built.insert(number, built);
                 continue;
             }
         }
+        let (dobj, parts) = (&built.dobj, &built.parts);
         let instances: Vec<xmodel_runtime::AnimInstance<'_>> = clips
             .iter()
             .map(|(clip, tracks, time, weight, torso_part)| xmodel_runtime::AnimInstance {
                 clip,
-                tracks,
+                tracks: &tracks[..],
                 time: *time,
                 weight: *weight,
-                parts: torso_part.then_some(&upper),
+                parts: torso_part.then_some(&built.upper),
             })
             .collect();
         let pitch = runtime.angles[0];
         let prone = runtime.next_state.e_flags & eflags::PRONE != 0;
         let crouch = runtime.next_state.e_flags & eflags::DUCK != 0;
         let legs_yaw = track.legs_yaw.to_radians();
-        let mut world = dobj.pose_with_controller(&instances, &all, Mat4::IDENTITY, |dobj, _, locals| {
-            if !corpse {
-                xmodel_runtime::apply_player_controller(
-                    dobj,
-                    locals,
-                    xmodel_runtime::PlayerControllerInput {
-                        view_pitch_deg: pitch,
-                        prone,
-                        crouch,
-                        lean_frac: 0.0,
-                    },
-                );
-            }
-        });
+        let mut world = if settled {
+            vec![Mat4::IDENTITY; dobj.bones.len()]
+        } else {
+            dobj.pose_with_controller(&instances, &built.all, Mat4::IDENTITY, |dobj, _, locals| {
+                if !corpse {
+                    xmodel_runtime::apply_player_controller(
+                        dobj,
+                        locals,
+                        xmodel_runtime::PlayerControllerInput {
+                            view_pitch_deg: pitch,
+                            prone,
+                            crouch,
+                            lean_frac: 0.0,
+                        },
+                    );
+                }
+            })
+        };
         // On a ladder he faces it, all of him (the climb's hands are on its
         // rungs); otherwise his legs turn in place behind his view and twist
         // to a diagonal move while the torso keeps to the view.
-        let climbing = script
-            .name_of(track.legs.cur.value)
-            .is_some_and(|n| n.starts_with("pb_climb") || n.starts_with("pb_riot_climb"));
+        let climbing = !settled
+            && script
+                .name_of(track.legs.cur.value)
+                .is_some_and(|n| n.starts_with("pb_climb") || n.starts_with("pb_riot_climb"));
         if !corpse && !climbing {
-            twist_legs(&dobj, &mut world, legs_yaw);
+            twist_legs(dobj, &mut world, legs_yaw);
         }
+        locals.spent.pose += ms_since(posing);
+        let grounding = std::time::Instant::now();
         let origin = runtime.origin;
         let body_yaw = if climbing { runtime.angles[1] + track.legs_yaw } else { runtime.angles[1] };
         let mut world_from_local = Transform {
@@ -1263,7 +1620,14 @@ fn collect_t6_bodies(
         // A corpse rests on the ground under it: tilted along its length to
         // the ground under its head, hips and feet, and set so none of them
         // sinks below the height the death animation gives it.
-        if corpse && let Some(clip) = clip.as_deref().and_then(|c| c.0.as_deref()) {
+        // A body gone limp is placed by its ragdoll alone (below).
+        let ragdolled = corpse
+            && (10..=12).contains(&runtime.next_state.tr_type)
+            && locals.limp.get(&number).is_some_and(|(r, _)| r.is_some());
+        if corpse
+            && !ragdolled
+            && let Some(clip) = clip.as_deref().and_then(|c| c.0.as_deref())
+        {
             let lying = track
                 .legs
                 .weighted(now)
@@ -1273,7 +1637,17 @@ fn collect_t6_bodies(
                     Some((p.phase / clip.duration().max(1e-3)).clamp(0.0, 1.0))
                 })
                 .unwrap_or(1.0);
-            world_from_local = rest_on_ground(&dobj, &world, world_from_local, origin, clip, lying);
+            // At the end of its death animation, where it lay last frame,
+            // it rests where it rested then (nothing traced again).
+            world_from_local = match built.rested {
+                Some((at, yaw, rested)) if lying >= 1.0 && at == origin && yaw == body_yaw => rested,
+                _ => {
+                    let _slow = SlowGuard::new("a corpse resting on the ground");
+                    let rested = rest_on_ground(dobj, &world, world_from_local, origin, clip, lying);
+                    built.rested = (lying >= 1.0).then_some((origin, body_yaw, rested));
+                    rested
+                }
+            };
         }
         // A body gone limp (the server's ragdoll trajectory, from the
         // script's startragdoll or launchragdoll): BO2's ragdoll takes it
@@ -1286,7 +1660,7 @@ fn collect_t6_bodies(
             let l = &mut *locals;
             if !limp {
                 l.limp.remove(&number);
-                if let Some(points) = joint_points(def, &dobj, &world, world_from_local) {
+                if let Some(points) = joint_points(def, dobj, &world, world_from_local) {
                     l.joints_before.insert(number, (points, now));
                 }
             } else {
@@ -1296,9 +1670,10 @@ fn collect_t6_bodies(
                         .joints_before
                         .get(&number)
                         .map(|(p, t)| (p.as_slice(), (now - *t) as f32 / 1000.0));
-                    let r = Ragdoll::start(def, &dobj, &world, world_from_local, last, launch.unwrap_or(Vec3::ZERO), clip);
+                    let _slow = SlowGuard::new("a ragdoll's start");
+                    let r = Ragdoll::start(def, dobj, &world, world_from_local, last, launch.unwrap_or(Vec3::ZERO), clip);
                     started = Some(r.as_ref().map_or_else(
-                        || format!("bo2mp ragdoll: {model} lacks a joint the ragdoll names"),
+                        || format!("bo2mp ragdoll: {} lacks a joint the ragdoll names", parts[0].skel.name),
                         |r| r.note().to_owned(),
                     ));
                     (r, launch.is_some())
@@ -1310,7 +1685,10 @@ fn collect_t6_bodies(
                         r.push(v);
                         *thrown = true;
                     }
-                    r.step(dt, clip);
+                    {
+                        let _slow = SlowGuard::new("a ragdoll's step");
+                        r.step(dt, clip);
+                    }
                     world_from_local = r.pose(&mut world);
                 }
                 l.joints_before.remove(&number);
@@ -1319,13 +1697,33 @@ fn collect_t6_bodies(
                 }
             }
         }
-        let posed = skin_all(&dobj, &parts, &world);
+        locals.spent.ground += ms_since(grounding);
+        // Drawn (and so skinned) only near the view; a body whose bones
+        // have not moved keeps its vertices; the rest are skinned after the
+        // loop, together.
+        let (light_at, reach) = parts[0].skel.bounds.map_or(
+            ([origin[0], origin[1], origin[2] + 36.0], 48.0),
+            |(lo, hi)| {
+                let mid = Vec3::new((lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5);
+                let half = Vec3::new(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]).length() * 0.5;
+                (world_from_local.transform_point3(mid).to_array(), half)
+            },
+        );
+        let shown = view
+            .as_ref()
+            .is_none_or(|v| v.sees(Vec3::from_array(light_at), reach + SHADOW_REACH));
+        let kept = shown && built.skinned.len() == parts.len() && same_pose(&built.skinned_bones, &world);
+        if !shown {
+            locals.spent.unseen += 1;
+        } else if kept {
+            locals.spent.still += 1;
+        }
         // The local player's own corpse: where its j_mainroot is, for the
         // death-watch camera (the newest one if he has several).
         if corpse
             && local_id == Some(client)
             && corpse_root_time.is_none_or(|t| runtime.next_state.tr_time >= t)
-            && let Some(root) = dobj.find("j_mainroot").and_then(|i| world.get(i))
+            && let Some(root) = built.mainroot.and_then(|i| world.get(i))
         {
             corpse_root_time = Some(runtime.next_state.tr_time);
             poses.local_corpse_root = Some(world_from_local.transform_point3(root.w_axis.truncate()).to_array());
@@ -1333,47 +1731,49 @@ fn collect_t6_bodies(
                 diag::info!(World, "bo2mp corpse root: {:?} entity origin {:?}", poses.local_corpse_root, origin);
             }
         }
-        let light_at = parts[0].skel.bounds.map_or([origin[0], origin[1], origin[2] + 36.0], |(lo, hi)| {
-            let mid = Vec3::new((lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5);
-            world_from_local.transform_point3(mid).to_array()
-        });
-        for (part, verts) in parts.iter().zip(posed) {
-            out.items.push(T6MissileModel {
-                skel: part.skel.clone(),
-                materials: part.materials.clone(),
-                world_from_local,
-                origin,
-                light_at,
-                posed: Some(verts),
-                hide: None,
-            });
+        if shown {
+            if !kept {
+                skin_jobs.push(SkinJob {
+                    number,
+                    first_item: out.items.len(),
+                    bones: world.clone(),
+                });
+            }
+            for (i, part) in parts.iter().enumerate() {
+                out.items.push(T6MissileModel {
+                    skel: part.skel.clone(),
+                    materials: part.materials.clone(),
+                    world_from_local,
+                    origin,
+                    light_at,
+                    // Its kept vertices, or this frame's (skinned below).
+                    posed: if kept { built.skinned.get(i).cloned() } else { None },
+                    hide: None,
+                });
+            }
         }
         // His gun's tags, for its muzzle flash, shells and tracers.
-        if let Some(head) = dobj.find("j_head").and_then(|i| world.get(i)) {
+        if let Some(head) = built.head.and_then(|i| world.get(i)) {
             let head = world_from_local.transform_point3(head.w_axis.truncate());
             poses.heads.push((identity.number(), head.to_array()));
         }
-        if let Some(gun) = right_gun {
-            let tag = |name: &str| {
-                dobj.bones
-                    .iter()
-                    .position(|b| b.model == gun && b.name == name)
-                    .and_then(|i| u16::try_from(i).ok())
-            };
+        if built.right_gun.is_some() {
             poses.rows.push(PosedBody {
                 entity,
                 number: identity.number(),
                 world_from_local,
-                flash: tag("tag_flash"),
-                brass: tag("tag_brass"),
+                flash: built.flash,
+                brass: built.brass,
                 bones: world.clone(),
             });
         }
         if std::env::var_os("BO2MP_BODYDRAWLOG").is_some() && (now / 1000) != ((now - 16) / 1000) {
             diag::info!(
                 World,
-                "bo2mp body draw: ent {number} client {} {model} corpse {corpse} weapon {weapon} parts {} legs {:?} torso {:?} at {:?} yaw {:.0} pitch {:.0}",
+                "bo2mp body draw: ent {number} client {} {} corpse {corpse} weapon {} parts {} legs {:?} torso {:?} at {:?} yaw {:.0} pitch {:.0}",
                 client.0,
+                parts[0].skel.name,
+                built.key.weapon,
                 parts.len(),
                 script.name_of(track.legs.cur.value),
                 script.name_of(track.torso.cur.value),
@@ -1382,14 +1782,74 @@ fn collect_t6_bodies(
                 pitch
             );
         }
+        locals.built.insert(number, built);
     }
+    // This frame's skinning, the bodies at once.
+    let skinning = std::time::Instant::now();
+    let bodies_end = out.items.len();
+    let skinned = {
+        let work: Vec<_> = skin_jobs
+            .iter()
+            .map(|j| {
+                locals
+                    .built
+                    .get(&j.number)
+                    .map(|b| (&b.dobj, b.parts.as_slice(), j.bones.as_slice()))
+            })
+            .collect();
+        skin_bodies(&work)
+    };
+    let mut unskinned = false;
+    for (job, posed) in skin_jobs.into_iter().zip(skinned) {
+        let Some(posed) = posed else {
+            unskinned = true;
+            continue;
+        };
+        for (k, verts) in posed.iter().enumerate() {
+            if let Some(item) = out.items.get_mut(job.first_item + k) {
+                item.posed = Some(verts.clone());
+            }
+        }
+        if let Some(b) = locals.built.get_mut(&job.number) {
+            b.skinned_bones = job.bones;
+            b.skinned = posed;
+        }
+    }
+    // Never a bind pose: a body left unskinned is not drawn.
+    if unskinned {
+        let mut at = 0;
+        out.items.retain(|item| {
+            at += 1;
+            at > bodies_end || item.posed.is_some()
+        });
+    }
+    locals.spent.skin += ms_since(skinning);
     locals.tracks.retain(|n, _| seen.contains(n));
+    locals.built.retain(|n, _| seen.contains(n));
+    let took = ms_since(bodies_started);
+    locals.spent.all += took;
+    locals.spent.frames += 1;
+    // A slow frame names its part.
+    if took > 20.0 {
+        let s = &locals.spent;
+        diag::warn!(
+            World,
+            "bo2mp slow: t6 bodies took {took:.1} ms (build {:.1} with {} rebuilt, pose {:.1}, ground {:.1}, skin {:.1}; {} bodies, {} corpses)",
+            s.build - before.build,
+            s.builds - before.builds,
+            s.pose - before.pose,
+            s.ground - before.ground,
+            s.skin - before.skin,
+            s.bodies - before.bodies,
+            s.corpses - before.corpses
+        );
+    }
     locals.corpse_bodies.retain(|(n, _, _), _| seen.contains(n));
     locals.limp.retain(|n, _| seen.contains(n));
     locals.joints_before.retain(|n, _| seen.contains(n));
 
-    drop(_slow);
-    let _slow_items = SlowGuard(std::time::Instant::now(), "t6 ground items");
+    let _slow_items = SlowGuard::new("t6 ground items");
+    let items_started = std::time::Instant::now();
     // Guns and Scavenger bags on the ground.
     let (Some(registry), Some(catalog)) = (registry, catalog) else {
         return;
@@ -1468,6 +1928,7 @@ fn collect_t6_bodies(
         }
     }
     locals.item_seen.retain(|n, _| seen_items.contains(n));
+    locals.spent.items += ms_since(items_started);
 }
 
 /// The rate a legs animation plays at, as T5's BG_RunLerpFrameRate does it

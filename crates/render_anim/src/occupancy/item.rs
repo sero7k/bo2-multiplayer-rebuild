@@ -253,6 +253,7 @@ fn occupy_item_scene_ents(
     cg_clock: Option<Res<net::FrameClock>>,
     t6_bodies: Option<Res<sim::t6_playeranim::T6PlayerAnimsRes>>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("occupy_item_scene_ents");
     occupancy.rows.clear();
     // bo2mp lane F: on a Black Ops II map the BO2 fallback pass draws the
     // items (occupancy::t6_body); this path's MW2 materials refuse every
@@ -383,6 +384,7 @@ fn pose_items(
     gfx: Res<HostGfxScene>,
     mut product: ResMut<ItemPoseProduct>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("pose_items");
     product.owners.clear();
     if world_weapons
         .as_ref()
@@ -475,6 +477,7 @@ fn append_item_draws(
     mut draws: Local<Vec<XModelSurfaceDraw>>,
     mut owners: Local<Vec<ItemOwnerDraw>>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("append_item_draws");
     draws.clear();
     owners.clear();
     let catalog = world_weapons

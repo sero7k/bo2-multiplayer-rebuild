@@ -588,6 +588,17 @@ impl WorldImageUpload {
                 probes: self.probe_handles.clone(),
                 lightmaps: self.lightmap_handles.clone(),
             };
+            // The asset server has its own copy of every texture now: the
+            // map kept for a same-map load lets its decoded ones go.
+            assets::note_gpu_resident(self.products_id);
+            if let Some((count, freed)) = assets::release_resident_cpu_images(self.products_id) {
+                diag::info!(
+                    World,
+                    "resident map: walk #{} let go of {count} decoded images ({:.0} MB freed) once the card had them",
+                    self.products_id,
+                    freed as f64 / (1024.0 * 1024.0)
+                );
+            }
         }
         if let Some(stage) = self.upload_stage.take() {
             stage.set_completed(u64::from(self.done));
@@ -606,6 +617,7 @@ impl WorldImageUpload {
             && map.lightmaps.len() == self.lightmap_handles.len();
         if !same || !map.all_live(images) {
             common.map = ResidentMapImages::default();
+            assets::note_gpu_resident(0);
             return false;
         }
         self.exact_handles.clone_from(&map.exact);

@@ -98,6 +98,13 @@ pub struct ClientMatchState {
 
     pub item_use_spawn_ms: i32,
     pub item_use_entity: Option<crate::EntityRef>,
+    /// bo2mp: when his use press on that item began, and whether it was the
+    /// use/reload button alone (that one must be held to take the item; let
+    /// go sooner, it reloads). The server's own: not sent.
+    pub(crate) item_use_hold: Option<(i32, bool)>,
+    /// bo2mp: a use/reload tap let go before it took anything: his next
+    /// command reloads.
+    pub(crate) item_use_reload: bool,
 
     pub(crate) ammo_clip: i32,
 

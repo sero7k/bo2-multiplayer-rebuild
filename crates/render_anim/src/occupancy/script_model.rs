@@ -270,6 +270,7 @@ fn sync_spawned_scene_models(
     presented: Option<Res<net::PresentedSnapshot>>,
     mut existing: Query<(Entity, &SpawnedSceneModel, &mut WorldScriptModelInstance)>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("sync_spawned_scene_models");
     let Some(snapshot) = presented.as_ref().and_then(|p| p.snapshot()) else {
         for (entity, _, _) in &mut existing {
             commands.entity(entity).despawn();
@@ -346,6 +347,7 @@ fn apply_presented_script_model_dobjs(
     local: Option<Res<net::LocalPresentClient>>,
     mut owners: Query<(&mut WorldScriptModelInstance, &mut Visibility)>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("apply_presented_script_model_dobjs");
     let Some(presented) = presented.as_deref().filter(|p| p.snapshot().is_some()) else {
         return;
     };
@@ -524,6 +526,7 @@ fn apply_script_mover_centity_pose(
     mut persist: ResMut<ScriptModelDobjs>,
     cg_clock: Option<Res<net::FrameClock>>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("apply_script_mover_centity_pose");
     persist.mover_pose.clear();
     let Some(slots) = slots else {
         return;
@@ -582,6 +585,7 @@ fn occupy_script_model_scene_ents(
     mut scene_submissions: MessageWriter<AnimDObjSceneSubmission>,
     lod_skinned: Res<render_scene::LodRampSkinnedDvar>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("occupy_script_model_scene_ents");
     let Some(assets) = assets else {
         return;
     };
@@ -724,6 +728,7 @@ fn pose_script_models(
         Option<Res<net::PresentedSnapshot>>,
     ),
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("pose_script_models");
     let anim_ahead_s = anim_ahead_secs(cg_clock.as_deref(), presented.as_deref());
     let focus_id = select.script_model_id();
     if let Some(id) = focus_id {
@@ -1028,6 +1033,7 @@ fn commit_script_model_draw_plan(
     mut draws: Local<Vec<XModelSurfaceDraw>>,
     mut owners: Local<Vec<ScriptModelOwnerDraw>>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("commit_script_model_draw_plan");
     let ScriptModelTessLocals {
         mut last_material_generation,
         mut last_unbound_materials,

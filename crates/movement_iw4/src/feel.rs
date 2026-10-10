@@ -73,9 +73,9 @@ pub struct Bo2Feel {
     pub ducked_sprint_cycle_scale: f32,
     pub dtp_cycle_scale: f32,
 
-    /// Sprint in any direction at full speed, and dive whichever way you
-    /// are moving (an owner's ask, 10-09; BO2 itself sprints forward only).
-    /// `BO2_OMNI=off` turns it off.
+    /// Sprint in any direction at full speed. Not BO2 (it sprints forward
+    /// only), so off unless the Controls menu's "Omni Movement" is on
+    /// (off by default, an option for whoever wants it).
     pub omni: bool,
 
     /// mantle_weapon_height: a climb this low (by its climb table height)
@@ -490,7 +490,42 @@ mod tests {
             weapon_ads_move_speed_scale: 1.0,
             shellshock_movement_scale: 1.0,
             prone_lerp_ms: 0,
+            bo2: false,
         }
+    }
+
+    /// BO2 feel M10c: aiming while prone moves at the gun's aiming speed
+    /// only (MW2 slows it 0.4 more), and sprint speed stops once the eye
+    /// heads below standing height.
+    #[test]
+    fn bo2_walk_scale_has_no_prone_aim_slow() {
+        let mut ps = PlayerState::ZERO;
+        ps.speed = 190;
+        ps.move_speed_scale_multiplier = 1.0;
+        ps.weapon = 1;
+        ps.view_height_target = crate::stance::view_height::PRONE;
+        let cmd = UserCmd {
+            forwardmove: 127,
+            ..UserCmd::default()
+        };
+        let mw2 = scales();
+        let bo2 = crate::CmdScaleWalkContext { bo2: true, ..mw2 };
+
+        ps.pm_flags = pm_flags::PRONE;
+        ps.f_weapon_pos_frac = 1.0;
+        let slow = crate::cmd_scale_walk(&ps, &cmd, mw2);
+        let fast = crate::cmd_scale_walk(&ps, &cmd, bo2);
+        assert!(slow > 0.0 && (slow / fast - 0.4).abs() < 1e-5, "{slow} {fast}");
+
+        ps.pm_flags = pm_flags::SPRINTING;
+        ps.f_weapon_pos_frac = 0.0;
+        let mw2_sprint = crate::cmd_scale_walk(&ps, &cmd, mw2);
+        let bo2_sprint = crate::cmd_scale_walk(&ps, &cmd, bo2);
+        assert!((mw2_sprint / bo2_sprint - 1.5).abs() < 1e-5);
+        ps.view_height_target = crate::stance::view_height::STAND;
+        let standing = crate::cmd_scale_walk(&ps, &cmd, bo2);
+        let mw2_standing = crate::cmd_scale_walk(&ps, &cmd, mw2);
+        assert!((standing - mw2_standing).abs() < 1e-5, "{standing} {mw2_standing}");
     }
 
     /// One 50 ms step of the head bob rhythm from 0, standing on the ground.

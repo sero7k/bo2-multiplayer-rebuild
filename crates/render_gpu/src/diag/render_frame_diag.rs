@@ -1476,9 +1476,14 @@ pub fn sample_render_frame_diag(
         .next()
         .map(|w| format!("{:?}", w.present_mode));
 
+    // IW4L_RENDER_LOG=1 only: a log line is written on this thread, and a
+    // slow write stalled whole frames for seconds.
+    static LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     static FRAMES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = FRAMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    if n % RENDER_FRAME_LOG_EVERY == 0 {
+    if n % RENDER_FRAME_LOG_EVERY == 0
+        && *LOG.get_or_init(|| std::env::var_os("IW4L_RENDER_LOG").is_some())
+    {
         diag::info!(
             World,
             "render frame diag: extract_ms={} extract_commands_ms={} prepare_assets_ms={} prepare_meshes_ms={} create_views_ms={} specialize_ms={} prepare_views_ms={} queue_ms={} phase_sort_ms={} prepare_ms={} render_ms={} present_mode={} submit_prepare_ms={} \

@@ -136,6 +136,19 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
     world.resource_mut::<Zm>().brush_rows = rows;
 }
 
+/// The level restarts (`map_restart`): every brush row goes; the new
+/// level's brush entities make their own.
+pub(super) fn retire_all(world: &mut World) {
+    let rows = std::mem::take(&mut world.resource_mut::<Zm>().brush_rows);
+    let mut f = frame(world);
+    for (n, row) in rows {
+        f.remove_collision_owner(owner(n));
+        if let Some(number) = row.number {
+            f.remove_script_mover_by_number(number);
+        }
+    }
+}
+
 /// The entity's submodel bounds (its own space: a submodel's brushes are
 /// authored about the entity's origin, measured: door `*49` spans
 /// -1.8..23.8 x -0.6..59 x -52..52 at origin -503 361 -6), placed by its

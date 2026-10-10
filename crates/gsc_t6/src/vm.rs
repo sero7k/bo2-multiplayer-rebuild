@@ -150,6 +150,13 @@ const MAX_NEST: u32 = 48;
 const STEP_LIMIT: u64 = 5_000_000;
 pub const FRAME_MS: i64 = 50;
 
+/// Script time by function and builtin (ms, calls): `Vm::profile`.
+#[derive(Default)]
+pub struct ScriptProfile {
+    pub funcs: FxHashMap<u32, (f64, u32)>,
+    pub natives: FxHashMap<u32, (f64, u32)>,
+}
+
 pub struct Vm<H> {
     pub strings: Strings,
     pub program: Arc<Program>,
@@ -176,6 +183,12 @@ pub struct Vm<H> {
     reported: FxHashSet<String>,
     /// Messages for the host to show (errors, unbound builtins).
     pub messages: Vec<String>,
+    /// A thread that runs longer than this before it waits names itself
+    /// in `messages` (ms; 0 = off): which script holds a frame up.
+    pub slow_thread_ms: f64,
+    /// While set: the time spent in each script function a thread resumed
+    /// in, and in each builtin (`profile_report`).
+    pub profile: Option<ScriptProfile>,
     pub steps: u64,
     pub rng: u64,
     /// Builtins whose calls are logged (debugging): id -> calls left.
@@ -218,6 +231,8 @@ impl<H> Vm<H> {
             dvars: FxHashMap::default(),
             reported: FxHashSet::default(),
             messages: Vec::new(),
+            slow_thread_ms: 0.0,
+            profile: None,
             steps: 0,
             rng: 0x2545_f491_4f6c_dd1d,
             trace: FxHashMap::default(),
@@ -421,6 +436,33 @@ impl<H> Vm<H> {
         for (t, d) in unwind {
             self.unwind(host, t, d);
         }
+    }
+
+    /// The level restarts (Black Ops II's `map_restart`), between frames:
+    /// every thread ends and every object goes (a host's references to them
+    /// read as gone); `game`, the program, the strings, the natives, the
+    /// dvars and the dice stay. A new `level` and `anim`.
+    pub fn restart(&mut self) {
+        debug_assert!(self.running.is_empty());
+        for (i, t) in self.threads.iter_mut().enumerate() {
+            if t.take().is_some() {
+                self.free_threads.push(i as u32);
+            }
+        }
+        self.timers.clear();
+        self.frame_end.clear();
+        self.ready.clear();
+        self.waiters.clear();
+        self.pending_unwind.clear();
+        for (i, o) in self.objects.iter_mut().enumerate() {
+            if o.alive {
+                o.alive = false;
+                o.fields.clear();
+                self.free_objects.push(i as u32);
+            }
+        }
+        self.level = self.alloc_object(ObjKind::Level);
+        self.anim = self.alloc_object(ObjKind::Anim);
     }
 
     // ---- threads --------------------------------------------------------
@@ -735,7 +777,28 @@ impl<H> Vm<H> {
         self.running.push(t);
         self.nest += 1;
         let program = self.program.clone();
+        let timed = (self.slow_thread_ms > 0.0 || self.profile.is_some()).then(|| {
+            let func = |f: Option<&Frame>| f.map(|f| f.func);
+            (std::time::Instant::now(), func(th.frames.first()), func(th.frames.last()))
+        });
         let outcome = self.interp(host, t, &mut th, &program);
+        if let Some((started, entry, at)) = timed {
+            let ms = started.elapsed().as_secs_f64() * 1000.0;
+            if let (Some(p), Some(f)) = (self.profile.as_mut(), at) {
+                let row = p.funcs.entry(f).or_default();
+                row.0 += ms;
+                row.1 += 1;
+            }
+            if self.slow_thread_ms > 0.0 && ms > self.slow_thread_ms {
+                let name = |f: Option<u32>| {
+                    f.and_then(|f| program.functions.get(f as usize)).map_or_else(String::new, |func| {
+                        format!("{}::{}", program.scripts[func.script as usize].name, self.strings.get(func.name))
+                    })
+                };
+                let line = format!("slow thread: {ms:.1} ms in {} (from {})", name(at), name(entry));
+                self.messages.push(line);
+            }
+        }
         self.nest -= 1;
         self.running.pop();
         match outcome {
@@ -1157,7 +1220,48 @@ impl<H> Vm<H> {
             self.messages.push(line);
             return r;
         }
+        if self.profile.is_some() {
+            let started = std::time::Instant::now();
+            let r = self.call_native_inner(host, id, self_, args);
+            let ms = started.elapsed().as_secs_f64() * 1000.0;
+            if let Some(p) = self.profile.as_mut() {
+                let row = p.natives.entry(id).or_default();
+                row.0 += ms;
+                row.1 += 1;
+            }
+            return r;
+        }
         self.call_native_inner(host, id, self_, args)
+    }
+
+    /// The costliest script functions and builtins since the last report
+    /// (ms in all, calls), and a fresh count; `None` while not profiling.
+    /// Times include what they call.
+    pub fn profile_report(&mut self, top: usize) -> Option<String> {
+        let p = std::mem::take(self.profile.as_mut()?);
+        let program = self.program.clone();
+        let mut funcs: Vec<(u32, (f64, u32))> = p.funcs.into_iter().collect();
+        funcs.sort_by(|a, b| b.1.0.total_cmp(&a.1.0));
+        let mut natives: Vec<(u32, (f64, u32))> = p.natives.into_iter().collect();
+        natives.sort_by(|a, b| b.1.0.total_cmp(&a.1.0));
+        let f: Vec<String> = funcs
+            .iter()
+            .take(top)
+            .filter_map(|(f, (ms, n))| {
+                let func = program.functions.get(*f as usize)?;
+                let script = program.scripts[func.script as usize].name.rsplit('/').next().unwrap_or("");
+                Some(format!("{script}::{} {ms:.1} ({n})", self.strings.get(func.name)))
+            })
+            .collect();
+        let b: Vec<String> = natives
+            .iter()
+            .take(top)
+            .filter_map(|(id, (ms, n))| {
+                let (name, _) = program.builtins.get(*id as usize)?;
+                Some(format!("{} {ms:.1} ({n})", self.strings.get(*name)))
+            })
+            .collect();
+        Some(format!("scripts: {}; builtins: {}", f.join(", "), b.join(", ")))
     }
 
     fn call_native_inner(&mut self, host: &mut H, id: u32, self_: &Value, args: &[Value]) -> Value {

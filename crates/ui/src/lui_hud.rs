@@ -200,6 +200,8 @@ fn profile_of(s: &frame::GameSettings) -> Vec<(String, String)> {
         ("mouseSensitivity".into(), format!("{:.2}", s.sensitivity)),
         // His name (BO2's `name` dvar: the lobby's player list).
         ("name".into(), s.player_name.clone()),
+        // His "Omni Movement" row (Controls > Move).
+        crate::lui_omni_row::profile(s),
     ]
 }
 
@@ -224,15 +226,19 @@ fn apply_profile(s: &mut frame::GameSettings, key: &str, value: &str) {
         "input_invertpitch" => s.invert_mouse = on,
         "m_pitch" => s.invert_mouse = num.is_some_and(|v| v < 0.0),
         "mouseSensitivity" => s.sensitivity = num.unwrap_or(s.sensitivity),
+        k if k == crate::lui_omni_row::KEY => s.omni_movement = on,
         _ => {}
     }
 }
 
 /// His settings <-> BO2's names: his go in when they change (not by the
 /// menus), and a name the menus changed comes back into them.
-fn settings_bridge(hud: &mut LuiHud, settings: &mut frame::GameSettings) {
+/// (Read through the `ResMut`, written only when a menu changed one: a
+/// write marks his settings changed, and the volume, save and shadow
+/// systems redo their work each frame they are.)
+fn settings_bridge(hud: &mut LuiHud, settings: &mut ResMut<frame::GameSettings>) {
     if hud.settings_rev != Some(settings.revision) {
-        let pairs = profile_of(settings);
+        let pairs = profile_of(&**settings);
         let mut v = hud.host.values.borrow_mut();
         for (k, x) in &pairs {
             v.profile.insert(k.clone(), x.clone());
@@ -624,6 +630,8 @@ fn build(ui: &assets::T6Ui, front: Option<&crate::lui_frontend::Bo2mpFrontend>, 
         zombies_values(&mut host);
         host.require("T6.HUD");
     }
+    // bo2zm: the "Omni Movement" row on the Controls menu.
+    crate::lui_omni_row::add(&mut host);
     LuiHud {
         host,
         metrics,
@@ -976,6 +984,76 @@ fn plain(text: &str) -> String {
     out.trim().to_owned()
 }
 
+/// bo2mp: each entity container (BO2's objective waypoints) on its point in
+/// the world this frame (a player's: his origin in the snapshot, plus its
+/// offset), in root units. Off screen, a clamping one sits on the screen's
+/// edge toward its point (behind him: toward its side of him); one that
+/// does not clamp is not drawn.
+fn place_entity_containers(
+    host: &mut Host,
+    presented: Option<&PresentedSnapshot>,
+    cameras: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window: Option<&Window>,
+    width: f32,
+) {
+    let containers = host.entity_containers();
+    if containers.is_empty() {
+        return;
+    }
+    let Some((camera, transform)) = cameras.iter().find(|(c, _)| c.is_active) else { return };
+    let (sw, sh) = window.map_or((1920.0, 1080.0), |w| (w.width(), w.height()));
+    let (eye, forward, right, up) = (transform.translation(), *transform.forward(), *transform.right(), *transform.up());
+    // The box a clamped one keeps inside (root units), and its middle.
+    let (edge_lo, edge_hi) = (Vec2::new(40.0, 72.0), Vec2::new(width - 40.0, 704.0));
+    let mid = Vec2::new(width * 0.5, 360.0);
+    for (u, entity, offset, clamp) in containers {
+        let base = if entity >= 0 {
+            u32::try_from(entity).ok().and_then(|id| presented?.player(sim::ClientId(id))).map(|ps| Vec3::from(ps.origin))
+        } else {
+            Some(Vec3::ZERO)
+        };
+        let Some(at) = base.map(|b| b + Vec3::from(offset)) else {
+            host.place_entity_container(&u, None, false, 0.0);
+            continue;
+        };
+        let d = at - eye;
+        let pos = (d.dot(forward) > 0.0)
+            .then(|| camera.world_to_viewport(transform, at).ok())
+            .flatten()
+            .map(|p| Vec2::new(p.x * width / sw, p.y * 720.0 / sh));
+        let (lo, hi) = if clamp { (edge_lo, edge_hi) } else { (Vec2::ZERO, Vec2::new(width, 720.0)) };
+        if let Some(p) = pos.filter(|p| p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y) {
+            host.place_entity_container(&u, Some([p.x, p.y]), false, 0.0);
+            continue;
+        }
+        if !clamp {
+            host.place_entity_container(&u, None, false, 0.0);
+            continue;
+        }
+        // The way to it on the screen (y down): from the middle to where it
+        // projects; behind him, its side of him and its height.
+        let mut dir = match pos {
+            Some(p) => p - mid,
+            None => Vec2::new(d.dot(right), -d.dot(up)),
+        };
+        if dir.length_squared() < 1e-6 {
+            dir = Vec2::Y;
+        }
+        let reach = |d: f32, lo: f32, hi: f32, m: f32| {
+            if d > 0.0 {
+                (hi - m) / d
+            } else if d < 0.0 {
+                (lo - m) / d
+            } else {
+                f32::INFINITY
+            }
+        };
+        let t = reach(dir.x, lo.x, hi.x, mid.x).min(reach(dir.y, lo.y, hi.y, mid.y));
+        let p = mid + dir * t;
+        host.place_entity_container(&u, Some([p.x, p.y]), true, (-dir.y).atan2(dir.x).to_degrees());
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn lui_hud(
     mut commands: Commands,
@@ -986,10 +1064,11 @@ fn lui_hud(
     mut image_assets: ResMut<Assets<Image>>,
     presented: Option<Res<PresentedSnapshot>>,
     local: Option<Res<LocalPresentClient>>,
-    (window, time, world_cam): (
+    (window, time, world_cam, cameras): (
         Query<&Window, With<PrimaryWindow>>,
         Res<Time>,
         Query<Entity, (With<Camera3d>, With<bevy::camera::CompositingSpace>, Without<crate::UiCamera>)>,
+        Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     ),
     (keys, weapons, actions, cursor): (
         Option<Res<frame::HudInputView>>,
@@ -1001,7 +1080,11 @@ fn lui_hud(
     roots: Query<(Entity, &LuiRoot)>,
     mut nodes: Query<(Entity, &mut LuiNode, &mut Node, &mut ZIndex)>,
     mut image_nodes: Query<&mut ImageNode>,
-    (children, computed): (Query<&Children>, Query<(&ComputedNode, &UiGlobalTransform, &InheritedVisibility)>),
+    (children, computed, mut backgrounds): (
+        Query<&Children>,
+        Query<(&ComputedNode, &UiGlobalTransform, &InheritedVisibility)>,
+        Query<&mut BackgroundColor>,
+    ),
     (mut pictures, mut logged, mut additive, mut add_names, mut color_add_names): (
         Local<HashMap<String, Handle<Image>>>,
         Local<usize>,
@@ -1013,6 +1096,7 @@ fn lui_hud(
     if !lui_enabled() {
         return;
     }
+    let mut hud_t = std::time::Instant::now();
     // bo2mp scope: the pictures kept for additive drawing (see lui_additive).
     if add_names.is_none() && icons.is_some() {
         *add_names = Some(
@@ -1067,6 +1151,7 @@ fn lui_hud(
         }
         v
     });
+    let mut spent = [lap(&mut hud_t), 0.0, 0.0, 0.0, 0.0];
     let (Some(ui), Some(values)) = (ui, values) else {
         for (e, _) in &roots {
             commands.entity(e).try_despawn();
@@ -1301,6 +1386,7 @@ fn lui_hud(
         }
     }
     hud.sent = Some(values);
+    spent[1] = lap(&mut hud_t);
     // BO2ZM_LUI_PAUSE_AT=<ms after the HUD opened>[,<button>@<ms>...]: open
     // the pause menu then, and press pad buttons later (test aid).
     // bo2mp: a multiplayer match runs its own steps (BO2MP_MATCH_STEPS,
@@ -1458,6 +1544,7 @@ fn lui_hud(
         io.paused.0 = pause;
         diag::info!(Ui, "bo2zm lui: game {}", if pause { "paused" } else { "resumed" });
     }
+    spent[2] = lap(&mut hud_t);
     hud.host.frame(time.elapsed_secs_f64() * 1000.0);
     if hud.host.errors.len() > *logged {
         for e in &hud.host.errors[*logged..] {
@@ -1478,8 +1565,15 @@ fn lui_hud(
             }
         }
     }
+    spent[3] = lap(&mut hud_t);
     if headless {
+        hud_spent(spent, 0);
         return;
+    }
+    // bo2mp: the objectives' waypoints on their points in the world.
+    if hud.match_mp {
+        let width = hud.host_width();
+        place_entity_containers(&mut hud.host, presented.as_deref(), &cameras, window.single().ok(), width);
     }
     // BO2ZM_LUI_DUMP=1: every element the scripts have, each time their
     // number changes (debugging aid).
@@ -1550,9 +1644,13 @@ fn lui_hud(
         })
         .flatten();
     hud.shots = shots;
-    let mut drawn: Vec<Drawn> = hud
-        .host
-        .drawn()
+    // (The scripts' whole list once a frame: walking their tree is the dear
+    // part. The blur flag sits on a menu container that is no picture or
+    // text, so it is read before those are picked out.)
+    let all = hud.host.drawn();
+    let any_blur = all.iter().any(|d| d.blur && d.alpha > 0.004);
+    let blur_amt = all.iter().filter(|d| d.blur).map(|d| d.alpha).fold(0.0f32, f32::max).clamp(0.0, 1.0);
+    let mut drawn: Vec<Drawn> = all
         .into_iter()
         .map(button_glyph)
         .filter(|d| {
@@ -1640,7 +1738,7 @@ fn lui_hud(
     // (`setBlur`): the 3D backdrop is drawn blurred then.
     // (A menu is no picture or text: its flag is read before those are
     // picked out.)
-    let blurred = front.is_some() && hud.host.drawn().iter().any(|d| d.blur && d.alpha > 0.004);
+    let blurred = front.is_some() && any_blur;
     // bo2mp: an in-match menu (a full-screen black dim is up) is drawn
     // with its colours as written: BO2's menu text and bars show the
     // script's 1.0 / 0.4 / 0.0 orange as 255 / 102 / 0, where the HUD's
@@ -1721,9 +1819,8 @@ fn lui_hud(
     // shot has no hex mesh, ring or warm tint, and its left and right edges
     // match. The menu's own black 0.15 dim is raised to leave that share;
     // the backdrop picture is blurred.
-    // (The blur flag sits on a menu container that is no picture or text, so it is read
-    // from the host's full list, not from `drawn`.)
-    let blur_amt = hud.host.drawn().iter().filter(|d| d.blur).map(|d| d.alpha).fold(0.0f32, f32::max).clamp(0.0, 1.0);
+    // (The blur's amount, `blur_amt`, is read from the host's full list
+    // above, not from `drawn`.)
     let is_backdrop_dim = |d: &Drawn| {
         d.kind == "image"
             && d.material.is_none()
@@ -1889,10 +1986,13 @@ fn lui_hud(
                 && let Ok((_, n, mut nn, mut zi)) = nodes.get_mut(e)
                 && n.shows == shows
             {
-                *nn = node;
-                *zi = z;
-                if let Ok(mut img) = image_nodes.get_mut(e) {
-                    img.color = Color::linear_rgba(1.0, 1.0, 1.0, color.alpha());
+                nn.set_if_neq(node);
+                zi.set_if_neq(z);
+                let c = Color::linear_rgba(1.0, 1.0, 1.0, color.alpha());
+                if let Ok(mut img) = image_nodes.get_mut(e)
+                    && img.color != c
+                {
+                    img.color = c;
                 }
                 continue;
             }
@@ -1963,8 +2063,8 @@ fn lui_hud(
                 && let Ok((_, n, mut nn, mut zi)) = nodes.get_mut(e)
                 && n.shows == shows
             {
-                *nn = node;
-                *zi = z;
+                nn.set_if_neq(node);
+                zi.set_if_neq(z);
                 continue;
             }
             if let Some(&e) = existing.get(&d.id) {
@@ -2297,8 +2397,8 @@ fn lui_hud(
                     && let Ok((_, n, mut nn, mut zi)) = nodes.get_mut(e)
                     && n.shows == key
                 {
-                    *nn = node;
-                    *zi = z;
+                    nn.set_if_neq(node);
+                    zi.set_if_neq(z);
                     continue;
                 }
                 if let Some(&e) = existing.get(&d.id) {
@@ -2355,9 +2455,16 @@ fn lui_hud(
                 && let Ok((_, n, mut nn, mut zi)) = nodes.get_mut(e)
                 && n.shows == shows
             {
-                *nn = node;
-                *zi = z;
-                commands.entity(e).insert(BackgroundColor(color));
+                nn.set_if_neq(node);
+                zi.set_if_neq(z);
+                match backgrounds.get_mut(e) {
+                    Ok(mut bg) => {
+                        bg.set_if_neq(BackgroundColor(color));
+                    }
+                    Err(_) => {
+                        commands.entity(e).insert(BackgroundColor(color));
+                    }
+                }
                 continue;
             }
             if let Some(&e) = existing.get(&d.id) {
@@ -2490,8 +2597,8 @@ fn lui_hud(
                     && let Ok((_, n, mut nn, mut zi)) = nodes.get_mut(e)
                     && n.shows == shows
                 {
-                    *nn = node;
-                    *zi = z;
+                    nn.set_if_neq(node);
+                    zi.set_if_neq(z);
                     continue;
                 }
                 if std::env::var_os("BO2ZM_LUI_LOG").is_some() {
@@ -2532,9 +2639,15 @@ fn lui_hud(
                 && let Ok((_, n, mut nn, mut zi)) = nodes.get_mut(e)
                 && n.shows == shows
             {
-                *nn = node;
-                *zi = z;
-                if let Ok(mut img) = image_nodes.get_mut(e) {
+                nn.set_if_neq(node);
+                zi.set_if_neq(z);
+                if let Ok(mut img) = image_nodes.get_mut(e)
+                    && (img.color != color
+                        || img.flip_x != flip_x
+                        || img.flip_y != flip_y
+                        || img.rect != cut
+                        || img.image_mode != image_mode)
+                {
                     img.color = color;
                     img.flip_x = flip_x;
                     img.flip_y = flip_y;
@@ -2689,8 +2802,8 @@ fn lui_hud(
                 && let Ok((_, mut n, mut nn, mut zi)) = nodes.get_mut(e)
                 && n.shows == shows
             {
-                *nn = node;
-                *zi = z;
+                nn.set_if_neq(node);
+                zi.set_if_neq(z);
                 // A fade: every letter's alpha.
                 if (n.alpha - color.alpha()).abs() > 1e-3 {
                     n.alpha = color.alpha();
@@ -2786,6 +2899,54 @@ fn lui_hud(
             commands.entity(e).try_despawn();
         }
     }
+    spent[4] = lap(&mut hud_t);
+    hud_spent(spent, keep.len());
+}
+
+/// The ms since `t`, and `t` moved on to now.
+fn lap(t: &mut std::time::Instant) -> f64 {
+    let now = std::time::Instant::now();
+    let ms = now.duration_since(*t).as_secs_f64() * 1000.0;
+    *t = now;
+    ms
+}
+
+/// Where the HUD's time goes, ms a frame over 10 s (logged): reading the
+/// game's values, the engine's events to the scripts, his input and the
+/// menus' engine calls, the scripts' own frame (timers, animations), and
+/// drawing; and the pieces drawn.
+fn hud_spent(parts: [f64; 5], pieces: usize) {
+    thread_local! {
+        static SPENT: std::cell::RefCell<(Option<std::time::Instant>, u32, [f64; 5], usize)> =
+            const { std::cell::RefCell::new((None, 0, [0.0; 5], 0)) };
+    }
+    SPENT.with_borrow_mut(|(since, frames, sum, drawn)| {
+        let now = std::time::Instant::now();
+        let start = *since.get_or_insert(now);
+        *frames += 1;
+        for (s, p) in sum.iter_mut().zip(parts) {
+            *s += p;
+        }
+        *drawn += pieces;
+        if now.duration_since(start).as_secs_f64() >= 10.0 {
+            let n = f64::from(*frames);
+            diag::info!(
+                Ui,
+                "bo2mp hud (10 s): ms a frame {:.2} (values {:.2}, events {:.2}, input {:.2}, scripts {:.2}, draw {:.2}), {:.0} pieces",
+                sum.iter().sum::<f64>() / n,
+                sum[0] / n,
+                sum[1] / n,
+                sum[2] / n,
+                sum[3] / n,
+                sum[4] / n,
+                *drawn as f64 / n
+            );
+            *since = Some(now);
+            *frames = 0;
+            *sum = [0.0; 5];
+            *drawn = 0;
+        }
+    });
 }
 
 /// The marks `plain` puts round a FontIcon entry's name.
@@ -3047,9 +3208,11 @@ fn soft_patch_with(
         && let Ok((_, n, mut nn, mut zi)) = nodes.get_mut(e)
         && n.shows == shows
     {
-        *nn = node;
-        *zi = z;
-        if let Ok(mut img) = image_nodes.get_mut(e) {
+        nn.set_if_neq(node);
+        zi.set_if_neq(z);
+        if let Ok(mut img) = image_nodes.get_mut(e)
+            && img.color != tint
+        {
             img.color = tint;
         }
         return;

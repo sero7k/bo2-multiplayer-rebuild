@@ -864,6 +864,10 @@ fn selected_item(world: &FrameWorld, walker: ClientId, ps: &PlayerState) -> Opti
     best.map(|(_, item)| item)
 }
 
+/// BO2's g_useholdtime: how long the use/reload button is held to take an
+/// item (ms). A shorter tap reloads.
+const USE_HOLD_MS: i32 = 250;
+
 pub(crate) fn phase_use_items(
     world: &mut FrameWorld,
     tick: Tick,
@@ -876,11 +880,12 @@ pub(crate) fn phase_use_items(
             continue;
         };
         let selected = selected_item(world, id, &ps);
-        let held = cmds.iter().any(|(client, bits)| {
-            *client == id.0
-                && bits & (playerstate_iw4::buttons::USE | playerstate_iw4::buttons::USE_RELOAD)
-                    != 0
-        });
+        let bits = cmds
+            .iter()
+            .filter(|(client, _)| *client == id.0)
+            .fold(0u32, |all, (_, bits)| all | *bits);
+        let held =
+            bits & (playerstate_iw4::buttons::USE | playerstate_iw4::buttons::USE_RELOAD) != 0;
         let pressed = presses.iter().any(|p| p.client == id.0 && p.edge);
         let selected_ref = selected.map(|item| {
             world
@@ -889,22 +894,41 @@ pub(crate) fn phase_use_items(
                 .expect("occupied item")
         });
         let meta = world.client_meta_mut(id);
+        // BO2: the use/reload button let go before it took the item reloads
+        // instead (a bot's reload is a 0.1 s tap of it).
+        if !held
+            && meta
+                .item_use_hold
+                .take()
+                .is_some_and(|(_, by_reload)| by_reload)
+        {
+            meta.item_use_reload |= meta.item_use_entity.is_some();
+        }
         if !held || selected.is_none() {
             meta.item_use_entity = None;
         }
         if pressed {
             meta.item_use_entity = selected_ref;
+            meta.item_use_hold = Some((now, bits & playerstate_iw4::buttons::USE == 0));
         }
         let pending = meta.item_use_entity;
         let ready = now - meta.item_use_spawn_ms >= 500;
-        if held && ready && pending.is_some() && selected_ref == pending {
+        // BO2: the use/reload button takes the item once held 250 ms, and
+        // never while his gun is still coming up or going away (so a swap
+        // cannot swap straight back). The use button takes it at once.
+        let long_enough = meta.item_use_hold.is_none_or(|(since, by_reload)| {
+            !by_reload || (now - since >= USE_HOLD_MS && !matches!(ps.weaponstate_primary, 1..=5))
+        });
+        if held && ready && long_enough && pending.is_some() && selected_ref == pending {
             let item = selected.expect("selected use item");
             if item.projectile {
                 grab_projectile(world, id, item.number, tick);
             } else {
                 grab_number(world, id, item.number);
             }
-            world.client_meta_mut(id).item_use_entity = None;
+            let meta = world.client_meta_mut(id);
+            meta.item_use_entity = None;
+            meta.item_use_hold = None;
         }
         let selected = selected_item(
             world,

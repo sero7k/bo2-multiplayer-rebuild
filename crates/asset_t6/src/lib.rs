@@ -11,7 +11,7 @@ pub mod m2;
 pub use capture::{
     AabbTreeRef, AssetKey, ClipAabbRef, ClipBrushRef, ClipCmodelRef, ClipLeafBrushNodeRef, ClipLeafRef,
     ClipMaterialRef, ClipNodeRef, ClipRef, ClipStaticModelRef, DpvsRanges, DrawState, EmbeddedImage, ImageRef, LightGridRef, MaterialRef,
-    MaterialTexture, PassRef, PathNodeRef, PrimaryLightRef, ReflectionProbeRef, ShaderArgRef, SkyGridVolumeRef, StaticModel, StringTableRef, SunRef, TechniqueRef, TechniqueSetRef,
+    MaterialTexture, PassRef, PathNodeRef, PathTablesRef, PrimaryLightRef, ReflectionProbeRef, ShaderArgRef, SkyGridVolumeRef, StaticModel, StringTableRef, SunRef, TechniqueRef, TechniqueSetRef,
     DestructiblePieceRef, DestructibleRef, DestructibleStageRef, VehicleDrive, VehicleRef,
     WorldFogRef, WorldRef, WorldSurface, XAnimRef, XModelCollSurfRef, XModelRef, XSurfaceRef, ZoneCapture, read_image,
 };

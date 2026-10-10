@@ -571,8 +571,10 @@ fn record_spawn_decal(
     }
 
     let result = host.record_impact_mark_from_decal(req.bolt);
-    // bo2zm: where a decal stops on its way to a mark, on change.
-    {
+    // bo2zm: where a decal stops on its way to a mark, on change
+    // (IW4L_RENDER_LOG=1 only: it changes nearly every shot).
+    static LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *LOG.get_or_init(|| std::env::var_os("IW4L_RENDER_LOG").is_some()) {
         use std::sync::Mutex;
         static LAST: Mutex<Option<String>> = Mutex::new(None);
         let line = format!(

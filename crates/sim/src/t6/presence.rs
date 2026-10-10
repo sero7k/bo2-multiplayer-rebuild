@@ -164,6 +164,17 @@ fn report_near(world: &mut World, now_ms: i64) {
     }
 }
 
+/// The level restarts (`map_restart`): every model it showed goes (a car
+/// blown up last round comes back whole); its serials keep counting.
+pub(super) fn retire_all(world: &mut World) {
+    let gone = std::mem::take(&mut world.resource_mut::<Zm>().presences.by_ent);
+    let mut f = frame(world);
+    for shown in gone.into_values() {
+        f.remove_script_mover_by_number(shown.number);
+        f.remove_collision_owner(shown.id);
+    }
+}
+
 pub(super) fn sync(world: &mut World, now_ms: i64) {
     report_near(world, now_ms);
     let now = now_ms as i32;

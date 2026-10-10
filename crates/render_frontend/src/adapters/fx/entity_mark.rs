@@ -169,14 +169,17 @@ pub(crate) fn generate(
             }
         }
     }
-    if state.unsupported_triangles != before {
+    // IW4L_RENDER_LOG=1 only: these change with nearly every hit.
+    static LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let log = *LOG.get_or_init(|| std::env::var_os("IW4L_RENDER_LOG").is_some());
+    if log && state.unsupported_triangles != before {
         diag::warn!(
             World,
             "entity marks: {} triangles lack a single rigid bone receiver",
             state.unsupported_triangles - before
         );
     }
-    if state.unsupported_receivers != before_receivers {
+    if log && state.unsupported_receivers != before_receivers {
         diag::warn!(
             World,
             "entity marks: {} requests lack composed rigid pose data",

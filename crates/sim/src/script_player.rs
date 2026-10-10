@@ -959,6 +959,17 @@ pub(crate) fn constrain_cmd(
         controls.switch_to = 0;
         world.client_meta_mut(id).controls.switch_to = 0;
     }
+    // BO2's use/reload button reloads when nothing is there to use (his
+    // client adds this to his own commands; a bot's come here), or when a
+    // tap of it let go before it took an item.
+    let nothing_to_use = world.player(id).is_some_and(|ps| ps.cursor_hint == 0);
+    if cmd.buttons & buttons::USE_RELOAD != 0 && nothing_to_use {
+        cmd.buttons |= buttons::RELOAD;
+    }
+    if world.client_meta(id).is_some_and(|m| m.item_use_reload) {
+        world.client_meta_mut(id).item_use_reload = false;
+        cmd.buttons |= buttons::RELOAD;
+    }
     if controls.frozen {
         cmd.forwardmove = 0;
         cmd.rightmove = 0;

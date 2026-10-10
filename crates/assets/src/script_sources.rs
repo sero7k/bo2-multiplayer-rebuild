@@ -11,6 +11,8 @@ pub struct T6ScriptSet {
     pub entities: Vec<String>,
     /// The map's AI path nodes (GameWorldMp), in node order.
     pub path_nodes: Vec<asset_t6::PathNodeRef>,
+    /// bo2mp: the map's baked node sight and smooth tables.
+    pub path_tables: asset_t6::PathTablesRef,
     /// Every animation's timing, root motion and notetracks.
     pub anims: Vec<T6AnimFacts>,
     /// Animation state definitions (`animstatedefs/*.asd`): (name, text).

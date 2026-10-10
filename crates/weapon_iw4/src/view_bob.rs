@@ -1,8 +1,8 @@
 use crate::placement::{
-    VIEWHEIGHT_TARGET_CROUCH, VIEWHEIGHT_TARGET_PRONE, WEAPON_BOB_AMPLITUDE_BASE,
+    PMF_DIVE_ANY, VIEWHEIGHT_TARGET_CROUCH, VIEWHEIGHT_TARGET_PRONE, WEAPON_BOB_AMPLITUDE_BASE,
     WEAPON_BOB_AMPLITUDE_ROLL, WEAPON_BOB_LAG, WEAPON_BOB_UP_PHASE, WEAPON_IDLE_FACTOR_LERP,
     WEAPON_IDLE_PITCH_FREQ, WEAPON_IDLE_SIN_SCALE, WEAPON_IDLE_TIME_MS_SCALE, WEAPON_IDLE_YAW_FREQ,
-    WeaponIdleInputs, WeaponPlacementPsInputs, weapon_bob_ads_attenuation,
+    WeaponIdleInputs, WeaponPlacementPsInputs, idle_e_flags, weapon_bob_ads_attenuation,
     weapon_idle_amount_speed,
 };
 use math_iw4::{angle_vectors, get_lean_fraction, vect_to_angles};
@@ -24,6 +24,10 @@ pub const VIEW_BOB_AMP_SPRINTING: [f32; 2] = [0.02, 0.014];
 
 /// bo2zm: Black Ops' head bob when prone (bg_viewBobAmplitudeProne).
 pub const VIEW_BOB_AMP_PRONE_BO2: [f32; 2] = [0.08, 0.04];
+
+/// bo2zm: Black Ops II's head bob through a dive, in the air and sliding
+/// (bg_viewBobAmplitudeDtp), whatever the view height.
+pub const VIEW_BOB_AMP_DTP: [f32; 2] = [0.002, 0.002];
 
 pub const PERK_LIGHTWEIGHT_VIEW_BOB_SCALE: f32 = 0.75;
 
@@ -146,7 +150,9 @@ fn view_bob_helper_amplitude(
 ) -> f32 {
     let idx = if horizontal { 0 } else { 1 };
     let ads = weapon_pos_frac;
-    let scale = if view_height_target == VIEWHEIGHT_TARGET_PRONE {
+    let scale = if bo2 && pm_flags & PMF_DIVE_ANY != 0 {
+        VIEW_BOB_AMP_DTP[idx]
+    } else if view_height_target == VIEWHEIGHT_TARGET_PRONE {
         if bo2 {
             VIEW_BOB_AMP_PRONE_BO2[idx]
         } else {
@@ -638,9 +644,10 @@ fn view_camera_idle(angles: &mut ViewAngleBob, inputs: ViewAngleBobInputs) {
     ) as i32;
     angles.weap_idle_time = angles.weap_idle_time.wrapping_add(add);
 
-    let target = if inputs.e_flags & eflags::PRONE != 0 {
+    let e_flags = idle_e_flags(inputs.e_flags, inputs.org.pm_flags);
+    let target = if e_flags & eflags::PRONE != 0 {
         inputs.idle.idle_prone_factor
-    } else if inputs.e_flags & eflags::DUCK != 0 {
+    } else if e_flags & eflags::DUCK != 0 {
         inputs.idle.idle_crouch_factor
     } else {
         1.0

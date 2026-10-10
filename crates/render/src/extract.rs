@@ -1124,31 +1124,139 @@ fn t6_note_untextured(material: u32, name: &str) {
     }
 }
 
-/// bo2zm M3: the still script models' shapes, kept across frames: one
-/// geometry, each model's surfaces in it (first index, count, colour slot,
-/// draw code) by model and materials.
+/// bo2zm M3: the shapes of things that hold their shape, kept across
+/// frames: still script models, grenades and rockets in flight, and (bo2mp)
+/// guns on the ground and corpses at rest. Each new shape goes up once, in
+/// a chunk of its own; a frame then sends one placement row per model.
+/// Re-sending them every frame grew with each gun dropped and each body
+/// that fell, to ~270,000 vertices and ~12 ms a frame late in a match.
 #[derive(Default)]
 pub struct T6StaticCache {
     generation: Option<u64>,
-    vertices: Vec<render_frame::SmodelVertex>,
-    indices: Vec<u32>,
-    shared: Arc<(Vec<render_frame::SmodelVertex>, Vec<u32>)>,
-    revision: u64,
-    models: std::collections::HashMap<T6StaticKey, Vec<[u32; 4]>>,
+    /// Bumped whenever the kept shapes are thrown out and gathered again.
+    epoch: u64,
+    frame: u64,
+    vertex_count: u32,
+    index_count: u32,
+    chunks: Vec<Arc<(Vec<render_frame::SmodelVertex>, Vec<u32>)>>,
+    models: std::collections::HashMap<T6StaticKey, T6Kept>,
+    /// Last frame's skinned poses, by address (held, so a new pose cannot
+    /// take an old one's address): one handed on again holds still.
+    posed_before: std::collections::HashMap<usize, Arc<render_anim::occupancy::missile::PosedVerts>>,
 }
 
-/// A still model's shape: its name, materials and (bo2mp) hidden parts.
-type T6StaticKey = (String, Vec<Option<u32>>, Option<([u32; 6], u32)>);
+/// A kept shape: its surfaces (first index, count, colour slot, draw code),
+/// its vertex count, the frame it was last drawn, and the pose it came
+/// from (held, so its address names it).
+struct T6Kept {
+    surfaces: Vec<[u32; 4]>,
+    vertices: u32,
+    used: u64,
+    _posed: Option<Arc<render_anim::occupancy::missile::PosedVerts>>,
+}
 
-/// One model's drawn surfaces appended to a geometry: per surface (first
-/// index, count, colour slot, draw code); vertices from its skinned pose
-/// when it has one.
-fn t6_append_model(
+/// A kept shape: its name, materials, (bo2mp) hidden parts and, when it was
+/// skinned, its pose's address.
+type T6StaticKey = (String, Vec<Option<u32>>, Option<([u32; 6], u32)>, usize);
+
+/// Kept vertices past which the shapes nothing draws any more (guns picked
+/// up, corpses gone) are thrown out, once they are half of them.
+const T6_KEPT_VERTICES: u32 = 400_000;
+
+/// bo2mp: how far a posed model may reach past its bind bounds (a player
+/// lying dead or prone), in game units.
+const T6_POSE_MARGIN: f32 = 48.0;
+
+/// bo2mp: how near the eye a model still casts sun shadow into view, while
+/// the sun shadow is drawn (its far partition is at most 4096 across).
+const T6_SHADOW_REACH: f32 = 4096.0;
+
+/// bo2mp: the camera's view, for leaving out the models it cannot see (a
+/// live player is ~20k vertices copied and drawn a frame): its near and
+/// side planes and, while the sun shadow is drawn, how near a model out
+/// of view still casts into it.
+struct T6ViewCull {
+    planes: Vec<[f32; 4]>,
+    eye: Vec3,
+    shadow_reach: Option<f32>,
+}
+
+impl T6ViewCull {
+    fn new(view: Option<&render_scene::PreparedSceneView>) -> Self {
+        let planes = match view {
+            // Near, far, left, right, bottom, top: the far plane is left
+            // out (a view without one puts it at the eye).
+            Some(v) if v.ready && v.frustum_planes.len() == 6 => {
+                let p = &v.frustum_planes;
+                vec![p[0], p[2], p[3], p[4], p[5]]
+            }
+            _ => Vec::new(),
+        };
+        Self {
+            planes,
+            eye: view.map_or(Vec3::ZERO, |v| v.eye),
+            shadow_reach: (!asset_core::t6_fast()).then_some(T6_SHADOW_REACH),
+        }
+    }
+
+    fn sees(&self, item: &render_anim::occupancy::missile::T6MissileModel) -> bool {
+        if self.planes.is_empty() {
+            return true;
+        }
+        let skel = &item.skel;
+        let (centre, half) = match (skel.bounds, skel.radius) {
+            (Some((lo, hi)), _) => {
+                let (lo, hi) = (Vec3::from(lo), Vec3::from(hi));
+                ((lo + hi) * 0.5, (hi - lo).length() * 0.5)
+            }
+            (None, Some(r)) => (Vec3::ZERO, r),
+            _ => return true,
+        };
+        let m = item.world_from_local;
+        let scale = m.x_axis.truncate().length().max(m.y_axis.truncate().length()).max(m.z_axis.truncate().length());
+        let centre = m.transform_point3(centre);
+        let radius = half * scale + T6_POSE_MARGIN;
+        if self.shadow_reach.is_some_and(|reach| centre.distance(self.eye) < reach + radius) {
+            return true;
+        }
+        !self
+            .planes
+            .iter()
+            .any(|p| p[0] * centre.x + p[1] * centre.y + p[2] * centre.z + p[3] + radius <= 0.0)
+    }
+}
+
+/// One drawn surface of a model: its vertices, its triangles (all of the
+/// surface's, or those its hidden parts leave), colour slot and draw code.
+struct T6Surface {
+    vbase: usize,
+    vn: usize,
+    triangles: T6Triangles,
+    slot: u32,
+    code: u32,
+}
+
+enum T6Triangles {
+    /// The surface's own index range (first, count).
+    All(usize, usize),
+    Left(Vec<u32>),
+}
+
+impl T6Surface {
+    fn index_count(&self) -> usize {
+        match &self.triangles {
+            T6Triangles::All(_, count) => *count,
+            T6Triangles::Left(left) => left.len(),
+        }
+    }
+}
+
+/// A model's drawn surfaces (with a material that draws, in range, not
+/// all hidden).
+fn t6_model_surfaces(
     item: &render_anim::occupancy::missile::T6MissileModel,
     catalog: &render_frontend::assemble::drawsurf::RuntimeMaterialCatalog,
-    vertices: &mut Vec<render_frame::SmodelVertex>,
-    indices: &mut Vec<u32>,
-) -> Vec<[u32; 4]> {
+) -> Vec<T6Surface> {
     let skel = &item.skel;
     let mut out = Vec::new();
     let ranges = skel.surface_vertex_ranges.iter().zip(&skel.surface_index_ranges);
@@ -1166,36 +1274,133 @@ fn t6_append_model(
             continue;
         }
         // bo2mp: less its hidden parts (a mannequin's shot-off head).
-        let Some(drawn) = item
-            .drawn_indices(surface, &skel.indices[ibase..ibase + icount])
-            .filter(|drawn| !drawn.is_empty())
-        else {
-            continue;
+        let triangles = match item.drawn_indices(surface, &skel.indices[ibase..ibase + icount]) {
+            None => continue,
+            Some(std::borrow::Cow::Borrowed(all)) if !all.is_empty() => T6Triangles::All(ibase, icount),
+            Some(std::borrow::Cow::Owned(left)) if !left.is_empty() => T6Triangles::Left(left),
+            Some(_) => continue,
         };
         let slot = m
             .texture_semantic(asset_material::TS_COLOR_MAP)
             .map_or(u32::MAX, |id| id.0);
-        let base = vertices.len() as u32;
-        for v in vbase..vbase + vn {
-            let (position, normal) = match &item.posed {
-                Some(posed) => (
-                    posed.positions.get(v).copied().unwrap_or(skel.positions[v]),
-                    posed.normals.get(v).copied().unwrap_or([0.0, 0.0, 1.0]),
-                ),
-                None => (skel.positions[v], skel.normals.get(v).copied().unwrap_or([0.0, 0.0, 1.0])),
-            };
-            vertices.push(render_frame::SmodelVertex {
-                position,
-                normal,
-                color: skel.colors.get(v).copied().unwrap_or([1.0; 4]),
-                uv0: skel.uvs.get(v).copied().unwrap_or([0.0; 2]),
-            });
-        }
-        let start = indices.len() as u32;
-        indices.extend(drawn.iter().map(|&i| base + i.saturating_sub(vbase as u32)));
-        out.push([start, drawn.len() as u32, slot, draw.code()]);
+        out.push(T6Surface { vbase, vn, triangles, slot, code: draw.code() });
     }
     out
+}
+
+/// Per surface (first index, count, colour slot, draw code), the first
+/// index counted from `first`.
+fn t6_surface_rows(surfaces: &[T6Surface], mut first: u32) -> Vec<[u32; 4]> {
+    surfaces
+        .iter()
+        .map(|s| {
+            let count = s.index_count() as u32;
+            let row = [first, count, s.slot, s.code];
+            first += count;
+            row
+        })
+        .collect()
+}
+
+/// A model's surfaces' vertices (from its skinned pose when it has one)
+/// and indices appended; the indices count from `first_vertex` plus where
+/// its vertices land in `vertices`.
+fn t6_fill_model(
+    skel: &asset_model::ModelSkel,
+    posed: Option<&render_anim::occupancy::missile::PosedVerts>,
+    surfaces: &[T6Surface],
+    vertices: &mut Vec<render_frame::SmodelVertex>,
+    indices: &mut Vec<u32>,
+    first_vertex: u32,
+) {
+    let (positions, normals) = match posed {
+        Some(posed) => (posed.positions.as_slice(), posed.normals.as_slice()),
+        None => (skel.positions.as_slice(), skel.normals.as_slice()),
+    };
+    for s in surfaces {
+        let base = first_vertex + vertices.len() as u32;
+        let range = s.vbase..s.vbase + s.vn;
+        match (
+            positions.get(range.clone()),
+            normals.get(range.clone()),
+            skel.colors.get(range.clone()),
+            skel.uvs.get(range.clone()),
+        ) {
+            // Every list has the surface's vertices: a straight copy (a
+            // live player's ~20k vertices every frame).
+            (Some(p), Some(n), Some(c), Some(u)) => vertices.extend(p.iter().zip(n).zip(c).zip(u).map(
+                |(((&position, &normal), &color), &uv0)| render_frame::SmodelVertex {
+                    position,
+                    normal,
+                    color,
+                    uv0,
+                },
+            )),
+            _ => vertices.extend(range.map(|v| render_frame::SmodelVertex {
+                position: positions.get(v).copied().unwrap_or(skel.positions[v]),
+                normal: normals.get(v).copied().unwrap_or([0.0, 0.0, 1.0]),
+                color: skel.colors.get(v).copied().unwrap_or([1.0; 4]),
+                uv0: skel.uvs.get(v).copied().unwrap_or([0.0; 2]),
+            })),
+        }
+        let vbase = s.vbase as u32;
+        match &s.triangles {
+            T6Triangles::All(first, count) => indices.extend(
+                skel.indices[*first..*first + *count]
+                    .iter()
+                    .map(|&i| base + i.saturating_sub(vbase)),
+            ),
+            T6Triangles::Left(left) => indices.extend(left.iter().map(|&i| base + i.saturating_sub(vbase))),
+        }
+    }
+}
+
+/// A draw list's vertices, written now or on the render thread.
+fn t6_vertex_count(draw: &render_gpu::T6DynamicDraw) -> usize {
+    draw.deferred.as_ref().map_or(draw.vertices.len(), |d| d.vertices)
+}
+
+/// One model's drawn surfaces appended to a geometry whose first vertex
+/// and index are `offset` into the whole: per surface (first index, count,
+/// colour slot, draw code); vertices from its skinned pose when it has one.
+fn t6_append_model(
+    item: &render_anim::occupancy::missile::T6MissileModel,
+    catalog: &render_frontend::assemble::drawsurf::RuntimeMaterialCatalog,
+    vertices: &mut Vec<render_frame::SmodelVertex>,
+    indices: &mut Vec<u32>,
+    offset: (u32, u32),
+) -> Vec<[u32; 4]> {
+    let surfaces = t6_model_surfaces(item, catalog);
+    let rows = t6_surface_rows(&surfaces, offset.1 + indices.len() as u32);
+    t6_fill_model(&item.skel, item.posed.as_deref(), &surfaces, vertices, indices, offset.0);
+    rows
+}
+
+/// IW4L_T6_LITLOG=1: an animated model whose light reads (near) black,
+/// once a second: where it stands.
+fn t6_note_dark(item: &render_anim::occupancy::missile::T6MissileModel, lit: &asset_world::T6PointLight) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var_os("IW4L_T6_LITLOG").is_some()) || lit.light.iter().sum::<f32>() >= 0.02 {
+        return;
+    }
+    static LAST: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    if let Ok(mut last) = LAST.lock()
+        && *last != now
+    {
+        *last = now;
+        diag::info!(
+            World,
+            "bo2zm dark model {} at {:?}: light {:?} primary {} vis {:.2}",
+            item.skel.name,
+            item.light_at.map(|v| v.round()),
+            lit.light,
+            lit.primary,
+            lit.visibility
+        );
+    }
 }
 
 /// bo2zm: Black Ops II things that move, every frame: the first-person gun
@@ -1212,6 +1417,7 @@ pub fn extract_t6_dynamic(
     t6_lights: Extract<Option<Res<render_frontend::adapters::fx::system::T6DynLights>>>,
     runtime: Extract<Option<Res<render_frontend::assemble::drawsurf::MaterialGeneration>>>,
     exposure: Extract<Option<Res<render_frontend::assemble::drawsurf::MapT5SunParseExposure>>>,
+    scene_view: Extract<Option<Res<render_scene::PreparedSceneView>>>,
     existing: Option<ResMut<render_gpu::ExtractedT6Dynamic>>,
     mut static_cache: Local<T6StaticCache>,
 ) {
@@ -1224,11 +1430,13 @@ pub fn extract_t6_dynamic(
     // below (cloning last frame's vertex lists cost as much as building
     // them).
     let mut out = match existing {
-        Some(existing) => render_gpu::ExtractedT6Dynamic {
-            generation: existing.generation,
-            materials: Arc::clone(&existing.materials),
-            ..Default::default()
-        },
+        Some(existing) => {
+            render_gpu::ExtractedT6Dynamic {
+                generation: existing.generation,
+                materials: Arc::clone(&existing.materials),
+                ..Default::default()
+            }
+        }
         None => render_gpu::ExtractedT6Dynamic::default(),
     };
     if out.generation != catalog.generation_id || out.materials.is_empty() {
@@ -1319,6 +1527,7 @@ pub fn extract_t6_dynamic(
                 indices: rows.indices.to_vec(),
                 draws,
                 instances: vec![instance],
+                deferred: None,
             })
         });
     // Effect sprites: world space, lit (when their material is) by the
@@ -1437,6 +1646,7 @@ pub fn extract_t6_dynamic(
             indices: mesh.indices.clone(),
             draws,
             instances,
+            deferred: None,
         }
     };
     // Marks: one instance per mark, lit by the grid where it landed.
@@ -1477,59 +1687,154 @@ pub fn extract_t6_dynamic(
             indices: mesh.indices.clone(),
             draws,
             instances,
+            deferred: None,
         }
     });
     out.dlights = t6_lights.as_ref().map(|l| l.lights.clone()).unwrap_or_default();
     // Projectiles in flight: each model in its own space, its instance
     // row its placement and the grid's light where it is.
     // bo2zm M3: the map's script models (perk machines, the box, ...) draw
-    // the same way.
-    // Script models that animate go with them; the still ones are drawn
-    // from shapes uploaded once (below).
-    let placed: Vec<&render_anim::occupancy::missile::T6MissileModel> = t6_missiles
+    // the same way, and (bo2mp) other players, corpses, guns and bags on
+    // the ground.
+    // A model that holds its shape (no pose, or the same pose handed on
+    // again: a gun on the ground, a corpse at rest) is drawn from shapes
+    // uploaded once; only what was skinned anew this frame is sent whole.
+    let all = t6_missiles
         .as_ref()
         .map(|m| m.items.iter())
         .into_iter()
         .flatten()
-        .chain(
-            t6_script_models
-                .as_ref()
-                .map(|m| m.items.iter().filter(|i| i.posed.is_some()))
-                .into_iter()
-                .flatten(),
-        )
-        // bo2mp: other players, corpses, guns and bags on the ground.
-        .chain(t6_bodies.as_ref().map(|m| m.items.iter()).into_iter().flatten())
-        .collect();
+        .chain(t6_script_models.as_ref().map(|m| m.items.iter()).into_iter().flatten())
+        .chain(t6_bodies.as_ref().map(|m| m.items.iter()).into_iter().flatten());
+    let mut moving: Vec<&render_anim::occupancy::missile::T6MissileModel> = Vec::new();
+    let view_cull = T6ViewCull::new(scene_view.as_deref());
+    let mut unseen = 0usize;
+    let held_models: usize;
     {
         let cache = &mut *static_cache;
         let generation = catalog.generation_id.0;
         if cache.generation != Some(generation) {
             *cache = T6StaticCache {
                 generation: Some(generation),
+                epoch: cache.epoch + 1,
                 ..Default::default()
             };
         }
-        let mut grew = false;
+        cache.frame += 1;
+        let frame = cache.frame;
+        if cache.vertex_count > T6_KEPT_VERTICES {
+            let drawn: u32 = cache
+                .models
+                .values()
+                .filter(|m| m.used + 1 >= frame)
+                .map(|m| m.vertices)
+                .sum();
+            if drawn * 2 < cache.vertex_count {
+                *cache = T6StaticCache {
+                    generation: cache.generation,
+                    epoch: cache.epoch + 1,
+                    frame,
+                    posed_before: std::mem::take(&mut cache.posed_before),
+                    ..Default::default()
+                };
+            }
+        }
+        let mut posed_now = std::collections::HashMap::new();
+        let mut new_vertices: Vec<render_frame::SmodelVertex> = Vec::new();
+        let mut new_indices: Vec<u32> = Vec::new();
         let mut draws: Vec<[u32; 7]> = Vec::new();
         let mut instances: Vec<[f32; 24]> = Vec::new();
-        for item in t6_script_models
-            .as_ref()
-            .map(|m| m.items.iter().filter(|i| i.posed.is_none()))
-            .into_iter()
-            .flatten()
-        {
-            let key = (item.skel.name.clone(), item.materials.clone(), item.hide);
-            if !cache.models.contains_key(&key) {
-                let surfaces = t6_append_model(item, catalog, &mut cache.vertices, &mut cache.indices);
-                cache.models.insert(key.clone(), surfaces);
-                grew = true;
+        for item in all {
+            // Out of view: not copied or drawn (its pose is still noted, so
+            // a corpse at rest stays held).
+            let seen = view_cull.sees(item);
+            unseen += usize::from(!seen);
+            let pose = match &item.posed {
+                None => 0,
+                Some(posed) => {
+                    let at = Arc::as_ptr(posed) as usize;
+                    let held = cache.posed_before.contains_key(&at);
+                    posed_now.insert(at, Arc::clone(posed));
+                    if !held {
+                        if seen {
+                            moving.push(item);
+                        }
+                        continue;
+                    }
+                    at
+                }
+            };
+            if !seen {
+                continue;
             }
-            let Some(surfaces) = cache.models.get(&key) else { continue };
-            if surfaces.is_empty() {
+            let key = (item.skel.name.clone(), item.materials.clone(), item.hide, pose);
+            let kept = cache.models.entry(key).or_insert_with(|| {
+                // Where this frame's new chunk starts; the append counts on
+                // from what the chunk holds already.
+                let offset = (cache.vertex_count, cache.index_count);
+                let before = new_vertices.len();
+                let surfaces = t6_append_model(item, catalog, &mut new_vertices, &mut new_indices, offset);
+                T6Kept {
+                    surfaces,
+                    vertices: (new_vertices.len() - before) as u32,
+                    used: frame,
+                    _posed: item.posed.clone(),
+                }
+            });
+            kept.used = frame;
+            if kept.surfaces.is_empty() {
                 continue;
             }
             let lit = sampler.as_ref().map(|s| s.at(item.light_at)).unwrap_or_default();
+            if item.posed.is_some() {
+                t6_note_dark(item, &lit);
+            }
+            let mut row = [0.0f32; 24];
+            row[..16].copy_from_slice(&item.world_from_local.to_cols_array());
+            for c in 0..3 {
+                row[16 + c] = lit.light[c] * exposure;
+            }
+            row[20] = f32::from(lit.primary);
+            row[21] = lit.visibility;
+            instances.push(row);
+            let instance = instances.len() as u32 - 1;
+            for s in &kept.surfaces {
+                draws.push([s[0], s[1], s[2], s[3], instance, u32::MAX, u32::MAX]);
+            }
+        }
+        cache.posed_before = posed_now;
+        if !new_vertices.is_empty() {
+            cache.vertex_count += new_vertices.len() as u32;
+            cache.index_count += new_indices.len() as u32;
+            cache.chunks.push(Arc::new((new_vertices, new_indices)));
+        }
+        held_models = instances.len();
+        out.script_static = (!draws.is_empty()).then(|| render_gpu::T6StaticDraw {
+            epoch: cache.epoch,
+            chunks: cache.chunks.clone(),
+            draws,
+            instances,
+        });
+    }
+    // The moving models' vertices (the live players' ~250k a frame) are
+    // copied on the render thread: here only what is drawn where, and the
+    // poses to copy from (shared, not copied).
+    out.missiles = (!moving.is_empty()).then(|| {
+        let mut draws = Vec::new();
+        let mut instances = Vec::with_capacity(moving.len());
+        let mut models = Vec::with_capacity(moving.len());
+        let (mut vertex_count, mut index_count) = (0usize, 0usize);
+        for item in moving.iter().copied() {
+            let lit = sampler.as_ref().map(|s| s.at(item.light_at)).unwrap_or_default();
+            t6_note_dark(item, &lit);
+            let plan = t6_model_surfaces(item, catalog);
+            if plan.is_empty() {
+                continue;
+            }
+            let surfaces = t6_surface_rows(&plan, index_count as u32);
+            vertex_count += plan.iter().map(|s| s.vn).sum::<usize>();
+            index_count += plan.iter().map(T6Surface::index_count).sum::<usize>();
+            models.push((item.skel.clone(), item.posed.clone(), plan));
             let mut row = [0.0f32; 24];
             row[..16].copy_from_slice(&item.world_from_local.to_cols_array());
             for c in 0..3 {
@@ -1543,105 +1848,21 @@ pub fn extract_t6_dynamic(
                 draws.push([s[0], s[1], s[2], s[3], instance, u32::MAX, u32::MAX]);
             }
         }
-        if grew {
-            cache.shared = Arc::new((cache.vertices.clone(), cache.indices.clone()));
-            cache.revision += 1;
-        }
-        out.script_static = (!draws.is_empty()).then(|| render_gpu::T6StaticDraw {
-            geometry: Arc::clone(&cache.shared),
-            revision: cache.revision,
-            draws,
-            instances,
-        });
-    }
-    out.missiles = (!placed.is_empty()).then(|| {
-        let mut vertices: Vec<render_frame::SmodelVertex> = Vec::new();
-        let mut indices: Vec<u32> = Vec::new();
-        let mut draws = Vec::new();
-        let mut instances = Vec::with_capacity(placed.len());
-        for item in placed.iter().copied() {
-            let skel = &item.skel;
-            let lit = sampler.as_ref().map(|s| s.at(item.light_at)).unwrap_or_default();
-            // IW4L_T6_LITLOG=1: an animated model whose light reads (near)
-            // black, once a second: where it stands.
-            if std::env::var_os("IW4L_T6_LITLOG").is_some() && lit.light.iter().sum::<f32>() < 0.02 {
-                static LAST: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |d| d.as_secs());
-                if let Ok(mut last) = LAST.lock()
-                    && *last != now
-                {
-                    *last = now;
-                    diag::info!(
-                        World,
-                        "bo2zm dark model {} at {:?}: light {:?} primary {} vis {:.2}",
-                        skel.name,
-                        item.light_at.map(|v| v.round()),
-                        lit.light,
-                        lit.primary,
-                        lit.visibility
-                    );
-                }
+        let fill = move |vertices: &mut Vec<render_frame::SmodelVertex>, indices: &mut Vec<u32>| {
+            for (skel, posed, plan) in &models {
+                t6_fill_model(skel, posed.as_deref(), plan, vertices, indices, 0);
             }
-            let mut row = [0.0f32; 24];
-            row[..16].copy_from_slice(&item.world_from_local.to_cols_array());
-            for c in 0..3 {
-                row[16 + c] = lit.light[c] * exposure;
-            }
-            row[20] = f32::from(lit.primary);
-            row[21] = lit.visibility;
-            instances.push(row);
-            let instance = instances.len() as u32 - 1;
-            let ranges = skel.surface_vertex_ranges.iter().zip(&skel.surface_index_ranges);
-            for (surface, (&(vbase, vn), &(ibase, icount))) in ranges.enumerate() {
-                let Some(material) = item.materials.get(surface).copied().flatten() else {
-                    continue;
-                };
-                let Some(m) = catalog.derived(assets::MaterialIndex::from_order(material as usize)) else {
-                    continue;
-                };
-                let Some(draw) = m.t6_draw else {
-                    continue;
-                };
-                if vbase + vn > skel.positions.len() || ibase + icount > skel.indices.len() {
-                    continue;
-                }
-                let Some(drawn) = item
-                    .drawn_indices(surface, &skel.indices[ibase..ibase + icount])
-                    .filter(|drawn| !drawn.is_empty())
-                else {
-                    continue;
-                };
-                let slot = m
-                    .texture_semantic(asset_material::TS_COLOR_MAP)
-                    .map_or(u32::MAX, |id| id.0);
-                let base = vertices.len() as u32;
-                for v in vbase..vbase + vn {
-                    let (position, normal) = match &item.posed {
-                        Some(posed) => (
-                            posed.positions.get(v).copied().unwrap_or(skel.positions[v]),
-                            posed.normals.get(v).copied().unwrap_or([0.0, 0.0, 1.0]),
-                        ),
-                        None => (skel.positions[v], skel.normals.get(v).copied().unwrap_or([0.0, 0.0, 1.0])),
-                    };
-                    vertices.push(render_frame::SmodelVertex {
-                        position,
-                        normal,
-                        color: skel.colors.get(v).copied().unwrap_or([1.0; 4]),
-                        uv0: skel.uvs.get(v).copied().unwrap_or([0.0; 2]),
-                    });
-                }
-                let start = indices.len() as u32;
-                indices.extend(drawn.iter().map(|&i| base + i.saturating_sub(vbase as u32)));
-                draws.push([start, drawn.len() as u32, slot, draw.code(), instance, u32::MAX, u32::MAX]);
-            }
-        }
+        };
         render_gpu::T6DynamicDraw {
-            vertices,
-            indices,
+            vertices: Vec::new(),
+            indices: Vec::new(),
             draws,
             instances,
+            deferred: Some(render_gpu::T6DeferredFill {
+                vertices: vertex_count,
+                indices: index_count,
+                fill: Arc::new(fill),
+            }),
         }
     });
     out.effects = t6_fx
@@ -1652,20 +1873,36 @@ pub fn extract_t6_dynamic(
         .as_ref()
         .filter(|mesh| !mesh.viewmodel_draws.is_empty())
         .map(|mesh| fx_draw(&mesh.viewmodel_draws, &[], mesh));
-    // IW4L_T6_PROF=1: this extract's cost, every 300 frames.
+    // IW4L_T6_PROF=1: this extract's cost, every 300 frames, with what it
+    // carried on the last of them.
     static PROF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if *PROF.get_or_init(|| std::env::var_os("IW4L_T6_PROF").is_some()) {
         static ACC: std::sync::Mutex<(u32, f64, usize)> = std::sync::Mutex::new((0, 0.0, 0));
         if let Ok(mut a) = ACC.lock() {
             a.0 += 1;
             a.1 += t0.elapsed().as_secs_f64() * 1000.0;
-            a.2 += out.missiles.as_ref().map_or(0, |m| m.vertices.len());
+            a.2 += out.missiles.as_ref().map_or(0, t6_vertex_count);
             if a.0 >= 300 {
+                let list = |d: Option<&render_gpu::T6DynamicDraw>| {
+                    d.map_or((0, 0), |d| (t6_vertex_count(d), d.draws.len()))
+                };
+                let kept = static_cache.vertex_count;
                 diag::info!(
                     World,
-                    "bo2zm t6 extract: {:.2} ms a frame, {} moving vertices a frame",
+                    "bo2zm t6 extract: {:.2} ms a frame, {} moving vertices a frame; now {} moving models, \
+                     {} held still, {} out of view ({} vertices kept in {} chunks), {} bodies and ground \
+                     items in all; vertices/draws: moving {:?}, marks {:?}, effects {:?}",
                     a.1 / f64::from(a.0),
-                    a.2 / a.0 as usize
+                    a.2 / a.0 as usize,
+                    moving.len(),
+                    held_models,
+                    unseen,
+                    kept,
+                    static_cache.chunks.len(),
+                    t6_bodies.as_ref().map_or(0, |b| b.items.len()),
+                    list(out.missiles.as_ref()),
+                    list(out.marks.as_ref()),
+                    list(out.effects.as_ref()),
                 );
                 *a = (0, 0.0, 0);
             }

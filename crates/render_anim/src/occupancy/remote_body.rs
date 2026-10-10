@@ -305,6 +305,7 @@ fn sync_remote_bodies(
     bodies: Option<Res<PreparedBodies>>,
     existing: Query<(Entity, &CEntity, &CEntityRuntime, Option<&RemotePlayer>)>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("sync_remote_bodies");
     let Some(bodies) = bodies else {
         return;
     };
@@ -508,6 +509,7 @@ fn pose_remote_bodies(
         ),
     >,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("pose_remote_bodies");
     let (cameras, lod_skinned, mut dobj_poses, mut posed_players, gfx, cg_clock) = dpvs;
     submit.clear();
     for (_, _, _, mut bolts, _) in &mut roots {

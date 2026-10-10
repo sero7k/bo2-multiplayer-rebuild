@@ -62,10 +62,39 @@ pub(crate) struct Bot {
     tick: u32,
     /// Where it was when it last made headway, and when (stuck checks).
     progress: Option<([f32; 3], i64)>,
+    /// The point its route came from to `path[0]` (where it planned, or
+    /// the last point it passed): it has passed `path[0]` once it is
+    /// beyond the line across that point.
+    prev: Option<[f32; 3]>,
+    /// Counts new routes; with the route's length it names the step a
+    /// cached far-sight answer belongs to.
+    path_gen: u32,
+    path_new: bool,
+    /// The farthest route point seen from the one it heads to, for
+    /// (route, points left, within 192 units of the next).
+    seen: Option<(u32, usize, bool, [f32; 3])>,
+    /// BO2's steering: the angles its view chases (pitch, yaw), smoothed
+    /// toward what it wants to face, and the current turn speeds
+    /// (degrees a second) that ramp up toward it.
+    aim_avg: Option<[f32; 2]>,
+    turn_speed: [f32; 2],
+    /// A semi-automatic or burst weapon's trigger rests until then.
+    fire_delay_until: i64,
+    /// When its current sprint began.
+    sprint_since: Option<i64>,
     pub classes: BTreeMap<i32, BotClass>,
 }
 
 impl Bot {
+    /// The level restarts (`map_restart`): what its scripts set up for its
+    /// classes stays; where it was going and what it was doing go.
+    pub(crate) fn restarted(self) -> Self {
+        Self {
+            classes: self.classes,
+            ..Self::default()
+        }
+    }
+
     fn best_goal(&self) -> Option<&Goal> {
         self.goals
             .iter()
@@ -88,6 +117,322 @@ fn angles_to(a: [f32; 3], b: [f32; 3]) -> (f32, f32) {
 
 fn angle_delta(from: f32, to: f32) -> f32 {
     (to - from + 540.0).rem_euclid(360.0) - 180.0
+}
+
+/// Weapon states (the movement code's numbering): reloading, any kind.
+fn reloading(state: i32) -> bool {
+    use weapon_iw4::WeaponState as S;
+    (S::Reloading as i32..=S::ReloadEnd as i32).contains(&state)
+}
+
+/// The settings BO2's engine drives bots by (its own dvars; the bot
+/// scripts raise `bot_yawspeed` and set the fire gaps per difficulty).
+struct BotDvars {
+    yaw_speed: f32,
+    min_fire: i64,
+    max_fire: i64,
+    sprint_distance: f32,
+    /// aim_turnrate_pitch / _ads, aim_turnrate_yaw / _ads (degrees a
+    /// second) and aim_accel_turnrate_lerp (degrees a second, a second).
+    pitch_rate: [f32; 2],
+    yaw_rate: [f32; 2],
+    accel: f32,
+}
+
+impl BotDvars {
+    fn read(world: &mut World) -> Self {
+        super::with_vm(world, |vm, _| {
+            let f = |k: &str, d: f32| {
+                vm.dvars
+                    .get(k)
+                    .and_then(|s| s.trim().parse::<f32>().ok())
+                    .unwrap_or(d)
+            };
+            let (min_fire, max_fire) = (f("bot_minfiretime", 400.0) as i64, f("bot_maxfiretime", 600.0) as i64);
+            Self {
+                yaw_speed: f("bot_yawspeed", 1.0),
+                min_fire,
+                max_fire: max_fire.max(min_fire),
+                sprint_distance: f("bot_sprintdistance", 256.0),
+                pitch_rate: [f("aim_turnrate_pitch", 90.0), f("aim_turnrate_pitch_ads", 55.0)],
+                yaw_rate: [f("aim_turnrate_yaw", 260.0), f("aim_turnrate_yaw_ads", 90.0)],
+                accel: f("aim_accel_turnrate_lerp", 1200.0),
+            }
+        })
+        .unwrap_or(Self {
+            yaw_speed: 1.0,
+            min_fire: 400,
+            max_fire: 600,
+            sprint_distance: 256.0,
+            pitch_rate: [90.0, 55.0],
+            yaw_rate: [260.0, 90.0],
+            accel: 1200.0,
+        })
+    }
+}
+
+/// A number in lo..hi from the bot and the time (splitmix).
+fn irand(n: u32, now: i64, lo: i64, hi: i64) -> i64 {
+    if hi <= lo {
+        return lo;
+    }
+    let mut z = (now as u64) ^ ((n as u64) << 40) ^ 0x9E37_79B9_7F4A_7C15;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    lo + (z % (hi - lo) as u64) as i64
+}
+
+/// BO2's lookahead down a route: along the route from where the bot is
+/// until the corner it would cut (each leg's length times how far its line
+/// passes from the bot, summed) reaches 32768; straight legs cost nothing.
+/// The point there, and how far it is.
+fn lookahead(origin: [f32; 3], path: &[[f32; 3]]) -> Option<([f32; 3], f32)> {
+    const AMOUNT: f32 = 32768.0;
+    let mut area = 0.0f32;
+    let mut a = origin;
+    for &b in path {
+        let d = [b[0] - a[0], b[1] - a[1]];
+        let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+        if len < 1e-3 {
+            a = b;
+            continue;
+        }
+        let dir = [d[0] / len, d[1] / len];
+        let off = (dir[0] * (b[1] - origin[1]) - dir[1] * (b[0] - origin[0])).abs();
+        let before = area;
+        area += len * off;
+        if off > 0.0 && area >= AMOUNT {
+            let s = ((AMOUNT - before) / off).min(len) / len;
+            let p = [a[0] + d[0] * s, a[1] + d[1] * s, a[2] + (b[2] - a[2]) * s];
+            return Some((p, dist2d(origin, p)));
+        }
+        a = b;
+    }
+    path.last().map(|&p| (p, dist2d(origin, p)))
+}
+
+/// BO2's far sight down a route: from the point it heads to (the one
+/// after when that is within 192 units), the farthest later point seen
+/// from there; it looks toward that while it walks.
+fn farthest_seen(world: &mut World, origin: [f32; 3], path: &[[f32; 3]]) -> Option<[f32; 3]> {
+    let start = usize::from(path.len() > 1 && dist2d(origin, *path.first()?) < 192.0);
+    let raise = |p: [f32; 3]| [p[0], p[1], p[2] + 60.0];
+    let from = raise(path[start]);
+    let last = (path.len() - 1).min(start + 12);
+    for &p in path[start + 1..=last].iter().rev() {
+        if dist2d(path[start], p) < 2048.0 && sight(world, from, raise(p)) {
+            return Some(p);
+        }
+    }
+    Some(path[start])
+}
+
+/// BO2's bot steering, one 50 ms tick: the view (pitch, yaw) turns toward
+/// the angles it chases at a speed that scales with how far off it is
+/// (a quarter second to close the gap from the hip, a fifth aimed in), up
+/// to the turn rates, ramping up by the acceleration and dropping at once.
+fn steer(view: [f32; 2], aim: [f32; 2], speed: &mut [f32; 2], ads: f32, dv: &BotDvars) -> [f32; 2] {
+    let lerp = |r: [f32; 2]| r[0] + (r[1] - r[0]) * ads;
+    let time = 0.2 * ads + 0.25 * (1.0 - ads);
+    let rate = [lerp(dv.pitch_rate), lerp(dv.yaw_rate)];
+    let mut axis: [f32; 2] =
+        std::array::from_fn(|i| (angle_delta(view[i], aim[i]) / (time * rate[i]).max(1e-3)).clamp(-1.0, 1.0));
+    // The smaller axis gives way to the larger (aim_scale_view_axis).
+    let (p, y) = (axis[0].abs(), axis[1].abs());
+    if y < p {
+        axis[1] *= 1.0 - (p - y);
+    } else {
+        axis[0] *= 1.0 - (y - p);
+    }
+    let mut out = view;
+    for i in 0..2 {
+        let target = axis[i].abs() * rate[i] * dv.yaw_speed;
+        speed[i] = if target <= speed[i] {
+            target
+        } else {
+            (speed[i] + dv.accel * dv.yaw_speed * 0.05).min(target)
+        };
+        out[i] = view[i] + speed[i] * 0.05 * if axis[i] >= 0.0 { 1.0 } else { -1.0 };
+    }
+    out
+}
+
+/// BO2's crowd avoidance: each bot keeps a circle (30 units; a player's is
+/// 50) and picks the velocity nearest the way it wants to go that misses
+/// its teammates for the next two seconds (reciprocal velocity obstacles).
+const AVOID_HORIZON: f32 = 2.0;
+const BOT_AVOID_RADIUS: f32 = 30.0;
+const BOT_AVOID_SPEED: f32 = 100.0;
+const PLAYER_AVOID_RADIUS: f32 = 50.0;
+/// Clip brushes the avoidance check traces against (AI clip).
+const AVOID_CLIP: u32 = 0x0002_0000;
+
+/// A player in the crowd, as the bots avoid it.
+struct Avoider {
+    id: u32,
+    pos: [f32; 3],
+    vel: [f32; 2],
+    radius: f32,
+    /// A player (not a bot): it does not dodge, so a bot takes all of it.
+    firm: bool,
+    team: String,
+}
+
+/// Everyone in play this tick, for the bots' avoidance; empty without
+/// teams (free-for-all bots do not avoid).
+fn crowd(world: &mut World) -> Vec<Avoider> {
+    let ids: Vec<u32> = world.resource::<Zm>().players.keys().copied().collect();
+    let mut out = Vec::new();
+    for id in ids {
+        if !alive(world, id) {
+            continue;
+        }
+        let Some((pos, vel)) = frame(world)
+            .player(ClientId(id))
+            .map(|ps| (ps.origin, [ps.velocity[0], ps.velocity[1]]))
+        else {
+            continue;
+        };
+        let bot = world.resource::<Zm>().bots.contains_key(&id);
+        let radius = if bot { BOT_AVOID_RADIUS } else { PLAYER_AVOID_RADIUS };
+        out.push(Avoider { id, pos, vel, radius, firm: !bot, team: String::new() });
+    }
+    let teams = super::with_vm(world, |vm, world| {
+        teambased(vm).then(|| out.iter().map(|a| team_of(vm, world, a.id)).collect::<Vec<_>>())
+    })
+    .flatten();
+    match teams {
+        Some(teams) => {
+            for (a, t) in out.iter_mut().zip(teams) {
+                a.team = t;
+            }
+            out
+        }
+        None => Vec::new(),
+    }
+}
+
+fn det2(a: [f32; 2], b: [f32; 2]) -> f32 {
+    a[0] * b[1] - a[1] * b[0]
+}
+
+fn dot2(a: [f32; 2], b: [f32; 2]) -> f32 {
+    a[0] * b[0] + a[1] * b[1]
+}
+
+/// The velocity nearest `pref` (no faster than `max_speed`) that keeps
+/// `me` clear of `others` over the horizon: each neighbour gives a
+/// half-plane of allowed velocities (half the dodge each between bots, all
+/// of it around a player), met one at a time; when one cannot be met it
+/// keeps what it had.
+fn avoid_velocity(me: &Avoider, pref: [f32; 2], max_speed: f32, others: &[&Avoider]) -> [f32; 2] {
+    let inv_t = 1.0 / AVOID_HORIZON;
+    let inv_tick = 1000.0 / crate::MATCH_TICK_MS as f32;
+    // Each half-plane as (a point on its edge, the edge's direction); the
+    // allowed side is to the left.
+    let mut lines: Vec<([f32; 2], [f32; 2])> = Vec::with_capacity(others.len());
+    for o in others {
+        let rel_pos = [o.pos[0] - me.pos[0], o.pos[1] - me.pos[1]];
+        let rel_vel = [me.vel[0] - o.vel[0], me.vel[1] - o.vel[1]];
+        let dist_sq = dot2(rel_pos, rel_pos);
+        let r = me.radius + o.radius;
+        let share = if o.firm { 1.0 } else { 0.5 };
+        let (dir, u);
+        // Off the edge nearest the velocity: the cut-off circle at the
+        // horizon, either side cone leg, or (already touching) the circle
+        // one tick ahead.
+        let toward = |w: [f32; 2], k: f32| {
+            let len = dot2(w, w).sqrt().max(1e-6);
+            let unit = [w[0] / len, w[1] / len];
+            ([unit[1], -unit[0]], [(k - len) * unit[0], (k - len) * unit[1]])
+        };
+        if dist_sq > r * r {
+            let w = [rel_vel[0] - inv_t * rel_pos[0], rel_vel[1] - inv_t * rel_pos[1]];
+            let along = dot2(w, rel_pos);
+            if along < 0.0 && along * along > r * r * dot2(w, w) {
+                (dir, u) = toward(w, r * inv_t);
+            } else {
+                let leg = (dist_sq - r * r).sqrt();
+                dir = if det2(rel_pos, w) > 0.0 {
+                    [(rel_pos[0] * leg - rel_pos[1] * r) / dist_sq, (rel_pos[0] * r + rel_pos[1] * leg) / dist_sq]
+                } else {
+                    [-(rel_pos[0] * leg + rel_pos[1] * r) / dist_sq, -(-rel_pos[0] * r + rel_pos[1] * leg) / dist_sq]
+                };
+                let d = dot2(rel_vel, dir);
+                u = [d * dir[0] - rel_vel[0], d * dir[1] - rel_vel[1]];
+            }
+        } else {
+            let w = [rel_vel[0] - inv_tick * rel_pos[0], rel_vel[1] - inv_tick * rel_pos[1]];
+            (dir, u) = toward(w, r * inv_tick);
+        }
+        lines.push(([me.vel[0] + share * u[0], me.vel[1] + share * u[1]], dir));
+    }
+    let len = dot2(pref, pref).sqrt();
+    let mut out = if len > max_speed { [pref[0] / len * max_speed, pref[1] / len * max_speed] } else { pref };
+    for i in 0..lines.len() {
+        let (p, d) = lines[i];
+        if det2(d, [p[0] - out[0], p[1] - out[1]]) > 0.0 {
+            match on_line(&lines[..=i], max_speed, pref) {
+                Some(v) => out = v,
+                None => break,
+            }
+        }
+    }
+    out
+}
+
+/// The point on the last line nearest `opt` inside the speed circle and the
+/// earlier half-planes, if any.
+fn on_line(lines: &[([f32; 2], [f32; 2])], radius: f32, opt: [f32; 2]) -> Option<[f32; 2]> {
+    let (&(p, d), rest) = lines.split_last()?;
+    let dp = dot2(p, d);
+    let disc = dp * dp + radius * radius - dot2(p, p);
+    if disc < 0.0 {
+        return None;
+    }
+    let s = disc.sqrt();
+    let (mut lo, mut hi) = (-dp - s, -dp + s);
+    for &(q, e) in rest {
+        let den = det2(d, e);
+        let num = det2(e, [p[0] - q[0], p[1] - q[1]]);
+        if den.abs() <= 1e-3 {
+            if num < 0.0 {
+                return None;
+            }
+            continue;
+        }
+        let t = num / den;
+        if den >= 0.0 {
+            hi = hi.min(t);
+        } else {
+            lo = lo.max(t);
+        }
+        if lo > hi {
+            return None;
+        }
+    }
+    let t = dot2(d, [opt[0] - p[0], opt[1] - p[1]]).max(lo).min(hi);
+    Some([p[0] + t * d[0], p[1] + t * d[1]])
+}
+
+/// BO2's check on a dodge: a thin line at knee height toward the bent
+/// lookahead, failing inside a clip brush or on one within 15 units of the
+/// bot (measured where the line halves).
+fn avoid_clear(world: &mut World, origin: [f32; 3], to: [f32; 3]) -> bool {
+    let a = [origin[0], origin[1], origin[2] + 18.0];
+    let b = [to[0], to[1], to[2] + 18.0];
+    let t = frame(world).trace_static_world(a, b, [0.0; 3], [0.0; 3], AVOID_CLIP);
+    if t.startsolid != 0 || t.allsolid != 0 {
+        return false;
+    }
+    if t.fraction < 1.0 {
+        let h = t.fraction * 0.5;
+        let m = [a[0] + (b[0] - a[0]) * h, a[1] + (b[1] - a[1]) * h];
+        let d = [origin[0] - m[0], origin[1] - m[1]];
+        return dot2(d, d) >= 225.0;
+    }
+    true
 }
 
 /// The eye of a player: his origin plus his view height.
@@ -661,10 +1006,9 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let Value::Object(o) = v else { return None };
         world
             .resource::<Zm>()
-            .node_objs
-            .iter()
-            .position(|x| x == o)
-            .map(|i| i as u32)
+            .node_of
+            .get(o)
+            .copied()
             .or_else(|| {
                 let f = vm.intern("origin");
                 let p = vm.raw_field(*o, f).as_vec3()?;
@@ -716,20 +1060,30 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         }
         Ok(list(out))
     });
+    // BO2 reads the map compiler's sight table (`Path_NodesVisible`); a
+    // node past it (or a map without one) is traced.
     f!("nodesvisible", |vm, world, _, a| {
         let (Some(i), Some(j)) = (node_index(vm, world, arg(a, 0)), node_index(vm, world, arg(a, 1)))
         else {
             return Ok(Value::Int(0));
         };
+        if let Some(seen) = world.resource::<Zm>().nav.baked.visible(i, j) {
+            return Ok(Value::bool(seen));
+        }
         let (x, y) = (node_eye(world, i), node_eye(world, j));
         Ok(Value::bool(sight(world, x, y)))
     });
+    // BO2's `Scr_NodesCanPath`: a straight walk joins them (the map
+    // compiler's smooth table) or the first links to the second; not a
+    // search for a route.
     f!("nodescanpath", |vm, world, _, a| {
         let (Some(i), Some(j)) = (node_index(vm, world, arg(a, 0)), node_index(vm, world, arg(a, 1)))
         else {
             return Ok(Value::Int(0));
         };
-        Ok(Value::bool(world.resource::<Zm>().nav.path(i, j).is_some()))
+        let nav = &world.resource::<Zm>().nav;
+        let linked = nav.nodes[i as usize].links.iter().any(|l| u32::from(l.0) == j);
+        Ok(Value::bool(nav.baked.smooth(i, j) || linked))
     });
     // A route between two points: its nodes in order (undefined: none).
     f!("findpath", |vm, world, _, a| {
@@ -757,7 +1111,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     m!("isreloading", |vm, world, s, _| {
         let n = entnum(vm, s).unwrap_or(u32::MAX);
         Ok(Value::bool(frame(world).player(ClientId(n)).is_some_and(|ps| {
-            matches!(ps.weaponstate_primary, 7..=11)
+            reloading(ps.weaponstate_primary)
         })))
     });
     for name in ["isfiring", "ismantling", "isonladder", "isthrowinggrenade", "isswitchingweapons", "isremotecontrolling", "iscarryingturret"] {
@@ -769,30 +1123,49 @@ pub(super) fn bind(vm: &mut Vm<World>) {
 /// clients' own; a bot whose client never came is dropped.
 pub(super) fn drive(world: &mut World, now: i64) {
     let ids: Vec<u32> = world.resource::<Zm>().bots.keys().copied().collect();
-    let difficulty = world
-        .resource::<Zm>()
-        .bot_difficulty
-        .clamp(0, 3);
-    // Degrees the view may turn per 50 ms tick: easy .. "fu".
-    let turn = [9.0f32, 18.0, 27.0, 40.0][difficulty as usize];
+    if ids.is_empty() {
+        return;
+    }
+    let dv = BotDvars::read(world);
+    let crowd = crowd(world);
     let throws = std::mem::take(&mut world.resource_mut::<Zm>().bot_throws);
     for n in ids {
         if !alive(world, n) {
+            // Dead, its steering starts over (BO2 clears its bot state).
+            if let Some(b) = world.resource_mut::<Zm>().bots.get_mut(&n)
+                && b.aim_avg.is_some()
+            {
+                b.aim_avg = None;
+                b.turn_speed = [0.0; 2];
+                b.sprint_since = None;
+                b.fire_delay_until = 0;
+            }
             continue;
         }
-        let Some((origin, view, height, ladder)) = frame(world)
+        let Some((origin, view, height, ladder, mantling, sprinting, ads_frac, wstate, standing, weapon)) = frame(world)
             .player(ClientId(n))
             .map(|ps| {
+                use playerstate_iw4::pm_flags;
                 (
                     ps.origin,
                     ps.viewangles,
                     ps.view_height_current,
-                    ps.pm_flags & playerstate_iw4::pm_flags::LADDER != 0,
+                    ps.pm_flags & pm_flags::LADDER != 0,
+                    ps.pm_flags & pm_flags::MANTLE != 0,
+                    ps.pm_flags & pm_flags::SPRINTING != 0,
+                    ps.f_weapon_pos_frac.clamp(0.0, 1.0),
+                    ps.weaponstate_primary,
+                    ps.pm_flags & (pm_flags::CROUCH | pm_flags::PRONE) == 0,
+                    ps.weapon,
                 )
             })
         else {
             continue;
         };
+        // Full-automatic weapons (miniguns too) hold the trigger down.
+        let full_auto = frame(world)
+            .combat_facts_for(weapon)
+            .is_none_or(|f| f.fire_type == 0);
         // The route: replan when the best goal moved or the route ran out.
         let (goal, path_to, replan_at) = {
             let zm = world.resource::<Zm>();
@@ -810,6 +1183,9 @@ pub(super) fn drive(world: &mut World, now: i64) {
                 b.path = route;
                 b.path_to = Some(g.pos);
                 b.replan_at = now + 500;
+                b.prev = Some(origin);
+                b.path_gen = b.path_gen.wrapping_add(1);
+                b.path_new = true;
             }
         } else {
             let mut zm = world.resource_mut::<Zm>();
@@ -840,57 +1216,197 @@ pub(super) fn drive(world: &mut World, now: i64) {
         let ahead_blocked = climb_blocked.is_some_and(|(_, b)| b);
         let climb_blocked = climb_blocked
             .is_some_and(|(p, b)| b && p[2] - origin[2] > 18.0 && dist2d(origin, p) < 96.0);
-        let mut zm = world.resource_mut::<Zm>();
-        let b = zm.bots.get_mut(&n).unwrap();
-        b.tick = b.tick.wrapping_add(1);
-        while b.path.len() > 1 && dist2d(origin, b.path[0]) < 24.0 {
-            b.path.remove(0);
-        }
         let at_goal = goal
             .as_ref()
             .is_none_or(|g| dist2d(origin, g.pos) <= g.radius.max(16.0));
-        let next = (!at_goal).then(|| b.path.first().copied()).flatten();
-        // The view: what it looks at, else down its route, else as it is.
-        let eye = [origin[0], origin[1], origin[2] + height];
-        let target = b.look.or_else(|| next.map(|p| [p[0], p[1], p[2] + height]));
-        let mut want = view;
-        if let Some(t) = target {
-            let (yaw, pitch) = angles_to(eye, t);
-            want[1] = view[1] + angle_delta(view[1], yaw).clamp(-turn, turn);
-            want[0] = view[0] + angle_delta(view[0], pitch).clamp(-turn, turn);
+        // Past a route point once beyond the line across it (the walk cuts
+        // corners toward its lookahead, so it seldom touches one).
+        let (route, seen_key, seen) = {
+            let mut zm = world.resource_mut::<Zm>();
+            let b = zm.bots.get_mut(&n).unwrap();
+            while b.path.len() > 1 {
+                let p = b.path[0];
+                let from = b.prev.unwrap_or(origin);
+                let d = [p[0] - from[0], p[1] - from[1]];
+                let beyond = d[0] * d[0] + d[1] * d[1] > 1.0
+                    && (origin[0] - p[0]) * d[0] + (origin[1] - p[1]) * d[1] >= 0.0;
+                if !(beyond || dist2d(origin, p) < 24.0) {
+                    break;
+                }
+                b.prev = Some(p);
+                b.path.remove(0);
+            }
+            let near = b.path.first().is_some_and(|p| dist2d(origin, *p) < 192.0);
+            let key = (b.path_gen, b.path.len(), near);
+            let seen = b.seen.filter(|s| (s.0, s.1, s.2) == key).map(|s| s.3);
+            ((!at_goal && !b.path.is_empty()).then(|| b.path.clone()), key, seen)
+        };
+        let far_seen = match (&route, seen) {
+            (Some(_), Some(p)) => Some(p),
+            (Some(r), None) => {
+                let p = farthest_seen(world, origin, r);
+                if let Some(p) = p {
+                    let mut zm = world.resource_mut::<Zm>();
+                    zm.bots.get_mut(&n).unwrap().seen = Some((seen_key.0, seen_key.1, seen_key.2, p));
+                }
+                p
+            }
+            _ => None,
+        };
+        let la = route.as_deref().and_then(|r| lookahead(origin, r));
+        let next = la.map(|(p, _)| p);
+        // Avoidance (Bot_UpdateAvoidance): off ladders and ledges, a bot on
+        // a team bends its walk around teammates close by, keeping the
+        // lookahead's distance; a bend into a clip brush right in front of
+        // it holds it still for the tick.
+        let mut walk_to = next;
+        let mut hold = false;
+        if let Some((lp, _)) = la
+            && !ladder
+            && !mantling
+            && let Some(me) = crowd.iter().find(|a| a.id == n && !a.team.is_empty() && a.team != "free")
+        {
+            let d = [lp[0] - origin[0], lp[1] - origin[1]];
+            let dist = dot2(d, d).sqrt();
+            let speed = me.vel[0].hypot(me.vel[1]);
+            let range = (speed + BOT_AVOID_SPEED) * 0.5 * AVOID_HORIZON;
+            let others: Vec<&Avoider> = crowd
+                .iter()
+                .filter(|a| {
+                    a.id != n
+                        && a.team == me.team
+                        && dist2d(a.pos, origin) < range
+                        && (a.pos[2] - origin[2]).abs() < 90.0
+                })
+                .take(32)
+                .collect();
+            if dist > 1.0 && !others.is_empty() {
+                let pref = [d[0] / dist * speed, d[1] / dist * speed];
+                let v = avoid_velocity(me, pref, BOT_AVOID_SPEED, &others);
+                let vl = v[0].hypot(v[1]);
+                if vl > 0.01 {
+                    let bent = [origin[0] + v[0] / vl * dist, origin[1] + v[1] / vl * dist, lp[2]];
+                    hold = dist2d(bent, lp) > 15.0 && !avoid_clear(world, origin, bent);
+                    walk_to = Some(bent);
+                }
+            }
         }
-        // Moving toward the next point, relative to where it faces.
+        let mut zm = world.resource_mut::<Zm>();
+        let b = zm.bots.get_mut(&n).unwrap();
+        b.tick = b.tick.wrapping_add(1);
+        // The view (BO2's Bot_Think / Bot_UpdateLookahead): the angles it
+        // chases move toward what it looks at (an eighth of the way in
+        // pitch, a quarter in yaw each tick), else toward the farthest route
+        // point it can see, slower the farther its lookahead reaches; the
+        // view then steers toward them.
+        let eye = [origin[0], origin[1], origin[2] + height];
+        let desired: Option<[f32; 2]> = if let Some(l) = b.look {
+            let (yaw, pitch) = angles_to(eye, l);
+            let avg = b.aim_avg.unwrap_or([view[0], view[1]]);
+            b.aim_avg = Some([avg[0] + angle_delta(avg[0], pitch) / 8.0, avg[1] + angle_delta(avg[1], yaw) / 4.0]);
+            Some([pitch, yaw])
+        } else if let Some((lp, reach)) = la {
+            let t = far_seen.filter(|p| dist2d(origin, *p) >= 1.0).unwrap_or(lp);
+            if dist2d(origin, t) >= 1.0 {
+                let (yaw, pitch) = angles_to(origin, t);
+                let h = if b.path_new || reach < 64.0 {
+                    1.0
+                } else if reach < 128.0 {
+                    2.0
+                } else {
+                    4.0
+                };
+                let avg = b.aim_avg.unwrap_or([view[0], view[1]]);
+                b.aim_avg = Some([avg[0] + angle_delta(avg[0], pitch) / (2.0 * h), avg[1] + angle_delta(avg[1], yaw) / h]);
+                Some([pitch, yaw])
+            } else {
+                None
+            }
+        } else {
+            b.aim_avg = None;
+            None
+        };
+        b.path_new = false;
+        let mut want = view;
+        match (desired, b.aim_avg) {
+            (Some(_), Some(avg)) => {
+                let out = steer([view[0], view[1]], avg, &mut b.turn_speed, ads_frac, &dv);
+                want[0] = out[0];
+                want[1] = out[1];
+            }
+            _ => b.turn_speed = [0.0; 2],
+        }
+        let yaw_err = desired.map_or(0.0, |d| angle_delta(want[1], d[1]).abs());
+        // Speed (Bot_GetMaxSpeed): full until the lookahead falls under 64
+        // units, down to half; walking its route (no look-at) it also slows
+        // while it faces away from where it heads, down to half at 35°.
+        let speed = la.map_or(0.0, |(_, reach)| {
+            let mut s = (reach / 64.0).clamp(0.5, 1.0);
+            if b.look.is_none() && desired.is_some() {
+                s = s.min((1.0 - yaw_err / 70.0).clamp(0.5, 1.0));
+            }
+            s * 127.0
+        });
+        // Moving toward the lookahead, relative to where it faces; on a
+        // ladder straight on (up it), while mantling not at all.
         let (mut forward, mut right) = (0i8, 0i8);
-        if let Some(p) = next {
+        if ladder {
+            forward = 127;
+        } else if !mantling && !hold && let Some(p) = walk_to {
             let wish = [p[0] - origin[0], p[1] - origin[1]];
-            let len = (wish[0] * wish[0] + wish[1] * wish[1]).sqrt().max(1e-3);
-            let (s, c) = want[1].to_radians().sin_cos();
-            forward = (((wish[0] * c + wish[1] * s) / len) * 127.0).round() as i8;
-            right = (((wish[0] * s - wish[1] * c) / len) * 127.0).round() as i8;
+            let len = (wish[0] * wish[0] + wish[1] * wish[1]).sqrt();
+            if len > 1e-3 {
+                let (s, c) = want[1].to_radians().sin_cos();
+                forward = (((wish[0] * c + wish[1] * s) / len).clamp(-1.0, 1.0) * speed) as i8;
+                right = (((wish[0] * s - wish[1] * c) / len).clamp(-1.0, 1.0) * speed) as i8;
+            }
         }
         let mut press = 0u32;
-        // The trigger: held while allowed, let go one tick in four so a
-        // semi-automatic fires again.
-        if (b.allow_attack && b.tick % 4 != 0) || b.attack_ticks > 0 {
-            press |= buttons::ATTACK;
+        // Sprint (Bot_UpdateMovement): on a long straight run while facing
+        // the way it goes, standing and not reloading; a sprint under 3 s
+        // old carries on through a turn.
+        if !sprinting {
+            b.sprint_since = None;
+        } else if b.sprint_since.is_none() {
+            b.sprint_since = Some(now);
         }
-        b.attack_ticks = b.attack_ticks.saturating_sub(1);
-        if b.ads {
-            press |= buttons::ADS;
-        }
-        if b.use_until > now {
-            press |= buttons::USE_RELOAD;
-        }
-        if std::mem::take(&mut b.melee) {
-            press |= buttons::MELEE_CHARGE;
-        }
-        if std::mem::take(&mut b.dive) {
-            press |= buttons::PRONE;
+        let reach = la.map_or(0.0, |(_, r)| r);
+        let sprint = if speed == 0.0 || yaw_err >= 5.0 || reach < dv.sprint_distance {
+            sprinting && b.sprint_since.is_some_and(|t| now - t < 3000)
+        } else {
+            !reloading(wstate) && wstate != weapon_iw4::WeaponState::MeleeInit as i32 && standing
+        };
+        if sprint && !b.no_sprint && b.stance == 0 && !ladder && !mantling {
+            press |= buttons::SPRINT;
         }
         match b.stance {
             1 => press |= buttons::CROUCH,
             2 => press |= buttons::PRONE,
             _ => {}
+        }
+        // Holding use, it presses nothing else (a plant, a defuse).
+        if b.use_until > now {
+            press = (press & (buttons::CROUCH | buttons::PRONE)) | buttons::USE_RELOAD;
+        }
+        // The trigger: one press when allowed, then a rest of
+        // bot_minfiretime..bot_maxfiretime ms; a full-automatic holds it.
+        // Firing lets go of sprint.
+        if b.attack_ticks > 0 {
+            press = (press & !buttons::SPRINT) | buttons::ATTACK;
+            b.attack_ticks -= 1;
+        } else if b.allow_attack && now >= b.fire_delay_until {
+            press = (press & !buttons::SPRINT) | buttons::ATTACK;
+            b.fire_delay_until = if full_auto { 0 } else { now + irand(n, now, dv.min_fire, dv.max_fire) };
+        }
+        if b.ads {
+            press |= buttons::ADS;
+        }
+        // A melee only while not raising, lowering, meleeing or throwing.
+        if std::mem::take(&mut b.melee) && !(1..=5).contains(&wstate) && !(14..=22).contains(&wstate) {
+            press |= buttons::MELEE_CHARGE;
+        }
+        if std::mem::take(&mut b.dive) {
+            press |= buttons::PRONE;
         }
         if throw {
             press |= buttons::FRAG;
@@ -940,17 +1456,11 @@ pub(super) fn drive(world: &mut World, now: i64) {
         } else {
             b.progress = None;
         }
-        let far = goal
-            .as_ref()
-            .is_some_and(|g| dist2d(origin, g.pos) > 384.0);
-        if next.is_some() && far && b.look.is_none() && !b.no_sprint && !b.ads && b.stance == 0 {
-            press |= buttons::SPRINT;
-        }
         // BO2MP_BOTLOG=1: each bot every 2 s (test aid).
         if std::env::var_os("BO2MP_BOTLOG").is_some() && now % 2000 == 0 {
             diag::info!(
                 Sim,
-                "bo2mp botlog {n}: at {:.0} {:.0} {:.0} view {:.0} {:.0} goal {:?} path {} look {:?} attack {} ads {} press {press:#x} move {forward} {right}",
+                "bo2mp botlog {n}: at {:.0} {:.0} {:.0} view {:.0} {:.0} goal {:?} path {} look {:?} attack {} ads {} press {press:#x} move {forward} {right} sprint {sprint} dodge {} hold {hold}",
                 origin[0],
                 origin[1],
                 origin[2],
@@ -961,6 +1471,7 @@ pub(super) fn drive(world: &mut World, now: i64) {
                 b.look.map(|l| [l[0] as i32, l[1] as i32, l[2] as i32]),
                 b.allow_attack,
                 b.ads,
+                walk_to != next,
             );
         }
         drop(zm);

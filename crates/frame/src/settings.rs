@@ -53,6 +53,9 @@ pub struct GameSettings {
     /// bo2zm: `bo2_quality=fast` (Black Ops II maps: half-size textures,
     /// single-layer ground, props hidden sooner); `full` by default.
     pub bo2_fast: bool,
+    /// bo2zm: Controls > Move > "Omni Movement": sprint in any direction.
+    /// Not Black Ops II's (it sprints forward only), so off by default.
+    pub omni_movement: bool,
 
     pub revision: u64,
 }
@@ -84,6 +87,7 @@ impl Default for GameSettings {
             pad_deadzone_left: 0.12,
             pad_deadzone_right: 0.12,
             bo2_fast: false,
+            omni_movement: false,
             revision: 0,
         }
     }

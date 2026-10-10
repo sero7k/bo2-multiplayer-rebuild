@@ -60,6 +60,12 @@ impl Plugin for RenderPlugin {
                     crate::extract::extract_model_lighting_tiles,
                 ),
             );
+            if crate::diag::gpu_report::gpu_report_enabled() {
+                render_app.add_systems(
+                    bevy::render::Render,
+                    crate::diag::gpu_report::report_gpu_allocator,
+                );
+            }
             if render_gpu::geometry_diagnostic_enabled() {
                 render_app.add_systems(
                     bevy::render::ExtractSchedule,

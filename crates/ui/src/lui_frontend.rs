@@ -74,7 +74,7 @@ pub(crate) fn restore_after_match(
 /// Before CoD's base loads: BO2's multiplayer answers, his saved stats.
 pub(crate) fn install(host: &mut Host, front: &Bo2mpFrontend) -> Mp {
     let mp = hks_t6::mp::install(host);
-    match std::fs::read_to_string(&front.stats_path) {
+    match bo2_profile::read_stats_text(&front.stats_path) {
         Ok(text) => {
             mp.borrow_mut().load_text(&text);
             diag::info!(Ui, "bo2mp front end: stats from {}", front.stats_path.display());
@@ -84,7 +84,7 @@ pub(crate) fn install(host: &mut Host, front: &Bo2mpFrontend) -> Mp {
     mp
 }
 
-/// After CoD's base: the front end's values (no map running, his PC, an
+/// After CoD's base: the front end's values (no map running, this PC, an
 /// offline session until ONLINE), the engine's roots (the scripts add to
 /// them while they load), then `T6.Main`.
 pub(crate) fn load(host: &mut Host) {
@@ -233,10 +233,12 @@ pub(crate) fn tick(
         diag::info!(Ui, "bo2mp stats command: {line}");
     }
     if mp.borrow_mut().take_dirty() {
-        match mp.borrow().profile.save_file(&front.stats_path) {
-            Ok(()) => diag::info!(Ui, "bo2mp front end: stats saved to {}", front.stats_path.display()),
-            Err(e) => diag::warn!(Ui, "bo2mp front end: stats not saved ({}): {e}", front.stats_path.display()),
-        }
+        let done: bo2_profile::SaveDone = Box::new(|file, result| match result {
+            Ok(()) => diag::info!(Ui, "bo2mp front end: stats saved to {}", file.display()),
+            Err(e) => diag::warn!(Ui, "bo2mp front end: stats not saved ({}): {e}", file.display()),
+        });
+        let all = bo2_profile::SaveJob::Whole(mp.borrow().profile.stats.clone());
+        bo2_profile::save_in_background(&front.stats_path, all, Some(done));
     }
     // ZOMBIES: our Nuketown Zombies, swapped in as START MATCH swaps a map.
     if mp.borrow().zombies_requested {
@@ -394,6 +396,9 @@ pub(crate) struct MatchValues {
     /// (`bo2mp_infrared` "1", `setinfraredvision`): BO2's HUD lights FLIR,
     /// else OPT.
     pub infrared: String,
+    /// The objectives (flags, bomb sites, zones; see
+    /// `hks_t6::mp::parse_objectives`).
+    pub objectives: String,
 }
 
 /// His minimap this frame: the map's picture and the world corners it
@@ -553,6 +558,7 @@ impl MatchValues {
             vehicle: s("bo2mp_vehicle"),
             vision: s("bo2mp_vision"),
             infrared: s("bo2mp_infrared"),
+            objectives: s("bo2mp_objectives"),
         })
     }
 
@@ -596,8 +602,10 @@ pub(crate) struct FeedLine {
 }
 
 /// How many kill feed lines show at once, how long each stays (ms), and its
-/// fades. The values are approximations (4 lines, 5 s, 0.25 s fade-in,
-/// 0.5 s fade-out): BO2's own counts are unconfirmed (docs/INDEX.md, KNOWN GAPS).
+/// fades: four obituary lines, 5 s each, a 0.25 s scroll and fade in and a
+/// 0.5 s fade out (the engine family's message defaults). BO2's t6mp.exe is
+/// packed and one real frame shows one line, so BO2's own counts are
+/// unconfirmed (INDEX.md, KNOWN GAPS).
 const FEED_LINES: usize = 4;
 const FEED_MS: f64 = 5000.0;
 const FEED_FADE_IN_MS: f64 = 250.0;
@@ -618,8 +626,8 @@ fn feed_line(_host: &Host, mp: &Mp, item: &str, my_team: &str) -> Option<FeedLin
     let (attacker, victim, weapon) = (f.next()?, f.next()?, f.next().unwrap_or(""));
     let mod_ = f.next().unwrap_or("");
     let own = f.next() == Some("self");
-    // (The sides the sim saw: the killer's, the one killed's.)
-    // A name is MyTeam's colour on your side, EnemyTeam's on the other, and
+    // (The sides the sim saw: the killer's, the one killed's.) The engine's
+    // team colour rule: a name is MyTeam's colour on his side, EnemyTeam's on the other, and
     // white unless both his side and the name's are allies or axis (a
     // free-for-all, a spectator, no side).
     let side = |t: &str| matches!(t, "allies" | "axis");
@@ -627,7 +635,7 @@ fn feed_line(_host: &Host, mp: &Mp, item: &str, my_team: &str) -> Option<FeedLin
     let (attacker_mine, victim_mine) = (mine(f.next()), mine(f.next()));
     let base = weapon.split('+').next().unwrap_or("").trim_end_matches("_mp");
     let m = mp.borrow();
-    // A gun with a kill icon draws
+    // The engine's obituary rule: a gun with a kill icon draws
     // it; a gun without one draws the suicide picture; no gun at all draws
     // the picture of how he died (`killicondied` unless the means says
     // otherwise). The gun's name is never written.
@@ -709,7 +717,8 @@ fn draw_feed(host: &mut Host, mp: &Mp, seen: &mut MatchSeen) {
     };
     let shown: Vec<(FeedLine, f64)> = seen.feed_lines.iter().rev().take(FEED_LINES).rev().cloned().collect();
     let pad = FEED_LINES - shown.len();
-    // The icon sits between ordinary space glyphs.
+    // The engine's death message: the icon sits between ordinary space
+    // glyphs.
     let gap = {
         let w = width(host, "i i") - width(host, "ii");
         if w > 0.5 { w } else { h * 0.3 }
@@ -739,7 +748,7 @@ fn draw_feed(host: &mut Host, mp: &Mp, seen: &mut MatchSeen) {
         if w > 0.0 {
             x += w + gap;
         }
-        // The weapon's kill icon (a 2:1 picture is 2.8 x
+        // The weapon's kill icon (the engine's sizes: a 2:1 picture is 2.8 x
         // 1.4 font heights, a 4:1 one 2.8 x 0.7, a square one 1.4 x 1.4).
         match &line.icon {
             Some((picture, wide)) => {
@@ -778,7 +787,7 @@ pub(crate) fn stats_path(identity: Option<&frame::LaunchIdentity>) -> std::path:
 /// (the class menu shows his classes).
 pub(crate) fn match_install(host: &mut Host, stats: &std::path::Path) -> Mp {
     let mp = hks_t6::mp::install(host);
-    if let Ok(text) = std::fs::read_to_string(stats) {
+    if let Ok(text) = bo2_profile::read_stats_text(stats) {
         mp.borrow_mut().load_text(&text);
     }
     mp
@@ -874,9 +883,42 @@ fn killstreak_hud(host: &mut Host, new: &MatchValues) {
 
 /// The match's events for what changed: the score bar, the clock, the menus
 /// the server opened, the LUI notifies (score popups, medals).
+/// bo2mp: the objectives' events, as the engine sends them when his
+/// objectives change: BO2's GametypeBase makes a waypoint for each named one
+/// its gametype draws; one gone or renamed closes (the refresh), a new one
+/// opens (`new_objective`), a changed one updates (`objective_update_<name>`).
+fn objective_events(host: &mut Host, mp: &Mp, row: &str) {
+    let new = hks_t6::mp::parse_objectives(row);
+    let old = std::mem::take(&mut mp.borrow_mut().objectives);
+    let kept: std::collections::BTreeMap<i32, hks_t6::mp::ObjectiveRow> = old
+        .iter()
+        .filter(|(i, o)| new.get(i).is_some_and(|n| n.name == o.name))
+        .map(|(i, o)| (*i, o.clone()))
+        .collect();
+    if kept.len() != old.len() {
+        mp.borrow_mut().objectives = kept;
+        host.root_event("hud_update_refresh", &[]);
+    }
+    mp.borrow_mut().objectives = new.clone();
+    for (i, o) in new.iter().filter(|(_, o)| !o.name.is_empty()) {
+        let id = [("objId", Value::Num(*i as f32))];
+        match old.get(i) {
+            Some(p) if p.name == o.name => {
+                if p != o {
+                    host.root_event(&format!("objective_update_{}", o.name), &id);
+                }
+            }
+            _ => host.root_event("new_objective", &id),
+        }
+    }
+}
+
 pub(crate) fn match_events(host: &mut Host, seen: &mut MatchSeen, old: Option<&MatchValues>, new: &MatchValues, mp: &Mp) {
     hks_t6::mp::update_timers(mp);
     let changed = |f: fn(&MatchValues) -> &str| old.is_none_or(|o| f(o) != f(new));
+    if changed(|v| &v.objectives) {
+        objective_events(host, mp, &new.objectives);
+    }
     let team_num = |host: &mut Host, t: &str| match t {
         "allies" => host.field("CoD", "TEAM_ALLIES").as_num().unwrap_or(1.0),
         "axis" => host.field("CoD", "TEAM_AXIS").as_num().unwrap_or(2.0),

@@ -651,6 +651,127 @@ impl Profile {
     }
 }
 
+/// A write for the stats saver.
+pub enum SaveJob {
+    /// The whole file: his profile's stats (the front end's).
+    Whole(HashMap<String, StatValue>),
+    /// Changed stats, merged over what the file holds then (a match's).
+    Merge(Vec<(String, StatValue)>),
+}
+
+/// What the saver says when a write is done.
+pub type SaveDone = Box<dyn FnOnce(&Path, &std::io::Result<()>) + Send>;
+
+struct Saver {
+    tx: std::sync::Mutex<std::sync::mpsc::Sender<(std::path::PathBuf, SaveJob, Option<SaveDone>)>>,
+    pending: std::sync::Arc<(std::sync::Mutex<usize>, std::sync::Condvar)>,
+}
+
+fn saver() -> Option<&'static Saver> {
+    static SAVER: std::sync::OnceLock<Option<Saver>> = std::sync::OnceLock::new();
+    SAVER
+        .get_or_init(|| {
+            let (tx, rx) = std::sync::mpsc::channel::<(std::path::PathBuf, SaveJob, Option<SaveDone>)>();
+            let pending = std::sync::Arc::new((std::sync::Mutex::new(0usize), std::sync::Condvar::new()));
+            let left = pending.clone();
+            std::thread::Builder::new()
+                .name("bo2mp stats saver".into())
+                .spawn(move || {
+                    while let Ok(first) = rx.recv() {
+                        let mut jobs = vec![first];
+                        jobs.extend(rx.try_iter());
+                        let count = jobs.len();
+                        // One write per file, its jobs applied in the order sent.
+                        let mut files: Vec<(std::path::PathBuf, Option<HashMap<String, StatValue>>, Vec<SaveDone>)> =
+                            Vec::new();
+                        for (path, job, done) in jobs {
+                            let at = match files.iter().position(|(f, _, _)| *f == path) {
+                                Some(at) => at,
+                                None => {
+                                    files.push((path, None, Vec::new()));
+                                    files.len() - 1
+                                }
+                            };
+                            let (path, stats, dones) = &mut files[at];
+                            match job {
+                                SaveJob::Whole(all) => *stats = Some(all),
+                                SaveJob::Merge(changed) => {
+                                    stats.get_or_insert_with(|| Profile::read_stats_file(path)).extend(changed)
+                                }
+                            }
+                            dones.extend(done);
+                        }
+                        for (path, stats, dones) in files {
+                            let result = Profile { stats: stats.unwrap_or_default(), ..Profile::default() }.save_file(&path);
+                            for done in dones {
+                                done(&path, &result);
+                            }
+                        }
+                        let (n, cv) = &*left;
+                        if let Ok(mut n) = n.lock() {
+                            *n = n.saturating_sub(count);
+                        }
+                        cv.notify_all();
+                    }
+                })
+                .ok()
+                .map(|_| Saver { tx: std::sync::Mutex::new(tx), pending })
+        })
+        .as_ref()
+}
+
+/// Write his stats file on the saver's own thread, so a slow or busy disk
+/// never holds up a frame (BO2 never waits on its stats writes either).
+/// Writes are kept in the order sent; those queued while one is written
+/// become one write per file. Without a saver it writes here.
+pub fn save_in_background(path: &Path, job: SaveJob, done: Option<SaveDone>) {
+    let Some(s) = saver() else { return write_now(path, job, done) };
+    if let Ok(mut n) = s.pending.0.lock() {
+        *n += 1;
+    }
+    let unsent = match s.tx.lock() {
+        Ok(tx) => tx.send((path.to_path_buf(), job, done)).err().map(|e| e.0),
+        Err(_) => Some((path.to_path_buf(), job, done)),
+    };
+    if let Some((path, job, done)) = unsent {
+        if let Ok(mut n) = s.pending.0.lock() {
+            *n = n.saturating_sub(1);
+        }
+        write_now(&path, job, done);
+    }
+}
+
+fn write_now(path: &Path, job: SaveJob, done: Option<SaveDone>) {
+    let stats = match job {
+        SaveJob::Whole(all) => all,
+        SaveJob::Merge(changed) => {
+            let mut s = Profile::read_stats_file(path);
+            s.extend(changed);
+            s
+        }
+    };
+    let result = Profile { stats, ..Profile::default() }.save_file(path);
+    if let Some(done) = done {
+        done(path, &result);
+    }
+}
+
+/// Wait (at most `limit`) until the saver has written what it was given:
+/// before his stats file is read, so a read never misses a write.
+pub fn wait_saved(limit: std::time::Duration) {
+    let Some(s) = saver() else { return };
+    let (n, cv) = &*s.pending;
+    if let Ok(n) = n.lock() {
+        let _ = cv.wait_timeout_while(n, limit, |n| *n > 0);
+    }
+}
+
+/// His stats file's text once the saver is done with it.
+pub fn read_stats_text(path: &Path) -> std::io::Result<String> {
+    wait_saved(std::time::Duration::from_secs(10));
+    std::fs::read_to_string(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

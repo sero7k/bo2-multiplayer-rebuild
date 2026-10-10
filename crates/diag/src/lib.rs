@@ -1,7 +1,9 @@
 mod alloc_count;
+mod cpu;
 pub mod gap;
 pub mod wgsl_dump;
 
+pub use cpu::{busy_note, process_cpu_ms, thread_cpu_ms};
 pub use alloc_count::{
     ProcessAllocationStats, ProcessCountingAllocator, counting_enabled,
     process_allocation_saturated, process_allocation_slots_used, process_allocations,
@@ -10,14 +12,151 @@ pub use alloc_count::{
 
 use std::{
     fs::{File, OpenOptions},
-    io::Write,
+    io::{BufWriter, Write},
     path::{Path, PathBuf},
-    sync::{Mutex, OnceLock},
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    sync::{Mutex, OnceLock, mpsc},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 static SINK: OnceLock<Mutex<DiagState>> = OnceLock::new();
 static START: OnceLock<Instant> = OnceLock::new();
+/// The log writer thread's mailbox. The game's threads never write the log
+/// files themselves: one write Windows held up froze a frame for seconds.
+static WRITER: OnceLock<mpsc::Sender<Out>> = OnceLock::new();
+
+const WRITER_THREAD: &str = "diag-writer";
+/// How long the writer holds lines before they go to the disk (a warning or
+/// an error goes at once).
+const WRITE_EVERY: Duration = Duration::from_millis(250);
+
+enum Out {
+    Line {
+        text: String,
+        stderr: bool,
+        file: bool,
+        urgent: bool,
+    },
+    Trace(String),
+    /// Everything sent so far onto the disk, then a word back.
+    Flush(mpsc::SyncSender<()>),
+}
+
+fn send(out: Out) {
+    if let Some(tx) = WRITER.get() {
+        let _ = tx.send(out);
+    } else if let Out::Line {
+        text, stderr: true, ..
+    } = out
+    {
+        eprintln!("{text}");
+    }
+}
+
+/// Waits (at most `wait`) until every line sent so far is on the disk.
+fn flush_writer(wait: Duration) {
+    let Some(tx) = WRITER.get() else {
+        return;
+    };
+    if std::thread::current().name() == Some(WRITER_THREAD) {
+        return;
+    }
+    let (done, back) = mpsc::sync_channel(1);
+    if tx.send(Out::Flush(done)).is_ok() {
+        let _ = back.recv_timeout(wait);
+    }
+}
+
+/// The writer thread: the lines in order, onto the disk every `WRITE_EVERY`
+/// (a warning or an error at once).
+fn writer(
+    rx: mpsc::Receiver<Out>,
+    mut file: Option<BufWriter<File>>,
+    mut traces: Option<BufWriter<File>>,
+) {
+    let mut written = Instant::now();
+    loop {
+        let urgent = match rx.recv_timeout(WRITE_EVERY) {
+            Ok(Out::Line {
+                text,
+                stderr,
+                file: to_file,
+                urgent,
+            }) => {
+                // (No `eprintln!`: a failed write must not end the writer.)
+                if stderr {
+                    let _ = writeln!(std::io::stderr(), "{text}");
+                }
+                if to_file && let Some(f) = file.as_mut() {
+                    let _ = writeln!(f, "{text}");
+                }
+                urgent
+            }
+            Ok(Out::Trace(line)) => {
+                if let Some(f) = traces.as_mut() {
+                    let _ = writeln!(f, "{line}");
+                }
+                false
+            }
+            Ok(Out::Flush(done)) => {
+                write_out(&mut file, &mut traces);
+                written = Instant::now();
+                let _ = done.send(());
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => true,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                write_out(&mut file, &mut traces);
+                return;
+            }
+        };
+        if urgent || written.elapsed() >= WRITE_EVERY {
+            write_out(&mut file, &mut traces);
+            written = Instant::now();
+        }
+    }
+}
+
+/// One line for stderr that goes out on the writer thread (Bevy's own log
+/// lines: a stderr write Windows held up stalled the frame that logged it).
+pub struct StderrLine(Vec<u8>);
+
+/// Bevy's log output (`tracing_subscriber`'s `MakeWriter`): each event
+/// becomes one `StderrLine`.
+pub fn stderr_writer() -> StderrLine {
+    StderrLine(Vec::new())
+}
+
+impl Write for StderrLine {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for StderrLine {
+    fn drop(&mut self) {
+        if self.0.is_empty() {
+            return;
+        }
+        let text = String::from_utf8_lossy(&self.0);
+        send(Out::Line {
+            text: text.trim_end_matches(['\r', '\n']).to_owned(),
+            stderr: true,
+            file: false,
+            urgent: false,
+        });
+    }
+}
+
+fn write_out(file: &mut Option<BufWriter<File>>, traces: &mut Option<BufWriter<File>>) {
+    for f in [file, traces].into_iter().flatten() {
+        let _ = f.flush();
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Channel {
@@ -80,11 +219,13 @@ impl Level {
 }
 
 struct DiagState {
-    file: Option<File>,
+    /// The log file is open (the writer thread has it).
+    file: bool,
     file_path: PathBuf,
 
     latest: Option<PathBuf>,
-    traces: Option<File>,
+    /// The traces file is open (the writer thread has it).
+    traces: bool,
     traces_path: Option<PathBuf>,
     stderr_threshold: Level,
     file_threshold: Level,
@@ -164,20 +305,8 @@ pub fn init_log(artifacts_root: &Path) -> PathBuf {
     let file_threshold = bump.unwrap_or(Level::Info);
 
     let started = START.get().copied().unwrap_or_else(Instant::now);
-    let mut state = DiagState {
-        file,
-        file_path: path.clone(),
-        latest: link_latest(&path),
-        traces,
-        traces_path,
-        stderr_threshold,
-        file_threshold,
-        last_key: None,
-        last_count: 0,
-        started,
-    };
-
-    if state.traces.is_some() {
+    let mut traces = traces.map(|f| BufWriter::with_capacity(1 << 16, f));
+    if let Some(f) = traces.as_mut() {
         let zone = std::env::var("IW4L_ZONE").unwrap_or_default();
         let role = std::env::var("IW4L_ROLE").unwrap_or_else(|_| "Listen".into());
         let games = std::env::var("IW4L_GAMES").unwrap_or_default();
@@ -196,14 +325,136 @@ pub fn init_log(artifacts_root: &Path) -> PathBuf {
                 "git": git,
             }
         });
-        if let Some(f) = state.traces.as_mut() {
-            let _ = writeln!(f, "{header}");
-            let _ = f.flush();
-        }
+        let _ = writeln!(f, "{header}");
+        let _ = f.flush();
     }
 
+    // The files go to the writer thread; nothing else writes them.
+    let opened = (file.is_some(), traces.is_some());
+    let file = file.map(|f| BufWriter::with_capacity(1 << 16, f));
+    let (tx, rx) = mpsc::channel();
+    let writing = std::thread::Builder::new()
+        .name(WRITER_THREAD.into())
+        .spawn(move || writer(rx, file, traces))
+        .is_ok();
+    if writing {
+        let _ = WRITER.set(tx);
+    }
+    let state = DiagState {
+        file: writing && opened.0,
+        file_path: path.clone(),
+        latest: link_latest(&path),
+        traces: writing && opened.1,
+        traces_path,
+        stderr_threshold,
+        file_threshold,
+        last_key: None,
+        last_count: 0,
+        started,
+    };
+
     let _ = SINK.set(Mutex::new(state));
+    install_crash_log(&path);
     path
+}
+
+static CRASH_LOG: OnceLock<PathBuf> = OnceLock::new();
+
+/// A crash's last words, straight to the log file (a fresh handle: the
+/// sink's lock may be held by the code that crashed).
+fn crash_line(text: &str) {
+    if let Some(path) = CRASH_LOG.get()
+        && let Ok(mut f) = OpenOptions::new().append(true).open(path)
+    {
+        let _ = writeln!(f, "{text}");
+        let _ = f.flush();
+    }
+}
+
+/// Every crash leaves its reason in the log: a panic (its message, place,
+/// thread and backtrace) and, on Windows, an exception the process does not
+/// catch (its code and address).
+fn install_crash_log(path: &Path) {
+    if CRASH_LOG.set(path.to_path_buf()).is_err() {
+        return;
+    }
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = std::thread::current();
+        let name = thread.name().unwrap_or("unnamed");
+        let ms = START.get().map_or(0, |s| s.elapsed().as_millis());
+        flush_writer(Duration::from_secs(1));
+        crash_line(&format!(
+            "[{ms}ms] CRASH panic on thread '{name}': {info}
+{}",
+            std::backtrace::Backtrace::force_capture()
+        ));
+        previous(info);
+    }));
+    #[cfg(windows)]
+    windows_crash::install();
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod windows_crash {
+    #[repr(C)]
+    struct ExceptionRecord {
+        code: u32,
+        flags: u32,
+        next: *mut ExceptionRecord,
+        address: *mut core::ffi::c_void,
+        count: u32,
+        info: [usize; 15],
+    }
+
+    #[repr(C)]
+    struct ExceptionPointers {
+        record: *mut ExceptionRecord,
+        context: *mut core::ffi::c_void,
+    }
+
+    type Filter = unsafe extern "system" fn(*const ExceptionPointers) -> i32;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn SetUnhandledExceptionFilter(filter: Option<Filter>) -> Option<Filter>;
+    }
+
+    unsafe extern "system" fn on_crash(pointers: *const ExceptionPointers) -> i32 {
+        // SAFETY: Windows passes a valid EXCEPTION_POINTERS to the filter.
+        let (code, address, info0, info1) = unsafe {
+            match pointers.as_ref().and_then(|p| p.record.as_ref()) {
+                Some(r) => (r.code, r.address as usize, r.info[0], r.info[1]),
+                None => (0, 0, 0, 0),
+            }
+        };
+        let base = module_base();
+        super::crash_line(&format!(
+            "CRASH exception 0x{code:08X} at 0x{address:X} (exe+0x{:X}) on thread '{}' (info {info0:X} {info1:X})",
+            address.wrapping_sub(base),
+            std::thread::current().name().unwrap_or("unnamed")
+        ));
+        super::flush_writer(std::time::Duration::from_secs(1));
+        0 // EXCEPTION_CONTINUE_SEARCH: Windows ends the process as before.
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetModuleHandleW(name: *const u16) -> *mut core::ffi::c_void;
+    }
+
+    fn module_base() -> usize {
+        // SAFETY: a null name asks for the exe's own module; no lifetime involved.
+        unsafe { GetModuleHandleW(core::ptr::null()) as usize }
+    }
+
+    pub(super) fn install() {
+        // SAFETY: the filter is a plain function that lives for the process.
+        unsafe {
+            SetUnhandledExceptionFilter(Some(on_crash));
+        }
+    }
 }
 
 pub fn latest_log_path() -> Option<PathBuf> {
@@ -214,11 +465,11 @@ pub fn latest_log_path() -> Option<PathBuf> {
 
 pub fn exit_launch_error(message: &str) -> ! {
     write_event(Channel::Launch, Level::Error, message, None, None);
+    flush_writer(Duration::from_secs(2));
     if let Some(sink) = SINK.get()
-        && let Ok(mut state) = sink.lock()
+        && let Ok(state) = sink.lock()
     {
-        if let Some(file) = state.file.as_mut() {
-            let _ = file.flush();
+        if state.file {
             eprintln!("log: {}", state.file_path.display());
         } else {
             eprintln!("log unavailable: {}", state.file_path.display());
@@ -275,16 +526,17 @@ fn emit_raw(
         format!("{}  {}  {msg}", ch.as_str(), lvl.as_str())
     };
 
-    if lvl <= state.stderr_threshold {
-        eprintln!("{text}");
+    let stderr = lvl <= state.stderr_threshold;
+    let file = lvl <= state.file_threshold && state.file;
+    if stderr || file {
+        send(Out::Line {
+            text,
+            stderr,
+            file,
+            urgent: lvl <= Level::Warn,
+        });
     }
-    if lvl <= state.file_threshold
-        && let Some(file) = state.file.as_mut()
-    {
-        let _ = writeln!(file, "{text}");
-        let _ = file.flush();
-    }
-    if let Some(file) = state.traces.as_mut() {
+    if state.traces {
         let t = now_ms(state.started);
         let mut obj = serde_json::json!({
             "t": t,
@@ -305,8 +557,7 @@ fn emit_raw(
         if !collapsed_banner {
             obj["msg"] = serde_json::Value::String(msg.to_owned());
         }
-        let _ = writeln!(file, "{obj}");
-        let _ = file.flush();
+        send(Out::Trace(obj.to_string()));
     }
 }
 
@@ -329,7 +580,7 @@ pub fn write_event(
     if state.last_key.as_ref() == Some(&key) {
         state.last_count = state.last_count.saturating_add(1);
 
-        if state.last_count.is_multiple_of(64) {
+        if state.last_count.is_multiple_of(64) && state.traces {
             let t = now_ms(state.started);
             let n = state.last_count;
             let obj = serde_json::json!({
@@ -339,9 +590,7 @@ pub fn write_event(
                 "msg": msg,
                 "n": n,
             });
-            if let Some(file) = state.traces.as_mut() {
-                let _ = writeln!(file, "{obj}");
-            }
+            send(Out::Trace(obj.to_string()));
         }
         return;
     }
@@ -352,12 +601,14 @@ pub fn write_event(
     emit_raw(&mut state, ch, lvl, msg, None, ev, fields, false);
 }
 
+/// Everything logged so far onto the disk (the process is about to end).
 pub fn flush() {
     if let Some(sink) = SINK.get()
         && let Ok(mut state) = sink.lock()
     {
         flush_collapsed(&mut state);
     }
+    flush_writer(Duration::from_secs(2));
 }
 
 pub fn announce_log_stdout(path: &Path, latest: Option<&Path>) {

@@ -357,6 +357,7 @@ fn link_dyn_ent_cells(
     >,
     all: Query<(&WorldDynEntInstance, &Transform), With<DynEntModelEntity>>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("link_dyn_ent_cells");
     if !cells.is_ready() {
         *membership = DynEntCellBits::default();
         *vis = DynEntPrimaryLightVis::default();
@@ -450,6 +451,7 @@ fn cull_dyn_ent_cell_models(
         With<DynEntModelEntity>,
     >,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("cull_dyn_ent_cell_models");
     let planes = fpv_frustum_planes(&cameras);
     let vis = admitted_vis(&cell_vis);
     let catalog = catalog.as_deref();
@@ -481,6 +483,7 @@ fn pose_dyn_ents(
     prepared: Res<crate::anim::model_materials::PreparedModelMaterials>,
     mut product: ResMut<DynEntPoseProduct>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("pose_dyn_ents");
     product.owners.clear();
     if catalog.as_ref().is_some_and(|c| c.is_changed()) {
         product.assets.clear();
@@ -582,6 +585,7 @@ fn append_dynent_draws(
     mut draws: Local<Vec<XModelSurfaceDraw>>,
     mut owners: Local<Vec<DynEntOwnerDraw>>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("append_dynent_draws");
     let atlas_ref = atlas.as_deref();
     if catalog.is_none() || atlas_ref.is_none() || !facts.spawned || tess.is_none() {
         plan.publish_no_rows();

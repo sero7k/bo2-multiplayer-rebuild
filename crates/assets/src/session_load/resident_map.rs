@@ -22,9 +22,55 @@ struct ResidentMap {
     pub(super) zone: ZoneStamp,
     pub(super) common: Arc<CommonSet>,
     pub(super) prepared: PreparedMatch,
+    /// Its decoded images were let go once the card had them all
+    /// ([`release_resident_cpu_images`]): it can stand in for a walk only
+    /// while the card still holds that walk's images.
+    stripped: bool,
 }
 
 static RESIDENT_MAP: std::sync::Mutex<Option<ResidentMap>> = std::sync::Mutex::new(None);
+
+/// The walk whose map images the card holds now (0: none). The render
+/// frontend says so when a map's upload completes and when it lets them go.
+static GPU_RESIDENT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn note_gpu_resident(products_id: u64) {
+    GPU_RESIDENT.store(products_id, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The card has every image of walk `products_id`: the copy kept for a
+/// same-map load lets go of its decoded images (each one is the texture's
+/// bytes a second time, ~580 MB on Nuketown; 8 games at once on one PC
+/// cannot carry that). Returns how many it let go and the bytes that were
+/// actually freed (an image the shared common set also holds stays).
+pub fn release_resident_cpu_images(products_id: u64) -> Option<(usize, u64)> {
+    let mut slot = RESIDENT_MAP
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    let resident = slot.as_mut()?;
+    if resident.stripped || resident.prepared.materials.products_id != products_id {
+        return None;
+    }
+    let held = Arc::strong_count(&resident.prepared.materials.population);
+    let Some(population) = Arc::get_mut(&mut resident.prepared.materials.population) else {
+        diag::info!(
+            World,
+            "resident map: walk #{products_id} keeps its decoded images (its materials are held {held} times)"
+        );
+        return None;
+    };
+    let (mut count, mut freed) = (0, 0u64);
+    for image in &mut population.images {
+        if let Some(decoded) = image.decoded.take() {
+            count += 1;
+            if Arc::strong_count(&decoded) == 1 {
+                freed += decoded.data.as_ref().map_or(0, |data| data.len() as u64);
+            }
+        }
+    }
+    resident.stripped = true;
+    Some((count, freed))
+}
 
 fn resident_copy(zone: &ZoneStamp, key: &CommonKey) -> Option<PreparedMatch> {
     let common = landed_common(key)?;
@@ -32,6 +78,14 @@ fn resident_copy(zone: &ZoneStamp, key: &CommonKey) -> Option<PreparedMatch> {
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
     let resident = slot.as_ref()?;
+    // Without its decoded images the copy is good only for a load the card
+    // already has every texture of.
+    if resident.stripped
+        && GPU_RESIDENT.load(std::sync::atomic::Ordering::Relaxed)
+            != resident.prepared.materials.products_id
+    {
+        return None;
+    }
     (resident.zone == *zone && Arc::ptr_eq(&resident.common, &common))
         .then(|| resident.prepared.clone())
 }
@@ -96,6 +150,7 @@ pub async fn load_prepared_match(
             zone,
             common,
             prepared: resident,
+            stripped: false,
         });
     }
     prepared.report.extend(progress.timing_report());

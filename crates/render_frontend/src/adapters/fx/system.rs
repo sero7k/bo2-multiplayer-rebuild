@@ -517,9 +517,10 @@ fn tick_fx_remaining_update(
     perf::Counter::CounterFxElemLive.emit(f64::from(host.0.elem_live_count));
     perf::Counter::CounterFxElemAllocFail.emit(f64::from(host.0.elem_alloc_failures));
     // bo2zm: the effect pools every 5 s of game: parts alive (most seen), of
-    // the pool; effects; parts refused since the last line.
+    // the pool; effects; parts refused since the last line (IW4L_RENDER_LOG=1).
     static POOL: std::sync::Mutex<(i32, u32, u32)> = std::sync::Mutex::new((0, 0, 0));
-    if let Ok(mut p) = POOL.lock() {
+    static LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if let (true, Ok(mut p)) = (*LOG.get_or_init(|| std::env::var_os("IW4L_RENDER_LOG").is_some()), POOL.lock()) {
         p.1 = p.1.max(host.0.elem_live_count);
         if msec.wrapping_sub(p.0) >= 5000 || msec < p.0 {
             diag::info!(
@@ -1636,7 +1637,11 @@ fn commit_fx_transaction(
     plan.publish_share();
 
     let cam_origin = cam_tf.translation.to_array();
-    let first_census = !cursor.draw_logged
+    // The first effects' census (IW4L_RENDER_LOG=1 only: dozens of lines in
+    // the frame of a match's first shot, and that frame waited on them).
+    static LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let first_census = *LOG.get_or_init(|| std::env::var_os("IW4L_RENDER_LOG").is_some())
+        && !cursor.draw_logged
         && (sprites_total > 0
             || !out.trail_meshes.is_empty()
             || out.skipped_unsupported_type > 0
@@ -2466,7 +2471,10 @@ fn take_t6_marks(
     out.vertices.clear();
     out.indices.clear();
     out.draws.clear();
-    {
+    // The mark mesh, on change (IW4L_RENDER_LOG=1 only: it changes with
+    // nearly every shot).
+    static LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *LOG.get_or_init(|| std::env::var_os("IW4L_RENDER_LOG").is_some()) {
         use std::sync::Mutex;
         static LAST: Mutex<Option<String>> = Mutex::new(None);
         let line = match mesh {
@@ -2499,6 +2507,11 @@ fn take_t6_marks(
     };
     let mut converted = false;
     let mut lit_ms = 0.0f64;
+    // bo2mp: every mark is rebuilt each frame, but a corner's lightmap light
+    // never changes, so it is looked up once and kept (until the lightmaps
+    // change): 268 marks cost 2-4 ms a frame read from the lightmap.
+    let mut cache = MARK_LIGHT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    cache.fresh(asset_world::t6_lightmap_generation());
     for surf in &mesh.surfs {
         if surf.index_count == 0 {
             continue;
@@ -2547,7 +2560,7 @@ fn take_t6_marks(
             .and_then(|&i| mesh.verts.get(usize::from(i)))
             .map_or([0.0; 3], |pt| pt.xyz);
         let began = std::time::Instant::now();
-        let lit = light_t6_mark_from_lightmap(surf, indices, &mesh.verts, &mut out.vertices);
+        let lit = light_t6_mark_from_lightmap(surf, indices, &mesh.verts, &mut out.vertices, &mut cache);
         lit_ms += began.elapsed().as_secs_f64() * 1000.0;
         out.draws.push((
             start,
@@ -2566,6 +2579,35 @@ fn take_t6_marks(
     }
 }
 
+/// bo2mp: the lightmap light at a mark corner, by lightmap, coordinate and
+/// normal (their exact bits), for the lightmaps of one generation.
+#[derive(Default)]
+struct MarkLightCache {
+    generation: u64,
+    light: std::collections::HashMap<(u8, [u32; 2], [u32; 3]), Option<([f32; 3], f32)>>,
+}
+
+impl MarkLightCache {
+    /// Starts over when the lightmaps changed, or when it holds more corners
+    /// than any match leaves marks for.
+    fn fresh(&mut self, generation: u64) {
+        if self.generation != generation || self.light.len() > 1 << 16 {
+            self.generation = generation;
+            self.light.clear();
+        }
+    }
+
+    fn light(&mut self, lmap: u8, uv: [f32; 2], n: [f32; 3]) -> Option<([f32; 3], f32)> {
+        *self
+            .light
+            .entry((lmap, uv.map(f32::to_bits), n.map(f32::to_bits)))
+            .or_insert_with(|| asset_world::t6_lightmap_light(lmap, uv, n))
+    }
+}
+
+static MARK_LIGHT: std::sync::LazyLock<std::sync::Mutex<MarkLightCache>> =
+    std::sync::LazyLock::new(Default::default);
+
 /// bo2zm fix list 2: a mark on a lightmapped world surface takes that
 /// surface's lightmap light at each of its corners, as BO2's world mark
 /// shaders do (the light grid in front of a wall can be far darker than the
@@ -2578,7 +2620,10 @@ fn light_t6_mark_from_lightmap(
     indices: &[u16],
     verts: &[marks_iw4::FxMarkStagingPoint],
     out: &mut [render_frame::SmodelVertex],
+    cache: &mut MarkLightCache,
 ) -> Option<(u8, f32)> {
+    static LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let log = *LOG.get_or_init(|| std::env::var_os("IW4L_MARK_LIGHT_LOG").is_some());
     let lmap = marks_iw4::mark_context_lmap(&surf.context);
     if lmap == marks_iw4::GFX_SURFACE_LIGHTMAP_NONE {
         return None;
@@ -2593,14 +2638,13 @@ fn light_t6_mark_from_lightmap(
         let (Some(pt), Some(v)) = (verts.get(usize::from(i)), out.get_mut(usize::from(i))) else {
             continue;
         };
-        let Some((light, vis)) = asset_world::t6_lightmap_light(lmap, pt.lmap_coord, pt.normal)
-        else {
+        let Some((light, vis)) = cache.light(lmap, pt.lmap_coord, pt.normal) else {
             return None;
         };
         // bo2zm test aid: IW4L_MARK_LIGHT_LOG=1 logs a mark's first corner
         // light in parts (base, directional, its N.dir, primary visibility).
         if lit_n == 0
-            && std::env::var_os("IW4L_MARK_LIGHT_LOG").is_some()
+            && log
             && let Some((base, dir, ndl, pvis)) =
                 asset_world::t6_lightmap_parts(lmap, pt.lmap_coord, pt.normal)
         {

@@ -191,6 +191,7 @@ fn collect_t6_script_models(
     pieces: Query<(&render_scene::WorldDynEntInstance, &Transform, &Visibility)>,
     mut out: ResMut<T6ScriptModels>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("collect_t6_script_models");
     out.items.clear();
     let Some(fpv) = fpv else {
         return;
@@ -625,6 +626,7 @@ fn collect_t6_missiles(
     cg_clock: Option<Res<net::FrameClock>>,
     mut out: ResMut<T6MissileModels>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("collect_t6_missiles");
     out.items.clear();
     let (Some(snapshot), Some(weapons), Some(fpv)) =
         (presented.as_ref(), weapons.as_ref(), fpv.as_ref())
@@ -706,6 +708,7 @@ fn occupy_missile_scene_ents(
     cg_clock: Option<Res<net::FrameClock>>,
     local: Option<Res<net::LocalPresentClient>>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("occupy_missile_scene_ents");
     occupancy.rows.clear();
     let Some(snapshot) = presented.as_ref() else {
         return;
@@ -965,6 +968,7 @@ fn pose_missiles(
     prepared: Res<crate::anim::model_materials::PreparedModelMaterials>,
     mut product: ResMut<MissilePoseProduct>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("pose_missiles");
     product.rows.clear();
     let catalog = missile_pose_catalog(projectile_meshes.as_deref());
     let Some(catalog) = catalog else {
@@ -1029,6 +1033,7 @@ fn append_missile_draws(
     mut draws: Local<Vec<XModelSurfaceDraw>>,
     mut owners: Local<Vec<MissileOwnerDraw>>,
 ) {
+    let _slow = crate::occupancy::t6_body::SlowGuard::new("append_missile_draws");
     // Missiles are rebuilt from scratch every frame, so the rebuild goes to a
     // staging plan whose allocations survive the frame; `plan` keeps the
     // revisions, which is the part a consumer reads.

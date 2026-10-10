@@ -1010,6 +1010,12 @@ fn preflight_match_install(
                 links: n.links.clone(),
             })
             .collect(),
+        path_tables: sim::T6PathTables {
+            node_count: set.path_tables.node_count,
+            original_count: set.path_tables.original_count,
+            vis: set.path_tables.vis.clone(),
+            smooth: set.path_tables.smooth.clone(),
+        },
         anims: set
             .anims
             .iter()

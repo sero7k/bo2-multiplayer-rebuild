@@ -19,6 +19,12 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             vm.bind($name, true, $body);
         };
     }
+    // A round over (Search and Destroy, half time): the level starts again
+    // at the next frame, `pers[]` kept when asked (`map_restart( 1 )`).
+    f!("map_restart", |_, world, _, a| {
+        world.resource_mut::<Zm>().pending_restart = Some(super::flag(a, 0, false));
+        Ok(Value::Undefined)
+    });
     // Team scores: what the score bar and the score limit read.
     f!("getteamscore", |vm, world, _, a| {
         let team = text(vm, a, 0);
@@ -88,7 +94,10 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     f!("getvehicletreadfxarray", |_, _, _, _| Ok(Value::array(
         Array::new()
     )));
-    f!("islocalgame", |_, _, _, _| Ok(Value::Int(1)));
+    // Split-screen only (BO2's engine asks whether the game mode is local
+    // split-screen); a custom game is not, so the bots fill up to 18
+    // players rather than 10.
+    f!("islocalgame", |_, _, _, _| Ok(Value::Int(0)));
     f!("ispregamegamestarted", |_, _, _, _| Ok(Value::Int(0)));
     f!("setdvarint", |vm, _, _, a| {
         let name = text(vm, a, 0).to_ascii_lowercase();
@@ -186,14 +195,19 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     m!("isweaponviewonlylinked", |_, _, _, _| Ok(Value::Int(0)));
     // The spawn a player gets (`getsortedspawnpoints(point team, influencer
     // team, enemy mask, player, predicted)`): BO2's engine rates every spawn
-    // point by its influencers (enemies near and in sight count against
-    // it) and hands back the best. Ours rates the team's points (the
-    // scripts' level.teamspawnpoints, or level.spawnpoints without teams)
-    // by the nearest living enemy, halved when an enemy sees it, and picks
-    // among the best three so a team does not stack on one point.
+    // point by its influencers, sorts them, then walks the best twenty
+    // skipping dangerous ones (it would telefrag, or a living enemy within
+    // 2600 units sees it, eyes 65 units up) and stops at the first safe
+    // one, so it pays sight traces only for the points it walks. Ours rates
+    // the team's points by the nearest living enemy and takes one of the
+    // first three safe ones, so a team does not stack on one point. (The
+    // scripts ask every half second for each dead player's predicted spawn:
+    // that answer only tells the client what to stream, and ours streams
+    // nothing, so it gets the best-rated point and pays no sight traces.)
     f!("getsortedspawnpoints", |vm, world, _, a| {
         let team = text(vm, a, 0);
         let player = arg(a, 3).clone();
+        let predicted = super::flag(a, 4, false);
         let level = vm.level;
         // The game type's spawn point kinds: the team's (level.
         // spawn_point_team_class_names[team], e.g. mp_tdm_spawn), else every
@@ -261,10 +275,13 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             if let Some(ps) = super::frame(world).player(crate::world::ClientId(n))
                 && ps.health > 0
             {
-                enemies.push([ps.origin[0], ps.origin[1], ps.origin[2] + 60.0]);
+                enemies.push([ps.origin[0], ps.origin[1], ps.origin[2] + SIGHT_HEIGHT]);
             }
         }
-        let mut rated: Vec<(f32, Value)> = Vec::new();
+        // spawnsystem_sight_check_max_distance, spawnsystem_sight_height_offset.
+        const SIGHT_RANGE: f32 = 2600.0;
+        const SIGHT_HEIGHT: f32 = 65.0;
+        let mut rated: Vec<(f32, [f32; 3], Value)> = Vec::new();
         for p in points {
             let Some(o) = super::origin_of(vm, world, &p).or_else(|| {
                 let Value::Object(obj) = &p else { return None };
@@ -273,43 +290,61 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             }) else {
                 continue;
             };
-            let eye = [o[0], o[1], o[2] + 60.0];
-            let mut score = enemies
+            let score = enemies
                 .iter()
                 .map(|e| ((e[0] - o[0]).powi(2) + (e[1] - o[1]).powi(2)).sqrt())
                 .fold(4096.0f32, f32::min);
-            let seen = enemies.iter().any(|e| {
-                super::frame(world)
-                    .trace_static_world(*e, eye, [0.0; 3], [0.0; 3], crate::bullet_collision::MASK_SHOT)
-                    .fraction
-                    >= 1.0
-            });
-            if seen {
-                score *= 0.5;
-            }
-            // Never on top of anyone alive (the spawn would telefrag him).
-            let taken = {
-                let f = super::frame(world);
-                f.client_ids_sorted().into_iter().any(|id| {
-                    f.player(id).is_some_and(|ps| {
-                        ps.health > 0
-                            && ((ps.origin[0] - o[0]).powi(2) + (ps.origin[1] - o[1]).powi(2)).sqrt() < 48.0
-                            && (ps.origin[2] - o[2]).abs() < 72.0
-                    })
-                })
-            };
-            if taken {
-                score = -1.0;
-            }
-            rated.push((score, p));
+            rated.push((score, o, p));
         }
-        rated.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap_or(std::cmp::Ordering::Equal));
-        let top = rated.len().min(3);
-        if top == 0 {
+        if rated.is_empty() {
             return Ok(super::list(Vec::new()));
         }
-        let pick = (vm.rand_u32() as usize) % top;
-        Ok(super::list(vec![rated[pick].1.clone()]))
+        rated.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap_or(std::cmp::Ordering::Equal));
+        let f = super::frame(world);
+        let alive: Vec<[f32; 3]> = f
+            .client_ids_sorted()
+            .into_iter()
+            .filter_map(|id| f.player(id).filter(|ps| ps.health > 0).map(|ps| ps.origin))
+            .collect();
+        // Never on top of anyone alive (the spawn would telefrag him).
+        let telefrag = |o: [f32; 3]| {
+            alive.iter().any(|a| {
+                ((a[0] - o[0]).powi(2) + (a[1] - o[1]).powi(2)).sqrt() < 48.0 && (a[2] - o[2]).abs() < 72.0
+            })
+        };
+        let mut safe: Vec<usize> = Vec::new();
+        let (tracing, traces) = (std::time::Instant::now(), std::cell::Cell::new(0u32));
+        for (i, (_, o, _)) in rated.iter().enumerate().take(if predicted { 0 } else { 20 }) {
+            if telefrag(*o) {
+                continue;
+            }
+            let eye = [o[0], o[1], o[2] + SIGHT_HEIGHT];
+            let seen = enemies.iter().any(|e| {
+                (e[0] - o[0]).powi(2) + (e[1] - o[1]).powi(2) <= SIGHT_RANGE * SIGHT_RANGE
+                    && {
+                        traces.set(traces.get() + 1);
+                        true
+                    }
+                    && f.trace_static_world(*e, eye, [0.0; 3], [0.0; 3], crate::bullet_collision::MASK_SHOT)
+                        .fraction
+                        >= 1.0
+            });
+            if !seen {
+                safe.push(i);
+                if safe.len() == 3 {
+                    break;
+                }
+            }
+        }
+        let ms = tracing.elapsed().as_secs_f64() * 1000.0;
+        if ms > 10.0 {
+            diag::warn!(Sim, "bo2mp spawn pick: {} sight traces took {ms:.1} ms", traces.get());
+        }
+        // All dangerous: the best that would not telefrag, else the best.
+        let fallback = rated.iter().position(|(_, o, _)| !telefrag(*o)).unwrap_or(0);
+        drop(f);
+        let pick = if safe.is_empty() { fallback } else { safe[(vm.rand_u32() as usize) % safe.len()] };
+        Ok(super::list(vec![rated[pick].2.clone()]))
     });
     // The death path's small answers: no revive, rank XP waits for the
     // profile (`cloneplayer` is below).
@@ -384,26 +419,15 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     for name in ["gpsjammeractive", "gpsjammerinactive", "recordmultikill", "trackweaponfirenative"] {
         vm.bind(name, true, |_, _, _, _| Ok(Value::Undefined));
     }
-    // Objectives on the minimap and HUD (which flag a player is taking, a
-    // capture's progress, who sees which marker), the bomb timers, spawn
-    // influencer weights: the HUD lane draws objectives; the server keeps
-    // no state of its own for them yet.
+    // The bomb timers, spawn influencer weights (objectives are
+    // `objectives.rs`).
     for name in [
-        "objective_clearplayerusing",
-        "objective_setplayerusing",
-        "objective_setprogress",
-        "objective_clearentity",
-        "objective_setvisibletoplayer",
-        "objective_setinvisibletoplayer",
-        "objective_setinvisibletoall",
-        "objective_setgamemodeflags",
         "setbombtimer",
         "setspawnpointsbaseweight",
         "setinfluencerteammask",
     ] {
         vm.bind(name, false, |_, _, _, _| Ok(Value::Undefined));
     }
-    f!("objective_getgamemodeflags", |_, _, _, _| Ok(Value::Int(0)));
     for name in [
         "recordgameevent",
         "clientclaimtrigger",
@@ -680,6 +704,19 @@ fn bind_screen(vm: &mut Vm<World>) {
 
 /// Each tick: every player's screen values (see `ScreenFeed`) as client
 /// dvars.
+/// The BO2MP_SETTING_<name> test overrides, read once (not each tick).
+fn setting_overrides() -> &'static [(String, String)] {
+    static OVERRIDES: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
+    OVERRIDES.get_or_init(|| {
+        std::env::vars()
+            .filter_map(|(k, v)| {
+                let name = k.get(..14).filter(|p| p.eq_ignore_ascii_case("BO2MP_SETTING_")).map(|_| k[14..].to_owned())?;
+                Some((name, v))
+            })
+            .collect()
+    })
+}
+
 pub(super) fn publish_screen(world: &mut World) {
     let (scores, timeleft, clients) = {
         let zm = world.resource::<Zm>();
@@ -692,9 +729,13 @@ pub(super) fn publish_screen(world: &mut World) {
     // the BO2MP_SETTING_<name> test overrides the server uses.
     let settings = {
         let zm = world.resource::<Zm>();
+        let overrides = setting_overrides();
         zm.gamesettings
             .iter()
-            .map(|(k, v)| format!("{k}={}", std::env::var(format!("BO2MP_SETTING_{k}")).unwrap_or_else(|_| v.clone())))
+            .map(|(k, v)| {
+                let v = overrides.iter().find(|(n, _)| n.eq_ignore_ascii_case(k)).map_or(v, |(_, o)| o);
+                format!("{k}={v}")
+            })
             .collect::<Vec<_>>()
             .join(",")
     };
@@ -766,9 +807,16 @@ pub(super) fn publish_screen(world: &mut World) {
         }
         f.killers.retain(|c, (_, seen)| killcams.contains_key(c) || !*seen);
     }
+    // The objectives each player's HUD marks (bots have no HUD).
+    let views: Vec<(u32, String)> =
+        teams.iter().filter(|(c, _, _)| !super::is_bot(world, *c)).map(|(c, t, _)| (*c, t.clone())).collect();
+    super::objectives::publish(world, &views);
     // Everyone's team (the scoreboard's sides): "<client>:<team>,...".
     let all_teams =teams.iter().map(|(c, t, _)| format!("{c}:{t}")).collect::<Vec<_>>().join(",");
     for (c, team, gametype) in teams {
+        if super::is_bot(world, c) {
+            continue;
+        }
         for (k, v) in [
             ("bo2mp_scores", scores.clone()),
             ("bo2mp_timeleft", timeleft.clone()),

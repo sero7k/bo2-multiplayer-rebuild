@@ -114,6 +114,7 @@ struct DiagnosticPerf {
     worst_ms: f32,
     props_drawn: u64,
     props_culled: u64,
+    props_unseen: u64,
     last_census_at: Option<Instant>,
 }
 
@@ -187,16 +188,37 @@ pub struct T6DynamicDraw {
     /// slot, specular map slot)
     pub draws: Vec<[u32; 7]>,
     pub instances: Vec<[f32; 24]>,
+    /// The vertices and indices written on the render thread instead (the
+    /// live players' ~250k vertices a frame: copied there, not while the
+    /// game waits on extract).
+    pub deferred: Option<T6DeferredFill>,
 }
 
-/// bo2zm M3: the map's script models that do not animate (mannequins, perk
-/// machines, the box, wall guns): their shapes in one geometry uploaded
-/// once (`revision` changes when a new model joins), placed by this frame's
-/// instance rows. Re-sending ~150 models' vertices every frame cost ~12 ms.
+/// Fills a draw's vertex and index lists (emptied first) from shared,
+/// unchanging data; `vertices` and `indices` are how many it adds.
+#[derive(Clone)]
+pub struct T6DeferredFill {
+    pub vertices: usize,
+    pub indices: usize,
+    pub fill: Arc<dyn Fn(&mut Vec<SmodelVertex>, &mut Vec<u32>) + Send + Sync>,
+}
+
+impl std::fmt::Debug for T6DeferredFill {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "T6DeferredFill({} vertices, {} indices)", self.vertices, self.indices)
+    }
+}
+
+/// bo2zm M3: the models that hold their shape (mannequins, perk machines,
+/// the box, wall guns; grenades in flight; bo2mp: guns on the ground,
+/// corpses at rest): their shapes uploaded once, in the chunks they came
+/// in (indices count from the first chunk's first vertex), placed by this
+/// frame's instance rows. Re-sending ~150 models' vertices every frame cost
+/// ~12 ms. A new `epoch` starts the upload over.
 #[derive(Clone, Debug, Default)]
 pub struct T6StaticDraw {
-    pub geometry: Arc<(Vec<SmodelVertex>, Vec<u32>)>,
-    pub revision: u64,
+    pub epoch: u64,
+    pub chunks: Vec<Arc<(Vec<SmodelVertex>, Vec<u32>)>>,
     pub draws: Vec<[u32; 7]>,
     pub instances: Vec<[f32; 24]>,
 }
@@ -228,45 +250,145 @@ pub struct ExtractedT6Dynamic {
 /// buffers, then the draws.
 type DynamicBuffers = (Buffer, Buffer, Buffer, Vec<[u32; 7]>);
 
+/// The held shapes on the GPU: which gathering, how many chunks of it are
+/// written, and how far into each buffer (bytes); the buffers have room to
+/// grow, so a new chunk is written after the others.
+struct StaticGeometry {
+    epoch: u64,
+    chunks: usize,
+    vertex_bytes: u64,
+    index_bytes: u64,
+    vb: Buffer,
+    ib: Buffer,
+}
+
+/// One per-frame list's buffers (vertex, index, instance), kept from frame
+/// to frame and grown when a frame needs more: new buffers for ~13 MB of
+/// players every frame cost more than writing into the old ones.
+#[derive(Default)]
+struct KeptBuffers([Option<Buffer>; 3], Vec<SmodelVertex>, Vec<u32>);
+
+impl KeptBuffers {
+    /// `bytes` written into buffer `at`, made bigger first when they do not
+    /// fit.
+    fn write(
+        &mut self,
+        device: &RenderDevice,
+        queue: &RenderQueue,
+        label: &str,
+        at: usize,
+        usage: BufferUsages,
+        bytes: &[u8],
+    ) -> Buffer {
+        let need = bytes.len() as u64;
+        if self.0[at].as_ref().is_none_or(|b| b.size() < need) {
+            self.0[at] = Some(device.create_buffer(&bevy::render::render_resource::BufferDescriptor {
+                label: Some(label),
+                size: (need + need / 2).max(64 << 10).next_multiple_of(4),
+                usage: usage | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+        let buffer = self.0[at].clone().expect("made above");
+        queue.write_buffer(&buffer, 0, bytes);
+        buffer
+    }
+}
+
 /// bo2zm: the GPU side of `ExtractedT6Dynamic`.
 #[derive(Resource, Default)]
 struct DiagnosticDynamic {
+    /// marks, viewmodel, missiles, effects, viewmodel effects, held
+    /// shapes' instances.
+    kept: [KeptBuffers; 6],
     marks: Option<DynamicBuffers>,
     missiles: Option<DynamicBuffers>,
     script_static: Option<DynamicBuffers>,
-    /// The still script models' shapes as uploaded (revision, vertices,
-    /// indices).
-    script_static_geometry: Option<(u64, Buffer, Buffer)>,
+    /// The held shapes as uploaded so far.
+    script_static_geometry: Option<StaticGeometry>,
     viewmodel: Option<DynamicBuffers>,
     effects: Option<DynamicBuffers>,
     viewmodel_effects: Option<DynamicBuffers>,
 }
 
-fn upload_dynamic_draw(device: &RenderDevice, label: &str, draw: Option<&T6DynamicDraw>) -> Option<DynamicBuffers> {
+fn upload_dynamic_draw(
+    device: &RenderDevice,
+    queue: &RenderQueue,
+    kept: &mut KeptBuffers,
+    label: &str,
+    draw: Option<&T6DynamicDraw>,
+) -> Option<DynamicBuffers> {
     let draw = draw?;
-    if draw.vertices.is_empty()
-        || draw.indices.is_empty()
-        || draw.draws.is_empty()
-        || draw.instances.is_empty()
-    {
-        return None;
+    // A deferred list is filled here into this list's own kept room.
+    let mut vertices = std::mem::take(&mut kept.1);
+    let mut indices = std::mem::take(&mut kept.2);
+    let (v, i) = match &draw.deferred {
+        Some(deferred) => {
+            vertices.clear();
+            indices.clear();
+            vertices.reserve(deferred.vertices);
+            indices.reserve(deferred.indices);
+            let _span = bevy::log::info_span!(target: "iw4l", "t6 fill", name = label).entered();
+            (deferred.fill)(&mut vertices, &mut indices);
+            (vertices.as_slice(), indices.as_slice())
+        }
+        None => (draw.vertices.as_slice(), draw.indices.as_slice()),
+    };
+    let buffers = (!v.is_empty() && !i.is_empty() && !draw.draws.is_empty() && !draw.instances.is_empty())
+        .then(|| {
+            let _span = bevy::log::info_span!(target: "iw4l", "t6 write", name = label).entered();
+            let vb = kept.write(device, queue, label, 0, BufferUsages::VERTEX, bytemuck::cast_slice(v));
+            let ib = kept.write(device, queue, label, 1, BufferUsages::INDEX, bytemuck::cast_slice(i));
+            (vb, ib)
+        });
+    let index_n = i.len() as u64;
+    kept.1 = vertices;
+    kept.2 = indices;
+    let (vb, ib) = buffers?;
+    let inst = kept.write(
+        device,
+        queue,
+        label,
+        2,
+        BufferUsages::VERTEX,
+        bytemuck::cast_slice(draw.instances.as_slice()),
+    );
+    Some((vb, ib, inst, draws_within(label, &draw.draws, index_n)))
+}
+
+/// A list's draws that stay inside its `indices`: one that reaches past
+/// them fails the graphics checks, and bevy then closes the game (a fast
+/// quality test match, 224 s in). The first few say which list and where.
+fn draws_within(label: &str, draws: &[[u32; 7]], indices: u64) -> Vec<[u32; 7]> {
+    let over = |d: &[u32; 7]| u64::from(d[0]) + u64::from(d[1]) > indices;
+    let Some(first) = draws.iter().find(|d| over(d)) else {
+        return draws.to_vec();
+    };
+    static SAID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    if SAID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 8 {
+        diag::warn!(
+            World,
+            "{label}: {} of {} draws reach past its {indices} indices (first: from {} for {}); left out",
+            draws.iter().filter(|d| over(d)).count(),
+            draws.len(),
+            first[0],
+            first[1],
+        );
     }
-    let vb = device.create_buffer_with_data(&BufferInitDescriptor {
-        label: Some(label),
-        contents: bytemuck::cast_slice(draw.vertices.as_slice()),
-        usage: BufferUsages::VERTEX,
-    });
-    let ib = device.create_buffer_with_data(&BufferInitDescriptor {
-        label: Some(label),
-        contents: bytemuck::cast_slice(draw.indices.as_slice()),
-        usage: BufferUsages::INDEX,
-    });
-    let inst = device.create_buffer_with_data(&BufferInitDescriptor {
-        label: Some(label),
-        contents: bytemuck::cast_slice(draw.instances.as_slice()),
-        usage: BufferUsages::VERTEX,
-    });
-    Some((vb, ib, inst, draw.draws.clone()))
+    draws.iter().filter(|d| !over(d)).copied().collect()
+}
+
+/// A retained draw (`first`, `count`) that stays inside its buffer's
+/// `indices`; the first few that do not are logged under `what`.
+fn retained_within(what: &str, first: u32, count: u32, indices: usize) -> bool {
+    if u64::from(first) + u64::from(count) <= indices as u64 {
+        return true;
+    }
+    static SAID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    if SAID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 8 {
+        diag::warn!(World, "{what} draw from {first} for {count} reaches past its {indices} indices; left out");
+    }
+    false
 }
 
 #[repr(C)]
@@ -320,6 +442,11 @@ struct DiagnosticGeometry {
     t6_blended_props: Vec<usize>,
     t6_prop_instances: Arc<Vec<[f32; 24]>>,
     t6_prop_instance_buffer: Option<Buffer>,
+    /// bo2mp: per prop draw (parallel to `t6_props`), its sphere in the
+    /// world (centre, radius; a negative radius = unknown, always drawn),
+    /// and what it was built from.
+    t6_prop_spheres: Vec<[f32; 4]>,
+    t6_prop_spheres_key: [usize; 5],
     t6_sky_slot: Option<u32>,
 }
 
@@ -1449,6 +1576,152 @@ fn upload_geometry(
             })
         });
     }
+    let spheres_key = [
+        Arc::as_ptr(&source.smodel_vertices) as usize,
+        Arc::as_ptr(&source.smodel_indices) as usize,
+        Arc::as_ptr(&source.smodel_surface_ranges) as usize,
+        Arc::as_ptr(&source.t6_props) as usize,
+        Arc::as_ptr(&source.t6_prop_instances) as usize,
+    ];
+    if geometry.t6_prop_spheres_key != spheres_key {
+        geometry.t6_prop_spheres_key = spheres_key;
+        geometry.t6_prop_spheres = t6_prop_spheres(
+            &source.smodel_vertices,
+            &source.smodel_indices,
+            &source.smodel_surface_ranges,
+            &source.t6_props,
+            &source.t6_prop_instances,
+        );
+    }
+}
+
+/// bo2mp: each prop draw's sphere in the world, from its surface's own
+/// vertices and its placement, so the draws outside the view are skipped.
+fn t6_prop_spheres(
+    vertices: &[SmodelVertex],
+    indices: &[u32],
+    ranges: &[(u32, u32)],
+    props: &[[u32; 4]],
+    instances: &[[f32; 24]],
+) -> Vec<[f32; 4]> {
+    const UNKNOWN: [f32; 4] = [0.0, 0.0, 0.0, -1.0];
+    let mut local: Vec<Option<[f32; 4]>> = vec![None; ranges.len()];
+    props
+        .iter()
+        .map(|&[surface, _, _, instance]| {
+            let (Some(&(start, count)), Some(row)) =
+                (ranges.get(surface as usize), instances.get(instance as usize))
+            else {
+                return UNKNOWN;
+            };
+            let sphere = *local[surface as usize].get_or_insert_with(|| {
+                let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+                let end = (start as usize).saturating_add(count as usize).min(indices.len());
+                for &index in indices.get(start as usize..end).unwrap_or(&[]) {
+                    if let Some(vertex) = vertices.get(index as usize) {
+                        let p = Vec3::from(vertex.position);
+                        lo = lo.min(p);
+                        hi = hi.max(p);
+                    }
+                }
+                if lo.x > hi.x {
+                    return UNKNOWN;
+                }
+                let centre = (lo + hi) * 0.5;
+                [centre.x, centre.y, centre.z, (hi - centre).length()]
+            });
+            if sphere[3] < 0.0 {
+                return UNKNOWN;
+            }
+            let world_from_local = Mat4::from_cols_slice(&row[..16]);
+            let centre = world_from_local.transform_point3(Vec3::new(sphere[0], sphere[1], sphere[2]));
+            let scale = world_from_local
+                .x_axis
+                .truncate()
+                .length()
+                .max(world_from_local.y_axis.truncate().length())
+                .max(world_from_local.z_axis.truncate().length());
+            let radius = sphere[3] * scale;
+            if !centre.is_finite() || !radius.is_finite() {
+                return UNKNOWN;
+            }
+            [centre.x, centre.y, centre.z, radius]
+        })
+        .collect()
+}
+
+/// bo2mp: the view's four sides and the plane through the eye, facing in.
+fn t6_view_planes(clip_from_world: Mat4) -> Option<[Vec4; 5]> {
+    let (x, y, w) = (clip_from_world.row(0), clip_from_world.row(1), clip_from_world.row(3));
+    let mut planes = [w + x, w - x, w + y, w - y, w];
+    for plane in &mut planes {
+        let len = plane.truncate().length();
+        if !len.is_finite() || len <= f32::EPSILON {
+            return None;
+        }
+        *plane /= len;
+    }
+    Some(planes)
+}
+
+/// The held shapes' chunks not on the GPU yet, written after the others;
+/// all of them into bigger buffers when they do not fit, or when a new
+/// gathering began.
+fn upload_static_geometry(
+    device: &RenderDevice,
+    queue: &RenderQueue,
+    have: &mut Option<StaticGeometry>,
+    s: &T6StaticDraw,
+) {
+    let vertex_size = std::mem::size_of::<SmodelVertex>() as u64;
+    let bytes = |chunks: &[Arc<(Vec<SmodelVertex>, Vec<u32>)>]| {
+        chunks.iter().fold((0u64, 0u64), |(v, i), c| {
+            (v + c.0.len() as u64 * vertex_size, i + c.1.len() as u64 * 4)
+        })
+    };
+    let (vertex_bytes, index_bytes) = bytes(&s.chunks);
+    let from = match have.as_ref() {
+        Some(g)
+            if g.epoch == s.epoch
+                && g.chunks <= s.chunks.len()
+                && vertex_bytes <= g.vb.size()
+                && index_bytes <= g.ib.size() =>
+        {
+            g.chunks
+        }
+        _ => {
+            // Room for the shapes to double before the next new buffers.
+            let buffer = |usage: BufferUsages, need: u64| {
+                device.create_buffer(&bevy::render::render_resource::BufferDescriptor {
+                    label: Some("bo2zm_script_static"),
+                    size: (need * 2).max(1 << 20).next_multiple_of(4),
+                    usage: usage | BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                })
+            };
+            *have = Some(StaticGeometry {
+                epoch: s.epoch,
+                chunks: 0,
+                vertex_bytes: 0,
+                index_bytes: 0,
+                vb: buffer(BufferUsages::VERTEX, vertex_bytes),
+                ib: buffer(BufferUsages::INDEX, index_bytes),
+            });
+            0
+        }
+    };
+    let Some(g) = have.as_mut() else { return };
+    for chunk in &s.chunks[from..] {
+        if !chunk.0.is_empty() {
+            queue.write_buffer(&g.vb, g.vertex_bytes, bytemuck::cast_slice(chunk.0.as_slice()));
+        }
+        if !chunk.1.is_empty() {
+            queue.write_buffer(&g.ib, g.index_bytes, bytemuck::cast_slice(chunk.1.as_slice()));
+        }
+        g.vertex_bytes += chunk.0.len() as u64 * vertex_size;
+        g.index_bytes += chunk.1.len() as u64 * 4;
+    }
+    g.chunks = s.chunks.len();
 }
 
 /// bo2zm: this frame's moving things into GPU buffers.
@@ -1456,63 +1729,62 @@ fn upload_dynamic(
     source: Option<Res<ExtractedT6Dynamic>>,
     mut dynamic: ResMut<DiagnosticDynamic>,
     device: Res<RenderDevice>,
+    queue: Res<RenderQueue>,
 ) {
     let source = source.as_deref();
+    let dynamic = &mut *dynamic;
+    let [marks, viewmodel, missiles, effects, viewmodel_effects, held] = &mut dynamic.kept;
     dynamic.marks = upload_dynamic_draw(
         &device,
+        &queue,
+        marks,
         "bo2zm_marks",
         source.and_then(|s| s.marks.as_ref()),
     );
     dynamic.viewmodel = upload_dynamic_draw(
         &device,
+        &queue,
+        viewmodel,
         "bo2zm_viewmodel",
         source.and_then(|s| s.viewmodel.as_ref()),
     );
     dynamic.missiles = upload_dynamic_draw(
         &device,
+        &queue,
+        missiles,
         "bo2zm_missiles",
         source.and_then(|s| s.missiles.as_ref()),
     );
     dynamic.script_static = match source.and_then(|s| s.script_static.as_ref()) {
-        Some(s)
-            if !s.draws.is_empty() && !s.instances.is_empty() && !s.geometry.0.is_empty() =>
-        {
-            let stale = dynamic
-                .script_static_geometry
-                .as_ref()
-                .is_none_or(|(revision, _, _)| *revision != s.revision);
-            if stale {
-                let vb = device.create_buffer_with_data(&BufferInitDescriptor {
-                    label: Some("bo2zm_script_static"),
-                    contents: bytemuck::cast_slice(s.geometry.0.as_slice()),
-                    usage: BufferUsages::VERTEX,
-                });
-                let ib = device.create_buffer_with_data(&BufferInitDescriptor {
-                    label: Some("bo2zm_script_static"),
-                    contents: bytemuck::cast_slice(s.geometry.1.as_slice()),
-                    usage: BufferUsages::INDEX,
-                });
-                dynamic.script_static_geometry = Some((s.revision, vb, ib));
-            }
-            let inst = device.create_buffer_with_data(&BufferInitDescriptor {
-                label: Some("bo2zm_script_static"),
-                contents: bytemuck::cast_slice(s.instances.as_slice()),
-                usage: BufferUsages::VERTEX,
-            });
-            dynamic
-                .script_static_geometry
-                .as_ref()
-                .map(|(_, vb, ib)| (vb.clone(), ib.clone(), inst, s.draws.clone()))
+        Some(s) if !s.draws.is_empty() && !s.instances.is_empty() && !s.chunks.is_empty() => {
+            let _span = bevy::log::info_span!(target: "iw4l", "t6 held upload").entered();
+            upload_static_geometry(&device, &queue, &mut dynamic.script_static_geometry, s);
+            let inst = held.write(
+                &device,
+                &queue,
+                "bo2zm_script_static",
+                2,
+                BufferUsages::VERTEX,
+                bytemuck::cast_slice(s.instances.as_slice()),
+            );
+            dynamic.script_static_geometry.as_ref().map(|g| {
+                let draws = draws_within("bo2zm_script_static", &s.draws, g.index_bytes / 4);
+                (g.vb.clone(), g.ib.clone(), inst, draws)
+            })
         }
         _ => None,
     };
     dynamic.effects = upload_dynamic_draw(
         &device,
+        &queue,
+        effects,
         "bo2zm_effects",
         source.and_then(|s| s.effects.as_ref()),
     );
     dynamic.viewmodel_effects = upload_dynamic_draw(
         &device,
+        &queue,
+        viewmodel_effects,
         "bo2zm_viewmodel_effects",
         source.and_then(|s| s.viewmodel_effects.as_ref()),
     );
@@ -2298,6 +2570,7 @@ fn draw_geometry_diagnostic(
     let mut fx_skipped = 0u32;
     let mut prop_draws = 0u32;
     let mut props_culled = 0u32;
+    let mut props_unseen = 0u32;
     // bo2zm: world surfaces drawn untextured (diagnostic colours), a few ids.
     let mut untextured: Vec<u16> = Vec::new();
     let mut untextured_n = 0u32;
@@ -2592,6 +2865,14 @@ fn draw_geometry_diagnostic(
                     bound_depth = Some((depth_min, depth_max));
                 }
             }
+            let (what, indices) = match tess {
+                DiagnosticTess::World | DiagnosticTess::WorldTextured(_) => ("world", geometry.world_index_count),
+                DiagnosticTess::XModel => ("xmodel", geometry.xmodel_index_count),
+                _ => ("static model", geometry.smodel_index_count),
+            };
+            if !retained_within(what, start, count, indices) {
+                continue;
+            }
             pass.draw_indexed(start..start.saturating_add(count), 0, instances);
         }
         // bo2zm: Black Ops II props of this phase (blended ones by sort key).
@@ -2618,6 +2899,10 @@ fn draw_geometry_diagnostic(
             let eye = extracted_view.world_from_view.translation();
             let cull_scale = if asset_core::t6_fast() { 0.6 } else { 1.0 };
             let instances_cpu = &geometry.t6_prop_instances;
+            let view_planes = t6_view_planes(
+                extracted_view.clip_from_view
+                    * extracted_view.world_from_view.to_matrix().inverse(),
+            );
             let props: Box<dyn Iterator<Item = usize>> = if blended_phase {
                 Box::new(geometry.t6_blended_props.iter().copied())
             } else {
@@ -2637,6 +2922,16 @@ fn draw_geometry_diagnostic(
                         props_culled += 1;
                         continue;
                     }
+                }
+                if let (Some(planes), Some(&[x, y, z, radius])) =
+                    (view_planes.as_ref(), geometry.t6_prop_spheres.get(i))
+                    && radius >= 0.0
+                    && planes
+                        .iter()
+                        .any(|plane| plane.truncate().dot(Vec3::new(x, y, z)) + plane.w < -radius)
+                {
+                    props_unseen += 1;
+                    continue;
                 }
                 let Some(&(start, count)) = geometry.smodel_surface_ranges.get(surface as usize)
                 else {
@@ -2662,7 +2957,7 @@ fn draw_geometry_diagnostic(
                 ) else {
                     continue;
                 };
-                if count == 0 {
+                if count == 0 || !retained_within("prop", start, count, geometry.smodel_index_count) {
                     continue;
                 }
                 if bound_prop != Some(key) {
@@ -2848,6 +3143,7 @@ fn draw_geometry_diagnostic(
     perf.frames += 1;
     perf.props_drawn += u64::from(prop_draws);
     perf.props_culled += u64::from(props_culled);
+    perf.props_unseen += u64::from(props_unseen);
     let start = *perf.window_start.get_or_insert(now);
     let span = now.duration_since(start).as_secs_f32();
     // (`IW4L_PERF_WINDOW=secs`: a shorter window, for tests that must end
@@ -2864,12 +3160,13 @@ fn draw_geometry_diagnostic(
         let n = perf.frames as f32;
         diag::info!(
             World,
-            "bo2zm perf: {:.1} fps, {:.2} ms average, {:.2} ms worst; props {:.0} drawn, {:.0} hidden by distance per frame; quality {}",
+            "bo2zm perf: {:.1} fps, {:.2} ms average, {:.2} ms worst; props {:.0} drawn, {:.0} hidden by distance, {:.0} out of view per frame; quality {}",
             (n - 1.0) / span,
             span * 1000.0 / (n - 1.0),
             perf.worst_ms,
             perf.props_drawn as f32 / n,
             perf.props_culled as f32 / n,
+            perf.props_unseen as f32 / n,
             if asset_core::t6_fast() { "fast" } else { "full" }
         );
         *perf = DiagnosticPerf {
@@ -2882,8 +3179,12 @@ fn draw_geometry_diagnostic(
     let line = format!(
         "drawsurf geometry diagnostic: world_draws={world_draws} smodel_draws={smodel_draws} xmodel_draws={xmodel_draws} fx_draws={fx_draws} world_skipped={world_skipped} smodel_skipped={smodel_skipped} xmodel_skipped={xmodel_skipped} fx_skipped={fx_skipped} g0_queued={g0_queued} untextured={untextured_n} {untextured:?}"
     );
-    // bo2zm: on change, at most every 5 s (it changes most frames).
-    let due = perf
+    // bo2zm: on change, at most every 5 s (it changes most frames);
+    // IW4L_RENDER_LOG=1 only (written on this thread, a slow write held up
+    // the frame).
+    static LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let due = *LOG.get_or_init(|| std::env::var_os("IW4L_RENDER_LOG").is_some())
+        && perf
         .last_census_at
         .is_none_or(|at| now.duration_since(at).as_secs_f32() >= 5.0);
     if last_census.as_ref() != Some(&line) && due {

@@ -236,6 +236,25 @@ struct Anim {
     ease_out: bool,
 }
 
+/// bo2mp: an entity container (`setupEntityContainer`): an element the
+/// engine keeps on a point in the world (an objective's waypoint), pushed to
+/// the screen's edge while the point is off screen if it clamps.
+#[derive(Clone, Debug, Default)]
+pub struct EntityContainer {
+    /// The entity it follows (-1: none, `offset` is the point).
+    pub entity: i32,
+    pub offset: [f32; 3],
+    pub clamp: bool,
+    pub stop_updating: bool,
+    pub fade_when_targeted: bool,
+    /// Where the host put it this frame (root units; None: not on screen).
+    pub screen: Option<[f32; 2]>,
+    pub clamped: bool,
+    /// The way to its point while clamped (degrees, counter-clockwise from
+    /// the right).
+    pub toward: f32,
+}
+
 /// The engine's part of one element.
 pub struct Element {
     pub id: usize,
@@ -278,6 +297,14 @@ pub struct Element {
     /// image (ms, 0 = for ever), and since when it has been waiting.
     stream_timeout: Option<f64>,
     stream_since: Option<f64>,
+    /// bo2mp: its entity container, if it is one.
+    pub entity: Option<EntityContainer>,
+    /// bo2mp: `setupEdgePointer(degrees)`: its children turn toward a
+    /// clamped container's point, plus the degrees.
+    pub edge_pointer: Option<f32>,
+    /// bo2mp: the turn an edge pointer above gives it (degrees, on top of
+    /// its own).
+    pub extra_rot: f32,
 }
 
 pub fn material_name(u: &UserData) -> Option<String> {
@@ -312,6 +339,8 @@ pub struct Lui {
     pub roots: Vec<Rc<UserData>>,
     /// The roots' rectangle in their units (0,0 top left).
     pub root_rect: Rect,
+    /// bo2mp: the entity containers made (`entity_containers`).
+    containers: Vec<Weak<UserData>>,
 }
 
 /// bo2mp: menus covered by another menu are not drawn (BO2's front end
@@ -326,6 +355,12 @@ pub fn set_hide_occluded(on: bool) {
 thread_local! {
     /// How many covered main menus the layout is inside (see `walk`).
     static BEHIND: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// bo2mp: inside a clamped entity container, the way to its point
+    /// (degrees, counter-clockwise from the right).
+    static TOWARD: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
+    /// bo2mp: inside an edge pointer that turns: its turn (degrees,
+    /// counter-clockwise) and the point it turns about (root units).
+    static ROT: std::cell::Cell<Option<(f32, f32, f32)>> = const { std::cell::Cell::new(None) };
 }
 
 /// bo2mp: a menu another menu covers, when that menu blurs what is under it
@@ -425,6 +460,9 @@ pub fn construct(vm: &mut Vm, kind: &'static str) -> Value {
         fields,
         stream_timeout: None,
         stream_since: None,
+        entity: None,
+        edge_pointer: None,
+        extra_rot: 0.0,
     };
     Value::User(Rc::new(UserData {
         kind: "LUIElement",
@@ -570,7 +608,10 @@ pub fn layout_clipped(root: &Rc<UserData>, rect: Rect) -> Vec<(Rc<UserData>, Rec
         if on {
             BEHIND.with(|b| b.set(b.get() + 1));
         }
+        let (toward, rot) = (TOWARD.get(), ROT.get());
         walk_in(u, parent, alpha, slot, xf, mid, clip, out);
+        TOWARD.set(toward);
+        ROT.set(rot);
         if on {
             BEHIND.with(|b| b.set(b.get() - 1));
         }
@@ -586,6 +627,22 @@ pub fn layout_clipped(root: &Rc<UserData>, rect: Rect) -> Vec<(Rc<UserData>, Rec
         out: &mut Vec<(Rc<UserData>, Rect, f32, Option<Rect>)>,
     ) {
         let (r, a, mut kids, list, xf, shown, stencil) = with(u, |e| {
+            // bo2mp: an entity container sits on its point (the host places
+            // it each frame, `set_entity_screen`): its parent's box is that
+            // point. Off screen it is not drawn; while it stops updating (an
+            // objective he is using) it keeps to its parent.
+            let (parent, alpha) = match &e.entity {
+                Some(c) if !c.stop_updating => match c.screen {
+                    Some([x, y]) => {
+                        let k = if xf.0 == 0.0 { 1.0 } else { xf.0 };
+                        let (px, py) = ((x - xf.1) / k, (y - xf.2) / k);
+                        TOWARD.set(c.clamped.then_some(c.toward));
+                        ([px, py, px, py], alpha)
+                    }
+                    None => (parent, 0.0),
+                },
+                _ => (parent, alpha),
+            };
             let mut r = place(&e.state, parent);
             match slot {
                 Some((true, y0, y1)) => (r[1], r[3]) = (y0, y1),
@@ -603,7 +660,25 @@ pub fn layout_clipped(root: &Rc<UserData>, rect: Rect) -> Vec<(Rc<UserData>, Rec
                 let z = 1.0 / (1.0 - e.state.zoom / 1280.0);
                 (xf.0 * z, z * (xf.1 - mid.0) + mid.0, z * (xf.2 - mid.1) + mid.1)
             };
-            let shown = [r[0] * xf.0 + xf.1, r[1] * xf.0 + xf.2, r[2] * xf.0 + xf.1, r[3] * xf.0 + xf.2];
+            let mut shown = [r[0] * xf.0 + xf.1, r[1] * xf.0 + xf.2, r[2] * xf.0 + xf.1, r[3] * xf.0 + xf.2];
+            // bo2mp: under a turning edge pointer, turned about its centre
+            // (counter-clockwise on the screen, y down).
+            e.extra_rot = match ROT.get() {
+                Some((deg, px, py)) => {
+                    let (s, c) = deg.to_radians().sin_cos();
+                    let (cx, cy) = ((shown[0] + shown[2]) * 0.5, (shown[1] + shown[3]) * 0.5);
+                    let (ox, oy) = (cx - px, cy - py);
+                    let (dx, dy) = (px + ox * c + oy * s - cx, py - ox * s + oy * c - cy);
+                    shown = [shown[0] + dx, shown[1] + dy, shown[2] + dx, shown[3] + dy];
+                    deg
+                }
+                None => 0.0,
+            };
+            // An edge pointer in a clamped container turns its children
+            // toward the point.
+            if let (Some(off), Some(t)) = (e.edge_pointer.filter(|_| e.kind == "pointer"), TOWARD.get()) {
+                ROT.set(Some((t + off, (shown[0] + shown[2]) * 0.5, (shown[1] + shown[3]) * 0.5)));
+            }
             let a = alpha * e.state.alpha * e.state.alpha_multiplier;
             // bo2mp: a menu another menu covers (`occludedBy`, set by
             // CoD.Menu's occlusion_change) is not drawn (`set_hide_occluded`).
@@ -758,6 +833,7 @@ pub fn install(vm: &mut Vm) {
         finished: Vec::new(),
         roots: Vec::new(),
         root_rect: [0.0, 0.0, 1280.0, 720.0],
+        containers: Vec::new(),
     }));
     LUI.with(|slot| *slot.borrow_mut() = Some(l));
     let n = &natives;
@@ -1248,6 +1324,51 @@ pub fn install(vm: &mut Vm) {
         Ok(vec![])
     });
 
+    // bo2mp: setupEntityContainer(entity, x, y, z): an element the engine
+    // keeps on a point in the world (an entity's origin plus x y z; for
+    // entity -1, x y z): an objective's waypoint. The host places it each
+    // frame (`entity_containers`, `set_entity_screen`).
+    reg(vm, n, "setupEntityContainer", |_, a| {
+        let u = this(&a, "setupEntityContainer")?;
+        let f = |i: usize| arg(&a, i).as_num().unwrap_or(0.0);
+        let (entity, offset) = (f(1) as i32, [f(2), f(3), f(4)]);
+        with(&u, |e| e.kind = "entity");
+        container(&u, |c| (c.entity, c.offset) = (entity, offset));
+        Ok(vec![])
+    });
+    for name in ["setEntityContainerClamp", "setEntityContainerStopUpdating", "setEntityContainerFadeWhenTargeted"] {
+        reg(vm, n, name, move |_, a| {
+            let u = this(&a, name)?;
+            let on = arg(&a, 1).truthy();
+            container(&u, |c| match name {
+                "setEntityContainerClamp" => c.clamp = on,
+                "setEntityContainerStopUpdating" => c.stop_updating = on,
+                _ => c.fade_when_targeted = on,
+            });
+            Ok(vec![])
+        });
+    }
+    // setupEdgePointer(degrees): its children turn toward a clamped
+    // container's point, plus the degrees (BO2's arrow points down at 0);
+    // setupUIElement makes it a plain element again.
+    reg(vm, n, "setupEdgePointer", |_, a| {
+        let u = this(&a, "setupEdgePointer")?;
+        let off = arg(&a, 1).as_num().unwrap_or(0.0);
+        with(&u, |e| {
+            e.kind = "pointer";
+            e.edge_pointer = Some(off);
+        });
+        Ok(vec![])
+    });
+    reg(vm, n, "setupUIElement", |_, a| {
+        let u = this(&a, "setupUIElement")?;
+        with(&u, |e| {
+            e.kind = "element";
+            e.edge_pointer = None;
+        });
+        Ok(vec![])
+    });
+
     reg(vm, n, "setBlur", |_, a| {
         let u = this(&a, "setBlur")?;
         let v = arg(&a, 1).truthy();
@@ -1258,9 +1379,6 @@ pub fn install(vm: &mut Vm) {
     for name in [
         "setZoom",
         "setTileVertically",
-        "setEntityContainerClamp",
-        "setEntityContainerFadeWhenTargeted",
-        "setEntityContainerStopUpdating",
         "setOwnerControllerIndex",
         "setUI3DWindow",
         "addCompass",
@@ -1348,6 +1466,59 @@ pub fn commit_pending() {
 }
 
 /// Make an element a root (its tree is laid out and animated).
+/// bo2mp: an element's entity container, made the first time (and kept in
+/// `Lui::containers` for the host).
+fn container(u: &Rc<UserData>, f: impl FnOnce(&mut EntityContainer)) {
+    let first = with(u, |e| {
+        let first = e.entity.is_none();
+        f(e.entity.get_or_insert_with(EntityContainer::default));
+        first
+    });
+    if first {
+        lui().borrow_mut().containers.push(Rc::downgrade(u));
+    }
+}
+
+/// bo2mp: the entity containers alive that the engine places (not stopped
+/// updating): the element, its entity (-1: none), its offset (or point)
+/// and whether it clamps to the screen's edge.
+pub fn entity_containers() -> Vec<(Rc<UserData>, i32, [f32; 3], bool)> {
+    let l = lui();
+    let mut l = l.borrow_mut();
+    l.containers.retain(|w| w.strong_count() > 0);
+    l.containers
+        .iter()
+        .filter_map(Weak::upgrade)
+        .filter_map(|u| {
+            let c = with(&u, |e| e.entity.clone())?;
+            (!c.stop_updating).then_some((u, c.entity, c.offset, c.clamp))
+        })
+        .collect()
+}
+
+/// bo2mp: where the host put an entity container this frame (root units;
+/// None: not on screen), whether it is clamped to the screen's edge and
+/// the way to its point then (degrees, counter-clockwise from the right).
+/// The new clamp when it changed.
+pub fn set_entity_screen(u: &Rc<UserData>, screen: Option<[f32; 2]>, clamped: bool, toward: f32) -> Option<bool> {
+    with(u, |e| {
+        let c = e.entity.as_mut()?;
+        c.screen = screen;
+        c.toward = toward;
+        let was = std::mem::replace(&mut c.clamped, clamped);
+        (was != clamped).then_some(clamped)
+    })
+}
+
+/// The element's topmost ancestor (its root, when it is on one).
+pub fn top(u: &Rc<UserData>) -> Rc<UserData> {
+    let mut at = u.clone();
+    while let Some(p) = with(&at, |e| e.parent.as_ref().and_then(Weak::upgrade)) {
+        at = p;
+    }
+    at
+}
+
 pub fn add_root(u: Rc<UserData>) {
     lui().borrow_mut().roots.push(u);
 }

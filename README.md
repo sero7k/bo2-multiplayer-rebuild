@@ -170,6 +170,15 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
 
 ## Recent changes
 
+- 2026-10-10: bots move and aim by the original's own rules (how fast they turn and settle their aim, where they
+  look while walking, when they sprint, how fast semi-automatic guns fire, when they knife) and step around
+  teammates the way the original's bots do; they judge what they can see and reach from the map's own baked node
+  tables. The game thread no longer stalls: the HUD and menus only redraw values that change, settings save only
+  when a menu changes them, and settled bodies stop being re-posed. Objective markers show in the objective modes.
+- 2026-10-10: bodies, dropped guns and props out of view are no longer drawn, so each game window spends about a
+  sixth less time preparing a frame; each window needs much less memory (Nuketown at full quality: 3.1 to 2.2 GB of
+  RAM, 1.6 to 1.4 GB on the graphics card), a window without focus draws 30 times a second, and bullet marks look
+  up their light once instead of every frame.
 - 2026-10-10: a scorestreak from a care package waits in the inventory slot and comes out the original way: hold
   the switch-weapon key (controller Y) for a quarter second; a tap still swaps guns, now on release as in the
   original. The console's `give killstreak` hands it over through Black Ops II's own scripts. Sun shadows sit
@@ -215,6 +224,9 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
 
 ## Coming soon
 
+- Bots that stop getting stuck on corners and props: the original's own stuck rescue and its look-ahead check on
+  the route.
+- Bodies posed on the graphics card instead of the processor, so 8 drawn game windows run smoothly on one PC.
 - The Hellstorm's steer prompt key.
 - Movement and gun-feel numbers checked side by side against the original game.
 - The care package's drop and pick-up checked side by side against the original game.

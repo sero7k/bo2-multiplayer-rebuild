@@ -38,7 +38,17 @@ pub const WEAPON_BOB_AMP_DTP: [f32; 2] = [0.002, 0.002];
 
 /// bo2zm: the movement flags of a dive to prone, in the air and sliding
 /// (movement_iw4::dive PMF_DIVE | PMF_DIVE_SLIDE).
-const PMF_DIVE_ANY: u32 = 0x0100_0000 | 0x0200_0000;
+pub(crate) const PMF_DIVE_ANY: u32 = 0x0100_0000 | 0x0200_0000;
+
+/// bo2zm: Black Ops II's idle sway does not count a dive as prone (the dive
+/// drops the view to prone from the frame after take-off).
+pub(crate) fn idle_e_flags(e_flags: u32, pm_flags: u32) -> u32 {
+    if pm_flags & PMF_DIVE_ANY != 0 {
+        e_flags & !eflags::PRONE
+    } else {
+        e_flags
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct WeaponBobState {
@@ -828,7 +838,11 @@ pub fn weapon_placement_assemble(
     steps_out[step] = WeaponPlacementAssembleStep::ApplyAngles;
     step += 1;
     let mut angles = weapon_placement_apply_angles(state, ps);
-    apply_idle_sway_scale(state, ps, idle, kinematics.frametime, &mut angles);
+    let idle_ps = WeaponPlacementPsInputs {
+        e_flags: idle_e_flags(ps.e_flags, kinematics.pm_flags),
+        ..ps
+    };
+    apply_idle_sway_scale(state, idle_ps, idle, kinematics.frametime, &mut angles);
     let dmg = weapon_damage_kick_angles(
         state.damage_kick_time,
         state.damage_time,

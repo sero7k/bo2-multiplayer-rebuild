@@ -88,6 +88,24 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             None => Ok(Value::Undefined),
         }
     });
+    // Every gun on the ground (the engine's dropped-weapon queue, not the
+    // Scavenger bags): an exploding car's script lifts the car, deletes the
+    // guns resting on it, then sets it down again.
+    vm.bind("getdroppedweapons", false, |vm, world, _, _| {
+        let guns: Vec<ObjRef> = world
+            .resource::<Zm>()
+            .ents
+            .values()
+            .filter(|e| e.classname == WEAPON_ITEM && e.item.is_some())
+            .filter_map(|e| e.obj)
+            .collect();
+        Ok(super::list(
+            guns.into_iter()
+                .filter(|obj| vm.alive(*obj))
+                .map(Value::Object)
+                .collect(),
+        ))
+    });
     m!("itemweaponsetammo", |vm, world, s, a| {
         let Some(number) = item_number(vm, world, s) else {
             return Ok(Value::Undefined);

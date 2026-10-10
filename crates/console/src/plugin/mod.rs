@@ -118,6 +118,7 @@ impl Plugin for ConsolePlugin {
                     .after(crate::user_settings::consume_menu_binding)
                     .before(crate::user_settings::sync_binding_view),
             )
+            .add_systems(Update, crate::user_settings::push_omni_movement_setting)
             .add_systems(
                 PreUpdate,
                 (

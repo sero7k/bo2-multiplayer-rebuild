@@ -632,10 +632,13 @@ fn zm_script_hud(
     ),
 ) {
     // The game's own pictures the scripts put up (the red low-health
-    // overlay), once.
-    if pictures.is_empty()
-        && let Some(icons) = icons.as_deref()
+    // overlay), again whenever the loaded pictures change: the front end
+    // loads its own first (Create-a-Class's perk icons), and a match from
+    // the menus has to swap in the match's (its hit marker).
+    if let Some(icons) = icons.as_ref()
+        && icons.is_changed()
     {
+        pictures.clear();
         // (bo2mp: and the hit marker, `damage_feedback`; the teams' icons
         // on the outcome screen, `faction_*`.)
         for (name, image) in icons

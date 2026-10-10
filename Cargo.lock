@@ -6329,6 +6329,7 @@ dependencies = [
  "asset_world",
  "assets",
  "bevy",
+ "bo2_profile",
  "diag",
  "frame",
  "hks_t6",

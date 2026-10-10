@@ -7,7 +7,8 @@ struct DofParams {
     texel_dir: vec4<f32>,
     // near start, near end, far start, far end (world units).
     range: vec4<f32>,
-    // x: how much the far range blurs against the near one.
+    // x: how much the far range blurs against the near one; y: the blur
+    // curve's power (1 / r_dof_bias).
     blur: vec4<f32>,
     // x: the scene's near plane; y: where the gun's depth band starts;
     // z: the band's size (reversed depth); w: the gun's own near plane.
@@ -93,12 +94,14 @@ fn blur(in: FullscreenOut) -> @location(0) vec4<f32> {
 }
 
 // Put back: the sharp pixel or the blurred one by how blurred it is (its own
-// amount, or a near object's spread over it).
+// amount, or a near object's spread over it). BO2 picks its blur size from
+// the amount through r_dof_bias: size = near blur x amount^(1 / bias), so
+// at its 0.5 a half-blurred gun gets a quarter of the blur, not half.
 @fragment
 fn composite(in: FullscreenOut) -> @location(0) vec4<f32> {
     let s = textureSample(source, source_sampler, in.uv).rgb;
     let b = textureSample(blurred, source_sampler, in.uv);
     let own = amount(vec2<i32>(floor(in.position.xy)));
-    let k = max(own, saturate(b.a * 2.0 - own));
-    return vec4(mix(s, b.rgb, smoothstep(0.0, 1.0, k)), 1.0);
+    let k = pow(max(own, saturate(b.a * 2.0 - own)), params.blur.y);
+    return vec4(mix(s, b.rgb, k), 1.0);
 }

@@ -32,7 +32,7 @@ const STATS: &[&str] = &[
 pub(super) fn get(
     vm: &mut Vm<World>,
     world: &mut World,
-    _obj: ObjRef,
+    obj: ObjRef,
     kind: ObjKind,
     field: Str,
 ) -> Option<Value> {
@@ -149,6 +149,12 @@ pub(super) fn get(
             let c = e.classname.clone();
             Some(vm.string(&c))
         }
+        // Engine fields every entity has, 0 until the map or a script sets
+        // them (`destructible_car_explosion` adds to a car's health).
+        "health" | "maxhealth" => match vm.raw_field(obj, field) {
+            Value::Undefined => Some(Value::Int(0)),
+            v => Some(v),
+        },
         _ => None,
     }
 }

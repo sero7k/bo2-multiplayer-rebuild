@@ -1068,6 +1068,28 @@ impl Host {
             .map(|(u, rect, alpha, clip)| drawn_of(&u, rect, alpha, clip))
             .collect()
     }
+
+    /// bo2mp: the entity containers on the roots to place this frame (see
+    /// `lui::entity_containers`).
+    pub fn entity_containers(&self) -> Vec<(Rc<UserData>, i32, [f32; 3], bool)> {
+        let roots: Vec<Rc<UserData>> = self.roots.iter().filter_map(lui::element).collect();
+        lui::entity_containers()
+            .into_iter()
+            .filter(|(u, ..)| {
+                let t = lui::top(u);
+                roots.iter().any(|r| Rc::ptr_eq(r, &t))
+            })
+            .collect()
+    }
+
+    /// bo2mp: place one (see `lui::set_entity_screen`); it hears
+    /// `entity_container_clamped` / `_unclamped` when that changes.
+    pub fn place_entity_container(&mut self, u: &Rc<UserData>, screen: Option<[f32; 2]>, clamped: bool, toward: f32) {
+        if let Some(on) = lui::set_entity_screen(u, screen, clamped, toward) {
+            let name = if on { "entity_container_clamped" } else { "entity_container_unclamped" };
+            self.event(&Value::User(u.clone()), name, &[]);
+        }
+    }
 }
 
 fn drawn_of(u: &Rc<UserData>, rect: Rect, alpha: f32, clip: Option<Rect>) -> Drawn {
@@ -1094,7 +1116,7 @@ fn drawn_of(u: &Rc<UserData>, rect: Rect, alpha: f32, clip: Option<Rect>) -> Dra
             (0, ..) => 2,
             (a, ..) => a,
         },
-        z_rot: s.z_rot,
+        z_rot: s.z_rot + e.extra_rot,
         x_rot: s.x_rot,
         y_rot: s.y_rot,
         dashes: e.dashes,

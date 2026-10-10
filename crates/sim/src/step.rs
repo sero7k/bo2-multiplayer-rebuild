@@ -32,6 +32,28 @@ pub(crate) struct StepRequest {
     output: Option<Snapshot>,
 }
 
+/// bo2mp: a part of the authority step slower than this names itself in
+/// the log (ms), profiling or not: a freeze he would feel says where it was.
+const STALL_MS: f64 = 250.0;
+
+/// Times one part of the step; a slow one logs when it ends.
+pub(crate) struct StallGuard(std::time::Instant, &'static str, Option<f64>);
+
+impl StallGuard {
+    pub(crate) fn new(part: &'static str) -> Self {
+        Self(std::time::Instant::now(), part, diag::thread_cpu_ms())
+    }
+}
+
+impl Drop for StallGuard {
+    fn drop(&mut self) {
+        let ms = self.0.elapsed().as_secs_f64() * 1000.0;
+        if ms > STALL_MS {
+            diag::warn!(Sim, "bo2mp stall: {} took {ms:.0} ms{}", self.1, diag::busy_note(self.2));
+        }
+    }
+}
+
 pub(crate) fn schedule() -> Schedule {
     let mut schedule = Schedule::default();
     schedule.add_systems(
@@ -256,6 +278,7 @@ fn apply_actions_system(world: &mut World) {
 }
 
 fn run_players_system(ecs: &mut World) {
+    let _stall = StallGuard::new("run_players");
     let tick = ecs.resource::<StepRequest>().tick;
     let level_time = crate::level_time_ms(tick);
     let input = ecs.resource::<StepRequest>().input.clone();
@@ -539,6 +562,7 @@ fn run_players_system(ecs: &mut World) {
 }
 
 fn record_collision_state_system(ecs: &mut World) {
+    let _stall = StallGuard::new("record_collision_state");
     let tick = ecs.resource::<StepRequest>().tick;
     let msec = ecs.resource::<StepRequest>().msec;
     let cmd_ids: Vec<crate::world::ClientId> = ecs
@@ -566,18 +590,32 @@ fn run_entity_types_system(ecs: &mut World) {
     let allow_move = world.phase() == MatchPhase::Playing;
     world.enter_kernel_phase(crate::gentity::KernelPhase::RunEntityTypes);
     if allow_move {
-        phase_materialize_entity_dobjs(&mut world);
+        {
+            let _stall = StallGuard::new("materialize_entity_dobjs");
+            phase_materialize_entity_dobjs(&mut world);
+        }
 
         if world.publishes_snapshot() {
+            let _stall = StallGuard::new("entity_collision_history");
             world.record_entity_collision_history(tick);
         }
 
-        crate::remote_missile::advance(&mut world, tick);
-        crate::entity_run::phase_run_entity_thinks(&mut world, tick);
+        {
+            let _stall = StallGuard::new("remote_missiles");
+            crate::remote_missile::advance(&mut world, tick);
+        }
+        {
+            let _stall = StallGuard::new("entity_thinks");
+            crate::entity_run::phase_run_entity_thinks(&mut world, tick);
+        }
         if world.publishes_snapshot() {
-            world.world_objects_mut().glass_update(
-                i32::try_from(tick.0.saturating_mul(crate::MATCH_TICK_MS)).unwrap_or(i32::MAX),
-            );
+            {
+                let _stall = StallGuard::new("glass");
+                world.world_objects_mut().glass_update(
+                    i32::try_from(tick.0.saturating_mul(crate::MATCH_TICK_MS)).unwrap_or(i32::MAX),
+                );
+            }
+            let _stall = StallGuard::new("animated_map_models");
             phase_animated_map_models(&mut world, tick, msec);
         }
     } else {
@@ -586,6 +624,7 @@ fn run_entity_types_system(ecs: &mut World) {
 }
 
 fn dispatch_touches_system(ecs: &mut World) {
+    let _stall = StallGuard::new("dispatch_touches");
     let tick = ecs.resource::<StepRequest>().tick;
     let input = ecs.resource::<StepRequest>().input.clone();
     let mut world = frame_world(ecs);
@@ -618,6 +657,7 @@ fn dispatch_touches_system(ecs: &mut World) {
 }
 
 fn finalize_system(ecs: &mut World) {
+    let _stall = StallGuard::new("finalize");
     let tick = ecs.resource::<StepRequest>().tick;
     let input = ecs.resource::<StepRequest>().input.clone();
     let mut world = frame_world(ecs);
@@ -641,6 +681,7 @@ fn finalize_system(ecs: &mut World) {
 }
 
 fn publish_snapshot_system(ecs: &mut World) {
+    let _stall = StallGuard::new("publish_snapshot");
     let tick = ecs.resource::<StepRequest>().tick;
     let mut world = frame_world(ecs);
     world.enter_kernel_phase(crate::gentity::KernelPhase::PublishSnapshot);
@@ -2110,8 +2151,21 @@ pub(crate) fn bo2_feel_mw2() -> bool {
     *MW2.get_or_init(|| std::env::var("BO2_FEEL").is_ok_and(|v| v.eq_ignore_ascii_case("mw2")))
 }
 
+/// bo2zm: the Controls setting "Omni Movement" (off by
+/// default, an option in the Controls menu for whoever wants it).
+static OMNI_SETTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// bo2zm: his "Omni Movement" setting; the next game started here reads it.
+pub fn set_omni_movement(on: bool) {
+    OMNI_SETTING.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// bo2zm: the "Omni Movement" setting as a game starting now takes it.
+pub(crate) fn omni_movement_setting() -> bool {
+    OMNI_SETTING.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn bo2_feel_from(t6: &crate::t6::T6Runtime) -> movement_iw4::Bo2Feel {
-    static OMNI: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if bo2_feel_mw2() {
         return movement_iw4::Bo2Feel::IW4;
     }
@@ -2158,9 +2212,10 @@ fn bo2_feel_from(t6: &crate::t6::T6Runtime) -> movement_iw4::Bo2Feel {
         sprint_cycle_scale: 1.0,
         ducked_sprint_cycle_scale: 1.0,
         dtp_cycle_scale: 1.0,
-        omni: *OMNI.get_or_init(|| {
-            !std::env::var("BO2_OMNI").is_ok_and(|v| v.eq_ignore_ascii_case("off"))
-        }),
+        // BO2 sprints forward only (forwardmove above
+        // player_sprintForwardMinimum); off by default, the
+        // Controls menu's "Omni Movement" turns it on (read at game start).
+        omni: t6.omni,
         // Low climbs keep the gun in hand (defaults until real BO2 is read).
         mantle_weapon_height: number("mantle_weapon_height", 39.0),
         mantle_weapon_anim_height: number("mantle_weapon_anim_height", 32.0),
@@ -2207,6 +2262,9 @@ fn pmove_context(
                 } else {
                     0
                 },
+                // BO2 feel M10c: no 0.4 prone-aim slow; sprint speed only
+                // while standing.
+                bo2: feel.on,
             },
             weapon_move_scale: 1.0,
             old_buttons,

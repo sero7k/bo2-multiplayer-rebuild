@@ -43,6 +43,7 @@ mod natives_game;
 mod natives_mp;
 mod natives_player;
 mod nav;
+mod objectives;
 mod playeranim;
 mod players;
 mod presence;
@@ -75,6 +76,8 @@ pub struct T6Install {
     pub entities: Vec<String>,
     /// The map's AI path nodes, in node order.
     pub path_nodes: Vec<T6PathNode>,
+    /// The map compiler's baked node sight and smooth tables.
+    pub path_tables: T6PathTables,
     /// Animations the server times and moves actors by.
     pub anims: Vec<T6Anim>,
     /// Animation state definitions: (name, text).
@@ -159,6 +162,17 @@ pub struct T6PathNode {
     pub links: Vec<(u16, f32, bool)>,
 }
 
+/// The map compiler's baked path tables: which node pairs see each other
+/// (`vis`, bit `node_count * i + j` for i < j) and which a straight walk
+/// joins (`smooth`, bit `original_count * i + j`).
+#[derive(Clone, Debug, Default)]
+pub struct T6PathTables {
+    pub node_count: u32,
+    pub original_count: u32,
+    pub vis: Vec<u8>,
+    pub smooth: Vec<u8>,
+}
+
 /// An animation's timing, root motion and notetracks.
 #[derive(Clone, Debug, Default)]
 pub struct T6Anim {
@@ -173,6 +187,8 @@ pub struct T6Anim {
 #[derive(Resource)]
 pub(crate) struct T6Runtime {
     pub vm: Vm<World>,
+    /// His "Omni Movement" setting when the game started.
+    pub omni: bool,
 }
 
 /// An entity the scripts see (not a player).
@@ -315,6 +331,8 @@ pub(crate) struct Zm {
     pub brush_rows: BTreeMap<u32, brushes::BrushRow>,
     /// Path node script objects, by node index.
     pub node_objs: Vec<ObjRef>,
+    /// Each path node object's node (the bot scripts name nodes by them).
+    pub node_of: std::collections::HashMap<ObjRef, u32>,
     /// Animations by lower-case name.
     pub anims: std::collections::HashMap<String, T6Anim>,
     pub clips: std::collections::HashMap<String, Arc<xmodel_runtime::AnimClip>>,
@@ -364,6 +382,8 @@ pub(crate) struct Zm {
     /// What each player's HUD was last sent (round, hint, offhand,
     /// action slots).
     pub hud_sent: BTreeMap<u32, (String, String, String, String)>,
+    /// bo2mp: mp/statstable.csv's items, read once.
+    pub items: loadout::ItemCache,
     /// bo2zm M4: each player's d-pad slots (`setactionslot(slot, "weapon",
     /// name)`): (slot, weapon or kind).
     pub action_slots: BTreeMap<u32, Vec<(i32, String)>>,
@@ -384,6 +404,16 @@ pub(crate) struct Zm {
     pub hints: BTreeMap<u32, String>,
     /// bo2mp: the destructible definitions by lower-case name.
     pub destructibles: std::collections::HashMap<String, Arc<xmodel_runtime::T5DestructibleDef>>,
+    /// bo2mp: a round restart the scripts asked for (`map_restart`), run at
+    /// the next frame's start: whether the players' `pers[]` carry over.
+    pub pending_restart: Option<bool>,
+    /// bo2mp: BO2's 32 objectives (`objective_add`), reset with the level.
+    pub objectives: [objectives::Objective; objectives::MAX],
+    /// bo2mp: players coming back from a round restart: their `pers[]` and
+    /// whether each is a bot.
+    pub rejoin: BTreeMap<u32, (Value, bool)>,
+    /// The map's entities (their text), spawned again at a round restart.
+    pub map_entities: Vec<String>,
 }
 
 /// Entity numbers: players are their client number; the rest start here.
@@ -461,6 +491,7 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
         bots::bind(&mut vm);
         killstreaks::bind(&mut vm);
         loadout::bind(&mut vm);
+        objectives::bind(&mut vm);
         items::bind(&mut vm);
         // bo2mp lane F: the body's animation natives (the death path).
         playeranim::bind(&mut vm);
@@ -482,6 +513,13 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
     // services, ranked play off (a local match, as Combat Training).
     // BO2MP_BOTS=<friends>,<enemies>[,<difficulty 0-3>]: bots, as BO2's
     // bot setup screen sets them (a test aid until the lobby does).
+    // A script thread that runs over 250 ms names itself (a freeze he
+    // would feel); IW4L_T6_PROF=1: over 20 ms.
+    vm.slow_thread_ms = if prof_on() { 20.0 } else { 250.0 };
+    // Profiling: which scripts and builtins the ticks spend on.
+    if prof_on() {
+        vm.profile = Some(gsc_t6::vm::ScriptProfile::default());
+    }
     let mut bot_difficulty = 1;
     let lobby = inst.bots.map(|(f, e, d)| format!("{f},{e},{d}"));
     if mp && let Some(spec) = std::env::var("BO2MP_BOTS").ok().or(lobby) {
@@ -565,41 +603,28 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
     // routes into them and stood there (M4 retest 1).
     let mut nodes = inst.path_nodes.clone();
     actors::drop_nodes_to_floor(world, &mut nodes);
-    let mut node_objs = Vec::with_capacity(nodes.len());
-    for n in &nodes {
-        let o = vm.alloc_object(ObjKind::Struct);
-        let kind = match n.ty {
-            nav::NODE_PATH => "Path",
-            nav::NODE_NEGOTIATION_BEGIN => "Begin",
-            nav::NODE_NEGOTIATION_END => "End",
-            _ => "Path",
-        };
-        let fields: [(&str, Value); 4] = [
-            ("origin", Value::Vec3(n.origin)),
-            ("angles", Value::Vec3([0.0, n.angle, 0.0])),
-            ("spawnflags", Value::Int(n.spawnflags as i32)),
-            ("radius", Value::Float(n.radius)),
-        ];
-        for (k, v) in fields {
-            let f = vm.intern(k);
-            vm.set_raw_field(o, f, v);
-        }
-        for (k, v) in [
-            ("type", kind),
-            ("targetname", n.targetname.as_str()),
-            ("target", n.target.as_str()),
-            ("script_noteworthy", n.script_noteworthy.as_str()),
-            ("script_linkname", n.script_linkname.as_str()),
-            ("animscript", n.animscript.as_str()),
-        ] {
-            if !v.is_empty() {
-                let f = vm.intern(k);
-                let s = vm.string(v);
-                vm.set_raw_field(o, f, s);
-            }
-        }
-        node_objs.push(o);
-    }
+    let node_objs = node_objects(&mut vm, &nodes);
+    let baked = nav::Baked::new(&inst.path_tables, nodes.len());
+    let linked: Vec<(u32, u32)> = nodes
+        .iter()
+        .enumerate()
+        .flat_map(|(i, n)| n.links.iter().map(move |l| (i as u32, u32::from(l.0))))
+        .collect();
+    let seen = linked.iter().filter(|&&(i, j)| baked.visible(i, j) == Some(true)).count();
+    let smooth = linked.iter().filter(|&&(i, j)| baked.smooth(i, j)).count();
+    diag::info!(
+        Sim,
+        "bo2mp path tables: {} nodes ({} compiled), sight table {} bytes (side {}), smooth table {} bytes (side {}); of {} links, {} see each other, {} walk straight",
+        inst.path_tables.node_count,
+        inst.path_tables.original_count,
+        inst.path_tables.vis.len(),
+        baked.sides().0,
+        inst.path_tables.smooth.len(),
+        baked.sides().1,
+        linked.len(),
+        seen,
+        smooth,
+    );
     let anims: std::collections::HashMap<String, T6Anim> = inst
         .anims
         .into_iter()
@@ -674,7 +699,8 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
         gamesettings: inst.gamesettings,
         tables: Arc::new(inst.tables),
         next_entnum: FIRST_ENTNUM,
-        nav: nav::Nav::new(nodes),
+        nav: nav::Nav::new(nodes).with_baked(baked),
+        node_of: node_objs.iter().enumerate().map(|(i, o)| (*o, i as u32)).collect(),
         node_objs,
         anims,
         asds,
@@ -686,10 +712,50 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
         ..Default::default()
     });
     killstreaks::install(world, inst.vehicles);
-    world.insert_resource(T6Runtime { vm });
+    world.insert_resource(T6Runtime { vm, omni: crate::step::omni_movement_setting() });
     world.insert_resource(playeranim::Bodies::new(inst.playeranim));
     world.insert_resource(PendingEntities(inst.entities));
     Ok(())
+}
+
+/// The path nodes' script objects, by node index.
+fn node_objects(vm: &mut Vm<World>, nodes: &[T6PathNode]) -> Vec<ObjRef> {
+    let mut node_objs = Vec::with_capacity(nodes.len());
+    for n in nodes {
+        let o = vm.alloc_object(ObjKind::Struct);
+        let kind = match n.ty {
+            nav::NODE_PATH => "Path",
+            nav::NODE_NEGOTIATION_BEGIN => "Begin",
+            nav::NODE_NEGOTIATION_END => "End",
+            _ => "Path",
+        };
+        let fields: [(&str, Value); 4] = [
+            ("origin", Value::Vec3(n.origin)),
+            ("angles", Value::Vec3([0.0, n.angle, 0.0])),
+            ("spawnflags", Value::Int(n.spawnflags as i32)),
+            ("radius", Value::Float(n.radius)),
+        ];
+        for (k, v) in fields {
+            let f = vm.intern(k);
+            vm.set_raw_field(o, f, v);
+        }
+        for (k, v) in [
+            ("type", kind),
+            ("targetname", n.targetname.as_str()),
+            ("target", n.target.as_str()),
+            ("script_noteworthy", n.script_noteworthy.as_str()),
+            ("script_linkname", n.script_linkname.as_str()),
+            ("animscript", n.animscript.as_str()),
+        ] {
+            if !v.is_empty() {
+                let f = vm.intern(k);
+                let s = vm.string(v);
+                vm.set_raw_field(o, f, s);
+            }
+        }
+        node_objs.push(o);
+    }
+    node_objs
 }
 
 #[derive(Resource)]
@@ -883,22 +949,139 @@ pub(crate) fn start(world: &mut World) {
             vm.thread_count()
         );
     });
-    world.resource_mut::<Zm>().started = true;
+    let mut zm = world.resource_mut::<Zm>();
+    zm.started = true;
+    zm.map_entities = texts;
     report(world);
+}
+
+/// bo2mp: Black Ops II's `map_restart` (a round of Search and Destroy over,
+/// Demolition's half time): the level starts again in the same match. Every
+/// script thread and object goes, and all the level put in the world (its
+/// entities, grenades in the air, dropped guns, bodies); `game[]`, the
+/// dvars and the loaded assets stay, and each player comes back in with his
+/// `pers[]` when `persist` (`map_restart( 1 )`).
+fn restart(world: &mut World, tick: crate::Tick, persist: bool) {
+    killstreaks::restart(world);
+    presence::retire_all(world);
+    brushes::retire_all(world);
+    let rejoin: BTreeMap<u32, (Value, bool)> = with_vm(world, |vm, world| {
+        let pers = vm.intern("pers");
+        let rejoin = world
+            .resource::<Zm>()
+            .players
+            .iter()
+            .map(|(c, p)| {
+                let kept = if persist { vm.raw_field(p.obj, pers) } else { Value::Undefined };
+                (*c, (kept, p.test_client))
+            })
+            .collect();
+        vm.restart();
+        rejoin
+    })
+    .unwrap_or_default();
+    {
+        let mut f = frame(world);
+        for p in crate::frame::collect_projectiles(f.ecs()) {
+            f.remove_projectile_by_number(p.entnum);
+        }
+        for number in f.dropped_item_numbers_sorted() {
+            if f.remove_dropped_item_by_number(number).is_some() {
+                f.free_dynamic_entity_number(number);
+            }
+        }
+        *f.corpses_mut() = crate::PlayerCorpsePool::default();
+        for id in f.client_ids_sorted() {
+            let (origin, angles) = f
+                .player(id)
+                .map_or(([0.0; 3], [0.0; 3]), |ps| (ps.origin, ps.viewangles));
+            crate::script_player::spawn(&mut f, tick, id, origin, angles, "spectator");
+        }
+    }
+    let old = std::mem::take(&mut *world.resource_mut::<Zm>());
+    let baked = old.nav.baked;
+    let nodes = old.nav.nodes;
+    let node_objs = with_vm(world, |vm, _| node_objects(vm, &nodes)).unwrap_or_default();
+    let texts = old.map_entities.clone();
+    let players = rejoin.len();
+    // What the level loaded and the client was last sent stay (the HUD
+    // goes by what it was sent; the models' serials keep counting).
+    world.insert_resource(Zm {
+        map: old.map,
+        tables: old.tables,
+        fx: old.fx,
+        client_sys: old.client_sys,
+        unbound: old.unbound,
+        presences: old.presences,
+        nav: nav::Nav::new(nodes).with_baked(baked),
+        brush_rows: old.brush_rows,
+        node_of: node_objs.iter().enumerate().map(|(i, o)| (*o, i as u32)).collect(),
+        node_objs,
+        anims: old.anims,
+        clips: old.clips,
+        strings: old.strings,
+        sound_aliases: old.sound_aliases,
+        shock_names: old.shock_names,
+        mp: old.mp,
+        ranked_match: old.ranked_match,
+        gamesettings: old.gamesettings,
+        team_scores: old.team_scores,
+        sound_lengths: old.sound_lengths,
+        retrievable_weapons: old.retrievable_weapons,
+        bots: old.bots.into_iter().map(|(n, b)| (n, b.restarted())).collect(),
+        test_client_requests: old.test_client_requests,
+        bot_leaves: old.bot_leaves,
+        bot_difficulty: old.bot_difficulty,
+        game_end_time: old.game_end_time,
+        map_center: old.map_center,
+        hud_sent: old.hud_sent,
+        autoplay_fire: old.autoplay_fire,
+        rounds_played: old.rounds_played,
+        asds: old.asds,
+        now_ms: old.now_ms,
+        next_thread_dump: old.next_thread_dump,
+        destructibles: old.destructibles,
+        next_entnum: FIRST_ENTNUM,
+        rejoin,
+        map_entities: old.map_entities,
+        ..Default::default()
+    });
+    world.insert_resource(engine_sounds::EngineSounds::default());
+    let script = world.get_resource::<playeranim::Bodies>().and_then(|b| b.script.clone());
+    world.insert_resource(playeranim::Bodies::new(script));
+    world.insert_resource(PendingEntities(texts));
+    diag::info!(Sim, "bo2mp map_restart({persist}): the level starts again, {players} players come back");
 }
 
 /// Each authority frame: connect players, move movers, run the scheduler.
 /// IW4L_T6_PROF=1: where a tick's time goes (milliseconds per tick, every
-/// 5 s of game).
+/// 5 s of game), and each slow tick's parts. Without it, only a stall
+/// (over STALL_TICK_MS) logs its parts.
 #[derive(Default)]
 struct Prof {
     ticks: u32,
     parts: Vec<(&'static str, f64)>,
+    /// This tick's parts so far.
+    tick: Vec<(&'static str, f64)>,
 }
+
+/// A tick slower than this logs its parts (ms).
+const SLOW_TICK_MS: f64 = 30.0;
+/// Profiling or not, a tick slower than this logs its parts (ms): a freeze
+/// he would feel names its cause.
+const STALL_TICK_MS: f64 = 250.0;
 
 fn prof_on() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("IW4L_T6_PROF").is_some())
+}
+
+thread_local! {
+    /// The thread's CPU time when this tick began (a slow tick says how
+    /// much of it was work).
+    static TICK_CPU: std::cell::Cell<Option<f64>> = const { std::cell::Cell::new(None) };
+    /// The profile line just went out: the scripts' own follows it.
+    static SCRIPT_REPORT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 fn prof_add(name: &'static str, since: std::time::Instant) -> std::time::Instant {
@@ -907,8 +1090,24 @@ fn prof_add(name: &'static str, since: std::time::Instant) -> std::time::Instant
     if let Ok(mut p) = PROF.lock() {
         let p = p.get_or_insert_with(Prof::default);
         if name == "tick" {
+            let ms = (now - since).as_secs_f64() * 1000.0;
+            let slow = if prof_on() { SLOW_TICK_MS } else { STALL_TICK_MS };
+            if ms > slow {
+                let parts: Vec<String> = p
+                    .tick
+                    .iter()
+                    .filter(|(n, _)| *n != "total")
+                    .map(|(n, ms)| format!("{n} {ms:.1}"))
+                    .collect();
+                let busy = diag::busy_note(TICK_CPU.get());
+                diag::warn!(Sim, "bo2mp slow tick: {ms:.1} ms ({}){busy}", parts.join(", "));
+            }
+            p.tick.clear();
             p.ticks += 1;
-            if p.ticks >= 100 {
+            if !prof_on() {
+                p.parts.clear();
+                p.ticks = 0;
+            } else if p.ticks >= 100 {
                 let line: Vec<String> = p
                     .parts
                     .iter()
@@ -916,6 +1115,7 @@ fn prof_add(name: &'static str, since: std::time::Instant) -> std::time::Instant
                     .collect();
                 diag::info!(Sim, "bo2zm t6 prof (ms per tick): {}", line.join(", "));
                 *p = Prof::default();
+                SCRIPT_REPORT.set(true);
             }
         } else {
             let ms = (now - since).as_secs_f64() * 1000.0;
@@ -923,6 +1123,7 @@ fn prof_add(name: &'static str, since: std::time::Instant) -> std::time::Instant
                 Some(row) => row.1 += ms,
                 None => p.parts.push((name, ms)),
             }
+            p.tick.push((name, ms));
         }
     }
     now
@@ -932,25 +1133,26 @@ pub(crate) fn advance(world: &mut World) {
     if !world.contains_resource::<T6Runtime>() {
         return;
     }
-    if prof_on() {
-        let t0 = std::time::Instant::now();
-        advance_inner(world);
-        prof_add("total", t0);
-        prof_add("tick", t0);
-        return;
-    }
+    // Always timed (a few clock reads a tick): a stall names its part.
+    let t0 = std::time::Instant::now();
+    TICK_CPU.set(diag::thread_cpu_ms());
     advance_inner(world);
+    if prof_on() {
+        prof_add("total", t0);
+    }
+    prof_add("tick", t0);
+    if SCRIPT_REPORT.replace(false)
+        && let Some(Some(line)) = with_vm(world, |vm, _| vm.profile_report(10))
+    {
+        diag::info!(Sim, "bo2mp script prof (ms over 100 ticks): {line}");
+    }
 }
 
 /// One step's sub-part, timed when profiling.
 fn timed(name: &'static str, world: &mut World, f: impl FnOnce(&mut World)) {
-    if prof_on() {
-        let t0 = std::time::Instant::now();
-        f(world);
-        prof_add(name, t0);
-    } else {
-        f(world);
-    }
+    let t0 = std::time::Instant::now();
+    f(world);
+    prof_add(name, t0);
 }
 
 fn advance_inner(world: &mut World) {
@@ -961,61 +1163,53 @@ fn advance_inner(world: &mut World) {
     if !advances {
         return;
     }
+    // bo2mp: a round restart (`map_restart`) asked for last frame: the
+    // level starts again before anything else runs.
+    let restart_asked = world.resource_mut::<Zm>().pending_restart.take();
+    if let Some(persist) = restart_asked {
+        restart(world, tick, persist);
+    }
     if world.contains_resource::<PendingEntities>() {
         start(world);
     }
     let now = i64::from(tick.0) * i64::from(crate::MATCH_TICK_MS);
     world.resource_mut::<Zm>().now_ms = now;
-    players::sync(world);
-    players::weapon_events(world);
-    players::shock_tick(world);
-    // bo2mp: each player's third-person animations, as BO2's script picks.
+    timed("players", world, |world| {
+        // (Its parts timed too: "p." in the profile line.)
+        timed("p.sync", world, players::sync);
+        timed("p.weapons", world, players::weapon_events);
+        timed("p.shock", world, players::shock_tick);
+        // bo2mp: each player's third-person animations, as BO2's script picks.
+        if world.resource::<Zm>().mp {
+            timed("p.anim", world, playeranim::advance);
+        }
+        timed("p.moves", world, players::movement_events);
+        if !world.resource::<Zm>().debris_paths_cut {
+            brushes::cut_debris_paths(world);
+        }
+    });
+    timed("bots", world, |world| {
+        // The test player's buttons go in before the triggers read them.
+        autoplay::drive(world, now);
+        // bo2mp: the bots' commands too.
+        if world.resource::<Zm>().mp {
+            bots::drive(world, now);
+        }
+    });
+    // Scorestreaks once every command is in (a bot capturing a crate
+    // holds use): thrown and fired projectiles reach the scripts,
+    // crafts fly, turrets aim.
     if world.resource::<Zm>().mp {
-        playeranim::advance(world);
+        timed("streaks", world, killstreaks::advance);
     }
-    players::movement_events(world);
-    if !world.resource::<Zm>().debris_paths_cut {
-        brushes::cut_debris_paths(world);
-    }
-    // The test player's buttons go in before the triggers read them.
-    autoplay::drive(world, now);
-    // bo2mp: the bots' commands too.
+    timed("tests", world, |world| autoplay_tests(world, now));
+    // Each timed apart: a stall names the one.
+    timed("vehicles", world, |world| vehicles::advance(world, crate::MATCH_TICK_MS as f32 / 1000.0));
+    timed("movers", world, |world| movers::advance(world, now));
+    timed("zbarriers", world, |world| zbarrier::advance(world, now));
+    timed("wallbuys", world, |world| wallbuys::advance(world, now));
     if world.resource::<Zm>().mp {
-        bots::drive(world, now);
-        // Scorestreaks once every command is in (a bot capturing a crate
-        // holds use): thrown and fired projectiles reach the scripts,
-        // crafts fly, turrets aim.
-        killstreaks::advance(world);
-    }
-    autoplay::buy_test(world, now);
-    autoplay::open_all_test(world, now);
-    autoplay::census_test(world, now);
-    autoplay::roam_test(world, now);
-    autoplay::glide_test(world, now);
-    autoplay::only_spawn_test(world);
-    autoplay::box_test(world, now);
-    autoplay::box_move_test(world, now);
-    autoplay::dual_wield_test(world, now);
-    autoplay::game_over_test(world, now);
-    autoplay::down_test(world, now);
-    autoplay::door_test(world, now);
-    autoplay::walk_test(world, now);
-    autoplay::floor_map(world, now);
-    autoplay::kite_test(world, now);
-    autoplay::face_test(world);
-    autoplay::zombie_block_test(world, now);
-    autoplay::solid_walk_test(world, now);
-    autoplay::perk_test(world, now);
-    autoplay::pap_test(world, now);
-    autoplay::powerup_test(world, now);
-    autoplay::fx_test(world, now);
-    autoplay::look_test(world);
-    vehicles::advance(world, crate::MATCH_TICK_MS as f32 / 1000.0);
-    movers::advance(world, now);
-    zbarrier::advance(world, now);
-    wallbuys::advance(world, now);
-    if world.resource::<Zm>().mp {
-        items::settle(world);
+        timed("items", world, items::settle);
     }
     timed("triggers", world, triggers::dispatch);
     timed("hud", world, |world| {
@@ -1066,6 +1260,33 @@ fn advance_inner(world: &mut World) {
     });
 
     report(world);
+}
+
+/// The test runs' hooks (each does nothing unless its test is on).
+fn autoplay_tests(world: &mut World, now: i64) {
+    autoplay::buy_test(world, now);
+    autoplay::open_all_test(world, now);
+    autoplay::census_test(world, now);
+    autoplay::roam_test(world, now);
+    autoplay::glide_test(world, now);
+    autoplay::only_spawn_test(world);
+    autoplay::box_test(world, now);
+    autoplay::box_move_test(world, now);
+    autoplay::dual_wield_test(world, now);
+    autoplay::game_over_test(world, now);
+    autoplay::down_test(world, now);
+    autoplay::door_test(world, now);
+    autoplay::walk_test(world, now);
+    autoplay::floor_map(world, now);
+    autoplay::kite_test(world, now);
+    autoplay::face_test(world);
+    autoplay::zombie_block_test(world, now);
+    autoplay::solid_walk_test(world, now);
+    autoplay::perk_test(world, now);
+    autoplay::pap_test(world, now);
+    autoplay::powerup_test(world, now);
+    autoplay::fx_test(world, now);
+    autoplay::look_test(world);
 }
 
 /// bo2mp: a player picked a spot on the map for a scorestreak (or backed
@@ -1543,6 +1764,12 @@ fn offhand_counts(world: &mut World, c: u32) -> String {
 /// round (`bo2zm_round`), the hint of the use trigger he faces
 /// (`bo2zm_hint`) and his grenades (`bo2zm_offhand`); sent when they
 /// change.
+/// A bot (`addtestclient`) has no screen: the server builds it no HUD
+/// (BO2 sends a test client none).
+pub(crate) fn is_bot(world: &World, c: u32) -> bool {
+    world.resource::<Zm>().players.get(&c).is_some_and(|p| p.test_client)
+}
+
 fn publish_hud(world: &mut World) {
     let round = with_vm(world, |vm, _| {
         let f = vm.intern("round_number");
@@ -1551,7 +1778,12 @@ fn publish_hud(world: &mut World) {
     .unwrap_or(0)
     .to_string();
     let clients: Vec<u32> = world.resource::<Zm>().players.keys().copied().collect();
+    // bo2mp: the scorestreak column's picks, the same for everyone.
+    let picks = loadout::streak_picks(world);
     for c in clients {
+        if is_bot(world, c) {
+            continue;
+        }
         let hint = world
             .resource::<Zm>()
             .hints
@@ -1573,12 +1805,11 @@ fn publish_hud(world: &mut World) {
             .and_then(|p| p.stats.get("momentum").copied())
             .unwrap_or(0)
             .to_string();
-        let picks = loadout::streak_picks(world);
         if !picks.is_empty() {
             let mut f = frame(world);
             if f.client_meta(crate::world::ClientId(c)).is_some() {
                 let dvars = &mut f.client_meta_mut(crate::world::ClientId(c)).client_dvars;
-                for (name, value) in [("bo2mp_streaks", picks), ("bo2mp_momentum", momentum)] {
+                for (name, value) in [("bo2mp_streaks", picks.clone()), ("bo2mp_momentum", momentum)] {
                     match dvars.iter_mut().find(|(k, _)| k == name) {
                         Some(row) if row.1 != value => row.1 = value,
                         Some(_) => {}

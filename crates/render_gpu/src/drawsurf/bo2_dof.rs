@@ -262,6 +262,14 @@ fn draw_bo2_dof(
     let band = render_backend::DEPTH_RANGE_BAND;
     // The gun is drawn with its own near plane (the depth resolve's too).
     let gun_near = Some(extracted.frame.view_model_near).filter(|n| *n > 0.0).unwrap_or(znear);
+    // r_dof_bias: BO2's blur size is near blur x amount^(1 / bias), and the
+    // far blur's share is (far / near)^bias, as the engine's own chain has.
+    let bias = extracted.frame.bias;
+    let (far_share, power) = if bias > 0.0 {
+        ((d.far_blur / d.near_blur).powf(bias), 1.0 / bias)
+    } else {
+        (d.far_blur / d.near_blur, 1.0)
+    };
     let write = |buffer: &Buffer, texel: Vec2, dir: Vec2| {
         let data: [f32; 20] = [
             texel.x,
@@ -272,8 +280,8 @@ fn draw_bo2_dof(
             d.near_end,
             d.far_start,
             d.far_end,
-            (d.far_blur / d.near_blur).clamp(0.0, 1.0),
-            0.0,
+            far_share.clamp(0.0, 1.0),
+            power,
             0.0,
             0.0,
             znear,

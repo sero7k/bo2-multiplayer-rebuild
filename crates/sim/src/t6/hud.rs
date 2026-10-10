@@ -366,6 +366,9 @@ pub(crate) fn publish(world: &mut World) {
     .unwrap_or_default();
     let clients: Vec<u32> = world.resource::<Zm>().players.keys().copied().collect();
     for c in clients {
+        if super::is_bot(world, c) {
+            continue;
+        }
         let team = teams.iter().find(|(t, _)| *t == c).map(|(_, t)| t.as_str()).unwrap_or("");
         let seen = |who: &Option<u32>, for_team: &Option<String>| {
             who.is_none_or(|w| w == c) && for_team.as_deref().is_none_or(|t| t == team)

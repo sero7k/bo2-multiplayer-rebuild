@@ -20,6 +20,7 @@ mod lui_frontend; // bo2mp lane C
 mod lui_scene; // bo2mp menus: the front end's 3D backdrop
 mod bo2mp_damage; // bo2mp lane C
 pub use lui_frontend::{Bo2mpFrontend, Bo2mpFrontendAssets};
+pub mod lui_omni_row; // bo2zm: Controls > Move "Omni Movement"
 
 pub use classes::equip_txn::{
     EquipTxnWatch, apply_pending_class_equip, resolve_class_equip_transaction,

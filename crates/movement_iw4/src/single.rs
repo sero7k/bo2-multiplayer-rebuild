@@ -101,13 +101,23 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
 
     // bo2zm: Black Ops II's dive to prone starts from a sprint, so it is
     // decided before the sprint and stance updates see the prone press;
-    // while it lasts, the dive owns sprint, stance and movement.
+    // while it lasts, the dive owns sprint, stance and movement. After its
+    // slide the player lies still a moment (their push is ignored), and a
+    // slide that has come to a stop is over before the stance update.
+    if context.walk.feel.dive {
+        if crate::dive::pausing(ps, cmd.server_time) {
+            cmd.forwardmove = 0;
+            cmd.rightmove = 0;
+        }
+        crate::dive::end_stopped_slide(ps, cmd.server_time);
+    }
+    let dive_stance = crate::dive::owns_stance(ps, cmd.server_time);
     let dive_start = context.walk.feel.dive
         && !context.weapon_blocks_prone
         && crate::dive::wants(ps, cmd, context.old_buttons);
     let diving = dive_start || crate::dive::active(ps);
 
-    // bo2zm: the gun can aim through a dive (an owner's ask, 10-09).
+    // bo2zm: the gun can aim through a dive (by request).
     let ads_cmd = crate::dive::ads_cmd(ps, cmd, diving);
     let _ads = update_ads_intent(ps, &ads_cmd, context.old_buttons, context.ads_intent);
     let mut sprint = context.sprint;
@@ -138,7 +148,15 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     };
     crate::feel::jump_out_of_sprint(ps, cmd, context.walk.feel, sprint_before, sprint_change); // bo2zm
     let previous_stance = ps.pm_flags & 3;
-    let dive_prone = !diving && crate::dive::holds_prone(ps, cmd, context.old_buttons);
+    // bo2zm: from the frame after take-off to the end of the still moment,
+    // the view drops to prone; a get-up pressed meanwhile is kept.
+    let dive_prone = if dive_stance {
+        crate::dive::queue_getup(ps, cmd, context.old_buttons);
+        crate::dive::force_prone(ps);
+        true
+    } else {
+        !diving && crate::dive::holds_prone(ps, cmd, context.old_buttons)
+    };
     if !diving && !dive_prone {
         // bo2zm: a held prone key does not drop the player back down while
         // they get up from a dive. Buttons the stance update clears stay
@@ -182,6 +200,10 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     update_view_height(ps, &pml, cmd, context.walk.cmd_scale.prone_lerp_ms);
     let mut bounds = context.bounds;
     bounds.maxs[2] = sync_stance_tail(ps);
+    if crate::dive::active(ps) {
+        // bo2zm: through a dive the body shrinks as the view drops.
+        bounds.maxs[2] = crate::dive::hull_height(ps);
+    }
 
     update_ads_frac(ps, pml.msec, context.ads_frac);
 
@@ -256,17 +278,15 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     if diving {
         if dive_start {
             crate::dive::start(ps, &mut pml, cmd, context.walk.jump.jump_height);
-        } else {
-            crate::dive::queue_getup(ps, cmd, context.old_buttons);
         }
         crate::dive::advance(
             ps,
-            &mut pml,
+            &pml,
             cmd,
             bounds,
             collision,
             context.walk.jump.jump_height,
-            context.air.player_spectate_speed_scale,
+            context.air,
         );
     } else if (ps.pm_flags & pm_flags::LADDER) != 0 {
         ladder_move(
@@ -300,9 +320,6 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     }
 
     complete_ground_trace(ps, &mut pml, bounds, collision, context.walk.feel);
-    if diving {
-        crate::dive::settle(ps, &pml, cmd, collision, bounds);
-    }
 
     if (ps.pm_flags & pm_flags::LADDER) != 0 {
         ladder_footsteps(ps, pml.msec, cmd.server_time, context.walk.feel);

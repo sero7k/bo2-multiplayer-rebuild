@@ -9,7 +9,7 @@
 //! `mp/statstable.csv` and `mp/attachmenttable.csv`.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 use bo2_profile::{Attachment, Item, Profile, SLOTS, StatValue};
@@ -24,9 +24,9 @@ use crate::vm::Vm;
 /// all off.
 const ENGINE_DVARS: &[(&str, &str)] = &[
     // The kill feed's name colours: yours and the other side's.
-    // Measured from the original game's kill feed: your side is drawn
-    // blue-grey and the other side tan, so BO2's MyTeam/EnemyTeam dvars are
-    // taken to default to these two colours.
+    // The real BO2 killfeed frames (ref 50, 54) measure these two exactly
+    // (his side blue-grey, the other tan); they are the engine's Allies and
+    // Axis colours, so BO2's MyTeam/EnemyTeam are taken to default to them.
     ("g_TeamColor_MyTeam", "0.60000002 0.63999999 0.69"),
     ("g_TeamColor_EnemyTeam", "0.64999998 0.56999999 0.41"),
     ("loc_language", "0"),
@@ -141,6 +141,11 @@ pub struct MpState {
     /// and each team's score (`CoD.TEAM_*` number -> score).
     pub board: Vec<BoardRow>,
     pub team_scores: Vec<(i32, f32)>,
+    /// bo2mp: the objectives the server sent (`bo2mp_objectives`), by index.
+    pub objectives: BTreeMap<i32, ObjectiveRow>,
+    /// The icons the HUD scripts gave them (`SetObjectiveIcon`), by (index,
+    /// icon type).
+    pub objective_icons: HashMap<(i32, i32), String>,
     /// The engine's message windows (`setupGameMessages(index)`: 0 the
     /// obituaries, the kill feed): the element and its index.
     pub windows: Vec<(Value, i32)>,
@@ -328,6 +333,55 @@ pub struct BoardRow {
     pub team: i32,
     pub name: String,
     pub cols: Vec<f32>,
+}
+
+/// bo2mp: one objective the server sent (`bo2mp_objectives`): a flag, a
+/// bomb site, a zone.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ObjectiveRow {
+    pub state: u8,
+    pub pos: [f32; 3],
+    /// The entity it follows (-1: none).
+    pub entity: i32,
+    pub icon: String,
+    pub name: String,
+    pub team_mask: i32,
+    /// 0-255.
+    pub progress: f32,
+    pub flags: i32,
+    pub team: i32,
+    /// The clients using it, a bit each.
+    pub using: u64,
+}
+
+/// The server's objectives (`index,state,x,y,z,entity,icon,name,teammask,
+/// progress,flags,team,using`, `;` between), by index.
+pub fn parse_objectives(s: &str) -> BTreeMap<i32, ObjectiveRow> {
+    s.split(';')
+        .filter_map(|row| {
+            let f: Vec<&str> = row.split(',').collect();
+            if f.len() < 13 {
+                return None;
+            }
+            let n = |i: usize| f[i].trim().parse::<f32>().unwrap_or(0.0);
+            let int = |i: usize| f[i].trim().parse::<i32>().unwrap_or(0);
+            Some((
+                int(0),
+                ObjectiveRow {
+                    state: u8::try_from(int(1)).unwrap_or(0),
+                    pos: [n(2), n(3), n(4)],
+                    entity: f[5].trim().parse().unwrap_or(-1),
+                    icon: f[6].to_owned(),
+                    name: f[7].to_owned(),
+                    team_mask: int(8),
+                    progress: n(9),
+                    flags: int(10),
+                    team: int(11),
+                    using: u64::from_str_radix(f[12].trim(), 16).unwrap_or(0),
+                },
+            ))
+        })
+        .collect()
 }
 
 pub type Mp = Rc<RefCell<MpState>>;
@@ -807,7 +861,7 @@ pub fn install(host: &mut Host) -> Mp {
     host.bind("UIExpression", "SessionMode_IsZombiesGame", |_, _| Ok(vec![Value::Num(0.0)]));
     host.bind("UIExpression", "GetCurrentMapTableName", |_, _| Ok(vec![Value::str("mp/mapstable.csv")]));
     host.bind("Engine", "CanPauseZombiesGame", |_, _| Ok(vec![Value::Bool(false)]));
-    // His PC: one local player (keyboard and mouse, or one pad), stats
+    // This PC: one local player (keyboard and mouse, or one pad), stats
     // read from his saved file at start, no online service (Demonware):
     // the front end's local (LAN) path.
     let one = |_: &mut Vm, _: Vec<Value>| Ok(vec![Value::Num(1.0)]);
@@ -1288,6 +1342,126 @@ pub fn install(host: &mut Host) -> Mp {
         let row = m.borrow().board.iter().find(|r| r.client == client).map(|r| r.team);
         Ok(vec![Value::Num(row.unwrap_or(v.borrow().team) as f32)])
     });
+    // bo2mp: the objectives (flags, bomb sites, zones) the server sent
+    // (`bo2mp_objectives`), as BO2's GametypeBase and ObjectiveWaypoint read
+    // them: GetObjectiveName(controller, index) and the rest.
+    fn objective<R>(mp: &Mp, a: &[Value], f: impl FnOnce(&ObjectiveRow) -> R) -> Option<R> {
+        mp.borrow().objectives.get(&num(a, 1)).map(f)
+    }
+    // Whether a client is using one (planting, defusing, capturing).
+    fn using(mp: &Mp, a: &[Value], client: i32) -> bool {
+        u32::try_from(client)
+            .ok()
+            .and_then(|c| objective(mp, a, |o| (o.using.checked_shr(c).unwrap_or(0) & 1) == 1))
+            .unwrap_or(false)
+    }
+    // The teams using one (each client's from the scoreboard).
+    fn using_teams(mp: &Mp, v: &RefCell<EngineValues>, a: &[Value]) -> Vec<i32> {
+        let bits = objective(mp, a, |o| o.using).unwrap_or(0);
+        let m = mp.borrow();
+        let mut teams: Vec<i32> = (0..64u32)
+            .filter(|c| ((bits >> c) & 1) == 1)
+            .map(|c| {
+                let row = m.board.iter().find(|r| r.client == c as i32).map(|r| r.team);
+                row.unwrap_or_else(|| if c == 0 { v.borrow().team } else { 0 })
+            })
+            .collect();
+        teams.sort_unstable();
+        teams.dedup();
+        teams
+    }
+    let m = mp.clone();
+    host.bind("Engine", "GetObjectiveName", move |_, a| {
+        let name = objective(&m, &a, |o| o.name.clone()).filter(|n| !n.is_empty());
+        Ok(name.map(|n| Value::str(&n)).into_iter().collect())
+    });
+    let m = mp.clone();
+    host.bind("Engine", "GetObjectiveState", move |_, a| {
+        Ok(vec![Value::Num(objective(&m, &a, |o| f32::from(o.state)).unwrap_or(0.0))])
+    });
+    // The player it follows (the HUD keeps it on him); another entity's is
+    // its position.
+    let m = mp.clone();
+    host.bind("Engine", "GetObjectiveEntity", move |_, a| {
+        let e = objective(&m, &a, |o| o.entity).filter(|e| (0..64).contains(e));
+        Ok(e.map(|e| Value::Num(e as f32)).into_iter().collect())
+    });
+    let m = mp.clone();
+    host.bind("Engine", "GetObjectivePosition", move |_, a| {
+        let p = objective(&m, &a, |o| o.pos).unwrap_or_default();
+        Ok(p.iter().map(|v| Value::Num(*v)).collect())
+    });
+    let m = mp.clone();
+    host.bind("Engine", "GetObjectiveTeam", move |_, a| {
+        Ok(vec![Value::Num(objective(&m, &a, |o| o.team).unwrap_or(0) as f32)])
+    });
+    let m = mp.clone();
+    host.bind("Engine", "GetObjectiveProgress", move |_, a| {
+        Ok(vec![Value::Num(objective(&m, &a, |o| o.progress / 255.0).unwrap_or(0.0))])
+    });
+    let m = mp.clone();
+    host.bind("Engine", "GetObjectiveGamemodeFlags", move |_, a| {
+        Ok(vec![Value::Num(objective(&m, &a, |o| o.flags).unwrap_or(0) as f32)])
+    });
+    // GetObjectiveIndexFromName(controller, name): -1 when none has it.
+    let m = mp.clone();
+    host.bind("Engine", "GetObjectiveIndexFromName", move |_, a| {
+        let name = arg(&a, 1).to_string();
+        let i = m.borrow().objectives.iter().find(|(_, o)| o.name == name).map_or(-1, |(i, _)| *i);
+        Ok(vec![Value::Num(i as f32)])
+    });
+    // IsPlayerUsing(controller, index, client); ObjectiveIsPlayerUsing
+    // (controller, index): him.
+    let m = mp.clone();
+    host.bind("Engine", "IsPlayerUsing", move |_, a| Ok(vec![Value::Bool(using(&m, &a, num(&a, 2)))]));
+    let m = mp.clone();
+    host.bind("Engine", "ObjectiveIsPlayerUsing", move |_, a| {
+        let client = if a.len() > 2 { num(&a, 2) } else { 0 };
+        Ok(vec![Value::Bool(using(&m, &a, client))])
+    });
+    let (m, v) = (mp.clone(), host.values.clone());
+    host.bind("Engine", "ObjectiveIsTeamUsing", move |_, a| {
+        Ok(vec![Value::Bool(using_teams(&m, &v, &a).contains(&num(&a, 2)))])
+    });
+    let (m, v) = (mp.clone(), host.values.clone());
+    host.bind("Engine", "ObjectiveIsAnyOtherTeamUsing", move |_, a| {
+        let team = num(&a, 2);
+        Ok(vec![Value::Bool(using_teams(&m, &v, &a).iter().any(|t| *t != team))])
+    });
+    let (m, v) = (mp.clone(), host.values.clone());
+    host.bind("Engine", "ObjectiveGetTeamUsingCount", move |_, a| {
+        Ok(vec![Value::Num(using_teams(&m, &v, &a).len() as f32)])
+    });
+    // No vehicles or remote-controlled streaks hide the waypoints yet.
+    for name in ["IsPlayerInVehicle", "IsPlayerRemoteControlling", "IsPlayerWeaponViewOnlyLinked"] {
+        host.bind("Engine", name, |_, _| Ok(vec![Value::Bool(false)]));
+    }
+    // SetObjectiveIcon(controller, index, type, material): the map's (and
+    // the shoutcaster's) icon for one, kept for the minimap.
+    let m = mp.clone();
+    host.bind("Engine", "SetObjectiveIcon", move |_, a| {
+        let icon = match arg(&a, 3) {
+            Value::User(u) => crate::lui::material_name(&u).unwrap_or_default(),
+            v => v.to_string(),
+        };
+        m.borrow_mut().objective_icons.insert((num(&a, 1), num(&a, 2)), icon);
+        Ok(vec![])
+    });
+    let m = mp.clone();
+    host.bind("Engine", "ClearObjectiveIcon", move |_, a| {
+        m.borrow_mut().objective_icons.remove(&(num(&a, 1), num(&a, 2)));
+        Ok(vec![])
+    });
+    for name in [
+        "SetCompassObjectiveIcon",
+        "ClearCompassObjectiveIcon",
+        "SetCarryIconEvent",
+        "SetObjectiveRotateWithEntity",
+        "SetObjectiveIgnoreEntity",
+        "SetObjectiveColorMaterialInCode",
+    ] {
+        host.bind("Engine", name, |_, _| Ok(vec![]));
+    }
     let v = host.values.clone();
     host.bind("Engine", "GetFactionColor", move |_, a| {
         let f = arg(&a, 0).to_string();

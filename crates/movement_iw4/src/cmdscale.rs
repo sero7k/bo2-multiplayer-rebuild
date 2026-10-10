@@ -22,6 +22,12 @@ pub struct CmdScaleWalkContext {
     /// How long the crouch-to-prone stage of an eye-height change takes, in
     /// ms (BO2 600). 0 = MW2's 400.
     pub prone_lerp_ms: i32,
+
+    /// BO2 feel M10c: BO2's walk scale. It has no 0.4 slow (MW2 slows
+    /// walking, leaning and aiming while prone by 0.4; BO2 aims prone at
+    /// the gun's own aiming speed only) and gives sprint speed only while
+    /// the eye is headed for standing height. false = MW2.
+    pub bo2: bool,
 }
 
 #[must_use]
@@ -53,11 +59,13 @@ pub fn cmd_scale_walk(ps: &PlayerState, cmd: &UserCmd, context: CmdScaleWalkCont
         return 0.0;
     }
 
-    if (flags & 0x40) != 0 || ps.leanf != 0.0 || sprinting_ads {
+    if !context.bo2 && ((flags & 0x40) != 0 || ps.leanf != 0.0 || sprinting_ads) {
         scale *= 0.4_f32;
     }
 
-    if (flags & 0x4000) != 0 {
+    if (flags & 0x4000) != 0
+        && (!context.bo2 || ps.view_height_target == crate::stance::view_height::STAND)
+    {
         scale *= context.player_sprint_speed_scale;
     }
 

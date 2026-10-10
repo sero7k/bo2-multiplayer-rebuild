@@ -706,6 +706,19 @@ pub struct PathNodeRef {
     pub links: Vec<(u16, f32, bool)>,
 }
 
+/// bo2mp: the map compiler's baked path tables (GameWorldMp `PathData`):
+/// which node pairs see each other (`pathVis`, bit `n * i + j` for i < j)
+/// and which a straight walk joins (`smoothCache`, bit
+/// `original * i + j`), as the engine's `Path_NodesVisible` and
+/// `Path_NodesSmooth` read them.
+#[derive(Clone, Debug, Default)]
+pub struct PathTablesRef {
+    pub node_count: u32,
+    pub original_count: u32,
+    pub vis: Vec<u8>,
+    pub smooth: Vec<u8>,
+}
+
 /// bo2zm M3: a string table: `rows` x `columns` cells, row-major.
 #[derive(Clone, Debug, Default)]
 pub struct StringTableRef {
@@ -889,6 +902,8 @@ pub struct ZoneCapture {
     pub localize: Vec<(String, String)>,
     /// bo2zm M3: the map's AI path nodes and their links (GameWorldMp).
     pub path_nodes: Vec<PathNodeRef>,
+    /// bo2mp: the map's baked node sight and smooth tables (GameWorldMp).
+    pub path_tables: PathTablesRef,
     /// Every XAnimParts: its timing and root translation.
     pub xanims: Vec<XAnimRef>,
     /// Every MapEnts entity string, in load order (the clipmap's own first).
@@ -2160,6 +2175,14 @@ impl WalkSink for ZoneCapture {
                         });
                     }
                 }
+                let vis_bytes = s.u32_at(pd, l::PathData::visBytes)? as usize;
+                let smooth_bytes = s.u32_at(pd, l::PathData::smoothBytes)? as usize;
+                self.path_tables = PathTablesRef {
+                    node_count: count as u32,
+                    original_count: s.u32_at(pd, l::PathData::originalNodeCount)?,
+                    vis: bytes_field(s, pd, l::PathData::pathVis, vis_bytes)?,
+                    smooth: bytes_field(s, pd, l::PathData::smoothCache, smooth_bytes)?,
+                };
                 None
             }
             AssetType::Localize => {

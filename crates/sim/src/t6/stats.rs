@@ -96,6 +96,9 @@ pub(crate) fn player(world: &mut World, client: u32) -> &mut PlayerStats {
     }
     if !world.resource::<ServerStats>().players.contains_key(&client) {
         let file = is_local(world, client).then(local_path).flatten();
+        if file.is_some() {
+            bo2_profile::wait_saved(std::time::Duration::from_secs(10));
+        }
         let stats = file.as_deref().map(Profile::read_stats_file).unwrap_or_default();
         let (items, atts) = (table_rows(world, "mp/statstable.csv"), table_rows(world, "mp/attachmenttable.csv"));
         let mut profile = Profile::from_tables(&items, &atts, &|_| None, stats);
@@ -192,10 +195,10 @@ fn weapon_item(world: &mut World, client: u32, weapon: &str) -> Option<i32> {
     player(world, client).profile.item_by_ref(reference).map(|it| it.index)
 }
 
-/// Each tick: write the local player's changed stats to his file (merged
-/// over what is there now). Only a ranked match's (Combat Training): as in
-/// BO2, a custom game keeps its stats to itself (his Combat Record and
-/// weapon stats count only ranked play).
+/// Each tick: hand the local player's changed stats to the saver (merged
+/// over what his file holds then). Only a ranked match's (Combat
+/// Training): as in BO2, a custom game keeps its stats to itself (his
+/// Combat Record and weapon stats count only ranked play).
 pub(crate) fn save(world: &mut World, force: bool) {
     if !world.resource::<Zm>().ranked_match {
         return;
@@ -211,16 +214,16 @@ pub(crate) fn save(world: &mut World, force: bool) {
         if p.changed.is_empty() {
             continue;
         }
-        let mut on_disk = Profile { stats: Profile::read_stats_file(&file), ..Profile::default() };
-        for path in std::mem::take(&mut p.changed) {
-            if let Some(v) = p.profile.stat(&path) {
-                on_disk.stats.insert(path, v.clone());
-            }
-        }
-        match on_disk.save_file(&file) {
+        let changed: Vec<(String, StatValue)> = std::mem::take(&mut p.changed)
+            .into_iter()
+            .filter_map(|path| p.profile.stat(&path).cloned().map(|v| (path, v)))
+            .collect();
+        let client = *client;
+        let done: bo2_profile::SaveDone = Box::new(move |file, result| match result {
             Ok(()) => diag::info!(Sim, "bo2mp stats: player {client}'s saved to {}", file.display()),
             Err(e) => diag::warn!(Sim, "bo2mp stats: player {client}'s not saved ({}): {e}", file.display()),
-        }
+        });
+        bo2_profile::save_in_background(&file, bo2_profile::SaveJob::Merge(changed), Some(done));
     }
 }
 
@@ -270,19 +273,30 @@ fn rank_for_xp(rows: &[RankRow], xp: f32) -> i32 {
     rows.iter().filter(|r| r.min <= xp).map(|r| r.id).max().unwrap_or(0)
 }
 
-/// mp/scoreInfo.csv: an event's XP in this game type (its `<gametype> XP`
-/// column) and whether it also counts toward the weapon (its GunXP).
-fn event_xp(world: &World, gametype: &str, event: &str) -> Option<(f32, bool)> {
+/// An event's row in mp/scoreInfo.csv: its XP in this game type (its
+/// `<gametype> XP` column, what BO2's _rank.gsc registers with registerxp),
+/// whether it also counts toward the weapon (its GunXP), and its row number
+/// when it is a medal (a Medal Reference in column 2).
+struct ScoreEvent {
+    xp: f32,
+    gun: bool,
+    medal: Option<i32>,
+}
+
+fn score_event(world: &World, gametype: &str, event: &str) -> Option<ScoreEvent> {
     let zm = world.resource::<Zm>();
     let t = table(zm, "mp/scoreInfo.csv")?;
     let mut rows = t.cells.chunks(t.columns.max(1));
     let header = rows.next()?;
     let col = header.iter().position(|h| h.trim().eq_ignore_ascii_case(&format!("{gametype} XP")))?;
     let gun = header.iter().position(|h| h.trim().eq_ignore_ascii_case("GunXP"));
-    let row = rows.find(|r| r.first().is_some_and(|c| c.trim().eq_ignore_ascii_case(event)))?;
+    // Row numbers count the header as row 0 (the scripts' and the HUD's
+    // tablelookup rows).
+    let (index, row) = rows.enumerate().find(|(_, r)| r.first().is_some_and(|c| c.trim().eq_ignore_ascii_case(event)))?;
     let xp = row.get(col)?.trim().parse::<f32>().ok()?;
     let gunxp = gun.and_then(|g| row.get(g)).is_some_and(|c| c.trim().eq_ignore_ascii_case("TRUE"));
-    Some((xp, gunxp))
+    let medal = row.get(2).is_some_and(|c| !c.trim().is_empty()).then_some(index as i32 + 1);
+    Some(ScoreEvent { xp, gun: gunxp, medal })
 }
 
 /// What a stat reads as a number.
@@ -367,19 +381,26 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     for name in ["gamemodeisusingxp", "gamemodeisusingstats"] {
         vm.bind(name, false, |_, world, _, _| Ok(Value::Int(i32::from(world.resource::<Zm>().ranked_match))));
     }
-    // addrankxp(event, weapon, ...): the event's XP (mp/scoreInfo.csv) in a
-    // ranked match, scaled by scr_xpscale.
+    // addrankxp(event, weapon, ...): a medal event with XP shows his medal in
+    // any match (the engine calls BO2's _medals::codecallback_medal(row)
+    // before its stats checks); the event's XP (mp/scoreInfo.csv) counts in
+    // a ranked match, scaled by scr_xpscale.
     vm.bind("addrankxp", true, |vm, world, s, a| {
+        let Some(c) = client_of(vm, s) else { return Ok(Value::Undefined) };
+        let event = text(vm, a, 0);
+        let gametype = vm.dvars.get("g_gametype").cloned().unwrap_or_default();
+        let Some(e) = score_event(world, &gametype, &event) else { return Ok(Value::Undefined) };
+        if e.xp > 0.0
+            && let Some(row) = e.medal
+        {
+            vm.spawn_named(world, "maps/mp/_medals", "codecallback_medal", s.clone(), vec![Value::Int(row)]);
+        }
         if !world.resource::<Zm>().ranked_match {
             return Ok(Value::Undefined);
         }
-        let Some(c) = client_of(vm, s) else { return Ok(Value::Undefined) };
-        let event = text(vm, a, 0);
         let weapon = text(vm, a, 1);
-        let gametype = vm.dvars.get("g_gametype").cloned().unwrap_or_default();
-        let Some((xp, gun)) = event_xp(world, &gametype, &event) else { return Ok(Value::Undefined) };
         let scale = vm.dvars.get("scr_xpscale").and_then(|v| v.parse::<f32>().ok()).filter(|x| *x > 0.0).unwrap_or(1.0);
-        give_xp(vm, world, s, c, (xp * scale).round(), Some((&weapon, gun)));
+        give_xp(vm, world, s, c, (e.xp * scale).round(), Some((&weapon, e.gun)));
         Ok(Value::Undefined)
     });
     // addrankxpvalue(event, value): that much XP.

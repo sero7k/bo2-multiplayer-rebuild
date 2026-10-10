@@ -29,6 +29,9 @@ const DEPTH_HALF: f32 = 4096.0;
 
 #[derive(Resource)]
 pub(super) struct SunShadow {
+    /// Texels per side: `SIZE`, or 1 under the fast quality setting, which
+    /// draws no sun shadow (the full pair is 32 MB of card memory a game).
+    size: u32,
     layers: [TextureView; 2],
     pub(super) array: TextureView,
     pub(super) sampler: Sampler,
@@ -45,11 +48,13 @@ pub(super) fn init(
     device: Res<RenderDevice>,
     asset_server: Res<AssetServer>,
 ) {
+    // The settings (Startup) are read before the renderer starts.
+    let size = if asset_core::t6_fast() { 1 } else { SIZE };
     let texture = device.create_texture(&TextureDescriptor {
         label: Some("bo2mp_sun_shadow"),
         size: Extent3d {
-            width: SIZE,
-            height: SIZE,
+            width: size,
+            height: size,
             depth_or_array_layers: 2,
         },
         mip_level_count: 1,
@@ -93,6 +98,7 @@ pub(super) fn init(
         })
     };
     commands.insert_resource(SunShadow {
+        size,
         layers,
         array,
         sampler,
@@ -264,10 +270,13 @@ pub(super) fn draw_sun_shadow(
         shadow.caster_groups = Some([group(&shadow.casters[0]), group(&shadow.casters[1])]);
     }
     let lists = [dynamic.missiles.as_ref(), dynamic.script_static.as_ref()];
-    let any = lists
-        .iter()
-        .flatten()
-        .any(|(_, _, _, draws)| draws.iter().any(|d| d[1] != 0 && casts(d[3])));
+    // bo2mp: the fast quality setting (8 games at once) draws no sun shadow.
+    let any = !asset_core::t6_fast()
+        && shadow.size == SIZE
+        && lists
+            .iter()
+            .flatten()
+            .any(|(_, _, _, draws)| draws.iter().any(|d| d[1] != 0 && casts(d[3])));
     let sun = geometry
         .t6_lighting
         .map(|l| Vec3::new(l[0][0], l[0][1], l[0][2]))

@@ -61,9 +61,15 @@ pub(super) fn sync(world: &mut World) {
             None => {
                 with_vm(world, |vm, world| {
                     let obj = vm.alloc_object(ObjKind::Entity(c));
-                    world.resource_mut::<Zm>().players.insert(c, Player::new(obj));
+                    // bo2mp: back from a round restart (`map_restart( 1 )`):
+                    // his pers[] and whether he is a bot carry over.
+                    let back = world.resource_mut::<Zm>().rejoin.remove(&c);
+                    let mut player = Player::new(obj);
+                    player.test_client = back.as_ref().is_some_and(|(_, bot)| *bot);
+                    world.resource_mut::<Zm>().players.insert(c, player);
                     let pers = vm.intern("pers");
-                    vm.set_raw_field(obj, pers, Value::array(Array::new()));
+                    let kept = back.map(|(v, _)| v).filter(|v| !matches!(v, Value::Undefined));
+                    vm.set_raw_field(obj, pers, kept.unwrap_or_else(|| Value::array(Array::new())));
                     diag::info!(Sim, "bo2zm t6: player {c} connects");
                     let cb = super::mp::callbacks(world);
                     if vm

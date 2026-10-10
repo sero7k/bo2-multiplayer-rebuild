@@ -1,5 +1,5 @@
 {
- "updated": "2026-10-08",
+ "updated": "2026-10-10",
  "maps": [
   {
    "id": "mp_la",
@@ -662,8 +662,8 @@
     "mode: Search and Destroy": "todo",
     "bots": "pass",
     "scorestreaks": "part",
-    "killcam": "todo",
-    "end_of_match": "todo"
+    "killcam": "pass",
+    "end_of_match": "pass"
    },
    "visuals": {
     "spawn": "todo",
@@ -684,7 +684,9 @@
     "mode: Demolition": "logs/mp/mode_dem.log",
     "mode: HQ": "logs/mp/mode_hq.log",
     "bots": "logs/mp/mode_tdm.log",
-    "scorestreaks": "logs/mp/hks_uav.log"
+    "scorestreaks": "logs/mp/hks_uav.log",
+    "killcam": "logs/mp/death97.game.log",
+    "end_of_match": "ref/ours/60_match_end.png"
    }
   },
   {

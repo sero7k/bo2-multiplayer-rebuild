@@ -194,15 +194,16 @@ pub fn view_height_lerp_duration(lerp_target: i32, lerp_down: i32) -> i32 {
 }
 
 /// bo2zm: getting up from a dive runs the stance change at twice the speed
-/// (an owner's ask, 10-09). `prone_ms` is the crouch-to-prone stage's time
-/// (BO2 600; 0 = MW2's 400).
+/// (by request); the dive's own drop to prone, a get-up queued or
+/// not, runs at the usual speed. `prone_ms` is the crouch-to-prone stage's
+/// time (BO2 600; 0 = MW2's 400).
 fn lerp_duration(ps: &PlayerState, lerp_target: i32, lerp_down: i32, prone_ms: i32) -> i32 {
     let duration = if lerp_target == view_height::PRONE && prone_ms > 0 {
         prone_ms
     } else {
         view_height_lerp_duration(lerp_target, lerp_down)
     };
-    if ps.pm_flags & crate::dive::PMF_DIVE_GETUP != 0 {
+    if crate::dive::getting_up(ps) {
         duration / 2
     } else {
         duration

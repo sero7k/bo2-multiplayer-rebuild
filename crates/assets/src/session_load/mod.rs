@@ -42,7 +42,7 @@ pub use common_walks::{
     MatchMaterialSeed, apply_match_material_map, load_match_material_catalog,
     load_match_material_seed,
 };
-pub use resident_map::load_prepared_match;
+pub use resident_map::{load_prepared_match, note_gpu_resident, release_resident_cpu_images};
 
 static PROCESS_CPUS: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
 

@@ -19,6 +19,14 @@ use replay::ReplayPlugin;
 use session::SessionPlugin;
 use ui::UiPlugin;
 
+/// Bevy's log lines go to stderr on the log writer's thread, never from the
+/// frame that logged them (a write Windows held up stalled it for seconds).
+fn log_lines(_: &mut App) -> Option<bevy::log::BoxedFmtLayer> {
+    Some(Box::new(
+        bevy::log::tracing_subscriber::fmt::Layer::default().with_writer(diag::stderr_writer),
+    ))
+}
+
 pub fn add_runtime_plugins(app: &mut App) {
     add_runtime_plugins_with_role(app, RuntimeRole::Listen);
 }
@@ -32,7 +40,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
     };
     if crate::launch::test_window_hidden() {
         // A hidden test run: about 30 updates a second, whatever the focus
-        // (the server keeps its own 20 Hz), so it costs his PC little.
+        // (the server keeps its own 20 Hz), so it costs the PC little.
         let pace = bevy::winit::UpdateMode::reactive_low_power(std::time::Duration::from_millis(33));
         app.insert_resource(bevy::winit::WinitSettings {
             focused_mode: pace,
@@ -42,6 +50,18 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         // Unfocused benchmarks (and test runs on another monitor) must not
         // inherit the window runner's 60 Hz sleep.
         app.insert_resource(bevy::winit::WinitSettings::continuous());
+    } else if !frame::Headless::requested() && !app.world().contains_resource::<frame::Headless>() {
+        // bo2mp: the window he plays in runs flat out; the others (8 games
+        // at once on one PC) draw about 30 times a second
+        // (IW4L_BACKGROUND_FPS, 0 for no limit).
+        let fps = std::env::var("IW4L_BACKGROUND_FPS").ok().and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(30);
+        app.insert_resource(bevy::winit::WinitSettings {
+            focused_mode: bevy::winit::UpdateMode::Continuous,
+            unfocused_mode: match fps {
+                0 => bevy::winit::UpdateMode::Continuous,
+                fps => bevy::winit::UpdateMode::reactive_low_power(std::time::Duration::from_secs_f64(1.0 / fps as f64)),
+            },
+        });
     }
     app.add_plugins(AssetPlugin)
         .add_plugins(UiPlugin)
@@ -115,17 +135,19 @@ pub fn default_plugins_with_quiet_log(mut window: WindowPlugin) -> bevy::app::Pl
         | WgpuFeatures::TEXTURE_BINDING_ARRAY
         | WgpuFeatures::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
         | WgpuFeatures::PARTIALLY_BOUND_BINDING_ARRAY;
+    // bo2mp: the card's memory comes in 8-64 MB blocks instead of 128-256 MB
+    // ones, so a game holds less it does not use (8 games share one card).
+    // IW4L_GPU_MEMORY=performance brings the big blocks back.
+    if !std::env::var("IW4L_GPU_MEMORY").is_ok_and(|v| v.trim().eq_ignore_ascii_case("performance")) {
+        wgpu.memory_hints = bevy::render::settings::MemoryHints::MemoryUsage;
+    }
     if headless {
         // No backends: bevy makes no graphics device and no render world.
         wgpu.backends = None;
     }
     let plugins = DefaultPlugins
         .set(window)
-        .set(LogPlugin {
-            filter: "warn,iw4l=info".into(),
-            level: bevy::log::Level::WARN,
-            ..default()
-        })
+        .set(log_plugin())
         .set(BevyRenderPlugin {
             render_creation: RenderCreation::Automatic(Box::new(wgpu)),
             ..default()
@@ -151,6 +173,24 @@ pub fn default_plugins_with_quiet_log(mut window: WindowPlugin) -> bevy::app::Pl
         plugins
     } else {
         plugins.disable::<PipelinedRenderingPlugin>()
+    }
+}
+
+fn log_plugin() -> LogPlugin {
+    #[cfg(feature = "span-stats")]
+    return LogPlugin {
+        filter: crate::span_stats::FILTER.into(),
+        level: bevy::log::Level::WARN,
+        custom_layer: crate::span_stats::layer,
+        fmt_layer: log_lines,
+        ..default()
+    };
+    #[cfg(not(feature = "span-stats"))]
+    LogPlugin {
+        filter: "warn,iw4l=info".into(),
+        level: bevy::log::Level::WARN,
+        fmt_layer: log_lines,
+        ..default()
     }
 }
 
