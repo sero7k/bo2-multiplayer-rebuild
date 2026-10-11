@@ -764,6 +764,7 @@ impl Host {
             let chunk = crate::parse(&bytes).map_err(|e| LuaError::new(format!("{module}: {e}")))?;
             let f = vm.load(chunk.main);
             let r = vm.call(f, vec![])?;
+            allow_bots_in_every_mode(vm);
             let v = r.into_iter().next().filter(Value::truthy).unwrap_or(Value::Bool(true));
             loaded.borrow_mut().set_str(&module, v.clone());
             Ok(vec![v])
@@ -1185,6 +1186,27 @@ fn stub_table(vm: &mut Vm, name: &'static str, asked: Rc<RefCell<BTreeMap<String
     meta.borrow_mut().set_str("__index", index);
     t.borrow_mut().meta = Some(meta);
     Value::Table(t)
+}
+
+/// BO2's custom-games lobby offers Setup Bots only in its own list of game
+/// types (FFA, TDM, CTF, Demolition, Domination, Hardpoint, HQ and Kill
+/// Confirmed) and greys it out elsewhere. Bots are wanted in every mode, so
+/// once the lobby script has defined that check it is replaced by one that
+/// always says yes.
+fn allow_bots_in_every_mode(vm: &mut Vm) {
+    let Value::Table(cod) = vm.global("CoD") else {
+        return;
+    };
+    let lobby = cod.borrow().get_str("PrivateGameLobby");
+    let Value::Table(lobby) = lobby else {
+        return;
+    };
+    let check = lobby.borrow().get_str("DoesGametypeSupportBots");
+    if !matches!(check, Value::Func(_)) {
+        return;
+    }
+    let always = vm.native("DoesGametypeSupportBots", |_, _| Ok(vec![Value::Bool(true)]));
+    lobby.borrow_mut().set_str("DoesGametypeSupportBots", always);
 }
 
 #[cfg(test)]
