@@ -106,34 +106,10 @@ stay sharp, as in the original.
 | ![Aiming before the fix: the gun blurred](docs/screenshots/ads_before.jpg) | ![Aiming now: the gun stays sharp](docs/screenshots/ads_now.jpg) |
 | Before: the MP7 blurred while aiming | Now: sharp, as in the original |
 
-**Every map** (31), from a spawn point with the HUD hidden, taken 2026-10-11 (build r129). Nuketown 2025
-is the map played from the menus so far; each of the others is checked loading, spawning and playing Team
-Deathmatch with bots when started directly, and picking it from the menus is still to come.
+**Nuketown 2025**, the map you play from the menus, from a spawn point with the HUD hidden (build r129, 2026-10-11).
+Each other map goes on this page once it is proven started from the menus.
 
-| | | |
-|---|---|---|
-| ![Aftermath](docs/screenshots/mp_la.jpg) | ![Cargo](docs/screenshots/mp_dockside.jpg) | ![Carrier](docs/screenshots/mp_carrier.jpg) |
-| Aftermath | Cargo | Carrier |
-| ![Cove](docs/screenshots/mp_castaway.jpg) | ![Detour](docs/screenshots/mp_bridge.jpg) | ![Dig](docs/screenshots/mp_dig.jpg) |
-| Cove | Detour | Dig |
-| ![Downhill](docs/screenshots/mp_downhill.jpg) | ![Drone](docs/screenshots/mp_drone.jpg) | ![Encore](docs/screenshots/mp_concert.jpg) |
-| Downhill | Drone | Encore |
-| ![Express](docs/screenshots/mp_express.jpg) | ![Frost](docs/screenshots/mp_frostbite.jpg) | ![Grind](docs/screenshots/mp_skate.jpg) |
-| Express | Frost | Grind |
-| ![Hijacked](docs/screenshots/mp_hijacked.jpg) | ![Hydro](docs/screenshots/mp_hydro.jpg) | ![Magma](docs/screenshots/mp_magma.jpg) |
-| Hijacked | Hydro | Magma |
-| ![Meltdown](docs/screenshots/mp_meltdown.jpg) | ![Mirage](docs/screenshots/mp_mirage.jpg) | ![Nuketown 2025](docs/screenshots/mp_nuketown_2020.jpg) |
-| Meltdown | Mirage | Nuketown 2025 |
-| ![Overflow](docs/screenshots/mp_overflow.jpg) | ![Plaza](docs/screenshots/mp_nightclub.jpg) | ![Pod](docs/screenshots/mp_pod.jpg) |
-| Overflow | Plaza | Pod |
-| ![Raid](docs/screenshots/mp_raid.jpg) | ![Rush](docs/screenshots/mp_paintball.jpg) | ![Slums](docs/screenshots/mp_slums.jpg) |
-| Raid | Rush | Slums |
-| ![Standoff](docs/screenshots/mp_village.jpg) | ![Studio](docs/screenshots/mp_studio.jpg) | ![Takeoff](docs/screenshots/mp_takeoff.jpg) |
-| Standoff | Studio | Takeoff |
-| ![Turbine](docs/screenshots/mp_turbine.jpg) | ![Uplink](docs/screenshots/mp_uplink.jpg) | ![Vertigo](docs/screenshots/mp_vertigo.jpg) |
-| Turbine | Uplink | Vertigo |
-| ![Yemen](docs/screenshots/mp_socotra.jpg) |  |  |
-| Yemen |  |  |
+![Nuketown 2025](docs/screenshots/mp_nuketown_2020.jpg)
 <!-- shots:end -->
 
 ## Requirements
