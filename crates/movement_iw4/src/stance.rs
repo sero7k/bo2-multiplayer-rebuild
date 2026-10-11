@@ -1,6 +1,6 @@
-use playerstate_iw4::{PlayerState, UserCmd, buttons, eflags, pm_flags};
+use playerstate_iw4::{PM_TYPE_LAST_STAND, PlayerState, UserCmd, buttons, eflags, pm_flags};
 
-use crate::check_prone::player_prone_allowed;
+use crate::check_prone::{ProneRules, player_prone_allowed};
 use crate::collision::CollisionBackend;
 use crate::{GroundTraceInput, MoveBounds, Pml, add_predictable_event};
 
@@ -28,18 +28,41 @@ const EV_STANCE_FORCE_PRONE: i32 = 8;
 
 const PMF_STANCE_LOCKED: u32 = 0xc00;
 
+/// bo2zm: bodies (0x0200_0000) and 0x8000, left out of BO2's stand-up and
+/// crouch-up checks.
+const BO2_GETUP_IGNORES: u32 = 0x0200_0000 | 0x8000;
+
+/// bo2zm: lying down, Black Ops II lifts the body this far and drops it back.
+const LIE_DOWN_LIFT: f32 = 10.0;
+
+/// bo2zm: how far below a body lying down Black Ops II looks for the ground.
+const LIE_DOWN_GROUND_PROBE: f32 = 0.25;
+
+/// bo2zm: the torso's slope pitch stays within this of where the player looks.
+const PRONE_TORSO_PITCH_RANGE: f32 = 45.0;
+
+const EV_RESET_ADS: i32 = 0x11;
+
 fn stance_hull_allsolid<C: CollisionBackend>(
     collision: &C,
     origin: [f32; 3],
     bounds: MoveBounds,
     maxs_z: f32,
+    bo2: bool,
 ) -> bool {
+    // bo2zm: in Black Ops II other players and zombies never stop you
+    // getting up; only the world does.
+    let tracemask = if bo2 {
+        bounds.tracemask & !BO2_GETUP_IGNORES
+    } else {
+        bounds.tracemask
+    };
     let trace = collision.trace(GroundTraceInput {
         start: origin,
         end: origin,
         mins: bounds.mins,
         maxs: [bounds.maxs[0], bounds.maxs[1], maxs_z],
-        tracemask: bounds.tracemask,
+        tracemask,
     });
     trace.allsolid != 0
 }
@@ -50,7 +73,9 @@ pub fn update_stance_flags<C: CollisionBackend>(
     collision: &C,
     bounds: MoveBounds,
     weapon_blocks_prone: bool,
+    feel: &crate::Bo2Feel,
 ) {
+    let bo2 = feel.on;
     if ps.pm_type == 5 {
         ps.pm_flags &= !(pm_flags::PRONE | pm_flags::CROUCH);
         if (cmd.buttons & buttons::PRONE) != 0 {
@@ -96,7 +121,8 @@ pub fn update_stance_flags<C: CollisionBackend>(
     let origin = ps.origin;
 
     if prone_btn && (ps.pm_flags & 0x400) == 0 {
-        if player_prone_allowed(ps, collision, bounds.maxs[0], weapon_blocks_prone) {
+        let rules = ProneRules::for_player(ps, bo2, feel.zombies);
+        if player_prone_allowed(ps, collision, bounds.maxs[0], weapon_blocks_prone, rules) {
             ps.pm_flags = (ps.pm_flags & !pm_flags::CROUCH) | pm_flags::PRONE;
         } else if ps.ground_entity_num != playerstate_iw4::ENTITYNUM_NONE && !stance_held {
             let event = if (ps.pm_flags & (pm_flags::PRONE | pm_flags::CROUCH)) == 0 {
@@ -109,25 +135,90 @@ pub fn update_stance_flags<C: CollisionBackend>(
     } else if crouch_btn {
         if (ps.pm_flags & pm_flags::PRONE) == 0 {
             ps.pm_flags |= pm_flags::CROUCH;
-        } else if !stance_hull_allsolid(collision, origin, bounds, CROUCH_MAXS_Z) {
+        } else if !stance_hull_allsolid(collision, origin, bounds, CROUCH_MAXS_Z, bo2) {
             ps.pm_flags = (ps.pm_flags & !pm_flags::PRONE) | pm_flags::CROUCH;
         } else if !stance_held {
             add_predictable_event(ps, EV_STANCE_FORCE_PRONE, 2);
         }
     } else if (ps.pm_flags & pm_flags::PRONE) != 0 {
-        if !stance_hull_allsolid(collision, origin, bounds, STAND_MAXS_Z) {
+        if !stance_hull_allsolid(collision, origin, bounds, STAND_MAXS_Z, bo2) {
             ps.pm_flags &= !(pm_flags::PRONE | pm_flags::CROUCH);
-        } else if !stance_hull_allsolid(collision, origin, bounds, CROUCH_MAXS_Z) {
+        } else if !stance_hull_allsolid(collision, origin, bounds, CROUCH_MAXS_Z, bo2) {
             ps.pm_flags = (ps.pm_flags & !pm_flags::PRONE) | pm_flags::CROUCH;
         } else if !stance_held {
             add_predictable_event(ps, EV_STANCE_FORCE_PRONE, 1);
         }
     } else if (ps.pm_flags & pm_flags::CROUCH) != 0 {
-        if !stance_hull_allsolid(collision, origin, bounds, STAND_MAXS_Z) {
+        if !stance_hull_allsolid(collision, origin, bounds, STAND_MAXS_Z, bo2) {
             ps.pm_flags &= !pm_flags::CROUCH;
         } else if !stance_held {
             add_predictable_event(ps, EV_STANCE_FORCE_CROUCH, 1);
         }
+    }
+}
+
+/// bo2zm: Black Ops II on the frame a player lies down (`was_prone` false):
+/// moving keys held drop the aim; the body is lifted 10 units and dropped
+/// back, points where the player looks, and takes its slope pitch from the
+/// ground just under it (flat in last stand, over nothing or stuck); the
+/// torso's pitch follows it but stays within 45 of the view. In last stand
+/// the body points where the player looks every frame.
+pub fn bo2_lie_down<C: CollisionBackend>(
+    ps: &mut PlayerState,
+    cmd: &UserCmd,
+    collision: &C,
+    bounds: MoveBounds,
+    was_prone: bool,
+) {
+    if (ps.pm_flags & pm_flags::PRONE) == 0 {
+        return;
+    }
+    if !was_prone {
+        if cmd.forwardmove != 0 || cmd.rightmove != 0 {
+            ps.pm_flags &= !pm_flags::PRONEMOVE_OVERRIDDEN;
+            crate::add_event(ps, EV_RESET_ADS);
+            ps.pm_flags &= !pm_flags::ADS_INTENT;
+        }
+        let trace = |start: [f32; 3], end: [f32; 3]| {
+            collision.trace(GroundTraceInput {
+                start,
+                end,
+                mins: bounds.mins,
+                maxs: bounds.maxs,
+                tracemask: bounds.tracemask & !BO2_GETUP_IGNORES,
+            })
+        };
+        let lerp = |from: [f32; 3], to: [f32; 3], frac: f32| {
+            [
+                (to[0] - from[0]) * frac + from[0],
+                (to[1] - from[1]) * frac + from[1],
+                (to[2] - from[2]) * frac + from[2],
+            ]
+        };
+        let origin = ps.origin;
+        let up = [origin[0], origin[1], origin[2] + LIE_DOWN_LIFT];
+        let lifted = lerp(origin, up, trace(origin, up).fraction);
+        ps.origin = lerp(lifted, origin, trace(lifted, origin).fraction);
+        ps.prone_direction = ps.viewangles[1];
+        let below = [ps.origin[0], ps.origin[1], ps.origin[2] - LIE_DOWN_GROUND_PROBE];
+        let ground = trace(ps.origin, below);
+        ps.prone_direction_pitch =
+            if ground.startsolid != 0 || ground.fraction >= 1.0 || ps.pm_type == PM_TYPE_LAST_STAND {
+                0.0
+            } else {
+                math_iw4::pitch_for_yaw_on_normal(ps.prone_direction, ground.normal)
+            };
+        let off = math_iw4::angle_subtract(ps.prone_direction_pitch, ps.viewangles[0]);
+        ps.prone_torso_pitch = if off < -PRONE_TORSO_PITCH_RANGE {
+            ps.viewangles[0] - PRONE_TORSO_PITCH_RANGE
+        } else if off > PRONE_TORSO_PITCH_RANGE {
+            ps.viewangles[0] + PRONE_TORSO_PITCH_RANGE
+        } else {
+            ps.prone_direction_pitch
+        };
+    }
+    if ps.pm_type == PM_TYPE_LAST_STAND {
+        ps.prone_direction = ps.viewangles[1];
     }
 }
 
@@ -193,20 +284,15 @@ pub fn view_height_lerp_duration(lerp_target: i32, lerp_down: i32) -> i32 {
     }
 }
 
-/// bo2zm: getting up from a dive runs the stance change at twice the speed
-/// (by request); the dive's own drop to prone, a get-up queued or
-/// not, runs at the usual speed. `prone_ms` is the crouch-to-prone stage's
-/// time (BO2 600; 0 = MW2's 400).
-fn lerp_duration(ps: &PlayerState, lerp_target: i32, lerp_down: i32, prone_ms: i32) -> i32 {
-    let duration = if lerp_target == view_height::PRONE && prone_ms > 0 {
+/// bo2zm: the stance change's time. `prone_ms` is the crouch-to-prone
+/// stage's time (BO2 600; 0 = MW2's 400). bo2mp: getting up from a dive runs
+/// at the usual speed, as BO2's (it has no get-up dvar of its own; an earlier
+/// double speed was too fast in testing).
+fn lerp_duration(_ps: &PlayerState, lerp_target: i32, lerp_down: i32, prone_ms: i32) -> i32 {
+    if lerp_target == view_height::PRONE && prone_ms > 0 {
         prone_ms
     } else {
         view_height_lerp_duration(lerp_target, lerp_down)
-    };
-    if crate::dive::getting_up(ps) {
-        duration / 2
-    } else {
-        duration
     }
 }
 
@@ -542,5 +628,110 @@ pub fn stance_speed_scale(
         StanceSurface::Crouch => CROUCH_SCALE,
         StanceSurface::Prone => PRONE_SCALE,
         StanceSurface::Stand => 1.0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use trace_iw4::Trace;
+
+    /// Someone standing over the player: only a trace that hits bodies
+    /// (0x0200_0000) is stuck.
+    struct BodyOverhead;
+
+    impl CollisionBackend for BodyOverhead {
+        fn trace(&self, input: GroundTraceInput) -> Trace {
+            Trace {
+                fraction: 1.0,
+                endpos: input.end,
+                allsolid: u8::from((input.tracemask & 0x0200_0000) != 0),
+                ..Trace::default()
+            }
+        }
+    }
+
+    /// BO2's stand-up and crouch-up checks leave bodies out: another player
+    /// or a zombie never keeps you down.
+    #[test]
+    fn bo2_gets_up_under_a_body() {
+        let bounds = MoveBounds {
+            mins: [-15.0, -15.0, 0.0],
+            maxs: [15.0, 15.0, PRONE_MAXS_Z],
+            tracemask: 0x0281_0011,
+        };
+        let origin = [0.0; 3];
+        assert!(stance_hull_allsolid(&BodyOverhead, origin, bounds, STAND_MAXS_Z, false));
+        assert!(!stance_hull_allsolid(&BodyOverhead, origin, bounds, STAND_MAXS_Z, true));
+    }
+
+    /// Ground 4 units under the start, rising toward +x: a trace down stops
+    /// on it, a trace up is clear.
+    struct Ramp;
+
+    const RAMP_NORMAL: [f32; 3] = [-0.196_116_14, 0.0, 0.980_580_7];
+
+    impl CollisionBackend for Ramp {
+        fn trace(&self, input: GroundTraceInput) -> Trace {
+            let floor = -4.0;
+            if input.end[2] < input.start[2] && input.end[2] <= floor {
+                let fraction = (input.start[2] - floor) / (input.start[2] - input.end[2]);
+                return Trace {
+                    fraction,
+                    endpos: [input.start[0], input.start[1], floor],
+                    normal: RAMP_NORMAL,
+                    walkable: 1,
+                    ..Trace::default()
+                };
+            }
+            Trace {
+                fraction: 1.0,
+                endpos: input.end,
+                ..Trace::default()
+            }
+        }
+    }
+
+    fn lying(pm_type: i32, view: [f32; 3], was_prone: bool) -> PlayerState {
+        let bounds = MoveBounds {
+            mins: [-15.0, -15.0, 0.0],
+            maxs: [15.0, 15.0, PRONE_MAXS_Z],
+            tracemask: 0x0281_0011,
+        };
+        let mut ps = PlayerState {
+            pm_type,
+            pm_flags: pm_flags::PRONE,
+            origin: [0.0, 0.0, -3.9],
+            viewangles: view,
+            ..PlayerState::ZERO
+        };
+        bo2_lie_down(&mut ps, &UserCmd::default(), &Ramp, bounds, was_prone);
+        ps
+    }
+
+    /// Lying down on a ramp: the body points where you look and takes the
+    /// ramp's slope; the torso stays within 45 of the view.
+    #[test]
+    fn bo2_lying_down_takes_the_slope() {
+        let ps = lying(0, [0.0, 30.0, 0.0], false);
+        assert_eq!(ps.prone_direction, 30.0);
+        let slope = math_iw4::pitch_for_yaw_on_normal(30.0, RAMP_NORMAL);
+        assert!(slope < -5.0, "{slope}");
+        assert_eq!(ps.prone_direction_pitch, slope);
+        assert_eq!(ps.prone_torso_pitch, slope);
+        let ps = lying(0, [60.0, 30.0, 0.0], false);
+        assert_eq!(ps.prone_torso_pitch, 60.0 - PRONE_TORSO_PITCH_RANGE);
+    }
+
+    /// Already lying: nothing changes; last stand lies flat and turns with
+    /// the view every frame.
+    #[test]
+    fn bo2_last_stand_lies_flat_and_follows_the_view() {
+        let ps = lying(0, [0.0, 30.0, 0.0], true);
+        assert_eq!((ps.prone_direction, ps.prone_direction_pitch), (0.0, 0.0));
+        let ps = lying(PM_TYPE_LAST_STAND, [0.0, 30.0, 0.0], false);
+        assert_eq!((ps.prone_direction, ps.prone_direction_pitch), (30.0, 0.0));
+        let ps = lying(PM_TYPE_LAST_STAND, [0.0, 75.0, 0.0], true);
+        assert_eq!(ps.prone_direction, 75.0);
     }
 }

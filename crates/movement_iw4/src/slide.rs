@@ -10,6 +10,9 @@ const MAX_CLIP_PLANES: usize = 8;
 
 const STEP_SIZE: f32 = 18.0;
 
+/// bo2zm: the body width Black Ops II checks a prone player still fits.
+const PRONE_VERIFY_SIZE: f32 = 15.0;
+
 const PRONE_STEP_SIZE: f32 = 10.0;
 
 const STEP_UP_EXTRA: f32 = 1.0;
@@ -22,10 +25,23 @@ const WALKING_STEP_DOWN_EXTRA: f32 = 9.0;
 
 const STEP_PROGRESS_EPSILON: f32 = 0.001;
 
+/// bo2zm: Black Ops II's com_maxclients (18): entity numbers below it are
+/// players (ours too: corpses start at 18).
+const MAX_CLIENTS: u16 = playerstate_iw4::PLAYER_CORPSE_ENTITY_BASE as u16;
+
+/// bo2zm: Black Ops II's stair step (PM_StepSlideMove's end).
+const STEP_SLOW_MIN_RISE: f32 = 0.5;
+const STEP_ROUND_BIAS: f64 = 9.313_225_746_154_785e-10;
+const STEP_SLOW_RANGE: f32 = 0.8;
+const STEP_SLOW_FLOOR: f32 = f32::from_bits(0x3e4c_cccc);
+const STEP_BOB_PER_UNIT: f32 = 1.25;
+const STEP_BOB_BASE: f32 = 7.0;
+
 const DUPLICATE_PLANE_DOT: f64 = 0.999_000_012_874_603_3;
 
 const PLANE_INTO: f32 = 0.1;
 
+#[allow(clippy::too_many_arguments)]
 pub fn slide_move<C: CollisionBackend>(
     ps: &mut PlayerState,
     pml: &Pml,
@@ -34,10 +50,13 @@ pub fn slide_move<C: CollisionBackend>(
     maxs: [f32; 3],
     tracemask: u32,
     gravity: Option<f32>,
+    bo2: bool,
 ) -> bool {
     let mut end_velocity = ps.velocity;
+    let mut primal_velocity = ps.velocity;
     if let Some(g) = gravity {
         end_velocity[2] -= g * pml.frametime;
+        primal_velocity[2] = end_velocity[2];
         ps.velocity[2] = (ps.velocity[2] + end_velocity[2]) * 0.5;
         if pml.ground_plane != 0 {
             let normal = [
@@ -174,9 +193,18 @@ pub fn slide_move<C: CollisionBackend>(
     if gravity.is_some() {
         ps.velocity = end_velocity;
     }
+    // bo2zm: Black Ops II's PM_SlideMove keeps the speed you came in with
+    // while pm_time runs (just after a landing): a wall moves you, it does
+    // not slow you.
+    if bo2 && ps.pm_time != 0 {
+        ps.velocity = primal_velocity;
+    }
     bumped
 }
 
+/// bo2zm: returns how far a Black Ops II stair step moved you up or down
+/// (0 when there was none): the camera eases over it (pmove_t viewChange).
+#[allow(clippy::too_many_arguments)]
 pub fn step_slide_move<C: CollisionBackend>(
     ps: &mut PlayerState,
     pml: &Pml,
@@ -185,7 +213,9 @@ pub fn step_slide_move<C: CollisionBackend>(
     maxs: [f32; 3],
     tracemask: u32,
     gravity: Option<f32>,
-) {
+    bo2: bool,
+    zombies: bool,
+) -> f32 {
     let had_ground = if (ps.pm_flags & pm_flags::LADDER) != 0 {
         jump::clear_state(ps);
         false
@@ -201,10 +231,21 @@ pub fn step_slide_move<C: CollisionBackend>(
     let start_origin = ps.origin;
     let start_velocity = ps.velocity;
 
-    let bumped = slide_move(ps, pml, collision, mins, maxs, tracemask, gravity);
+    let bumped = slide_move(ps, pml, collision, mins, maxs, tracemask, gravity, bo2);
     let down_origin = ps.origin;
     let down_velocity = ps.velocity;
 
+    // bo2zm: Black Ops II: in last stand a move that hit nothing never steps.
+    if bo2
+        && !bumped
+        && ps.pm_type == playerstate_iw4::PM_TYPE_LAST_STAND
+        && (ps.pm_flags & pm_flags::LAST_STAND) != 0
+    {
+        return 0.0;
+    }
+
+    // bo2zm: a jump stepping up near its top (Black Ops II caps it).
+    let mut jump_step = false;
     let mut step_size = if (ps.pm_flags & pm_flags::PRONE) != 0 {
         PRONE_STEP_SIZE
     } else {
@@ -219,13 +260,16 @@ pub fn step_slide_move<C: CollisionBackend>(
         let ladder_up = (ps.pm_flags & pm_flags::LADDER) != 0 && ps.velocity[2] > 0.0;
         if bumped && jumping {
             match jump::get_step_height(ps, start_origin) {
-                Some(height) if height < 1.0 => return,
-                Some(height) => step_size = height,
-                None if !ladder_up => return,
+                Some(height) if height < 1.0 => return 0.0,
+                Some(height) => {
+                    step_size = height;
+                    jump_step = true;
+                }
+                None if !ladder_up => return 0.0,
                 None => {}
             }
         } else if !ladder_up {
-            return;
+            return 0.0;
         }
     }
 
@@ -255,7 +299,7 @@ pub fn step_slide_move<C: CollisionBackend>(
                 start_origin[2] + step_amount,
             ];
             ps.velocity = start_velocity;
-            let _ = slide_move(ps, pml, collision, mins, maxs, tracemask, gravity);
+            let _ = slide_move(ps, pml, collision, mins, maxs, tracemask, gravity, bo2);
         }
     }
 
@@ -272,18 +316,27 @@ pub fn step_slide_move<C: CollisionBackend>(
             maxs,
             tracemask,
         });
+        // bo2zm: Black Ops II takes the whole step back when the step down
+        // would put you on another player.
+        if bo2 && trace_iw4::trace_get_entity_hit_id(down.hit_type, down.hit_id) < MAX_CLIENTS {
+            ps.origin = down_origin;
+            ps.velocity = down_velocity;
+            return 0.0;
+        }
         if down.fraction >= 1.0 {
             if step_height != 0.0 {
                 ps.origin[2] -= step_height;
             }
-        } else if down.walkable != 0 || down.normal[2] >= SECONDARY_LANDING_NORMAL_Z {
+        } else if down.walkable != 0 || (!bo2 && down.normal[2] >= SECONDARY_LANDING_NORMAL_Z) {
+            // bo2zm: Black Ops II (collision mode 1, its default) only steps
+            // down onto walkable ground; a steeper face never holds you.
             ps.origin = down.endpos;
 
             project_velocity(&mut ps.velocity, &down.normal);
         } else {
             ps.origin = down_origin;
             ps.velocity = down_velocity;
-            return;
+            return 0.0;
         }
     }
 
@@ -291,7 +344,9 @@ pub fn step_slide_move<C: CollisionBackend>(
         + start_velocity[1] * (ps.origin[1] - start_origin[1]);
     let flat = start_velocity[0] * (down_origin[0] - start_origin[0])
         + start_velocity[1] * (down_origin[1] - start_origin[1]);
-    if gained <= flat + STEP_PROGRESS_EPSILON {
+    // bo2zm: Black Ops II also takes back a jump's step that ends at or past
+    // the top of the jump.
+    if gained <= flat + STEP_PROGRESS_EPSILON || (bo2 && jump_step && jump::above_max(ps)) {
         ps.origin = down_origin;
         ps.velocity = down_velocity;
 
@@ -310,11 +365,119 @@ pub fn step_slide_move<C: CollisionBackend>(
             });
             if down.fraction < 1.0 {
                 ps.origin = down.endpos;
-                let velocity = ps.velocity;
-                clip_velocity(&velocity, &down.normal, &mut ps.velocity);
+                if bo2 {
+                    // bo2zm: Black Ops II keeps your speed along the slope.
+                    project_velocity(&mut ps.velocity, &down.normal);
+                } else {
+                    let velocity = ps.velocity;
+                    clip_velocity(&velocity, &down.normal, &mut ps.velocity);
+                }
             }
         }
     }
+
+    if bo2 {
+        if jump_step {
+            jump::clamp_velocity(ps, down_origin);
+        }
+        if had_ground && ps.pm_type < playerstate_iw4::PM_TYPE_DEAD {
+            // bo2zm: a prone player the move left with no room to lie goes
+            // back to where they were, and the step counts for nothing.
+            if !verify_prone_position(ps, collision, start_origin, start_velocity, zombies) {
+                return 0.0;
+            }
+            return stair_step(ps, pml, start_origin, down_origin, step_size);
+        }
+    }
+    0.0
+}
+
+/// bo2zm: Black Ops II after a move on the ground: a prone player must still
+/// have room to lie where they ended up. If not, they go back to where they
+/// started; if that spot is no better, the move stands. False when the move
+/// was taken back.
+fn verify_prone_position<C: CollisionBackend>(
+    ps: &mut PlayerState,
+    collision: &C,
+    old_origin: [f32; 3],
+    old_velocity: [f32; 3],
+    zombies: bool,
+) -> bool {
+    if (ps.pm_flags & pm_flags::PRONE) == 0 {
+        return true;
+    }
+    if prone_fits(ps, collision, zombies) {
+        return true;
+    }
+    let (new_origin, new_velocity) = (ps.origin, ps.velocity);
+    ps.origin = old_origin;
+    ps.velocity = old_velocity;
+    if prone_fits(ps, collision, zombies) {
+        return false;
+    }
+    ps.origin = new_origin;
+    ps.velocity = new_velocity;
+    true
+}
+
+fn prone_fits<C: CollisionBackend>(ps: &mut PlayerState, collision: &C, zombies: bool) -> bool {
+    let (mut torso, mut waist) = (ps.f_torso_pitch, ps.f_waist_pitch);
+    let fits = crate::check_prone(
+        collision,
+        ps.origin,
+        PRONE_VERIFY_SIZE,
+        crate::PRONE_CHECK_HEIGHT,
+        ps.prone_direction,
+        true,
+        true,
+        true,
+        crate::ProneRules::for_player(ps, true, zombies),
+        crate::PRONE_FEET_DIST,
+        Some(&mut torso),
+        Some(&mut waist),
+    );
+    ps.f_torso_pitch = torso;
+    ps.f_waist_pitch = waist;
+    fits
+}
+
+/// bo2zm: Black Ops II on a stair: a step up or down on the ground costs
+/// speed by its height (a full step leaves 0.2), and one of more than 3 units
+/// moves the walk rhythm on, which can sound a footstep. Returns the step's
+/// height for the camera (0 when it does not count).
+fn stair_step(
+    ps: &mut PlayerState,
+    pml: &Pml,
+    start_origin: [f32; 3],
+    down_origin: [f32; 3],
+    step_size: f32,
+) -> f32 {
+    if ps.pm_type >= playerstate_iw4::PM_TYPE_DEAD {
+        return 0.0;
+    }
+    let rise = ps.origin[2] - down_origin[2];
+    if libm::fabsf(rise) <= STEP_SLOW_MIN_RISE {
+        return 0.0;
+    }
+    let delta = libm::rint(rise as f64 + STEP_ROUND_BIAS) as i32;
+    if delta == 0 {
+        return 0.0;
+    }
+    let scale = (1.0 - libm::fabsf(ps.origin[2] - start_origin[2]) / step_size) * STEP_SLOW_RANGE
+        + STEP_SLOW_FLOOR;
+    for v in &mut ps.velocity {
+        *v *= scale;
+    }
+    let delta = delta.abs();
+    if delta > 3 && ps.ground_entity_num != ENTITYNUM_NONE {
+        let beats = (delta / 2).min(4);
+        let old = ps.bob_cycle;
+        ps.bob_cycle =
+            ((beats as f32 * STEP_BOB_PER_UNIT + STEP_BOB_BASE + old as f32) as i32) & 0xff;
+        let footsteps = crate::should_make_footsteps(ps);
+        crate::footstep_event(ps, old as u8, ps.bob_cycle as u8, pml.ground_trace[4], footsteps);
+    }
+    rise
 }
 
 pub(crate) fn project_velocity(velocity: &mut [f32; 3], normal: &[f32; 3]) {
@@ -381,4 +544,116 @@ fn normalize(v: &mut [f32; 3]) -> f32 {
     v[1] *= scale;
     v[2] *= scale;
     len
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use trace_iw4::{ENTITYNUM_WORLD, Trace};
+
+    /// Open space over a floor at z = 0; the floor reports `hit_id` and is
+    /// tilted to `normal_z` (walkable from 0.7).
+    struct Floor {
+        hit_id: u16,
+        normal_z: f32,
+    }
+
+    impl CollisionBackend for Floor {
+        fn trace(&self, input: GroundTraceInput) -> Trace {
+            let mut hit = Trace {
+                fraction: 1.0,
+                endpos: input.end,
+                ..Trace::default()
+            };
+            let start = input.start[2] + input.mins[2];
+            let end = input.end[2] + input.mins[2];
+            if start >= 0.0 && end < 0.0 {
+                hit.fraction = start / (start - end);
+                let nz = self.normal_z;
+                hit.normal = [libm::sqrtf(1.0 - nz * nz), 0.0, nz];
+                hit.walkable = u8::from(nz >= 0.7);
+                hit.hit_type = trace_iw4::HITTYPE_ENTITY;
+                hit.hit_id = self.hit_id;
+                for i in 0..3 {
+                    hit.endpos[i] = input.start[i] + (input.end[i] - input.start[i]) * hit.fraction;
+                }
+            }
+            hit
+        }
+    }
+
+    /// Walking off a 5-unit drop: the step down lands on the floor.
+    fn walk_off(floor: &Floor, bo2: bool, last_stand: bool) -> f32 {
+        let mut ps = PlayerState::ZERO;
+        ps.origin = [0.0, 0.0, 5.0];
+        ps.velocity = [100.0, 0.0, 0.0];
+        ps.ground_entity_num = i32::from(ENTITYNUM_WORLD);
+        if last_stand {
+            ps.pm_type = playerstate_iw4::PM_TYPE_LAST_STAND;
+            ps.pm_flags |= pm_flags::LAST_STAND;
+        }
+        let mut ground_trace = [0; 11];
+        ground_trace[3] = 1.0f32.to_bits();
+        let pml = Pml {
+            forward: [1.0, 0.0, 0.0],
+            right: [0.0, -1.0, 0.0],
+            up: [0.0, 0.0, 1.0],
+            frametime: 0.05,
+            msec: 50,
+            walking: 1,
+            ground_plane: 1,
+            almost_ground_plane: 1,
+            ground_trace,
+            previous_origin: ps.origin,
+            previous_velocity: ps.velocity,
+            holdrand: 0,
+        };
+        let (mins, maxs) = ([-15.0, -15.0, 0.0], [15.0, 15.0, 70.0]);
+        step_slide_move(&mut ps, &pml, floor, mins, maxs, 1, None, bo2, false);
+        ps.origin[2]
+    }
+
+    /// BO2's PM_StepSlideMove: a step down onto another player is taken back.
+    #[test]
+    fn no_step_down_onto_a_player_in_bo2() {
+        let world = Floor {
+            hit_id: ENTITYNUM_WORLD,
+            normal_z: 1.0,
+        };
+        let player = Floor {
+            hit_id: 3,
+            normal_z: 1.0,
+        };
+        assert_eq!(walk_off(&world, true, false), 0.0);
+        assert_eq!(walk_off(&player, true, false), 5.0);
+        assert_eq!(walk_off(&player, false, false), 0.0);
+        // A zombie (entity 26 and up) is no player.
+        assert_eq!(walk_off(&Floor {
+            hit_id: 26,
+            normal_z: 1.0,
+        }, true, false), 0.0);
+    }
+
+    /// BO2's PM_StepSlideMove: in last stand a clear move never steps.
+    #[test]
+    fn last_stand_clear_move_never_steps_in_bo2() {
+        let world = Floor {
+            hit_id: ENTITYNUM_WORLD,
+            normal_z: 1.0,
+        };
+        assert_eq!(walk_off(&world, true, true), 5.0);
+        assert_eq!(walk_off(&world, false, true), 0.0);
+    }
+
+    /// BO2's PM_StepSlideMove (collision mode 1): a step down onto a face too
+    /// steep to walk is taken back; the old 0.3 rule is mode 0 only.
+    #[test]
+    fn no_step_down_onto_a_steep_face_in_bo2() {
+        let steep = Floor {
+            hit_id: ENTITYNUM_WORLD,
+            normal_z: 0.5,
+        };
+        assert_eq!(walk_off(&steep, true, false), 5.0);
+        assert_eq!(walk_off(&steep, false, false), 0.0);
+    }
 }

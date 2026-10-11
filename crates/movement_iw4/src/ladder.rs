@@ -189,6 +189,10 @@ pub struct LadderMoveContext {
     pub jump: crate::JumpLaunchContext,
     pub old_buttons: u32,
     pub player_spectate_speed_scale: f32,
+    /// bo2zm: Black Ops II's slide.
+    pub bo2: bool,
+    /// bo2zm: Zombies (its prone check differs in last stand).
+    pub zombies: bool,
 }
 
 pub fn ladder_move<C: crate::CollisionBackend>(
@@ -198,7 +202,7 @@ pub fn ladder_move<C: crate::CollisionBackend>(
     context: LadderMoveContext,
     bounds: crate::MoveBounds,
     collision: &C,
-) {
+) -> f32 {
     use crate::{
         JumpCheckContext, JumpCheckResult, accelerate, air_move, jump, stance_surface_type,
         step_slide_move,
@@ -208,9 +212,10 @@ pub fn ladder_move<C: crate::CollisionBackend>(
         time_since_jump: cmd.server_time.wrapping_sub(ps.jump_time),
         old_buttons: context.old_buttons,
         stance_surface_type: stance_surface_type(ps) as u8,
+        slick_blocks: false,
     };
     if let JumpCheckResult::Launched { .. } = jump::check(ps, pml, cmd, gate, context.jump) {
-        air_move(
+        return air_move(
             ps,
             pml,
             cmd,
@@ -221,8 +226,9 @@ pub fn ladder_move<C: crate::CollisionBackend>(
             },
             bounds,
             collision,
+            context.bo2,
+            context.zombies,
         );
-        return;
     }
 
     let mut upscale = (pml.forward[2] + LADDER_UPSCALE_BIAS) * LADDER_UPSCALE_MUL;
@@ -283,7 +289,9 @@ pub fn ladder_move<C: crate::CollisionBackend>(
         bounds.maxs,
         bounds.tracemask,
         None,
-    );
+        context.bo2,
+        context.zombies,
+    )
 }
 
 fn normalize3(v: &mut [f32; 3]) -> f32 {

@@ -295,6 +295,7 @@ fn run_players_system(ecs: &mut World) {
     );
     let original_buttons = world.old_buttons_mut().clone();
     let original_angles = world.old_cmd_angles_mut().clone();
+    let original_moves = world.old_cmd_moves_mut().clone();
     let mut consumed = Vec::new();
     if allow_move {
         phase_materialize_entity_dobjs(&mut world);
@@ -327,23 +328,13 @@ fn run_players_system(ecs: &mut World) {
             let scales = world.scales_for(weapon);
             let facts = world.combat_facts_for(weapon);
             let aim_down_sight = facts.is_some_and(|f| f.aim_down_sight);
-            let ads_allowed = facts.is_some_and(|f| {
-                weapon != 0 && {
-                    let mut allow = f.ads_allow_facts();
-
-                    allow.clip_index = weapon_iw4::clip_table_key(allow.clip_index, weapon);
-                    weapon_iw4::is_ads_allowed(
-                        &ps,
-                        &allow,
-                        &ps.ammoclip,
-                        ps.last_weapon_hand.min(1) as u8,
-                    )
-                }
-            });
             let overlay_reticle = facts.map(|f| f.overlay_reticle).unwrap_or(0);
             let (ads_in_rate, ads_out_rate, rechamber_while_ads, ads_fire_only) = facts
                 .map(|f| f.ads_frac_context())
                 .unwrap_or((1.0 / 200.0, 1.0 / 200.0, true, false));
+            let ads_reload = facts
+                .map(|f| f.ads_reload_rule())
+                .unwrap_or((false, 0, false));
             let predicting = !world.publishes_snapshot();
             let sent = world.feel();
             let mut feel = bo2_feel(world.ecs(), predicting, sent);
@@ -359,6 +350,19 @@ fn run_players_system(ecs: &mut World) {
                 feel.ducked_sprint_cycle_scale = f.ducked_sprint_cycle_scale;
                 feel.dtp_cycle_scale = f.dtp_cycle_scale;
             }
+            let ads_allowed = facts.is_some_and(|f| {
+                weapon != 0 && {
+                    let mut allow = f.ads_allow_facts();
+
+                    allow.clip_index = weapon_iw4::clip_table_key(allow.clip_index, weapon);
+                    let allowed = if feel.on {
+                        weapon_iw4::is_ads_allowed_bo2
+                    } else {
+                        weapon_iw4::is_ads_allowed
+                    };
+                    allowed(&ps, &allow, &ps.ammoclip, ps.last_weapon_hand.min(1) as u8)
+                }
+            });
             let (ads_in_rate, ads_out_rate) = movement_iw4::quickdraw_ads_rates(
                 &ps,
                 ads_in_rate,
@@ -377,6 +381,7 @@ fn run_players_system(ecs: &mut World) {
                 ads_in_rate,
                 ads_out_rate,
                 rechamber_while_ads,
+                ads_reload,
                 ads_fire_only,
                 melee_delay_ms,
                 melee_charge_delay_ms,
@@ -415,6 +420,9 @@ fn run_players_system(ecs: &mut World) {
                 cmd.buttons &= playerstate_iw4::buttons::CROUCH | playerstate_iw4::buttons::PRONE;
             }
             let commanded_move = cmd.forwardmove != 0 || cmd.rightmove != 0;
+            // bo2zm: the keys as sent, before the move holds any back.
+            let sent_move = [cmd.forwardmove, cmd.rightmove];
+            context.old_move = world.old_cmd_move(*id).unwrap_or([0, 0]);
             let linked_brushes: Vec<LinkedBrushCollisionBrush> = world
                 .entity_collision_capabilities()
                 .iter()
@@ -447,6 +455,7 @@ fn run_players_system(ecs: &mut World) {
                 moved_to,
                 stance_event,
                 reset_torso,
+                view_change,
             ) = {
                 let ps = world
                     .player_mut(*id)
@@ -487,6 +496,7 @@ fn run_players_system(ecs: &mut World) {
                     moved_to,
                     result.stance_event,
                     result.reset_torso,
+                    result.view_change,
                 )
             };
             world
@@ -521,6 +531,7 @@ fn run_players_system(ecs: &mut World) {
                 world.set_last_anim_movetype(*id, mt);
             }
             world.set_pmove_walking(*id, walking);
+            world.set_pmove_view_change(*id, view_change); // bo2zm
             world.link_player_area(*id, linked_bounds);
 
             let shots = advance_weapon_command(&mut world, tick, *id, cmd, delta.min(200));
@@ -542,12 +553,14 @@ fn run_players_system(ecs: &mut World) {
             }
             crate::equipment::phase_offhand(&mut world, tick, &[(*id, cmd)]);
             world.set_old_cmd(*id, cmd.buttons, cmd.angles);
+            world.set_old_cmd_move(*id, sent_move);
             consumed.push((*id, cmd));
         }
     }
 
     *world.old_buttons_mut() = original_buttons;
     *world.old_cmd_angles_mut() = original_angles;
+    *world.old_cmd_moves_mut() = original_moves;
 
     restamp_debug_move_look(&mut world, &input.actions);
 
@@ -666,6 +679,7 @@ fn finalize_system(ecs: &mut World) {
         emit_attack_events(&mut world, tick, &[(id, cmd)]);
         if world.client_meta(id).is_some() {
             world.set_old_cmd(id, cmd.buttons, cmd.angles);
+            world.set_old_cmd_move(id, [cmd.forwardmove, cmd.rightmove]);
         }
     }
 
@@ -675,6 +689,9 @@ fn finalize_system(ecs: &mut World) {
     let mut old_angles = std::mem::take(world.old_cmd_angles_mut());
     old_angles.retain(|(id, _)| world.client_meta(*id).is_some());
     *world.old_cmd_angles_mut() = old_angles;
+    let mut old_moves = std::mem::take(world.old_cmd_moves_mut());
+    old_moves.retain(|(id, _)| world.client_meta(*id).is_some());
+    *world.old_cmd_moves_mut() = old_moves;
 
     harvest_predictable_events(&mut world, tick);
     world.script_gaps_mut().report();
@@ -2155,7 +2172,7 @@ pub(crate) fn bo2_feel_mw2() -> bool {
 /// default, an option in the Controls menu for whoever wants it).
 static OMNI_SETTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// bo2zm: his "Omni Movement" setting; the next game started here reads it.
+/// bo2zm: the "Omni Movement" setting; the next game started here reads it.
 pub fn set_omni_movement(on: bool) {
     OMNI_SETTING.store(on, std::sync::atomic::Ordering::Relaxed);
 }
@@ -2230,6 +2247,7 @@ fn pmove_context(
     ads_in_rate: f32,
     ads_out_rate: f32,
     rechamber_while_ads: bool,
+    ads_reload: (bool, i32, bool),
     ads_fire_only: bool,
     melee_delay_ms: i32,
     melee_charge_delay_ms: i32,
@@ -2302,6 +2320,7 @@ fn pmove_context(
             ads_allowed,
             weapon_def_scope: overlay_reticle != 0,
             sprint_hold_ads: false,
+            bo2: feel.on,
         },
         ads_frac: movement_iw4::AdsFracContext {
             aim_down_sight,
@@ -2309,6 +2328,10 @@ fn pmove_context(
             ads_out_rate,
             rechamber_while_ads,
             ads_fire_only,
+            bo2: feel.on,
+            reload_lowers_ads: ads_reload.0,
+            position_reload_trans_ms: ads_reload.1,
+            segmented_reload: ads_reload.2,
         },
         melee_charge: movement_iw4::MeleeChargeWeaponDelays {
             melee_delay_ms,
@@ -2316,6 +2339,7 @@ fn pmove_context(
         },
         player_melee_range: movement_iw4::MELEE_CHARGE_PLAYER_MELEE_RANGE_DEFAULT,
         old_buttons,
+        old_move: [0, 0],
         weapon_blocks_prone: false,
     }
 }

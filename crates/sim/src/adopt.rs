@@ -57,11 +57,11 @@ pub const ADOPT_GAPS: &[AdoptGap] = &[
         reason: "sequence allocator for the journal above. Same argument.",
     },
     AdoptGap {
-        field: "old_buttons / old_cmd_angles",
+        field: "old_buttons / old_cmd_angles / old_cmd_moves",
         reason: "pmove edge state. Not in the snapshot, but not lost \
                  either: buttons and angles are on the previous usercmd. A matched ack is that \
                  command; a retired or missing ack still has the last predicted command. \
-                 `SimWorld::set_old_cmd` is how the client puts them back, and \
+                 `SimWorld::set_old_cmd` (and `set_old_cmd_move`) is how the client puts                  them back, and \
                  `net::ClientPrediction` calls it on every adopt — including Retired. \
                  Skipping Retired was the predicted-sprint toggle: held `BUTTON_SPRINT` on a \
                  snapshot that already has `pm_flags::SPRINTING` looks like a fresh press.",

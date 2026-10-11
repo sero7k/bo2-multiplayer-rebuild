@@ -4,7 +4,10 @@ use crate::{Pml, StanceSurface, add_predictable_event, stance_surface_type};
 
 const BUTTON_JUMP: u32 = 0x400;
 
-const JUMP_CLEAR_FLAGS: u32 = 0x0040_2000;
+// bo2zm: only the jump. MW2 also cleared its dive flag (0x40_0000), which
+// nothing here sets; that bit is last stand in this game, and landing a jump
+// must not end it (Black Ops II's Jump_ClearState clears only the jump).
+const JUMP_CLEAR_FLAGS: u32 = pm_flags::JUMPING;
 
 const EV_JUMP: i32 = 0x6f;
 
@@ -19,6 +22,9 @@ pub struct JumpCheckContext {
     pub old_buttons: u32,
 
     pub stance_surface_type: u8,
+
+    /// bo2zm: Black Ops II will not jump off slick ground (Jump_Check).
+    pub slick_blocks: bool,
 }
 
 pub fn clear_state(ps: &mut PlayerState) {
@@ -42,6 +48,28 @@ pub fn get_step_height(ps: &PlayerState, origin: [f32; 3]) -> Option<f32> {
     Some(step)
 }
 
+/// bo2zm: Black Ops II's Jump_IsPlayerAboveMax: at or past the top of the
+/// jump.
+pub(crate) fn above_max(ps: &PlayerState) -> bool {
+    ps.jump_origin_z + JUMP_GET_STEP_HEIGHT <= ps.origin[2]
+}
+
+/// bo2zm: Black Ops II's Jump_ClampVelocity: a jump that rose from `before`
+/// climbs no faster than takes it to the top of the jump.
+pub(crate) fn clamp_velocity(ps: &mut PlayerState, before: [f32; 3]) {
+    if ps.origin[2] - before[2] > 0.0 {
+        let room = (ps.jump_origin_z + JUMP_GET_STEP_HEIGHT) - ps.origin[2];
+        if room < 0.1 {
+            ps.velocity[2] = 0.0;
+            return;
+        }
+        let top = libm::sqrtf(ps.gravity as f32 * room * 2.0);
+        if top < ps.velocity[2] {
+            ps.velocity[2] = top;
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum JumpCheckResult {
     NotEligible,
@@ -62,6 +90,21 @@ pub struct JumpLaunchContext {
     pub crouch_jump_scale: f32,
 
     pub jump_ladder_push_vel: f32,
+}
+
+/// bo2zm: Black Ops II's land factor (Jump_GetLandFactor): a jump taken
+/// again soon after landing one has its launch energy divided by this, 2.5
+/// for the first tenth of a second, easing back to 1 as the landing wears
+/// off; 1 with the jump slowdown off.
+#[must_use]
+pub fn bo2_land_factor(ps: &PlayerState, jump_slowdown: bool) -> f32 {
+    if !jump_slowdown {
+        return 1.0;
+    }
+    if ps.pm_time > 0x6a3 {
+        return 2.5;
+    }
+    (ps.pm_time as f32 * 1.5 * 0.0005882352706976235) + 1.0
 }
 
 pub fn start(ps: &mut PlayerState, pml: &mut Pml, cmd: &UserCmd, context: JumpLaunchContext) {
@@ -89,7 +132,7 @@ pub fn start(ps: &mut PlayerState, pml: &mut Pml, cmd: &UserCmd, context: JumpLa
     ps.pm_flags = if context.dive {
         (flags & 0xffff_fe7f) | 0x0040_2000
     } else {
-        (flags & 0xffbf_fe7f) | pm_flags::JUMPING
+        (flags & 0xffff_fe7f) | pm_flags::JUMPING // bo2zm: keeps last stand
     };
 }
 
@@ -161,6 +204,9 @@ pub fn check(
     let result = check_gate(ps, cmd, gate);
     if result != JumpCheckResult::Ready {
         return result;
+    }
+    if gate.slick_blocks && (pml.ground_trace[4] & 2) != 0 {
+        return JumpCheckResult::NotEligible;
     }
 
     start(ps, pml, cmd, launch);

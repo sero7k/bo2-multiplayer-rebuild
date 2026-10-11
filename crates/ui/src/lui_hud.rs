@@ -92,10 +92,6 @@ struct LuiHud {
     back_in: u8,
     /// bo2mp: BO2's loading screen was opened for the match loading.
     loading_open: bool,
-    /// bo2mp: when the front end's globe was last turned (`lui_scene`).
-    scene_at: f64,
-    /// bo2mp: when the backdrop floor was last redrawn.
-    floor_at: f64,
     /// bo2mp: when each client was last seen firing (an
     /// enemy firing shows on the minimap for a moment).
     shots: std::collections::HashMap<u32, f64>,
@@ -656,8 +652,6 @@ fn build(ui: &assets::T6Ui, front: Option<&crate::lui_frontend::Bo2mpFrontend>, 
         scoreboard_bits: (false, false),
         back_in: 0,
         loading_open: false,
-        scene_at: 0.0,
-        floor_at: 0.0,
         shots: std::collections::HashMap::new(),
     }
 }
@@ -1077,13 +1071,15 @@ fn lui_hud(
         Option<Res<net::LocationCursor>>,
     ),
     mut io: LuiIo,
-    roots: Query<(Entity, &LuiRoot)>,
+    roots: Query<(Entity, &LuiRoot, Option<&bevy::ui::UiTargetCamera>)>,
     mut nodes: Query<(Entity, &mut LuiNode, &mut Node, &mut ZIndex)>,
     mut image_nodes: Query<&mut ImageNode>,
-    (children, computed, mut backgrounds): (
+    (children, computed, mut backgrounds, mut scene_mats, mut scene_cards): (
         Query<&Children>,
         Query<(&ComputedNode, &UiGlobalTransform, &InheritedVisibility)>,
         Query<&mut BackgroundColor>,
+        ResMut<Assets<crate::lui_scene::SceneUi>>,
+        Local<HashMap<&'static str, Handle<crate::lui_scene::SceneUi>>>,
     ),
     (mut pictures, mut logged, mut additive, mut add_names, mut color_add_names): (
         Local<HashMap<String, Handle<Image>>>,
@@ -1153,7 +1149,7 @@ fn lui_hud(
     });
     let mut spent = [lap(&mut hud_t), 0.0, 0.0, 0.0, 0.0];
     let (Some(ui), Some(values)) = (ui, values) else {
-        for (e, _) in &roots {
+        for (e, ..) in &roots {
             commands.entity(e).try_despawn();
         }
         let idle = frame::LuiMenus::default();
@@ -1218,7 +1214,7 @@ fn lui_hud(
         );
         slot.0 = Some(hud);
         pictures.clear();
-        for (e, _) in &roots {
+        for (e, ..) in &roots {
             commands.entity(e).try_despawn();
         }
         // (bo2mp: the old root goes this frame; draw from the next.)
@@ -1567,9 +1563,10 @@ fn lui_hud(
     }
     spent[3] = lap(&mut hud_t);
     if headless {
-        hud_spent(spent, 0);
+        hud_spent(spent, [0.0; 3], 0, 0);
         return;
     }
+    let mut sub = [0.0f64; 3];
     // bo2mp: the objectives' waypoints on their points in the world.
     if hud.match_mp {
         let width = hud.host_width();
@@ -1644,10 +1641,12 @@ fn lui_hud(
         })
         .flatten();
     hud.shots = shots;
+    sub[0] = lap(&mut hud_t);
     // (The scripts' whole list once a frame: walking their tree is the dear
     // part. The blur flag sits on a menu container that is no picture or
     // text, so it is read before those are picked out.)
-    let all = hud.host.drawn();
+    // (Only what shows is copied out: most of the tree is hidden at a time.)
+    let (all, elements) = hud.host.drawn_shown(0.004);
     let any_blur = all.iter().any(|d| d.blur && d.alpha > 0.004);
     let blur_amt = all.iter().filter(|d| d.blur).map(|d| d.alpha).fold(0.0f32, f32::max).clamp(0.0, 1.0);
     let mut drawn: Vec<Drawn> = all
@@ -1676,6 +1675,7 @@ fn lui_hud(
                 && !(hud.calm_frames > calm_limit() && d.text.as_deref().is_some_and(|t| t.trim().eq_ignore_ascii_case("killed by")))
         })
         .collect();
+    sub[1] = lap(&mut hud_t);
     // bo2mp: proof the end scoreboard drew its rows (the gate's check): every
     // player's name drawn on the board, logged once per opening.
     if hud.match_mp
@@ -1697,7 +1697,7 @@ fn lui_hud(
     // (bo2mp: the loading screen's root is the loading layer's, over the
     // engine's own loading screen; a root on another layer goes.)
     let root = match roots.iter().next() {
-        Some((r, _)) => r,
+        Some((r, ..)) => r,
         None => commands
             .spawn((
                 LuiRoot(bo2_loading),
@@ -1722,8 +1722,8 @@ fn lui_hud(
     };
     // (A root on the other layer goes with its nodes; draw from the next
     // frame, as nodes under it cannot be touched after its despawn.)
-    if roots.iter().any(|(_, r)| r.0 != bo2_loading) {
-        for (e, _) in &roots {
+    if roots.iter().any(|(_, r, _)| r.0 != bo2_loading) {
+        for (e, ..) in &roots {
             commands.entity(e).try_despawn();
         }
         return;
@@ -1767,13 +1767,17 @@ fn lui_hud(
         commands.entity(root).try_despawn();
         return;
     }
+    // (Only when it changes: a re-insert every frame marks the whole UI tree's
+    // camera changed each frame.)
+    let on = roots.get(root).ok().and_then(|(_, _, c)| c.map(|c| c.0));
     match lens {
-        Some(cam) => {
+        Some(cam) if on != Some(cam) => {
             commands.entity(root).insert(bevy::ui::UiTargetCamera(cam));
         }
-        None => {
+        None if on.is_some() => {
             commands.entity(root).remove::<bevy::ui::UiTargetCamera>();
         }
+        _ => {}
     }
     IN_MATCH_MENU_PICS.store(gamma_ui && !enc_ui, std::sync::atomic::Ordering::Relaxed);
     IN_FRONT_END_PICS.store(front.is_some(), std::sync::atomic::Ordering::Relaxed);
@@ -1899,11 +1903,14 @@ fn lui_hud(
         let backdrop_pic = blurred && front.is_some() && order < first_blur && d.kind == "image" && !d.behind && d.material.as_deref().is_some_and(|m| m.starts_with("lui_bkg"));
         let z = ZIndex(order as i32 + 1);
         if front.is_some() && crate::lui_frontend::is_3d(d) {
-            // bo2mp: the 3D backdrop, drawn here (`lui_scene`): the floor
-            // over the whole root, once per width; the globe in its
-            // rectangle, turned on ten times a second.
+            // bo2mp: the 3D backdrop: the floor over the whole root, the
+            // globe in its rectangle. Drawn on the graphics card each frame
+            // (`lui_scene.wgsl`: BO2's own pixel shaders over its quads); the
+            // CPU pictures they were (about two million texture reads every
+            // quarter second for the floor, the globe ten times a second, each
+            // sent to the card again) made the menus stutter. Under a blurring
+            // menu the floor is the CPU picture, blurred, made once per width.
             let Some(icons) = icons.as_deref() else { continue };
-            let tex = |name: &str| icons.0.iter().find(|(k, _)| k == name).map(|(_, i)| i.clone());
             let globe = d.kind == "globe";
             // bo2mp: under Options / the Quit prompt the covered main menu's
             // soldiers stand over the backdrop: BO2's blurred shot has no
@@ -1914,56 +1921,6 @@ fn lui_hud(
             if globe && (behind_up || blurred || d.shader[0] < 1.5) {
                 continue;
             }
-            let key = if globe { "\u{1}bo2mp globe".to_owned() } else { format!("\u{1}bo2mp floor {:.0}", hud.host_width()) };
-            let key = if blurred { format!("{key} blurred") } else { key };
-            let due = if globe { now_s - hud.scene_at >= 0.1 } else { now_s - hud.floor_at >= 0.25 };
-            if pictures.get(&key).is_none_or(|h| image_assets.get(h).is_none()) || due {
-                let made = if globe {
-                    let (Some(map), mesh) = (tex("scene:globe_map"), tex("scene:globe_map_mesh")) else { continue };
-                    let (Some(map), mesh) = (crate::lui_scene::Tex::of(&map), mesh.as_deref().and_then(crate::lui_scene::Tex::of)) else {
-                        continue;
-                    };
-                    hud.scene_at = now_s;
-                    let n = 384;
-                    let spin = std::env::var("BO2ZM_GLOBE_SPIN").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(115.0 + now_s as f32 * 7.16);
-                    let mut px = crate::lui_scene::globe(n, &map, mesh.as_ref(), spin, 23.5);
-                    if blurred {
-                        crate::lui_scene::blur(&mut px, n, n, ((blur_sigma() * n as f32 / (x1 - x0).abs().max(1.0)).round() as usize).max(1));
-                    }
-                    crate::lui_scene::image(n, n, px)
-                } else {
-                    let (Some(a), Some(b), Some(c)) = (tex("scene:plus_tile"), tex("scene:plus_grid2"), tex("scene:plus_grid3")) else {
-                        continue;
-                    };
-                    let (Some(a), Some(b), Some(c)) =
-                        (crate::lui_scene::Tex::of(&a), crate::lui_scene::Tex::of(&b), crate::lui_scene::Tex::of(&c))
-                    else {
-                        continue;
-                    };
-                    let tv = tex("scene:tv_lookup");
-                    let tv = tv.as_deref().and_then(crate::lui_scene::Tex::of);
-                    hud.floor_at = now_s;
-                    let w = hud.host_width();
-                    let (pw, ph) = ((w * 0.5) as usize, 270);
-                    let mut px = crate::lui_scene::floor(w, pw, ph, now_s as f32, tv.as_ref(), &a, &b, &c);
-                    if blurred {
-                        crate::lui_scene::blur(&mut px, pw, ph, ((blur_sigma() * 0.5).round() as usize).max(1));
-                    }
-                    crate::lui_scene::image(pw, ph, px)
-                };
-                match pictures.get(&key) {
-                    Some(h) if image_assets.get(h).is_some() => {
-                        let h = h.clone();
-                        image_assets.insert(&h, made).ok();
-                    }
-                    _ => {
-                        let h = image_assets.add(made);
-                        pictures.insert(key.clone(), h);
-                    }
-                }
-            }
-            let Some(handle) = pictures.get(&key).cloned() else { continue };
-            keep.insert(d.id);
             // bo2mp: the real globe sits 24 units left of the widget's rectangle
             // (its right limb at 523, not 547) and a little smaller (R 354).
             let r = if globe {
@@ -1981,7 +1938,68 @@ fn lui_hud(
                 height: Val::Px((r[3] - r[1]).abs() * scale),
                 ..default()
             };
-            let shows = format!("scene {key}");
+            let (shows, card, pic) = if blurred {
+                let tex = |name: &str| icons.0.iter().find(|(k, _)| k == name).map(|(_, i)| i.clone());
+                let key = format!("\u{1}bo2mp floor {:.0} blurred", hud.host_width());
+                if pictures.get(&key).is_none_or(|h| image_assets.get(h).is_none()) {
+                    let (Some(a), Some(b), Some(c)) = (tex("scene:plus_tile"), tex("scene:plus_grid2"), tex("scene:plus_grid3")) else {
+                        continue;
+                    };
+                    let (Some(a), Some(b), Some(c)) =
+                        (crate::lui_scene::Tex::of(&a), crate::lui_scene::Tex::of(&b), crate::lui_scene::Tex::of(&c))
+                    else {
+                        continue;
+                    };
+                    let tv = tex("scene:tv_lookup");
+                    let tv = tv.as_deref().and_then(crate::lui_scene::Tex::of);
+                    let w = hud.host_width();
+                    let (pw, ph) = ((w * 0.5) as usize, 270);
+                    let mut px = crate::lui_scene::floor(w, pw, ph, now_s as f32, tv.as_ref(), &a, &b, &c);
+                    crate::lui_scene::blur(&mut px, pw, ph, ((blur_sigma() * 0.5).round() as usize).max(1));
+                    let h = image_assets.add(crate::lui_scene::image(pw, ph, px));
+                    pictures.insert(key.clone(), h);
+                }
+                let Some(handle) = pictures.get(&key).cloned() else { continue };
+                (format!("scene {key}"), None, Some(handle))
+            } else {
+                let which = if globe { "globe" } else { "floor" };
+                let names = if globe {
+                    ["scene:globe_map", "scene:globe_map_mesh", "scene:globe_map", "scene:globe_map"]
+                } else {
+                    ["scene:plus_tile", "scene:plus_grid3", "scene:plus_grid2", "scene:tv_lookup"]
+                };
+                let hs = names.map(|n| crate::lui_scene::gpu_texture(&mut pictures, icons, &mut image_assets, n));
+                // (The floor needs its three grids, the globe its map; the
+                // last picture, the globe's mesh, may be missing.)
+                if hs[..if globe { 1 } else { 3 }].iter().any(Option::is_none) {
+                    continue;
+                }
+                let has_aux = hs[if globe { 1 } else { 3 }].is_some();
+                let Some(first) = hs[0].clone() else { continue };
+                let [a, b, c, dd] = hs.map(|h| h.unwrap_or_else(|| first.clone()));
+                static SPIN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+                let spin = SPIN
+                    .get_or_init(|| std::env::var("BO2ZM_GLOBE_SPIN").ok().and_then(|v| v.parse::<f32>().ok()))
+                    .unwrap_or_else(|| (115.0 + now_s * 7.16).rem_euclid(360.0) as f32);
+                let params = Vec4::new(now_s as f32, hud.host_width(), color.alpha(), if has_aux { 1.0 } else { 0.0 });
+                let extra = if globe { Vec4::new(1.0, spin, 23.5, crate::lui_scene::GLOBE_PAD) } else { Vec4::ZERO };
+                let h = match scene_cards.get(which).cloned() {
+                    Some(h) if scene_mats.get(&h).is_some() => {
+                        if let Some(mut m) = scene_mats.get_mut(&h) {
+                            m.params = params;
+                            m.extra = extra;
+                        }
+                        h
+                    }
+                    _ => {
+                        let h = scene_mats.add(crate::lui_scene::SceneUi { params, a, b, c, d: dd, extra });
+                        scene_cards.insert(which, h.clone());
+                        h
+                    }
+                };
+                (format!("scene gpu {which}"), Some(h), None)
+            };
+            keep.insert(d.id);
             if let Some(&e) = existing.get(&d.id)
                 && let Ok((_, n, mut nn, mut zi)) = nodes.get_mut(e)
                 && n.shows == shows
@@ -1999,19 +2017,18 @@ fn lui_hud(
             if let Some(&e) = existing.get(&d.id) {
                 commands.entity(e).try_despawn();
             }
-            let e = commands
-                .spawn((
-                    LuiNode { id: d.id, shows, alpha: color.alpha() },
-                    node,
-                    ImageNode {
-                        image: handle,
-                        color: Color::linear_rgba(1.0, 1.0, 1.0, color.alpha()),
-                        image_mode: bevy::ui::widget::NodeImageMode::Stretch,
-                        ..default()
-                    },
-                    z,
-                ))
-                .id();
+            let mut spawned = commands.spawn((LuiNode { id: d.id, shows, alpha: color.alpha() }, node, z));
+            if let Some(h) = card {
+                spawned.insert(MaterialNode(h));
+            } else if let Some(handle) = pic {
+                spawned.insert(ImageNode {
+                    image: handle,
+                    color: Color::linear_rgba(1.0, 1.0, 1.0, color.alpha()),
+                    image_mode: bevy::ui::widget::NodeImageMode::Stretch,
+                    ..default()
+                });
+            }
+            let e = spawned.id();
             commands.entity(root).add_child(e);
         } else if d.kind == "dashes" {
             // A slider's or attribute bar's pips, as BO2's engine draws them
@@ -2027,7 +2044,7 @@ fn lui_hud(
             // A pip's picture is the element's own box (the slider's bar is
             // 16 wide by 32, the attribute bar 32 by 32), stepped along by
             // the pitch, as the script asks (sliders 8, Create-a-Class's bars
-            // 18). Logged gap, not a rule: his real game's Create-a-Class
+            // 18). Logged gap, not a rule: the real game's Create-a-Class
             // shots show about 14 for the 18 asked; no script, scale or
             // unit in the zone explains it (the engine's native
             // setupDashes is not in the scripts), so no fitted number here.
@@ -2899,8 +2916,9 @@ fn lui_hud(
             commands.entity(e).try_despawn();
         }
     }
-    spent[4] = lap(&mut hud_t);
-    hud_spent(spent, keep.len());
+    sub[2] = lap(&mut hud_t);
+    spent[4] = sub.iter().sum();
+    hud_spent(spent, sub, keep.len(), elements);
 }
 
 /// The ms since `t`, and `t` moved on to now.
@@ -2914,37 +2932,44 @@ fn lap(t: &mut std::time::Instant) -> f64 {
 /// Where the HUD's time goes, ms a frame over 10 s (logged): reading the
 /// game's values, the engine's events to the scripts, his input and the
 /// menus' engine calls, the scripts' own frame (timers, animations), and
-/// drawing; and the pieces drawn.
-fn hud_spent(parts: [f64; 5], pieces: usize) {
+/// drawing (split: waypoints and minimap, the scripts' tree, the nodes);
+/// the pieces drawn and the tree's elements.
+fn hud_spent(parts: [f64; 5], sub: [f64; 3], pieces: usize, elements: usize) {
     thread_local! {
-        static SPENT: std::cell::RefCell<(Option<std::time::Instant>, u32, [f64; 5], usize)> =
-            const { std::cell::RefCell::new((None, 0, [0.0; 5], 0)) };
+        static SPENT: std::cell::RefCell<(Option<std::time::Instant>, u32, [f64; 8], usize, usize)> =
+            const { std::cell::RefCell::new((None, 0, [0.0; 8], 0, 0)) };
     }
-    SPENT.with_borrow_mut(|(since, frames, sum, drawn)| {
+    SPENT.with_borrow_mut(|(since, frames, sum, drawn, all)| {
         let now = std::time::Instant::now();
         let start = *since.get_or_insert(now);
         *frames += 1;
-        for (s, p) in sum.iter_mut().zip(parts) {
+        for (s, p) in sum.iter_mut().zip(parts.into_iter().chain(sub)) {
             *s += p;
         }
         *drawn += pieces;
+        *all += elements;
         if now.duration_since(start).as_secs_f64() >= 10.0 {
             let n = f64::from(*frames);
             diag::info!(
                 Ui,
-                "bo2mp hud (10 s): ms a frame {:.2} (values {:.2}, events {:.2}, input {:.2}, scripts {:.2}, draw {:.2}), {:.0} pieces",
-                sum.iter().sum::<f64>() / n,
+                "bo2mp hud (10 s): ms a frame {:.2} (values {:.2}, events {:.2}, input {:.2}, scripts {:.2}, draw {:.2} = waypoints {:.2} + tree {:.2} + nodes {:.2}), {:.0} pieces of {:.0} elements",
+                sum[..5].iter().sum::<f64>() / n,
                 sum[0] / n,
                 sum[1] / n,
                 sum[2] / n,
                 sum[3] / n,
                 sum[4] / n,
-                *drawn as f64 / n
+                sum[5] / n,
+                sum[6] / n,
+                sum[7] / n,
+                *drawn as f64 / n,
+                *all as f64 / n
             );
             *since = Some(now);
             *frames = 0;
-            *sum = [0.0; 5];
+            *sum = [0.0; 8];
             *drawn = 0;
+            *all = 0;
         }
     });
 }
@@ -3579,6 +3604,7 @@ pub(crate) fn raw_texels(img: &mut Image) {
 pub(crate) fn register_lui_hud_systems(app: &mut App) {
     app.insert_non_send(LuiHudSlot::default());
     crate::lui_additive::register(app);
+    crate::lui_scene::register(app);
     app.add_systems(Update, lui_hud.after(crate::bo2_font::load_bo2_fonts).in_set(ClientSet::Ui));
     app.add_systems(Update, crate::lui_frontend::restore_after_match.in_set(ClientSet::Ui));
 }

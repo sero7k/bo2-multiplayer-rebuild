@@ -256,6 +256,11 @@ ps_netfields! {
     jump_time: i32 = Replication::Replicated, Validation::Exact;
     jump_origin_z: f32 = Replication::Replicated, Validation::Exact;
     dive_end_time: i32 = Replication::Replicated, Validation::Exact;
+    prone_direction: f32 = Replication::Replicated, Validation::Exact;
+    prone_direction_pitch: f32 = Replication::Replicated, Validation::Exact;
+    prone_torso_pitch: f32 = Replication::Replicated, Validation::Exact;
+    f_torso_pitch: f32 = Replication::Replicated, Validation::Exact;
+    f_waist_pitch: f32 = Replication::Replicated, Validation::Exact;
     legs_timer: i32 = Replication::Replicated, Validation::Exact;
     legs_anim: i32 = Replication::Replicated, Validation::Exact;
     torso_timer: i32 = Replication::Replicated, Validation::Exact;

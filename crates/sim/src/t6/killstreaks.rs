@@ -663,7 +663,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     // the engine's bot pathing reads no danger marks yet.
     for name in [
         "setblockweaponpickup",
-        "setdangerous",
         "cleardangerous",
         "sethintstringforperk",
         "rotatevelocity",

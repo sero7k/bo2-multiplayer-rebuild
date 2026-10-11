@@ -276,7 +276,9 @@ pub struct Element {
     pub behind: bool,
     /// A list's gap between its children (`setSpacing`).
     pub spacing: f32,
-    /// Where the last layout put it (`getRect`, the mouse's hit test).
+    /// Where the last layout put it (`getRect`, the mouse's hit test). Under
+    /// an unseen element (alpha 0) the layout does not go, so there it is
+    /// where it was last laid out.
     pub last_rect: Option<Rect>,
     /// Holds the menu focus (`setFocus`, `isInFocus`).
     pub focused: bool,
@@ -363,6 +365,21 @@ thread_local! {
     static ROT: std::cell::Cell<Option<(f32, f32, f32)>> = const { std::cell::Cell::new(None) };
 }
 
+thread_local! {
+    /// The layout walk's field names, made once: `get_str` makes a new key
+    /// string on every call, and the walk reads these for every element of
+    /// every menu every frame.
+    static WALK_KEYS: [Value; 3] = [Value::str("occludedBy"), Value::str("menuName"), Value::str("darkenElement")];
+}
+const OCCLUDED_BY: usize = 0;
+const MENU_NAME: usize = 1;
+const DARKEN: usize = 2;
+
+/// One of the walk's fields (`WALK_KEYS`) of an element's field table.
+fn walk_field(t: &TableRef, k: usize) -> Value {
+    WALK_KEYS.with(|keys| t.borrow().get(&keys[k]))
+}
+
 /// bo2mp: a menu another menu covers, when that menu blurs what is under it
 /// (`setBlur`, set by CoD.Menu's `updateBlur` on every menu that covers one
 /// in the front end, none named) and does not darken it itself: BO2 keeps
@@ -372,9 +389,9 @@ fn is_behind_menu(u: &Rc<UserData>) -> bool {
     if !HIDE_OCCLUDED.load(std::sync::atomic::Ordering::Relaxed) {
         return false;
     }
-    let by = with(u, |e| e.fields.borrow().get_str("occludedBy"));
+    let by = with(u, |e| walk_field(&e.fields, OCCLUDED_BY));
     match &by {
-        Value::User(o) if !std::ptr::eq(&**o, &**u) => with(o, |oe| !oe.fields.borrow().get_str("darkenElement").truthy() && oe.blur),
+        Value::User(o) if !std::ptr::eq(&**o, &**u) => with(o, |oe| !walk_field(&oe.fields, DARKEN).truthy() && oe.blur),
         _ => false,
     }
 }
@@ -684,12 +701,12 @@ pub fn layout_clipped(root: &Rc<UserData>, rect: Rect) -> Vec<(Rc<UserData>, Rec
             // CoD.Menu's occlusion_change) is not drawn (`set_hide_occluded`).
             // An in-game popup (End Game?) keeps what it covers drawn: the
             // popup darkens it itself (`darkenElement`).
-            let by = e.fields.borrow().get_str("occludedBy");
-            let is_hud = e.fields.borrow().get_str("menuName").as_str() == Some("HUD");
+            let by = walk_field(&e.fields, OCCLUDED_BY);
+            let is_hud = walk_field(&e.fields, MENU_NAME).as_str() == Some("HUD");
             let by_dimmer = match &by {
                 _ if is_hud => false,
                 Value::User(o) if !std::ptr::eq(&**o, &**u) => {
-                    with(o, |oe| oe.fields.borrow().get_str("darkenElement").truthy())
+                    with(o, |oe| walk_field(&oe.fields, DARKEN).truthy())
                 }
                 _ => false,
             };
@@ -713,6 +730,13 @@ pub fn layout_clipped(root: &Rc<UserData>, rect: Rect) -> Vec<(Rc<UserData>, Rec
             (r, a, e.children.clone(), list, xf, shown, e.use_stencil)
         });
         out.push((u.clone(), shown, a, clip));
+        // bo2mp: nothing under an unseen element can show (alpha only falls
+        // further down), so its subtree is not laid out: most of the front
+        // end's menus sit hidden in the tree, and walking them every frame
+        // was most of the menus' cost.
+        if a <= 0.0 {
+            return;
+        }
         let clip = if stencil {
             let b = [shown[0].min(shown[2]), shown[1].min(shown[3]), shown[0].max(shown[2]), shown[1].max(shown[3])];
             Some(match clip {
@@ -726,7 +750,7 @@ pub fn layout_clipped(root: &Rc<UserData>, rect: Rect) -> Vec<(Rc<UserData>, Rec
         // added by setOccludedMenu after the popup's panel, at the panel's
         // own priority -100) is drawn first among equals: BO2 shows the End
         // Game panel lit over its dim, not dimmed by it.
-        let dim = with(u, |e| e.fields.borrow().get_str("darkenElement"));
+        let dim = with(u, |e| walk_field(&e.fields, DARKEN));
         let is_dim = |k: &Rc<UserData>| matches!(&dim, Value::User(o) if std::ptr::eq(&**o, &**k));
         kids.sort_by(|x, y| {
             let px = with(x, |e| e.priority);

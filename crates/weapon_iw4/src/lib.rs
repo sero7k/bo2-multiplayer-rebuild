@@ -30,7 +30,9 @@ mod weaponcomplete;
 mod weapondef;
 mod weaponstate;
 
-pub use ads_allow::{AdsAllowWeaponFacts, OTHER_FLAG_PLAYER, WEAP_FLAG_NO_ADS, is_ads_allowed};
+pub use ads_allow::{
+    AdsAllowWeaponFacts, OTHER_FLAG_PLAYER, WEAP_FLAG_NO_ADS, is_ads_allowed, is_ads_allowed_bo2,
+};
 pub use ads_overlay::{AdsOverlayScrub, ads_overlay_scrub};
 pub use ammo::{
     AMMO_TABLE_BYTES, AMMOCLIP_TABLE_BYTES, WEAPON_DATA_BYTES, ammo_row_present, ammo_table_key,

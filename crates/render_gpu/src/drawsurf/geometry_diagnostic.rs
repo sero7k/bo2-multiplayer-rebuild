@@ -42,6 +42,7 @@ use render_material::MaterialGenerationId;
 
 const SHADER_PATH: &str = "embedded://render_gpu/drawsurf/geometry_diagnostic.wgsl";
 
+mod skin;
 mod sun_shadow;
 
 fn geometry_diagnostic_covers(kind: &RetainedDrawKind, key: u64) -> bool {
@@ -113,6 +114,8 @@ struct DiagnosticPerf {
     frames: u32,
     worst_ms: f32,
     props_drawn: u64,
+    /// bo2mp: the draws the opaque ones took.
+    prop_batches: u64,
     props_culled: u64,
     props_unseen: u64,
     last_census_at: Option<Instant>,
@@ -192,6 +195,40 @@ pub struct T6DynamicDraw {
     /// live players' ~250k vertices a frame: copied there, not while the
     /// game waits on extract).
     pub deferred: Option<T6DeferredFill>,
+    /// bo2mp: and vertices skinned on the graphics card, after the others.
+    pub skinned: Option<T6Skinned>,
+}
+
+/// bo2mp: the moving models skinned on the graphics card, written after
+/// the vertices `vertices` or `deferred` adds (the indices already count
+/// them there): their shapes (sent once and kept on the card), each model
+/// part's bone matrices, and which shape vertices each surface skins.
+#[derive(Clone, Debug, Default)]
+pub struct T6Skinned {
+    pub shapes: Vec<T6SkinShape>,
+    /// Skin matrices (column-major), each part's bones in a row.
+    pub bones: Vec<[f32; 16]>,
+    /// Per drawn surface: (shape, its first vertex in the shape, how many,
+    /// the part's first bone, the part's bone count).
+    pub runs: Vec<[u32; 5]>,
+    /// The vertices the runs add, all told.
+    pub vertices: usize,
+}
+
+/// One shape the card skins from: kept there by what `source` points at
+/// (which it holds on to), filled once with its bind-pose vertices and,
+/// per vertex, its four bones and then its four weights' bits.
+#[derive(Clone)]
+pub struct T6SkinShape {
+    pub source: Arc<dyn std::any::Any + Send + Sync>,
+    pub vertices: usize,
+    pub fill: Arc<dyn Fn(&mut Vec<SmodelVertex>, &mut Vec<[u32; 8]>) + Send + Sync>,
+}
+
+impl std::fmt::Debug for T6SkinShape {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "T6SkinShape({} vertices)", self.vertices)
+    }
 }
 
 /// Fills a draw's vertex and index lists (emptied first) from shared,
@@ -200,8 +237,15 @@ pub struct T6DynamicDraw {
 pub struct T6DeferredFill {
     pub vertices: usize,
     pub indices: usize,
-    pub fill: Arc<dyn Fn(&mut Vec<SmodelVertex>, &mut Vec<u32>) + Send + Sync>,
+    /// bo2mp: what the indices are made from (0: not known). The same as
+    /// last frame's and they are not made or sent again: the list's index
+    /// buffer still has them (the live players' ~300k a frame cost ~1 ms).
+    pub indices_key: u64,
+    /// The vertices, and the indices when there is somewhere to put them.
+    pub fill: T6Fill,
 }
+
+pub type T6Fill = Arc<dyn Fn(&mut Vec<SmodelVertex>, Option<&mut Vec<u32>>) + Send + Sync>;
 
 impl std::fmt::Debug for T6DeferredFill {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -265,8 +309,15 @@ struct StaticGeometry {
 /// One per-frame list's buffers (vertex, index, instance), kept from frame
 /// to frame and grown when a frame needs more: new buffers for ~13 MB of
 /// players every frame cost more than writing into the old ones.
+/// bo2mp: and what the index buffer was last made from (its key and
+/// count), holding that fill so the models it names stay where they are.
 #[derive(Default)]
-struct KeptBuffers([Option<Buffer>; 3], Vec<SmodelVertex>, Vec<u32>);
+struct KeptBuffers(
+    [Option<Buffer>; 3],
+    Vec<SmodelVertex>,
+    Vec<u32>,
+    Option<(u64, usize, T6Fill)>,
+);
 
 impl KeptBuffers {
     /// `bytes` written into buffer `at`, made bigger first when they do not
@@ -280,8 +331,27 @@ impl KeptBuffers {
         usage: BufferUsages,
         bytes: &[u8],
     ) -> Buffer {
-        let need = bytes.len() as u64;
-        if self.0[at].as_ref().is_none_or(|b| b.size() < need) {
+        self.write_in(device, queue, label, at, usage, bytes.len() as u64, bytes)
+    }
+
+    /// The same, in a buffer with room for `need` bytes (bo2mp: the
+    /// card-skinned vertices go after `bytes`).
+    #[allow(clippy::too_many_arguments)]
+    fn write_in(
+        &mut self,
+        device: &RenderDevice,
+        queue: &RenderQueue,
+        label: &str,
+        at: usize,
+        usage: BufferUsages,
+        need: u64,
+        bytes: &[u8],
+    ) -> Buffer {
+        let need = need.max(bytes.len() as u64);
+        if self.0[at]
+            .as_ref()
+            .is_none_or(|b| b.size() < need || !b.usage().contains(usage))
+        {
             self.0[at] = Some(device.create_buffer(&bevy::render::render_resource::BufferDescriptor {
                 label: Some(label),
                 size: (need + need / 2).max(64 << 10).next_multiple_of(4),
@@ -290,7 +360,9 @@ impl KeptBuffers {
             }));
         }
         let buffer = self.0[at].clone().expect("made above");
-        queue.write_buffer(&buffer, 0, bytes);
+        if !bytes.is_empty() {
+            queue.write_buffer(&buffer, 0, bytes);
+        }
         buffer
     }
 }
@@ -317,34 +389,93 @@ fn upload_dynamic_draw(
     kept: &mut KeptBuffers,
     label: &str,
     draw: Option<&T6DynamicDraw>,
+    card_skin: Option<(
+        &skin::SkinPipeline,
+        &mut skin::SkinCache,
+        &mut bevy::render::renderer::PendingCommandBuffers,
+    )>,
 ) -> Option<DynamicBuffers> {
     let draw = draw?;
     // A deferred list is filled here into this list's own kept room.
     let mut vertices = std::mem::take(&mut kept.1);
     let mut indices = std::mem::take(&mut kept.2);
+    // bo2mp: indices made from the same as last frame's are still there.
+    let same_indices = draw.deferred.as_ref().and_then(|d| {
+        let &(key, n, _) = kept.3.as_ref()?;
+        (d.indices_key != 0 && key == d.indices_key && n == d.indices && n > 0)
+            .then(|| kept.0[1].clone())
+            .flatten()
+    });
+    kept.3 = None;
     let (v, i) = match &draw.deferred {
         Some(deferred) => {
             vertices.clear();
             indices.clear();
             vertices.reserve(deferred.vertices);
-            indices.reserve(deferred.indices);
             let _span = bevy::log::info_span!(target: "iw4l", "t6 fill", name = label).entered();
-            (deferred.fill)(&mut vertices, &mut indices);
+            if same_indices.is_some() {
+                (deferred.fill)(&mut vertices, None);
+            } else {
+                indices.reserve(deferred.indices);
+                (deferred.fill)(&mut vertices, Some(&mut indices));
+            }
             (vertices.as_slice(), indices.as_slice())
         }
         None => (draw.vertices.as_slice(), draw.indices.as_slice()),
     };
-    let buffers = (!v.is_empty() && !i.is_empty() && !draw.draws.is_empty() && !draw.instances.is_empty())
-        .then(|| {
-            let _span = bevy::log::info_span!(target: "iw4l", "t6 write", name = label).entered();
-            let vb = kept.write(device, queue, label, 0, BufferUsages::VERTEX, bytemuck::cast_slice(v));
-            let ib = kept.write(device, queue, label, 1, BufferUsages::INDEX, bytemuck::cast_slice(i));
-            (vb, ib)
-        });
-    let index_n = i.len() as u64;
+    let index_n = match (&same_indices, &draw.deferred) {
+        (Some(_), Some(d)) => d.indices,
+        _ => i.len(),
+    };
+    // bo2mp: the card-skinned vertices go after these, written there.
+    let skinned = draw.skinned.as_ref().filter(|s| s.vertices > 0);
+    let skinned_n = skinned.map_or(0, |s| s.vertices);
+    let buffers = ((!v.is_empty() || skinned_n > 0)
+        && index_n > 0
+        && !draw.draws.is_empty()
+        && !draw.instances.is_empty())
+    .then(|| {
+        let _span = bevy::log::info_span!(target: "iw4l", "t6 write", name = label).entered();
+        let usage = match skinned {
+            Some(_) => BufferUsages::VERTEX | BufferUsages::STORAGE,
+            None => BufferUsages::VERTEX,
+        };
+        let need = ((v.len() + skinned_n) * std::mem::size_of::<SmodelVertex>()) as u64;
+        let vb = kept.write_in(device, queue, label, 0, usage, need, bytemuck::cast_slice(v));
+        let ib = match &same_indices {
+            Some(ib) => ib.clone(),
+            None => kept.write(device, queue, label, 1, BufferUsages::INDEX, bytemuck::cast_slice(i)),
+        };
+        (vb, ib)
+    });
+    let written = v.len() as u32;
+    if buffers.is_some()
+        && let Some(d) = draw.deferred.as_ref().filter(|d| d.indices_key != 0)
+    {
+        kept.3 = Some((d.indices_key, index_n, Arc::clone(&d.fill)));
+    }
+    let index_n = index_n as u64;
     kept.1 = vertices;
     kept.2 = indices;
     let (vb, ib) = buffers?;
+    if let Some(skinned) = skinned
+        && !card_skin.is_some_and(|(pipeline, cache, pending)| {
+            skin::skin_into(device, queue, pending, pipeline, cache, skinned, &vb, written)
+        })
+    {
+        // Their vertices are not there: nothing in this list is drawn.
+        static SAID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        if SAID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 8 {
+            diag::warn!(
+                World,
+                "{label}: {} card-skinned vertices ({} shapes, {} runs) could not be skinned; list left out",
+                skinned.vertices,
+                skinned.shapes.len(),
+                skinned.runs.len(),
+            );
+        }
+        return None;
+    }
     let inst = kept.write(
         device,
         queue,
@@ -702,11 +833,24 @@ fn draw_dynamic_list<'w>(
     pass.set_index_buffer(ib.slice(..), IndexFormat::Uint32);
     let mut order: Vec<usize> = (0..draws.len()).filter(|&i| keep(draws[i][3])).collect();
     order.sort_by_key(|&i| (t6_blended(draws[i][3]), t6_sort_key(draws[i][3])));
+    // bo2mp: back-to-back draws of one look and placement whose indices
+    // follow on are one draw (marks lit alike share a placement).
+    let mut merged: Vec<[u32; 7]> = Vec::with_capacity(order.len());
+    for i in order {
+        let d = draws[i];
+        if let Some(last) = merged.last_mut()
+            && last[2..] == d[2..]
+            && last[0].checked_add(last[1]) == Some(d[0])
+        {
+            last[1] = last[1].saturating_add(d[1]);
+            continue;
+        }
+        merged.push(d);
+    }
     let mut bound: Option<DiagnosticTess> = None;
     let mut bound_slot = None;
     let mut drawn = 0u32;
-    for i in order {
-        let [start, count, slot, code, instance, normal, specular] = draws[i];
+    for [start, count, slot, code, instance, normal, specular] in merged {
         if count == 0 || (code != T6_NONE && code & T6_BLEND_MASK >= T6_SHADOW_ONLY) {
             continue;
         }
@@ -762,6 +906,125 @@ fn draw_dynamic_list<'w>(
         drawn += 1;
     }
     drawn
+}
+
+/// bo2mp: one draw of opaque props: one surface at `instances`
+/// placements, which sit together in this frame's own placement rows.
+struct PropBatch<'a> {
+    style: u16,
+    slot_key: (u32, Option<[u32; 3]>),
+    pipeline: &'a bevy::render::render_resource::RenderPipeline,
+    bind_group: &'a BindGroup,
+    /// The reflection probes, for a surface with shine.
+    probes: Option<&'a BindGroup>,
+    start: u32,
+    count: u32,
+    instances: std::ops::Range<u32>,
+}
+
+/// bo2mp: the opaque props this view draws, each surface's placements in
+/// one draw (Nuketown drew ~1,450 a frame one placement at a time), sorted
+/// by pipeline and texture so they switch less; `rows` gets the placements
+/// in the order the draws read them. Returns the draws, then how many
+/// props were hidden by distance and how many were out of view.
+fn t6_opaque_prop_batches<'a>(
+    geometry: &DiagnosticGeometry,
+    world_textures: &'a DiagnosticWorldTextures,
+    cache: &'a PipelineCache,
+    pipelines: &HashMap<DiagnosticTess, CachedRenderPipelineId>,
+    view: &ExtractedView,
+    rows: &mut Vec<[f32; 24]>,
+) -> (Vec<PropBatch<'a>>, u32, u32) {
+    // The game's own per-placement draw distance (the fast quality
+    // setting hides props at 60% of it).
+    let eye = view.world_from_view.translation();
+    let cull_scale = if asset_core::t6_fast() { 0.6 } else { 1.0 };
+    let view_planes =
+        t6_view_planes(view.clip_from_view * view.world_from_view.to_matrix().inverse());
+    let (mut culled, mut unseen) = (0u32, 0u32);
+    let mut each: Vec<PropBatch<'a>> = Vec::new();
+    for (i, &[surface, slot, code, instance]) in geometry.t6_props.iter().enumerate() {
+        if t6_blended(code) || (code != T6_NONE && code & T6_BLEND_MASK >= T6_SHADOW_ONLY) {
+            continue;
+        }
+        let Some(row) = geometry.t6_prop_instances.get(instance as usize) else {
+            continue;
+        };
+        if row[22] > 0.0 {
+            let d = Vec3::new(row[12], row[13], row[14]) - eye;
+            let cull = row[22] * cull_scale;
+            if d.length_squared() > cull * cull {
+                culled += 1;
+                continue;
+            }
+        }
+        if let (Some(planes), Some(&[x, y, z, radius])) =
+            (view_planes.as_ref(), geometry.t6_prop_spheres.get(i))
+            && radius >= 0.0
+            && planes
+                .iter()
+                .any(|plane| plane.truncate().dot(Vec3::new(x, y, z)) + plane.w < -radius)
+        {
+            unseen += 1;
+            continue;
+        }
+        let Some(&(start, count)) = geometry.smodel_surface_ranges.get(surface as usize) else {
+            continue;
+        };
+        // Shine: a lit opaque prop with a normal or specular map.
+        let shine = geometry.t6_prop_shine.get(i).copied().unwrap_or([u32::MAX; 3]);
+        let flow = prop_style(code) & (STYLE_PROP_FLOW | STYLE_PROP_TILE) != 0
+            || (prop_style(code) & STYLE_PROP_FLAG != 0 && code & T6_UNLIT == 0);
+        let probes = world_textures.probes.as_ref().map(|(_, probes)| probes);
+        let shine_group = (prop_shine_code(code) && (shine[0] != u32::MAX || shine[1] != u32::MAX))
+            .then_some(probes)
+            .flatten()
+            .and_then(|_| {
+                let aux = if flow { shine[2] } else { u32::MAX };
+                world_textures.shine.get(&(slot, shine[0], shine[1], aux))
+            });
+        let style = prop_style(code) | if shine_group.is_some() { STYLE_SHINE } else { 0 };
+        let pipeline = pipelines
+            .get(&DiagnosticTess::PropTextured(style))
+            .and_then(|&id| cache.get_render_pipeline(id));
+        let (Some(pipeline), Some(bind_group)) =
+            (pipeline, shine_group.or_else(|| world_textures.bind_groups.get(&slot)))
+        else {
+            continue;
+        };
+        if count == 0 || !retained_within("prop", start, count, geometry.smodel_index_count) {
+            continue;
+        }
+        each.push(PropBatch {
+            style,
+            slot_key: (slot, shine_group.map(|_| shine)),
+            pipeline,
+            bind_group,
+            probes: shine_group.and(probes),
+            start,
+            count,
+            instances: instance..instance + 1,
+        });
+    }
+    each.sort_unstable_by_key(|b| (b.style, b.slot_key, b.start, b.count, b.instances.start));
+    let mut batches: Vec<PropBatch<'a>> = Vec::new();
+    for b in each {
+        let at = rows.len() as u32;
+        rows.push(geometry.t6_prop_instances[b.instances.start as usize]);
+        match batches.last_mut() {
+            Some(last)
+                if (last.style, last.slot_key, last.start, last.count)
+                    == (b.style, b.slot_key, b.start, b.count) =>
+            {
+                last.instances.end = at + 1;
+            }
+            _ => batches.push(PropBatch {
+                instances: at..at + 1,
+                ..b
+            }),
+        }
+    }
+    (batches, culled, unseen)
 }
 
 /// bo2zm: an effect code that draws with soft edges in the world (BO2's
@@ -1730,9 +1993,18 @@ fn upload_dynamic(
     mut dynamic: ResMut<DiagnosticDynamic>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
+    skin_pipeline: Option<Res<skin::SkinPipeline>>,
+    mut skin_cache: ResMut<skin::SkinCache>,
+    mut pending: ResMut<bevy::render::renderer::PendingCommandBuffers>,
 ) {
     let source = source.as_deref();
     let dynamic = &mut *dynamic;
+    if source
+        .and_then(|s| s.missiles.as_ref())
+        .is_none_or(|m| m.skinned.is_none())
+    {
+        skin_cache.idle();
+    }
     let [marks, viewmodel, missiles, effects, viewmodel_effects, held] = &mut dynamic.kept;
     dynamic.marks = upload_dynamic_draw(
         &device,
@@ -1740,6 +2012,7 @@ fn upload_dynamic(
         marks,
         "bo2zm_marks",
         source.and_then(|s| s.marks.as_ref()),
+        None,
     );
     dynamic.viewmodel = upload_dynamic_draw(
         &device,
@@ -1747,6 +2020,7 @@ fn upload_dynamic(
         viewmodel,
         "bo2zm_viewmodel",
         source.and_then(|s| s.viewmodel.as_ref()),
+        None,
     );
     dynamic.missiles = upload_dynamic_draw(
         &device,
@@ -1754,6 +2028,9 @@ fn upload_dynamic(
         missiles,
         "bo2zm_missiles",
         source.and_then(|s| s.missiles.as_ref()),
+        skin_pipeline
+            .as_deref()
+            .map(|p| (p, &mut *skin_cache, &mut *pending)),
     );
     dynamic.script_static = match source.and_then(|s| s.script_static.as_ref()) {
         Some(s) if !s.draws.is_empty() && !s.instances.is_empty() && !s.chunks.is_empty() => {
@@ -1780,6 +2057,7 @@ fn upload_dynamic(
         effects,
         "bo2zm_effects",
         source.and_then(|s| s.effects.as_ref()),
+        None,
     );
     dynamic.viewmodel_effects = upload_dynamic_draw(
         &device,
@@ -1787,6 +2065,7 @@ fn upload_dynamic(
         viewmodel_effects,
         "bo2zm_viewmodel_effects",
         source.and_then(|s| s.viewmodel_effects.as_ref()),
+        None,
     );
     // bo2mp test aid: `IW4L_T6_SKIP_LIST=marks,missiles,static,effects`
     // leaves those dynamic lists out (bisecting a stray surface).
@@ -2515,6 +2794,24 @@ fn draw_geometry_diagnostic(
             usage: BufferUsages::VERTEX,
         })
     });
+    // bo2mp: the opaque props, a surface's placements per draw, from
+    // their own rows this frame.
+    let mut prop_rows = Vec::new();
+    let (prop_batches, mut props_culled, mut props_unseen) = t6_opaque_prop_batches(
+        &geometry,
+        &world_textures,
+        &cache,
+        &view_bind.t6_pipelines,
+        extracted_view,
+        &mut prop_rows,
+    );
+    let prop_rows_buffer = (!prop_rows.is_empty()).then(|| {
+        device.create_buffer_with_data(&BufferInitDescriptor {
+            label: Some("bo2mp_prop_rows"),
+            contents: bytemuck::cast_slice(prop_rows.as_slice()),
+            usage: BufferUsages::VERTEX,
+        })
+    });
     let attachments = [Some(target.get_color_attachment())];
     stamp.pass = 1;
     // bo2zm: the pass's GPU time (`render/bo2zm_world/elapsed_gpu`), which a
@@ -2569,8 +2866,7 @@ fn draw_geometry_diagnostic(
     let mut xmodel_skipped = 0u32;
     let mut fx_skipped = 0u32;
     let mut prop_draws = 0u32;
-    let mut props_culled = 0u32;
-    let mut props_unseen = 0u32;
+    let mut prop_batch_draws = 0u32;
     // bo2zm: world surfaces drawn untextured (diagnostic colours), a few ids.
     let mut untextured: Vec<u16> = Vec::new();
     let mut untextured_n = 0u32;
@@ -2890,10 +3186,30 @@ fn draw_geometry_diagnostic(
                 pass.set_viewport(vp_x, vp_y, vp_w, vp_h, depth_min, depth_max);
             }
             pass.set_vertex_buffer(0, vertex.slice(..));
-            pass.set_vertex_buffer(1, instances.slice(..));
             pass.set_index_buffer(index_buffer.slice(..), IndexFormat::Uint32);
-            let opaque_props = (0..geometry.t6_props.len())
-                .filter(|&i| !t6_blended(geometry.t6_props[i][2]));
+            // bo2mp: the opaque ones, a surface's placements per draw.
+            if let Some(rows) = prop_rows_buffer.as_ref().filter(|_| !blended_phase) {
+                pass.set_vertex_buffer(1, rows.slice(..));
+                for b in &prop_batches {
+                    let key = DiagnosticTess::PropTextured(b.style);
+                    if bound_prop != Some(key) {
+                        pass.set_render_pipeline(b.pipeline);
+                        if let Some(probes) = b.probes {
+                            pass.set_bind_group(3, probes, &[]);
+                        }
+                        bound_prop = Some(key);
+                        bound_slot = None;
+                    }
+                    if bound_slot != Some(b.slot_key) {
+                        pass.set_bind_group(1, b.bind_group, &[]);
+                        bound_slot = Some(b.slot_key);
+                    }
+                    pass.draw_indexed(b.start..b.start.saturating_add(b.count), 0, b.instances.clone());
+                    prop_draws = prop_draws.saturating_add(b.instances.len() as u32);
+                    prop_batch_draws += 1;
+                }
+            }
+            pass.set_vertex_buffer(1, instances.slice(..));
             // The game's own per-placement draw distance (the fast quality
             // setting hides props at 60% of it).
             let eye = extracted_view.world_from_view.translation();
@@ -2903,12 +3219,12 @@ fn draw_geometry_diagnostic(
                 extracted_view.clip_from_view
                     * extracted_view.world_from_view.to_matrix().inverse(),
             );
-            let props: Box<dyn Iterator<Item = usize>> = if blended_phase {
-                Box::new(geometry.t6_blended_props.iter().copied())
+            let props: &[usize] = if blended_phase {
+                &geometry.t6_blended_props
             } else {
-                Box::new(opaque_props)
+                &[]
             };
-            for i in props {
+            for &i in props {
                 let [surface, slot, code, instance] = geometry.t6_props[i];
                 if code != T6_NONE && code & T6_BLEND_MASK >= T6_SHADOW_ONLY {
                     continue;
@@ -3142,6 +3458,7 @@ fn draw_geometry_diagnostic(
     perf.last_frame = Some(now);
     perf.frames += 1;
     perf.props_drawn += u64::from(prop_draws);
+    perf.prop_batches += u64::from(prop_batch_draws);
     perf.props_culled += u64::from(props_culled);
     perf.props_unseen += u64::from(props_unseen);
     let start = *perf.window_start.get_or_insert(now);
@@ -3160,11 +3477,12 @@ fn draw_geometry_diagnostic(
         let n = perf.frames as f32;
         diag::info!(
             World,
-            "bo2zm perf: {:.1} fps, {:.2} ms average, {:.2} ms worst; props {:.0} drawn, {:.0} hidden by distance, {:.0} out of view per frame; quality {}",
+            "bo2zm perf: {:.1} fps, {:.2} ms average, {:.2} ms worst; props {:.0} drawn ({:.0} opaque draws), {:.0} hidden by distance, {:.0} out of view per frame; quality {}",
             (n - 1.0) / span,
             span * 1000.0 / (n - 1.0),
             perf.worst_ms,
             perf.props_drawn as f32 / n,
+            perf.prop_batches as f32 / n,
             perf.props_culled as f32 / n,
             perf.props_unseen as f32 / n,
             if asset_core::t6_fast() { "fast" } else { "full" }
@@ -3211,9 +3529,10 @@ pub(super) fn register(app: &mut App) {
         .init_resource::<DiagnosticWorldTextures>()
         .init_resource::<DiagnosticWorldLightmaps>()
         .init_resource::<DiagnosticDynamic>()
+        .init_resource::<skin::SkinCache>()
         .init_resource::<ExtractedT6Dynamic>()
         .init_resource::<SpecializedRenderPipelines<DiagnosticPipeline>>()
-        .add_systems(RenderStartup, (init_pipeline, sun_shadow::init))
+        .add_systems(RenderStartup, (init_pipeline, sun_shadow::init, skin::init))
         .add_systems(
             Render,
             (

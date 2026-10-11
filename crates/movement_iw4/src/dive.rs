@@ -14,9 +14,8 @@
 //! when the slide ends (no friction over a ledge top they could climb). A
 //! slide that comes to a stop (into a wall) ends at once. The player then
 //! lies still for 0.1 s and stays prone until they press jump, crouch, prone
-//! or sprint. Getting up from a dive is twice as quick as from an ordinary
-//! prone (by request; BO2's own quick get-up is sprinting out of it).
-//! A get-up pressed during the dive is kept, so the player rises the moment
+//! or sprint. Getting up from a dive takes as long as from an ordinary prone,
+//! as in BO2 (bo2mp 10-10; its quick get-up is sprinting out of it). A get-up pressed during the dive is kept, so the player rises the moment
 //! it is over.
 //!
 //! The numbers are BO2's dive dvar defaults: `dtp_startup_delay` 250 ms of
@@ -48,8 +47,8 @@ pub const PMF_DIVE_SLIDE: u32 = 0x0200_0000;
 /// (as BO2 leaves them) until they press jump, crouch, prone or sprint,
 /// whatever the keys' hold or toggle style.
 pub const PMF_DIVE_PRONE: u32 = 0x0400_0000;
-/// Getting up from a dive (or waiting to, once it ends): the stance change
-/// runs at twice the speed, and a held prone key does not drop the player
+/// Getting up from a dive (or waiting to, once it ends): a held prone key
+/// does not drop the player
 /// back down until it is let go.
 pub const PMF_DIVE_GETUP: u32 = 0x0800_0000;
 
@@ -245,7 +244,7 @@ pub fn advance<C: CollisionBackend>(
     collision: &C,
     jump_height: f32,
     air: AirMoveContext,
-) {
+) -> f32 {
     let now = cmd.server_time;
     if ps.pm_flags & PMF_DIVE != 0 && pml.walking != 0 {
         ps.pm_flags = (ps.pm_flags & !PMF_DIVE) | PMF_DIVE_SLIDE;
@@ -257,9 +256,11 @@ pub fn advance<C: CollisionBackend>(
         }
         ps.velocity[2] = ps.velocity[2].min(0.0);
     }
-    crate::air::air_move_with(ps, pml, cmd, air, bounds, collision, true, |ps| {
+    // A dive never happens in last stand, the only time Zombies' prone check
+    // differs.
+    crate::air::air_move_with(ps, pml, cmd, air, bounds, collision, true, false, |ps| {
         slide_friction(ps, now, collision, bounds)
-    });
+    })
 }
 
 /// The slide's share of the ground's friction: none at touch-down, rising

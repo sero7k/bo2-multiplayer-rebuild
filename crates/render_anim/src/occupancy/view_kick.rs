@@ -792,6 +792,10 @@ pub fn sync_camera_from_presented(
         ps.origin[1] + offset[1],
         ps.origin[2] + offset[2] + ps.view_height_current,
     ];
+    // bo2zm: Black Ops II eases the camera over a stair step.
+    if matches!(ps.pm_type, 0 | 2 | 3) {
+        origin[2] -= presented.view_z_drop();
+    }
     let bob = view_org_bob(org);
     origin[2] += bob.vertical;
 

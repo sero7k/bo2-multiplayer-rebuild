@@ -800,6 +800,7 @@ fn perk_bits(name: &str) -> (u32, u32) {
         "specialty_longersprint" => movement_iw4::PERK_LONGERSPRINT,
         "specialty_bulletflinch" => weapon_iw4::PERK_BULLETFLINCH,
         "specialty_movefaster" => movement_iw4::PERK_MOVEFASTER,
+        "specialty_stalker" => movement_iw4::PERK_STALKER,
         "specialty_sprintrecovery" => weapon_iw4::PERK_SPRINTRECOVERY,
         "specialty_unlimitedsprint" => movement_iw4::PERK_MARATHON,
         _ => 0,

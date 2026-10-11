@@ -21,6 +21,14 @@ pub struct PlayerState {
     pub jump_origin_z: f32,
     /// bo2zm: when the last dive's slide ended (0: no dive yet).
     pub dive_end_time: i32,
+    /// bo2zm: the way a prone body lies (yaw), its slope pitch and the
+    /// torso's slope pitch, as Black Ops II keeps them for its crawl.
+    pub prone_direction: f32,
+    pub prone_direction_pitch: f32,
+    pub prone_torso_pitch: f32,
+    /// bo2zm: the last prone check's torso and waist pitch.
+    pub f_torso_pitch: f32,
+    pub f_waist_pitch: f32,
     pub legs_timer: i32,
     pub legs_anim: i32,
     pub torso_timer: i32,
@@ -261,6 +269,11 @@ impl PlayerState {
         jump_time: 0,
         jump_origin_z: 0.0,
         dive_end_time: 0,
+        prone_direction: 0.0,
+        prone_direction_pitch: 0.0,
+        prone_torso_pitch: 0.0,
+        f_torso_pitch: 0.0,
+        f_waist_pitch: 0.0,
         legs_timer: 0,
         legs_anim: 0,
         torso_timer: 0,

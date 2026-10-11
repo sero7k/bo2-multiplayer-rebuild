@@ -93,6 +93,8 @@ pub(crate) fn validated_facts(
         ads_in_rate: f.ads_in_rate,
         ads_out_rate: f.ads_out_rate,
         rechamber_while_ads: f.rechamber_while_ads,
+        reload_lowers_ads: f.reload_lowers_ads,
+        position_reload_trans_ms: f.position_reload_trans_ms,
         ads_fire_only: f.ads_fire_only,
         optic_switch: f.optic_switch,
         melee_damage: f.melee_damage,

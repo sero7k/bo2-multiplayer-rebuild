@@ -29,7 +29,7 @@ pub fn walk_move<C: CollisionBackend>(
     context: WalkMoveContext,
     bounds: MoveBounds,
     collision: &C,
-) {
+) -> f32 {
     if (ps.pm_flags & 0x2000) != 0 {
         prone_velocity_scale(ps, context.feel);
     }
@@ -44,13 +44,27 @@ pub fn walk_move<C: CollisionBackend>(
         time_since_jump: cmd.server_time.wrapping_sub(ps.jump_time),
         old_buttons: context.old_buttons,
         stance_surface_type: stance_surface_type(ps) as u8,
+        slick_blocks: context.feel.on,
     };
-    if let JumpCheckResult::Launched { .. } = jump::check(ps, pml, cmd, gate, context.jump) {
-        air_move(ps, pml, cmd, context.air, bounds, collision);
-        return;
+    let mut launch = context.jump;
+    // bo2zm: Black Ops II's jump taken soon after landing one goes lower.
+    if context.feel.on {
+        launch.crouch_jump_scale = jump::bo2_land_factor(ps, context.feel.jump_slowdown);
+    }
+    if let JumpCheckResult::Launched { .. } = jump::check(ps, pml, cmd, gate, launch) {
+        return air_move(
+            ps,
+            pml,
+            cmd,
+            context.air,
+            bounds,
+            collision,
+            context.feel.on,
+            context.feel.zombies,
+        );
     }
 
-    friction(ps, pml, context.feel.on);
+    friction(ps, pml, context.feel);
 
     let cmd_scale = crate::feel::omni_cmd_scale(ps, context.cmd_scale, context.feel); // bo2zm
     let cmd_scale = crate::feel::stamin_up_cmd_scale(ps, cmd_scale, context.feel); // bo2zm
@@ -85,8 +99,10 @@ pub fn walk_move<C: CollisionBackend>(
     }
 
     clip_to_ground_plane(&mut ps.velocity, &pml.ground_trace[1..4]);
-    if ps.velocity[0] != 0.0 || ps.velocity[1] != 0.0 {
-        step_slide_move(
+    // bo2zm: Black Ops II steps every walking frame, standing still too, so
+    // a player at rest stays down on the floor under them.
+    if context.feel.on || ps.velocity[0] != 0.0 || ps.velocity[1] != 0.0 {
+        return step_slide_move(
             ps,
             pml,
             collision,
@@ -94,8 +110,11 @@ pub fn walk_move<C: CollisionBackend>(
             bounds.maxs,
             bounds.tracemask,
             None,
+            context.feel.on,
+            context.feel.zombies,
         );
     }
+    0.0
 }
 
 fn prone_velocity_scale(ps: &mut PlayerState, feel: crate::Bo2Feel) {
@@ -118,13 +137,23 @@ fn prone_velocity_scale(ps: &mut PlayerState, feel: crate::Bo2Feel) {
             }
         }
     } else {
-        ps.pm_flags &= 0xffbfdfff;
+        // bo2zm: Black Ops II ends only the jump (Jump_ApplySlowdown); the
+        // bit MW2 also cleared is last stand here.
+        ps.pm_flags &= if feel.on {
+            !playerstate_iw4::pm_flags::JUMPING
+        } else {
+            0xffbfdfff
+        };
         ps.jump_origin_z = 0.0;
         scale = 0.65;
     }
 
-    let slowdown = !feel.on || feel.jump_slowdown;
-    if (ps.pm_flags & 0x400000) == 0 && slowdown {
+    let slowdown = if feel.on {
+        feel.jump_slowdown
+    } else {
+        (ps.pm_flags & 0x400000) == 0
+    };
+    if slowdown {
         ps.velocity[0] *= scale;
         ps.velocity[1] *= scale;
         ps.velocity[2] *= scale;

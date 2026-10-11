@@ -28,8 +28,16 @@ use bevy::prelude::App;
 const WINDOW: Duration = Duration::from_secs(10);
 /// A single run this long is listed on its own.
 const SPIKE: Duration = Duration::from_millis(20);
-/// The most names listed per window.
+/// The most names listed per window (`IW4L_SPAN_TOP` lists more, to break a
+/// schedule down into its small systems).
 const TOP: usize = 60;
+
+fn top() -> usize {
+    std::env::var("IW4L_SPAN_TOP")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(TOP)
+}
 
 /// Bevy's spans are at info level; the log keeps its usual quiet filter for
 /// everything else.
@@ -171,6 +179,7 @@ pub(crate) fn layer(_app: &mut App) -> Option<BoxedLayer> {
 fn write_windows(path: PathBuf) {
     let start = *START.get_or_init(Instant::now);
     let mut from = 0.0f32;
+    let top = top();
     loop {
         std::thread::sleep(WINDOW);
         let to = start.elapsed().as_secs_f32();
@@ -190,7 +199,7 @@ fn write_windows(path: PathBuf) {
         rows.sort_by(|a, b| b.1.total.cmp(&a.1.total));
         spikes.sort_by(|a, b| a.0.total_cmp(&b.0));
         let mut out = format!("== {from:.0}-{to:.0} s\n");
-        for (label, stat) in rows.iter().take(TOP) {
+        for (label, stat) in rows.iter().take(top) {
             let total = stat.total.as_secs_f64() * 1000.0;
             let _ = writeln!(
                 out,

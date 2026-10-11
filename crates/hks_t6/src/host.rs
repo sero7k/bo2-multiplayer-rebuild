@@ -1069,6 +1069,24 @@ impl Host {
             .collect()
     }
 
+    /// bo2mp: `drawn`, less what no one sees (alpha at most `min_alpha`):
+    /// that is still walked (its places kept) but not copied out. With the
+    /// count of every element walked.
+    pub fn drawn_shown(&self, min_alpha: f32) -> (Vec<Drawn>, usize) {
+        let (w, h) = self.root_size;
+        let mut all = 0;
+        let shown = self
+            .roots
+            .iter()
+            .filter_map(lui::element)
+            .flat_map(|root| lui::layout_clipped(&root, [0.0, 0.0, w, h]))
+            .inspect(|_| all += 1)
+            .filter(|(_, _, alpha, _)| *alpha > min_alpha)
+            .map(|(u, rect, alpha, clip)| drawn_of(&u, rect, alpha, clip))
+            .collect();
+        (shown, all)
+    }
+
     /// bo2mp: the entity containers on the roots to place this frame (see
     /// `lui::entity_containers`).
     pub fn entity_containers(&self) -> Vec<(Rc<UserData>, i32, [f32; 3], bool)> {

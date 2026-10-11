@@ -1,5 +1,7 @@
-//! bo2mp: the front end's 3D backdrop, drawn on the CPU from BO2's own
-//! textures. `ui_mp/t6/main.lua` builds it from widgets the engine draws in
+//! bo2mp: the front end's 3D backdrop from BO2's own textures, drawn on the
+//! graphics card each frame (`lui_scene.wgsl`, the sums below as BO2's pixel
+//! shaders do them); the CPU floor here is kept for the blurred backdrop
+//! under a covering menu, made once. `ui_mp/t6/main.lua` builds it from widgets the engine draws in
 //! 3D, which the 2D layer cannot: the holotable floor (three pictures
 //! `ui_holotable_grid`, `_grid3` at half brightness and `_grid2` 32 units
 //! lower, each 2560 units square, 400 below the screen's middle, turned
@@ -14,6 +16,9 @@
 //! mesh's strength. They are set to match the real game's lobby shots.
 
 use bevy::prelude::*;
+use bevy::render::render_resource::AsBindGroup;
+use bevy::shader::ShaderRef;
+use std::collections::HashMap;
 
 /// A texture's pixels (RGBA8, as stored).
 pub(crate) struct Tex<'a> {
@@ -184,95 +189,70 @@ pub(crate) fn floor(w: f32, pw: usize, ph: usize, t: f32, tv: Option<&Tex>, grid
     out
 }
 
-/// The globe as an RGBA8 picture `n` x `n`: the map on a sphere seen from
-/// above `tilt` degrees of latitude, `spin` degrees of longitude at its
-/// middle, the mesh's dots over it, a light rim.
-/// The picture holds the globe's disc plus a soft glow around its limb: the
+/// The globe's picture holds its disc plus a soft glow around its limb: the
 /// disc spans 1/PAD of the picture's width (BO2's limb glows 30 px out).
 pub(crate) const GLOBE_PAD: f32 = 1.11;
 
-/// The glow's strength (0..1) at radius `r` (the disc's radius is 1).
-fn glow_alpha(r: f32) -> f32 {
-    let g = (1.0 - (r - 1.0) / 0.09).clamp(0.0, 1.0);
-    g.powf(1.3) * 0.11
+/// The backdrop on the graphics card (`lui_scene.wgsl`): the floor (`a` the
+/// small stars `plus_tile`, `b` `plus_grid3`, `c` `plus_grid2`, `d`
+/// `tv_lookup`) or the globe (`a` `globe_map`, `b` `globe_map_mesh`).
+#[derive(AsBindGroup, Asset, TypePath, Debug, Clone)]
+pub struct SceneUi {
+    /// The game's clock (s), the root's width (units), the fade, 1 when the
+    /// optional picture is there (the floor's `d`, the globe's `b`).
+    #[uniform(0)]
+    pub params: Vec4,
+    #[texture(1)]
+    #[sampler(2)]
+    pub a: Handle<Image>,
+    #[texture(3)]
+    #[sampler(4)]
+    pub b: Handle<Image>,
+    #[texture(5)]
+    #[sampler(6)]
+    pub c: Handle<Image>,
+    #[texture(7)]
+    #[sampler(8)]
+    pub d: Handle<Image>,
+    /// 0 the floor, 1 the globe; the globe's spin and tilt (degrees), its pad.
+    #[uniform(9)]
+    pub extra: Vec4,
 }
 
-pub(crate) fn globe(n: usize, map: &Tex, mesh: Option<&Tex>, spin: f32, tilt: f32) -> Vec<u8> {
-    let (ts, tc) = (tilt.to_radians().sin(), tilt.to_radians().cos());
-    let mut out = vec![0u8; n * n * 4];
-    let px_size = 2.0 * GLOBE_PAD / n as f32;
-    for y in 0..n {
-        let ny = GLOBE_PAD - (y as f32 + 0.5) * px_size;
-        for x in 0..n {
-            let nx = (x as f32 + 0.5) * px_size - GLOBE_PAD;
-            let r2 = nx * nx + ny * ny;
-            let r = r2.sqrt();
-            if r > 1.0 + px_size {
-                // The limb's glow (real: ~29 of 255 at the limb, a soft grey
-                // falling away over ~6% of the radius).
-                let a = glow_alpha(r);
-                if a > 0.0 {
-                    let i = (y * n + x) * 4;
-                    out[i] = 255;
-                    out[i + 1] = 247;
-                    out[i + 2] = 235;
-                    out[i + 3] = (a * 255.0) as u8;
-                }
-                continue;
-            }
-            let edge = ((1.0 + px_size - r) / (2.0 * px_size)).clamp(0.0, 1.0);
-            let nz = (1.0 - r2.min(1.0)).sqrt();
-            // Into the globe's frame: tilted toward us by `tilt`.
-            let gy = ny * tc + nz * ts;
-            let gz = -ny * ts + nz * tc;
-            let lat = gy.clamp(-1.0, 1.0).asin();
-            let lon = nx.atan2(gz) + spin.to_radians();
-            let u = lon / std::f32::consts::TAU + 0.5;
-            let v = 0.5 - lat / std::f32::consts::PI;
-            let m = map.sample(u, v);
-            let d = mesh.map_or([0.0; 4], |t| t.sample(u, v));
-            // As the shader does: the land is the day map's own colour (its
-            // alpha is the land mask; the coast lines are in its colour), the
-            // sea shows the dotted mesh, and the heat map (orange) fills the
-            // SEA (measured on the real shot: Black Sea, Red Sea, Caspian
-            // and the oceans are orange-brown, the land dark).
-            let land = m[3];
-            // The mesh's dots fade toward the limb, where they alias.
-            let dots = (nz * 4.0).min(1.0);
-            // The orange is lit from the lower right: dim toward the
-            // upper left (the real globe's unlit side).
-            let lit = (0.4 + 0.9 * (0.3 * nx - 0.6 * ny + 0.75 * nz)).clamp(0.0, 1.0);
-            // The shader's cell noise scales the heat by 0.72..2.0; the
-            // mesh's dots stand in for the cells.
-            let cell = 0.75 + 0.8 * (d[0] / 0.16).clamp(0.0, 1.0);
-            const HEAT: [f32; 3] = [1.0, 0.62, 0.2];
-            // The ring of light at the limb.
-            let ring = ((0.32 - nz) / 0.32).clamp(0.0, 1.0);
-            let ring = ring.powf(1.1) * 0.14;
-            const WARM: [f32; 3] = [1.0, 0.97, 0.92];
-            let mut rgb = [0.0f32; 3];
-            for k in 0..3 {
-                let sea = d[k] * dots * 0.9 + HEAT[k] * 0.09 * lit * cell;
-                rgb[k] = (sea * (1.0 - land) + m[k] * land + ring * WARM[k]).min(1.0);
-            }
-            let i = (y * n + x) * 4;
-            for k in 0..3 {
-                out[i + k] = (rgb[k] * 255.0) as u8;
-            }
-            // The disc's edge blends into the glow (never below it).
-            let ga = glow_alpha(r);
-            let a = ga + (1.0 - ga) * edge;
-            if a > 0.0 && edge < 1.0 {
-                let gcol = [1.0, 247.0 / 255.0, 235.0 / 255.0];
-                for k in 0..3 {
-                    let c = (rgb[k] * edge + gcol[k] * ga * (1.0 - edge)) / (edge + ga * (1.0 - edge)).max(1e-4);
-                    out[i + k] = (c.min(1.0) * 255.0) as u8;
-                }
-            }
-            out[i + 3] = (a * 255.0) as u8;
-        }
+impl UiMaterial for SceneUi {
+    fn fragment_shader() -> ShaderRef {
+        "embedded://ui/lui_scene.wgsl".into()
     }
-    out
+}
+
+pub(crate) fn register(app: &mut App) {
+    bevy::asset::embedded_asset!(app, "lui_scene.wgsl");
+    app.add_plugins(UiMaterialPlugin::<SceneUi>::default());
+}
+
+/// A backdrop texture for the graphics card: its texels read as stored (as
+/// `Tex` reads them), repeating, made once.
+pub(crate) fn gpu_texture(
+    cache: &mut HashMap<String, Handle<Image>>,
+    icons: &assets::T6HudIcons,
+    images: &mut Assets<Image>,
+    name: &str,
+) -> Option<Handle<Image>> {
+    let key = format!("\u{1}scene gpu {name}");
+    if let Some(h) = cache.get(&key) {
+        return Some(h.clone());
+    }
+    let img = icons.0.iter().find(|(k, _)| k == name).map(|(_, i)| i.clone())?;
+    let mut img = (*img).clone();
+    crate::lui_hud::raw_texels(&mut img);
+    img.sampler = bevy::image::ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
+        address_mode_u: bevy::image::ImageAddressMode::Repeat,
+        address_mode_v: bevy::image::ImageAddressMode::Repeat,
+        ..bevy::image::ImageSamplerDescriptor::linear()
+    });
+    let h = images.add(img);
+    cache.insert(key, h.clone());
+    Some(h)
 }
 
 /// An RGBA8 sRGB picture of `w` x `h` from `px`.

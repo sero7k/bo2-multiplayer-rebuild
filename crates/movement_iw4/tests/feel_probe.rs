@@ -43,11 +43,88 @@ impl CollisionBackend for Floor {
             hit.normal = [0.0, 0.0, 1.0];
             hit.walkable = 1;
             hit.hit_type = 1;
+            hit.hit_id = trace_iw4::ENTITYNUM_WORLD;
             for i in 0..3 {
                 hit.endpos[i] = input.start[i] + (input.end[i] - input.start[i]) * fraction;
             }
         }
         hit
+    }
+}
+
+/// Stairs up along +x: flat floor at z = 0 until x = `first`, then a step
+/// of `rise` every `run` units. Only sweeps forward along x or straight up
+/// and down are exact (all this probe makes).
+#[derive(Clone, Copy)]
+struct Stairs {
+    first: f32,
+    run: f32,
+    rise: f32,
+}
+
+impl Stairs {
+    /// The tread under a box whose front is at `x`.
+    fn height(&self, x: f32) -> f32 {
+        if x < self.first {
+            0.0
+        } else {
+            (((x - self.first) / self.run).floor() + 1.0) * self.rise
+        }
+    }
+
+    fn trace(&self, input: &GroundTraceInput) -> Trace {
+        const BACK_OFF: f32 = 0.03125;
+        let (s, e) = (input.start, input.end);
+        let bottom = s[2] + input.mins[2];
+        let front = s[0] + input.maxs[0];
+        let (dx, dz) = (e[0] - s[0], e[2] - s[2]);
+        let mut hit = Trace {
+            fraction: 1.0,
+            endpos: input.end,
+            ..Trace::default()
+        };
+        let at = |hit: &mut Trace, f: f32, normal: [f32; 3]| {
+            hit.fraction = f;
+            hit.normal = normal;
+            hit.walkable = u8::from(normal[2] > 0.7);
+            hit.hit_type = 1;
+            hit.hit_id = trace_iw4::ENTITYNUM_WORLD;
+            for i in 0..3 {
+                hit.endpos[i] = s[i] + (e[i] - s[i]) * f;
+            }
+        };
+        if bottom < self.height(front) - 0.001 {
+            hit.startsolid = 1;
+            at(&mut hit, 0.0, [0.0, 0.0, 1.0]);
+            return hit;
+        }
+        let mut t = 0.0_f32;
+        loop {
+            let x = front + dx * t;
+            let h = self.height(x);
+            let edge = if x < self.first {
+                self.first
+            } else {
+                self.first + (((x - self.first) / self.run).floor() + 1.0) * self.run
+            };
+            let t_edge = if dx > 0.0 { (edge - front) / dx } else { f32::INFINITY };
+            if dz < 0.0 {
+                let t_floor = (h - bottom) / dz;
+                if t_floor >= t && t_floor <= t_edge.min(1.0) {
+                    at(&mut hit, t_floor, [0.0, 0.0, 1.0]);
+                    return hit;
+                }
+            }
+            if t_edge > 1.0 {
+                return hit;
+            }
+            if bottom + dz * t_edge < self.height(edge) - 0.001 {
+                let f = ((edge - BACK_OFF - front) / dx).max(0.0);
+                at(&mut hit, f, [-1.0, 0.0, 0.0]);
+                return hit;
+            }
+            t = t_edge;
+        }
     }
 }
 
@@ -59,6 +136,7 @@ struct Room {
     slick: bool,
     mantle: bool,
     window: Option<Window>,
+    stairs: Option<Stairs>,
 }
 
 /// A thin wall across +x at x = `wall`, open from z = `sill` to `lintel`.
@@ -123,7 +201,10 @@ impl CollisionBackend for Room {
                 ..Trace::default()
             };
         }
-        let mut hit = Floor.trace(input);
+        let mut hit = match self.stairs {
+            Some(stairs) => stairs.trace(&input),
+            None => Floor.trace(input),
+        };
         if self.slick && hit.walkable != 0 {
             hit.surface_flags = 2;
         }
@@ -151,6 +232,7 @@ impl CollisionBackend for Room {
                 normal,
                 walkable: u8::from(normal[2] > 0.7),
                 hit_type: 1,
+                hit_id: trace_iw4::ENTITYNUM_WORLD,
                 endpos: input.end,
                 ..Trace::default()
             };
@@ -225,6 +307,7 @@ fn context(
             ads_allowed,
             weapon_def_scope: false,
             sprint_hold_ads: false,
+            bo2: false,
         },
         ads_frac: AdsFracContext {
             aim_down_sight: false,
@@ -232,6 +315,7 @@ fn context(
             ads_out_rate: 1.0 / 200.0,
             rechamber_while_ads: true,
             ads_fire_only: false,
+            ..AdsFracContext::default()
         },
         melee_charge: MeleeChargeWeaponDelays {
             melee_delay_ms: 0,
@@ -239,6 +323,7 @@ fn context(
         },
         player_melee_range: movement_iw4::MELEE_CHARGE_PLAYER_MELEE_RANGE_DEFAULT,
         old_buttons,
+        old_move: [0, 0],
         weapon_blocks_prone,
     }
 }
@@ -247,6 +332,7 @@ struct Run {
     ps: PlayerState,
     time: i32,
     old_buttons: u32,
+    old_move: [i8; 2],
     feel: Bo2Feel,
     /// The gun in hand can aim.
     ads: bool,
@@ -262,6 +348,8 @@ struct Run {
     shock: f32,
     /// A wall with a window in it ahead.
     window: Option<Window>,
+    /// Stairs ahead instead of a flat floor.
+    stairs: Option<Stairs>,
 }
 
 impl Run {
@@ -278,6 +366,7 @@ impl Run {
             ps,
             time: 1000,
             old_buttons: 0,
+            old_move: [0, 0],
             feel,
             ads: false,
             blocks_prone: false,
@@ -286,6 +375,7 @@ impl Run {
             mantle: false,
             shock: 1.0,
             window: None,
+            stairs: None,
         }
     }
 
@@ -303,6 +393,7 @@ impl Run {
             };
             let mut ctx = context(self.feel, self.old_buttons, self.ads, self.blocks_prone);
             ctx.walk.cmd_scale.shellshock_movement_scale = self.shock;
+            ctx.old_move = self.old_move;
             pmove(
                 &mut self.ps,
                 &mut cmd,
@@ -312,11 +403,13 @@ impl Run {
                     slick: self.slick,
                     mantle: self.mantle,
                     window: self.window,
+                    stairs: self.stairs,
                 },
                 &FlatMantleAnimLength::default(),
                 &ZeroMantleRootDelta,
             );
             self.old_buttons = buttons;
+            self.old_move = [forward, right];
         }
     }
 
@@ -368,6 +461,111 @@ fn flat_jump_lands_faster_in_bo2() {
         iw4.ground_speed()
     );
     assert!(bo2.ground_speed() > iw4.ground_speed() * 1.05);
+}
+
+/// Jumps from standing, lands, jumps again on the first frame back on the
+/// ground; the two jumps' peak heights.
+fn hop_twice(feel: Bo2Feel) -> (f32, f32) {
+    let mut run = Run::new(feel);
+    run.hold(500, 0, 0, 0);
+    let mut peaks = [0.0_f32; 2];
+    for peak in &mut peaks {
+        run.hold(50, 0, 0, JUMP);
+        while run.ps.ground_entity_num == 0x7FF {
+            *peak = peak.max(run.ps.origin[2]);
+            run.hold(50, 0, 0, 0);
+        }
+    }
+    (peaks[0], peaks[1])
+}
+
+/// BO2's Jump_GetLandFactor: in multiplayer a jump taken right after landing
+/// one goes lower (energy / 2.5, so about 2/5 of the height); in Zombies
+/// (jump slowdown off) both go full height.
+#[test]
+fn a_jump_right_after_landing_goes_lower_in_bo2() {
+    let (first, second) = hop_twice(BO2);
+    let (zm_first, zm_second) = hop_twice(Bo2Feel { jump_slowdown: false, ..BO2 });
+    eprintln!("hop peaks: mp {first:.1} then {second:.1}; zombies {zm_first:.1} then {zm_second:.1}");
+    assert!((35.0..=40.0).contains(&first), "{first}");
+    assert!(second < first * 0.5 && second > first * 0.3, "{second}");
+    assert!((zm_second - zm_first).abs() < 2.0, "{zm_first} {zm_second}");
+}
+
+/// BO2's PM_GroundTraceMissed: a player within a unit of the floor still
+/// counts as almost on it, so the step rhythm keeps going (down stairs, off
+/// a curb); MW2's rules stop it the moment the feet leave the floor.
+#[test]
+fn rhythm_keeps_going_just_above_the_floor_in_bo2() {
+    let bob = |feel| {
+        let mut run = Run::new(feel);
+        run.ps.origin[2] = 1.5;
+        run.ps.ground_entity_num = playerstate_iw4::ENTITYNUM_NONE;
+        run.ps.velocity = [190.0, 0.0, 0.0];
+        run.hold(50, 127, 0, 0);
+        (run.ps.bob_cycle, run.ps.origin[2])
+    };
+    let (bo2, bo2_z) = bob(BO2);
+    let (iw4, iw4_z) = bob(Bo2Feel::IW4);
+    eprintln!("one frame just above the floor: bo2 bob {bo2} (z {bo2_z:.2}), iw4 bob {iw4} (z {iw4_z:.2})");
+    assert!(bo2_z > 0.25 && iw4_z > 0.25, "still off the floor");
+    assert!(bo2 > 0 && iw4 == 0, "{bo2} {iw4}");
+}
+
+/// BO2's PM_StepSlideMove: each stair step on the ground costs speed by its
+/// height (a full 18 leaves 0.2), so stairs climb slower than in MW2 rules.
+#[test]
+fn stairs_climb_slower_in_bo2() {
+    let walk = |feel, stairs| {
+        let mut run = Run::new(feel);
+        run.stairs = stairs;
+        run.hold(3000, 127, 0, 0);
+        (run.ps.origin[0], run.ps.origin[2])
+    };
+    let stairs = Some(Stairs {
+        first: 40.0,
+        run: 12.0,
+        rise: 8.0,
+    });
+    let (bo2_flat, _) = walk(BO2, None);
+    let (bo2_x, bo2_z) = walk(BO2, stairs);
+    let (iw4_flat, _) = walk(Bo2Feel::IW4, None);
+    let (iw4_x, iw4_z) = walk(Bo2Feel::IW4, stairs);
+    eprintln!(
+        "3 s up stairs: bo2 {bo2_x:.1} (up {bo2_z:.0}, flat {bo2_flat:.1}), iw4 {iw4_x:.1} (up {iw4_z:.0}, flat {iw4_flat:.1})"
+    );
+    assert!(bo2_z > 100.0 && iw4_z > 100.0, "both climb");
+    let (bo2_share, iw4_share) = (bo2_x / bo2_flat, iw4_x / iw4_flat);
+    assert!(bo2_share < iw4_share - 0.05, "{bo2_share} {iw4_share}");
+}
+
+/// BO2's PM_SlideMove: while pm_time runs (just after a landing) grazing a
+/// wall keeps the speed you came in with; MW2, and BO2 once it runs out,
+/// loses the part into the wall. (Both drop the speed when a wall stops you
+/// dead: the tick's end sets it from the real move.)
+#[test]
+fn a_wall_just_after_landing_keeps_speed_in_bo2() {
+    let into_wall = |feel: Bo2Feel, pm_time| {
+        let mut run = Run::new(feel);
+        run.hold(500, 0, 0, 0);
+        let x = run.ps.origin[0];
+        run.window = Some(Window {
+            wall: x + 15.0,
+            sill: f32::INFINITY,
+            lintel: f32::INFINITY,
+        });
+        run.ps.velocity = [100.0, 120.0, 0.0];
+        run.ps.pm_time = pm_time;
+        run.hold(50, 0, 0, 0);
+        assert!(run.ps.origin[0] - x < 0.1, "the wall holds");
+        assert!(run.ps.origin[1] > 4.0, "slides along it");
+        run.ps.velocity[0]
+    };
+    let (bo2, bo2_later, iw4) = (into_wall(BO2, 1000), into_wall(BO2, 0), into_wall(Bo2Feel::IW4, 1000));
+    eprintln!("speed into the wall: bo2 {bo2:.1}, bo2 later {bo2_later:.1}, iw4 {iw4:.1}");
+    assert!(bo2 > 50.0, "{bo2}");
+    assert!(bo2_later.abs() < 1.0, "{bo2_later}");
+    assert!(iw4.abs() < 1.0, "{iw4}");
 }
 
 #[test]
@@ -592,8 +790,8 @@ fn a_dive_goes_through_a_window_a_jump_hits() {
 #[test]
 fn a_dive_steers_a_little() {
     // Dive straight ahead, then push right through the flight: BO2's
-    // ordinary air control, acceleration 1 toward the 190 wish speed, 9.5 a
-    // frame at 50 ms. Touch-down is a hard landing, as in BO2 (a fall of
+    // ordinary air control cut to 0.4 through a dive (PM_CmdScale),
+    // acceleration 1 toward the 76 wish speed, 3.8 a frame at 50 ms. Touch-down is a hard landing, as in BO2 (a fall of
     // over 12): the speed drops to 0.67 of it, a dive's too.
     let steer = |right: i8| {
         let mut run = Run::new(DIVE);
@@ -616,8 +814,8 @@ fn a_dive_steers_a_little() {
          ahead {run_speed:.1} at take-off, {ahead:.1} after touch-down"
     );
     assert!(still < 0.01);
-    // 0.6 s of it before touch-down: 12 frames.
-    assert!((110.0..=150.0).contains(&pushed), "pushed {pushed}");
+    // 16 frames of it before touch-down, never past the 76 wish speed.
+    assert!((50.0..=76.0).contains(&pushed), "pushed {pushed}");
     assert!(
         (pushed_ahead - ahead).abs() < 0.01,
         "pushing sideways keeps the forward speed"
@@ -911,6 +1109,20 @@ fn walk_on_ice(feel: Bo2Feel, ms: i32, coast_ms: i32) -> (f32, f32) {
     (walked, run.ground_speed())
 }
 
+/// BO2's Jump_Check: no jumping off ice (MW2 jumps).
+#[test]
+fn no_jumping_off_ice_in_bo2() {
+    let jumped = |feel| {
+        let mut run = Run::new(feel);
+        run.slick = true;
+        run.hold(200, 0, 0, 0);
+        run.hold(50, 0, 0, JUMP);
+        run.ps.velocity[2] > 0.0
+    };
+    assert!(!jumped(BO2));
+    assert!(jumped(Bo2Feel::IW4));
+}
+
 #[test]
 fn ice_picks_up_twice_as_fast_and_still_slows_you_in_bo2() {
     let (bo2_start, _) = walk_on_ice(BO2, 200, 0);
@@ -956,4 +1168,35 @@ fn a_shellshock_slows_you_by_its_own_number_in_bo2() {
         old.iter().all(|s| (s - 76.0).abs() < 1.0),
         "the old rule: 0.4"
     );
+}
+
+/// Crawling, then aiming, then pressing forward again: ground speeds.
+fn crawl_then_aim(feel: Bo2Feel, weaponstate: i32) -> (f32, f32, f32) {
+    let lie = PRONE | STANCE_HELD;
+    let mut run = Run::new(feel);
+    run.ads = true;
+    run.hold(2500, 0, 0, lie);
+    run.hold(1000, 127, 0, lie);
+    let crawl = run.ground_speed();
+    run.hold(1000, 127, 0, lie | ADS);
+    let aimed = run.ground_speed();
+    run.ps.weaponstate_primary = weaponstate;
+    run.hold(50, 0, 0, lie | ADS);
+    run.hold(1000, 127, 0, lie | ADS);
+    (crawl, aimed, run.ground_speed())
+}
+
+#[test]
+fn aiming_lying_down_stops_the_crawl_in_bo2() {
+    let (crawl, aimed, again) = crawl_then_aim(BO2, 0);
+    let (_, _, firing) = crawl_then_aim(BO2, 6);
+    let (iw4_crawl, iw4_aimed, _) = crawl_then_aim(Bo2Feel::IW4, 0);
+    eprintln!(
+        "bo2 crawl {crawl:.1} aimed {aimed:.1} pressed again {again:.1} firing {firing:.1}; iw4 crawl {iw4_crawl:.1} aimed {iw4_aimed:.1}"
+    );
+    assert!(crawl > 20.0);
+    assert!(aimed < 1.0, "aiming holds still");
+    assert!(again > crawl * 0.8, "a fresh press drops the aim and crawls");
+    assert!(firing < 1.0, "not while the gun fires");
+    assert!(iw4_aimed > iw4_crawl * 0.5, "MW2 keeps crawling");
 }

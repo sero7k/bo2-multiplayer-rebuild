@@ -107,7 +107,7 @@ fn elem_mut<'a>(zm: &'a mut Zm, s: &Value) -> Option<&'a mut HudElem> {
 }
 
 pub(super) fn bind(vm: &mut Vm<World>) {
-    for name in ["newhudelem", "newdebughudelem", "newdamageindicatorhudelem"] {
+    for name in ["newhudelem", "newdebughudelem"] {
         vm.bind(name, false, |vm, world, _, _| Ok(create(vm, world, None)));
     }
     // newteamhudelem(team): seen by that team only (BO2's equipment head
@@ -145,7 +145,9 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         }
         Ok(Value::Undefined)
     });
-    for name in ["newclienthudelem", "newscorehudelem"] {
+    // bo2mp: `newdamageindicatorhudelem(player)` too: the hit marker is his
+    // own (it showed every player's, so a bot's hit flashed on his screen).
+    for name in ["newclienthudelem", "newscorehudelem", "newdamageindicatorhudelem"] {
         vm.bind(name, false, |vm, world, _, a| {
             let client = entnum(vm, arg(a, 0));
             Ok(create(vm, world, client))

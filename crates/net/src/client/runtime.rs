@@ -1863,6 +1863,12 @@ pub fn publish_presented(
     );
     presented.set_presented_projectiles(merged_projectiles);
     presented.set_view_offset(view_offset);
+    // bo2zm: the camera eases over a stair step (Black Ops II).
+    presented.set_view_z_drop(if archived {
+        0.0
+    } else {
+        prediction.0.view_z().camera_drop(cg_clock.time())
+    });
     presented.set_snapshot_interpolation(interpolation_previous, frame_interpolation);
     presented.set_trajectory_sample(
         archived.then_some(body_time_ms),

@@ -102,11 +102,21 @@ impl SlowGuard {
 impl Drop for SlowGuard {
     fn drop(&mut self) {
         let ms = self.0.elapsed().as_secs_f64() * 1000.0;
+        if let Ok(mut totals) = SYSTEM_TOTALS.lock() {
+            match totals.iter_mut().find(|(name, _)| *name == self.1) {
+                Some(row) => row.1 += ms,
+                None => totals.push((self.1, ms)),
+            }
+        }
         if ms > 20.0 {
             diag::warn!(World, "bo2mp slow: {} took {ms:.1} ms{}", self.1, diag::busy_note(self.2));
         }
     }
 }
+
+/// Each guarded system's time summed since the last frame-parts line (the
+/// systems that fill a stretch, logged with it).
+static SYSTEM_TOTALS: std::sync::Mutex<Vec<(&'static str, f64)>> = std::sync::Mutex::new(Vec::new());
 
 /// When each part of the last frame began: First, PreUpdate, Update,
 /// PostUpdate, Last (finding which part a stall is in).
@@ -201,6 +211,17 @@ fn add_part_times(marks: &[Option<std::time::Instant>; 5], now: std::time::Insta
         t.parts[4] / n,
         stretches.join(", ")
     );
+    let mut systems = SYSTEM_TOTALS.lock().map(|mut s| std::mem::take(&mut *s)).unwrap_or_default();
+    systems.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let top: Vec<String> = systems
+        .iter()
+        .take(10)
+        .filter(|(_, ms)| ms / n >= 0.05)
+        .map(|(name, ms)| format!("{name} {:.2}", ms / n))
+        .collect();
+    if !top.is_empty() {
+        diag::info!(World, "bo2mp systems (ms a frame, 10 s): {}", top.join(", "));
+    }
     *t = PartTotals { since: now, frames: 0, parts: [0.0; 5], update: [0.0; 15] };
 }
 
@@ -956,7 +977,7 @@ struct SkinJob {
 }
 
 fn skin_one(w: Option<(&xmodel_runtime::DObj, &[Part], &[Mat4])>) -> Option<Vec<Arc<PosedVerts>>> {
-    w.map(|(dobj, parts, bones)| skin_all(dobj, parts, bones))
+    w.map(|(dobj, parts, bones)| bones_all(dobj, parts, bones))
 }
 
 /// Skins the bodies, several at once across the cores (BO2 skins on its
@@ -981,6 +1002,31 @@ fn skin_all(dobj: &xmodel_runtime::DObj, parts: &[Part], world: &[Mat4]) -> Vec<
         .map(|(mi, part)| {
             let base = dobj.models.get(mi).map_or(0, |m| m.base);
             Arc::new(skin_verts(&part.skel, |b| {
+                skin.get(base + b).copied().unwrap_or(Mat4::IDENTITY)
+            }))
+        })
+        .collect()
+}
+
+/// bo2mp: each part's skin matrices, for the graphics card to skin it
+/// with (IW4L_CPU_SKIN=1: skinned here, as before). Skinning ~150k
+/// vertices a frame here and copying them cost a drawn window ~5 ms of
+/// game thread and ~8 ms of render thread.
+fn bones_all(dobj: &xmodel_runtime::DObj, parts: &[Part], world: &[Mat4]) -> Vec<Arc<PosedVerts>> {
+    static CPU: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *CPU.get_or_init(|| std::env::var_os("IW4L_CPU_SKIN").is_some()) {
+        return skin_all(dobj, parts, world);
+    }
+    let skin = dobj.skin_matrices(world);
+    parts
+        .iter()
+        .enumerate()
+        .map(|(mi, part)| {
+            let (base, count) = dobj
+                .models
+                .get(mi)
+                .map_or((0, part.skel.bones.len()), |m| (m.base, m.bone_count));
+            Arc::new(PosedVerts::from_bones(count, |b| {
                 skin.get(base + b).copied().unwrap_or(Mat4::IDENTITY)
             }))
         })

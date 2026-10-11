@@ -260,8 +260,12 @@ fn draw_bo2_dof(
         })
         .clone();
     let band = render_backend::DEPTH_RANGE_BAND;
-    // The gun is drawn with its own near plane (the depth resolve's too).
-    let gun_near = Some(extracted.frame.view_model_near).filter(|n| *n > 0.0).unwrap_or(znear);
+    // On a BO2 map the gun is drawn with the scene's own projection
+    // (geometry_diagnostic.wgsl: view.clip_from_world), only squeezed into
+    // the gun's depth band, so its distance comes back with the scene near.
+    // The engine's gun near (0.1) put every gun pixel 20 times too close and
+    // the whole gun blurred while aiming.
+    let gun_near = znear;
     // r_dof_bias: BO2's blur size is near blur x amount^(1 / bias), and the
     // far blur's share is (far / near)^bias, as the engine's own chain has.
     let bias = extracted.frame.bias;

@@ -36,6 +36,9 @@ pub struct PmoveResult {
     pub bounds: MoveBounds,
     pub stance_event: Option<u8>,
     pub reset_torso: bool,
+    /// bo2zm: how far a stair step moved the player up or down this move
+    /// (Black Ops II's pmove_t viewChange); the camera eases over it.
+    pub view_change: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -60,6 +63,10 @@ pub struct PmoveSingleContext {
 
     pub old_buttons: u32,
 
+    /// bo2zm: last frame's forward and side keys (BO2's oldcmd), for the
+    /// prone aim hold.
+    pub old_move: [i8; 2],
+
     pub weapon_blocks_prone: bool,
 }
 
@@ -73,6 +80,14 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     root: &R,
 ) -> PmoveResult {
     let msec = clamped_msec(cmd.server_time.wrapping_sub(ps.command_time));
+    // bo2zm: lying down and aiming holds still (BO2 decides it first).
+    crate::feel::prone_aim(
+        ps,
+        cmd,
+        context.old_move,
+        crate::ads_intent::sniper_scope_raised(ps, context.ads_intent),
+        context.walk.feel,
+    );
     ps.command_time = cmd.server_time;
 
     let mut pml = Pml {
@@ -90,7 +105,12 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         holdrand: holdrand(ps.viewangles[1], cmd.server_time),
     };
 
+    let old_yaw = ps.viewangles[1];
     update_view_angles(ps, cmd, context.view_angles);
+    if context.walk.feel.on {
+        // bo2zm: lying down, the view is held to the body's turn.
+        crate::prone_turn::bo2_prone_view(ps, cmd, msec, collision, context.walk.feel.zombies, old_yaw);
+    }
 
     let (forward, right, up) = math_iw4::angle_vectors(ps.viewangles);
     pml.forward = forward;
@@ -144,8 +164,14 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         // does not end the sprint while getting up from a dive.
         let sprint_cmd =
             crate::feel::omni_sprint_cmd(&crate::dive::stance_cmd(ps, cmd), context.walk.feel);
-        update_sprint(ps, &sprint_cmd, context.old_buttons, sprint)
+        update_sprint(
+            ps,
+            &sprint_cmd,
+            crate::feel::sprint_old_buttons(context.old_buttons, context.walk.feel),
+            sprint,
+        )
     };
+    crate::feel::update_walking_flag(ps, cmd, context.walk.feel); // bo2zm
     crate::feel::jump_out_of_sprint(ps, cmd, context.walk.feel, sprint_before, sprint_change); // bo2zm
     let previous_stance = ps.pm_flags & 3;
     // bo2zm: from the frame after take-off to the end of the still moment,
@@ -169,6 +195,7 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
             collision,
             context.bounds,
             context.weapon_blocks_prone,
+            &context.walk.feel,
         );
         cmd.buttons &= stance_cmd.buttons | held_back;
     }
@@ -204,6 +231,17 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         // bo2zm: through a dive the body shrinks as the view drops.
         bounds.maxs[2] = crate::dive::hull_height(ps);
     }
+    if context.walk.feel.on {
+        // bo2zm: a dive's push does not drop the aim on lying down (the gun
+        // aims through a dive, by request).
+        crate::stance::bo2_lie_down(
+            ps,
+            &ads_cmd,
+            collision,
+            bounds,
+            previous_stance & pm_flags::PRONE != 0,
+        );
+    }
 
     update_ads_frac(ps, pml.msec, context.ads_frac);
 
@@ -220,6 +258,7 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
             bounds,
             stance_event,
             reset_torso,
+            view_change: 0.0,
         };
     }
 
@@ -256,7 +295,13 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
             bounds,
             stance_event,
             reset_torso,
+            view_change: 0.0,
         };
+    }
+
+    if context.walk.feel.on {
+        // bo2zm: the body's slope pitches follow this tick's ground.
+        crate::prone_turn::bo2_prone_pitch(ps, &pml, collision, context.walk.feel.zombies);
     }
 
     drop_timers(ps, &pml);
@@ -275,7 +320,7 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         );
     }
 
-    if diving {
+    let view_change = if diving {
         if dive_start {
             crate::dive::start(ps, &mut pml, cmd, context.walk.jump.jump_height);
         }
@@ -287,7 +332,7 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
             collision,
             context.walk.jump.jump_height,
             context.air,
-        );
+        )
     } else if (ps.pm_flags & pm_flags::LADDER) != 0 {
         ladder_move(
             ps,
@@ -297,10 +342,12 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
                 jump: context.walk.jump,
                 old_buttons: context.old_buttons,
                 player_spectate_speed_scale: context.air.player_spectate_speed_scale,
+                bo2: context.walk.feel.on,
+                zombies: context.walk.feel.zombies,
             },
             bounds,
             collision,
-        );
+        )
     } else {
         calc_melee_charge_time(ps, context.melee_charge, context.player_melee_range);
         if (ps.pm_flags & pm_flags::MELEE_CHARGE) != 0 {
@@ -311,13 +358,24 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
                 bounds.maxs,
                 bounds.tracemask,
                 collision,
-            );
+                context.walk.feel.on,
+                context.walk.feel.zombies,
+            )
         } else if pml.walking == 0 {
-            air_move(ps, &pml, cmd, context.air, bounds, collision);
+            air_move(
+                ps,
+                &pml,
+                cmd,
+                context.air,
+                bounds,
+                collision,
+                context.walk.feel.on,
+                context.walk.feel.zombies,
+            )
         } else {
-            walk_move(ps, &mut pml, cmd, context.walk, bounds, collision);
+            walk_move(ps, &mut pml, cmd, context.walk, bounds, collision)
         }
-    }
+    };
 
     complete_ground_trace(ps, &mut pml, bounds, collision, context.walk.feel);
 
@@ -355,6 +413,7 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         bounds,
         stance_event,
         reset_torso,
+        view_change,
     }
 }
 

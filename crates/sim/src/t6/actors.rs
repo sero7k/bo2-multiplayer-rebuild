@@ -613,6 +613,11 @@ pub(crate) fn drop_nodes_to_floor(world: &mut World, nodes: &mut [super::T6PathN
         nodes.len(),
         if moved > 0 { total / moved as f32 } else { 0.0 }
     );
+    let mut kinds = std::collections::BTreeMap::<&str, usize>::new();
+    for n in nodes.iter() {
+        *kinds.entry(super::nav::NODE_TYPE_NAMES.get(n.ty as usize).copied().unwrap_or("?")).or_default() += 1;
+    }
+    diag::info!(Sim, "bo2zm t6 nav kinds: {kinds:?}");
 }
 
 /// IW4L_T6_STALL_LOG=1: every actor's stalls (where, heading where).
@@ -1115,8 +1120,7 @@ fn follow_path(
     // on by landing on the point itself; zombies rising together in the
     // crater crowded their first point, pushed each other off it and stood
     // there until the scripts' 30-second failsafe killed and respawned them:
-    // rounds that dragged on with zombies heard but never coming (his "I'm
-    // just on a scavenger hunt for zombies").
+    // rounds that dragged on with zombies heard but never coming.
     while i + 1 < a.path.len() && !traversal_at(world, a, i) && dist2(me, a.path[i]) < PASS_REACH {
         i += 1;
     }

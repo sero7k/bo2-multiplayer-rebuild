@@ -262,6 +262,18 @@ pub(super) fn hud_icons(
             }
         }
     }
+    // bo2mp: the objective markers' pictures and the carried flag's: BO2's
+    // game scripts name them, built from parts ("waypoint_capture" + "_a"),
+    // so no UI script holds the whole name.
+    let ui_wanted = wanted.len();
+    for c in captures {
+        for m in &c.materials {
+            if (m.name.starts_with("waypoint_") || m.name.starts_with("hudicon_")) && seen.insert(m.name.clone()) {
+                wanted.push(m.name.clone());
+            }
+        }
+    }
+    report.push(format!("t6 hud icons the game scripts name: {}", wanted.len() - ui_wanted));
     let mut failed = 0usize;
     let mut additive = 0usize;
     for name in &wanted {

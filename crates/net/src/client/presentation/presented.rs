@@ -54,6 +54,8 @@ pub struct PresentedSnapshot {
 
     pose: HashMap<ClientId, PlayerState>,
     view_offset: [f32; 3],
+    /// bo2zm: how far below the eye the camera sits, easing over a step.
+    view_z_drop: f32,
     remote_provenance: HashMap<ClientId, PresentationSampleProvenance>,
 
     presented_projectiles: Vec<PresentedProjectile>,
@@ -68,6 +70,7 @@ impl PresentedSnapshot {
         self.trajectory_next = None;
         self.pose.clear();
         self.view_offset = [0.0; 3];
+        self.view_z_drop = 0.0;
         self.remote_provenance.clear();
         self.presented_projectiles.clear();
     }
@@ -244,6 +247,16 @@ impl PresentedSnapshot {
 
     pub fn set_view_offset(&mut self, o: [f32; 3]) {
         self.view_offset = o;
+    }
+
+    /// bo2zm: how far below the eye the first-person camera sits while it
+    /// eases over a stair step.
+    pub fn view_z_drop(&self) -> f32 {
+        self.view_z_drop
+    }
+
+    pub fn set_view_z_drop(&mut self, drop: f32) {
+        self.view_z_drop = drop;
     }
 
     pub fn snapshot(&self) -> Option<&Snapshot> {

@@ -125,13 +125,11 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         vm.bind(name, false, |_, _, _, _| Ok(Value::Undefined));
     }
     // Player side: the kill camera's field of view, the rank on the
-    // scoreboard, the spawn the client streams ahead (nothing to stream),
-    // where a spawn point sits (already on the ground in his maps).
+    // scoreboard, the spawn the client streams ahead (nothing to stream).
     for name in [
         "setfovforkillcam",
         "setrank",
         "predictspawnpoint",
-        "placespawnpoint",
         "setpregameclass",
         "setpregameteam",
         "gamehistorystartmatch",
@@ -153,6 +151,42 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     ] {
         vm.bind(name, true, |_, _, _, _| Ok(Value::Undefined));
     }
+    // BO2's placespawnpoint (every spawn point, as the match starts): a
+    // player-sized box lifted up to 128 units (less under a ceiling), then
+    // dropped straight down to the floor; the point moves there. A point the
+    // map leaves in the air or inside a fence now stands on the ground, as a
+    // player spawned there would. One still in solid gets BO2's warning.
+    m!("placespawnpoint", |vm, world, s, _| {
+        use crate::bullet_collision::{MASK_PLAYER_SOLID, PLAYER_MAXS, PLAYER_MINS};
+        let Some(n) = super::entnum(vm, s) else {
+            return Ok(Value::Undefined);
+        };
+        let Some(o) = world.resource::<Zm>().ents.get(&n).map(|e| e.origin) else {
+            return Ok(Value::Undefined);
+        };
+        let f = super::frame(world);
+        let up = f.trace_clip(o, [o[0], o[1], o[2] + 128.0], PLAYER_MINS, PLAYER_MAXS, MASK_PLAYER_SOLID);
+        let top = [o[0], o[1], o[2] + 128.0 * up.fraction];
+        let bottom = [o[0], o[1], top[2] - 262_144.0];
+        let down = f.trace_clip(top, bottom, PLAYER_MINS, PLAYER_MAXS, MASK_PLAYER_SOLID);
+        if down.fraction >= 1.0 {
+            // No floor under it at all: leave it where the map put it.
+            return Ok(Value::Undefined);
+        }
+        let floor = [o[0], o[1], top[2] - 262_144.0 * down.fraction];
+        let stuck = f.trace_clip(floor, floor, PLAYER_MINS, PLAYER_MAXS, MASK_PLAYER_SOLID).startsolid != 0;
+        drop(f);
+        if stuck {
+            diag::info!(Sim, "bo2mp spawn point {n} is in solid at {:.0} {:.0} {:.0}", floor[0], floor[1], floor[2]);
+        }
+        if (floor[2] - o[2]).abs() > 1.0 {
+            diag::info!(Sim, "bo2mp spawn point {n} placed: z {:.0} -> {:.0} at {:.0} {:.0}", o[2], floor[2], o[0], o[1]);
+        }
+        if let Some(e) = world.resource_mut::<Zm>().ents.get_mut(&n) {
+            e.origin = floor;
+        }
+        Ok(Value::Undefined)
+    });
     // A weapon only some items use (none of a default class's).
     f!("isweaponspecificuse", |_, _, _, _| Ok(Value::Int(0)));
     // Camo, reticle and player render options packed for the client: none
@@ -435,9 +469,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         "releaseclaimedtrigger",
         "showtoplayer",
         "allowtacticalinsertion",
-        // A thrown explosive marked for bots to avoid (their scripts read
-        // it back themselves).
-        "setdangerous",
         // Spawn logging flags (BO2's spawn telemetry).
         "setspawnclientflag",
     ] {

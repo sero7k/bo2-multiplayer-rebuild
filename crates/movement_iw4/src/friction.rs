@@ -1,19 +1,21 @@
-use playerstate_iw4::PlayerState;
+use playerstate_iw4::{PlayerState, pm_flags};
 
-use crate::Pml;
+use crate::{Bo2Feel, Pml};
 
-pub fn friction(ps: &mut PlayerState, pml: &Pml, bo2: bool) {
-    friction_scaled(ps, pml, bo2, |_| 1.0);
+pub fn friction(ps: &mut PlayerState, pml: &Pml, feel: Bo2Feel) {
+    friction_scaled(ps, pml, feel.on, !feel.on || feel.jump_slowdown, |_| 1.0);
 }
 
 /// bo2zm: `ground_scale` scales the ground's friction (a dive's slide); it
 /// is asked only when that friction applies, after a hard landing's or a
-/// jump's own scale.
+/// jump's own scale. `jump_slowdown`: a landed jump grips harder for a
+/// moment (BO2's jump_slowdownEnable; off, none of it).
 #[allow(clippy::assign_op_pattern)]
 pub(crate) fn friction_scaled(
     ps: &mut PlayerState,
     pml: &Pml,
     bo2: bool,
+    jump_slowdown: bool,
     ground_scale: impl FnOnce(&mut PlayerState) -> f32,
 ) {
     // bo2zm: Black Ops II measures the speed along the ground while walking.
@@ -44,7 +46,7 @@ pub(crate) fn friction_scaled(
                     2.0
                 };
             } else if (flags & 0x2000) != 0 {
-                control *= walking_scale(ps);
+                control *= walking_scale(ps, bo2, jump_slowdown);
             }
             control *= ground_scale(ps);
 
@@ -73,9 +75,17 @@ pub(crate) fn friction_scaled(
     ps.velocity[2] = scale * ps.velocity[2];
 }
 
-fn walking_scale(ps: &mut PlayerState) -> f32 {
+fn walking_scale(ps: &mut PlayerState, bo2: bool, jump_slowdown: bool) -> f32 {
     if ps.pm_time < 0x709 {
-        if (ps.pm_flags & 0x400000) == 0 {
+        // bo2zm: Black Ops II grips only while its jump slowdown is on
+        // (Jump_GetSlowdownFriction); it has no dive exception, and the
+        // bit MW2 used for one is last stand here.
+        let grips = if bo2 {
+            jump_slowdown
+        } else {
+            (ps.pm_flags & 0x400000) == 0
+        };
+        if grips {
             if ps.pm_time > 0x6a3 {
                 return 2.5;
             }
@@ -83,7 +93,8 @@ fn walking_scale(ps: &mut PlayerState) -> f32 {
             return (ps.pm_time as f32 * 1.5 * 0.0005882352706976235) + 1.0;
         }
     } else {
-        ps.pm_flags &= 0xffbfdfff;
+        // bo2zm: Black Ops II ends only the jump (Jump_ReduceFriction).
+        ps.pm_flags &= if bo2 { !pm_flags::JUMPING } else { 0xffbfdfff };
         ps.jump_origin_z = 0.0;
     }
     1.0

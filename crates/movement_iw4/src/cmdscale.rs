@@ -23,10 +23,10 @@ pub struct CmdScaleWalkContext {
     /// ms (BO2 600). 0 = MW2's 400.
     pub prone_lerp_ms: i32,
 
-    /// BO2 feel M10c: BO2's walk scale. It has no 0.4 slow (MW2 slows
-    /// walking, leaning and aiming while prone by 0.4; BO2 aims prone at
-    /// the gun's own aiming speed only) and gives sprint speed only while
-    /// the eye is headed for standing height. false = MW2.
+    /// BO2 feel M10c: BO2's walk scale gives sprint speed only while the eye
+    /// is headed for standing height. false = MW2. (Both slow walking, which
+    /// BO2 sets while aiming, leaning and aiming prone by 0.4, then use the
+    /// gun's aiming speed scale.)
     pub bo2: bool,
 }
 
@@ -59,7 +59,7 @@ pub fn cmd_scale_walk(ps: &PlayerState, cmd: &UserCmd, context: CmdScaleWalkCont
         return 0.0;
     }
 
-    if !context.bo2 && ((flags & 0x40) != 0 || ps.leanf != 0.0 || sprinting_ads) {
+    if (flags & 0x40) != 0 || ps.leanf != 0.0 || sprinting_ads {
         scale *= 0.4_f32;
     }
 

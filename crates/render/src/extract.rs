@@ -1310,10 +1310,13 @@ fn t6_fill_model(
     posed: Option<&render_anim::occupancy::missile::PosedVerts>,
     surfaces: &[T6Surface],
     vertices: &mut Vec<render_frame::SmodelVertex>,
-    indices: &mut Vec<u32>,
+    mut indices: Option<&mut Vec<u32>>,
     first_vertex: u32,
 ) {
-    let (positions, normals) = match posed {
+    // bo2mp: a pose left to the graphics card is skinned here instead (a
+    // corpse at rest, held from now on).
+    let posed = posed.map(|p| p.on_cpu(skel));
+    let (positions, normals) = match posed.as_deref() {
         Some(posed) => (posed.positions.as_slice(), posed.normals.as_slice()),
         None => (skel.positions.as_slice(), skel.normals.as_slice()),
     };
@@ -1343,21 +1346,66 @@ fn t6_fill_model(
                 uv0: skel.uvs.get(v).copied().unwrap_or([0.0; 2]),
             })),
         }
-        let vbase = s.vbase as u32;
-        match &s.triangles {
-            T6Triangles::All(first, count) => indices.extend(
-                skel.indices[*first..*first + *count]
-                    .iter()
-                    .map(|&i| base + i.saturating_sub(vbase)),
-            ),
-            T6Triangles::Left(left) => indices.extend(left.iter().map(|&i| base + i.saturating_sub(vbase))),
+        if let Some(indices) = indices.as_deref_mut() {
+            t6_fill_indices(skel, s, base, indices);
         }
+    }
+}
+
+/// A surface's indices appended, counting from `base` (where its first
+/// vertex lands).
+fn t6_fill_indices(skel: &asset_model::ModelSkel, s: &T6Surface, base: u32, indices: &mut Vec<u32>) {
+    let vbase = s.vbase as u32;
+    match &s.triangles {
+        T6Triangles::All(first, count) => indices.extend(
+            skel.indices[*first..*first + *count]
+                .iter()
+                .map(|&i| base + i.saturating_sub(vbase)),
+        ),
+        T6Triangles::Left(left) => indices.extend(left.iter().map(|&i| base + i.saturating_sub(vbase))),
+    }
+}
+
+/// bo2mp: a model's shape as the graphics card skins it: every vertex in
+/// its bind pose, and its four bones and weights (a vertex with none moves
+/// with bone 0, as `skin_verts` does).
+fn t6_skin_shape(skel: &Arc<asset_model::ModelSkel>) -> render_gpu::T6SkinShape {
+    let source: Arc<dyn std::any::Any + Send + Sync> = skel.clone();
+    let vertex_total = skel.positions.len();
+    let skel = Arc::clone(skel);
+    let fill = move |vertices: &mut Vec<render_frame::SmodelVertex>, weights: &mut Vec<[u32; 8]>| {
+        const RIGID: [u32; 8] = [0, 0, 0, 0, 0x3f80_0000, 0, 0, 0];
+        let n = skel.positions.len();
+        let blended = skel.vert_skin.len() == n;
+        vertices.extend((0..n).map(|v| render_frame::SmodelVertex {
+            position: skel.positions[v],
+            normal: skel.normals.get(v).copied().unwrap_or([0.0, 0.0, 1.0]),
+            color: skel.colors.get(v).copied().unwrap_or([1.0; 4]),
+            uv0: skel.uvs.get(v).copied().unwrap_or([0.0; 2]),
+        }));
+        weights.extend((0..n).map(|v| {
+            let Some(s) = skel.vert_skin.get(v).filter(|_| blended) else {
+                return RIGID;
+            };
+            let w = s.weights.map(|w| if w > 0.0 { w } else { 0.0 });
+            if w.iter().sum::<f32>() <= 0.0 {
+                return RIGID;
+            }
+            let b = s.bones.map(u32::from);
+            [b[0], b[1], b[2], b[3], w[0].to_bits(), w[1].to_bits(), w[2].to_bits(), w[3].to_bits()]
+        }));
+    };
+    render_gpu::T6SkinShape {
+        source,
+        vertices: vertex_total,
+        fill: Arc::new(fill),
     }
 }
 
 /// A draw list's vertices, written now or on the render thread.
 fn t6_vertex_count(draw: &render_gpu::T6DynamicDraw) -> usize {
     draw.deferred.as_ref().map_or(draw.vertices.len(), |d| d.vertices)
+        + draw.skinned.as_ref().map_or(0, |s| s.vertices)
 }
 
 /// One model's drawn surfaces appended to a geometry whose first vertex
@@ -1372,7 +1420,7 @@ fn t6_append_model(
 ) -> Vec<[u32; 4]> {
     let surfaces = t6_model_surfaces(item, catalog);
     let rows = t6_surface_rows(&surfaces, offset.1 + indices.len() as u32);
-    t6_fill_model(&item.skel, item.posed.as_deref(), &surfaces, vertices, indices, offset.0);
+    t6_fill_model(&item.skel, item.posed.as_deref(), &surfaces, vertices, Some(indices), offset.0);
     rows
 }
 
@@ -1528,6 +1576,7 @@ pub fn extract_t6_dynamic(
                 draws,
                 instances: vec![instance],
                 deferred: None,
+                skinned: None,
             })
         });
     // Effect sprites: world space, lit (when their material is) by the
@@ -1647,6 +1696,7 @@ pub fn extract_t6_dynamic(
             draws,
             instances,
             deferred: None,
+            skinned: None,
         }
     };
     // Marks: one instance per mark, lit by the grid where it landed.
@@ -1678,7 +1728,11 @@ pub fn extract_t6_dynamic(
                     row[20] = f32::from(lit.primary);
                     row[21] = lit.visibility;
                 }
-                instances.push(row);
+                // bo2mp: a mark lit like the one before it shares its row
+                // (and, its indices following on, its draw: ~256 a frame).
+                if instances.last() != Some(&row) {
+                    instances.push(row);
+                }
                 Some([start, count, slot, draw.code(), instances.len() as u32 - 1, u32::MAX, u32::MAX])
             })
             .collect();
@@ -1688,6 +1742,7 @@ pub fn extract_t6_dynamic(
             draws,
             instances,
             deferred: None,
+            skinned: None,
         }
     });
     out.dlights = t6_lights.as_ref().map(|l| l.lights.clone()).unwrap_or_default();
@@ -1818,12 +1873,18 @@ pub fn extract_t6_dynamic(
     }
     // The moving models' vertices (the live players' ~250k a frame) are
     // copied on the render thread: here only what is drawn where, and the
-    // poses to copy from (shared, not copied).
+    // poses to copy from (shared, not copied). bo2mp: a pose that is only
+    // bones is skinned on the graphics card, after the copied vertices.
     out.missiles = (!moving.is_empty()).then(|| {
         let mut draws = Vec::new();
         let mut instances = Vec::with_capacity(moving.len());
         let mut models = Vec::with_capacity(moving.len());
         let (mut vertex_count, mut index_count) = (0usize, 0usize);
+        let mut skinned = render_gpu::T6Skinned::default();
+        let mut shape_of = std::collections::HashMap::new();
+        // What the indices are made from: the same as last frame's and
+        // they are not made again.
+        let mut key = std::hash::DefaultHasher::new();
         for item in moving.iter().copied() {
             let lit = sampler.as_ref().map(|s| s.at(item.light_at)).unwrap_or_default();
             t6_note_dark(item, &lit);
@@ -1832,9 +1893,35 @@ pub fn extract_t6_dynamic(
                 continue;
             }
             let surfaces = t6_surface_rows(&plan, index_count as u32);
-            vertex_count += plan.iter().map(|s| s.vn).sum::<usize>();
+            let on_card = item.posed.as_ref().filter(|p| p.on_gpu());
+            match on_card {
+                Some(posed) => {
+                    let shape = *shape_of.entry(Arc::as_ptr(&item.skel) as usize).or_insert_with(|| {
+                        skinned.shapes.push(t6_skin_shape(&item.skel));
+                        skinned.shapes.len() as u32 - 1
+                    });
+                    let bones = (skinned.bones.len() as u32, posed.bones.len() as u32);
+                    skinned.bones.extend(posed.bones.iter().map(|m| m.to_cols_array()));
+                    for s in &plan {
+                        skinned.runs.push([shape, s.vbase as u32, s.vn as u32, bones.0, bones.1]);
+                        skinned.vertices += s.vn;
+                    }
+                }
+                None => vertex_count += plan.iter().map(|s| s.vn).sum::<usize>(),
+            }
             index_count += plan.iter().map(T6Surface::index_count).sum::<usize>();
-            models.push((item.skel.clone(), item.posed.clone(), plan));
+            {
+                use std::hash::Hash;
+                (Arc::as_ptr(&item.skel) as usize, on_card.is_some()).hash(&mut key);
+                for s in &plan {
+                    (s.vbase, s.vn).hash(&mut key);
+                    match &s.triangles {
+                        T6Triangles::All(first, count) => (0u8, first, count).hash(&mut key),
+                        T6Triangles::Left(left) => (1u8, left).hash(&mut key),
+                    }
+                }
+            }
+            models.push((item.skel.clone(), item.posed.clone(), plan, on_card.is_some()));
             let mut row = [0.0f32; 24];
             row[..16].copy_from_slice(&item.world_from_local.to_cols_array());
             for c in 0..3 {
@@ -1848,9 +1935,28 @@ pub fn extract_t6_dynamic(
                 draws.push([s[0], s[1], s[2], s[3], instance, u32::MAX, u32::MAX]);
             }
         }
-        let fill = move |vertices: &mut Vec<render_frame::SmodelVertex>, indices: &mut Vec<u32>| {
-            for (skel, posed, plan) in &models {
-                t6_fill_model(skel, posed.as_deref(), plan, vertices, indices, 0);
+        // The card-skinned models' vertices land after the copied ones;
+        // their indices count from there.
+        let copied = vertex_count as u32;
+        let indices_key = {
+            use std::hash::{Hash, Hasher};
+            copied.hash(&mut key);
+            key.finish().max(1)
+        };
+        let fill = move |vertices: &mut Vec<render_frame::SmodelVertex>, mut indices: Option<&mut Vec<u32>>| {
+            let mut on_card = copied;
+            for (skel, posed, plan, card) in &models {
+                if !*card {
+                    t6_fill_model(skel, posed.as_deref(), plan, vertices, indices.as_deref_mut(), 0);
+                    continue;
+                }
+                let Some(indices) = indices.as_deref_mut() else {
+                    continue;
+                };
+                for s in plan {
+                    t6_fill_indices(skel, s, on_card, indices);
+                    on_card += s.vn as u32;
+                }
             }
         };
         render_gpu::T6DynamicDraw {
@@ -1861,8 +1967,10 @@ pub fn extract_t6_dynamic(
             deferred: Some(render_gpu::T6DeferredFill {
                 vertices: vertex_count,
                 indices: index_count,
+                indices_key,
                 fill: Arc::new(fill),
             }),
+            skinned: (skinned.vertices > 0).then_some(skinned),
         }
     });
     out.effects = t6_fx
@@ -1877,11 +1985,12 @@ pub fn extract_t6_dynamic(
     // carried on the last of them.
     static PROF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if *PROF.get_or_init(|| std::env::var_os("IW4L_T6_PROF").is_some()) {
-        static ACC: std::sync::Mutex<(u32, f64, usize)> = std::sync::Mutex::new((0, 0.0, 0));
+        static ACC: std::sync::Mutex<(u32, f64, usize, usize)> = std::sync::Mutex::new((0, 0.0, 0, 0));
         if let Ok(mut a) = ACC.lock() {
             a.0 += 1;
             a.1 += t0.elapsed().as_secs_f64() * 1000.0;
             a.2 += out.missiles.as_ref().map_or(0, t6_vertex_count);
+            a.3 += out.missiles.as_ref().and_then(|m| m.skinned.as_ref()).map_or(0, |s| s.vertices);
             if a.0 >= 300 {
                 let list = |d: Option<&render_gpu::T6DynamicDraw>| {
                     d.map_or((0, 0), |d| (t6_vertex_count(d), d.draws.len()))
@@ -1889,11 +1998,13 @@ pub fn extract_t6_dynamic(
                 let kept = static_cache.vertex_count;
                 diag::info!(
                     World,
-                    "bo2zm t6 extract: {:.2} ms a frame, {} moving vertices a frame; now {} moving models, \
+                    "bo2zm t6 extract: {:.2} ms a frame, {} moving vertices a frame ({} skinned on the card); \
+                     now {} moving models, \
                      {} held still, {} out of view ({} vertices kept in {} chunks), {} bodies and ground \
                      items in all; vertices/draws: moving {:?}, marks {:?}, effects {:?}",
                     a.1 / f64::from(a.0),
                     a.2 / a.0 as usize,
+                    a.3 / a.0 as usize,
                     moving.len(),
                     held_models,
                     unseen,
@@ -1904,7 +2015,7 @@ pub fn extract_t6_dynamic(
                     list(out.marks.as_ref()),
                     list(out.effects.as_ref()),
                 );
-                *a = (0, 0.0, 0);
+                *a = (0, 0.0, 0, 0);
             }
         }
     }

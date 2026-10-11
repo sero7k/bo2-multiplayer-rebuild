@@ -107,6 +107,13 @@ pub struct CapturedCombatInput {
 
     pub rechamber_while_ads: bool,
 
+    /// BO2: a reload lowers the sights (!bReloadWhileAds).
+    pub reload_lowers_ads: bool,
+
+    /// BO2 iPositionReloadTransTime: the sights come back up when this
+    /// much of the reload is left.
+    pub position_reload_trans_ms: i32,
+
     pub ads_fire_only: bool,
 
     /// bo2mp: Hybrid Optic gun: its alternate weapon is the other sight.
@@ -265,6 +272,13 @@ pub struct WeaponCombatFacts {
 
     pub rechamber_while_ads: bool,
 
+    /// BO2: a reload lowers the sights (!bReloadWhileAds).
+    pub reload_lowers_ads: bool,
+
+    /// BO2 iPositionReloadTransTime: the sights come back up when this
+    /// much of the reload is left.
+    pub position_reload_trans_ms: i32,
+
     pub ads_fire_only: bool,
 
     pub optic_switch: bool,
@@ -383,6 +397,8 @@ impl WeaponCombatFacts {
             ads_in_rate: 0.0,
             ads_out_rate: 0.0,
             rechamber_while_ads: true,
+            reload_lowers_ads: false,
+            position_reload_trans_ms: 0,
             ads_fire_only: false,
             optic_switch: false,
             melee_damage: 0,
@@ -499,6 +515,8 @@ impl WeaponCombatFacts {
             ads_in_rate: input.ads_in_rate,
             ads_out_rate: input.ads_out_rate,
             rechamber_while_ads: input.rechamber_while_ads,
+            reload_lowers_ads: input.reload_lowers_ads,
+            position_reload_trans_ms: input.position_reload_trans_ms,
             ads_fire_only: input.ads_fire_only,
             optic_switch: input.optic_switch,
             melee_damage: input.melee_damage,
@@ -615,6 +633,16 @@ impl WeaponCombatFacts {
             self.ads_out_rate,
             self.rechamber_while_ads,
             self.ads_fire_only,
+        )
+    }
+
+    /// BO2's reload rule for the sights: (a reload lowers them, how much of
+    /// the reload is left when they come back up, segmented reload).
+    pub fn ads_reload_rule(self) -> (bool, i32, bool) {
+        (
+            self.reload_lowers_ads,
+            self.position_reload_trans_ms,
+            self.segmented_reload,
         )
     }
 

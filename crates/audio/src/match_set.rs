@@ -49,6 +49,16 @@ const MENU_CODE: [&str; 2] = ["mouse_over", "mouse_click"];
 
 const MATCH_CLOCK: &[&str] = &["ui_mp_timer_countdown"];
 
+/// bo2mp: Black Ops II's hit sounds (`_damagefeedback.gsc`'s hit alerts and
+/// the engine's headshot crack), ready before the first hit: a late one
+/// left his first hits of a match silent.
+const T6_HIT_SOUNDS: &[&str] = &[
+    "mpl_hit_alert",
+    "mpl_hit_alert_low",
+    "prj_bullet_impact_headshot",
+    "prj_bullet_impact_headshot_2d",
+];
+
 #[derive(Default)]
 struct MatchRequests {
     required: HashSet<ClipKey>,
@@ -252,6 +262,12 @@ fn queue_match_clips(
     {
         aliases += 1;
         request_named(clips, &bank.0, AssetNamespace::Iw4, alias, &mut set);
+    }
+    if namespace.namespace == AssetNamespace::T6 {
+        for alias in T6_HIT_SOUNDS {
+            aliases += 1;
+            request_named(clips, &bank.0, AssetNamespace::T6, alias, &mut set);
+        }
     }
     for alias in &type10.0 {
         aliases += 1;

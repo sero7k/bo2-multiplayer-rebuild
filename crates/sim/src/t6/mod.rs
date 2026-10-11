@@ -362,6 +362,9 @@ pub(crate) struct Zm {
     pub bot_leaves: Vec<u32>,
     pub bot_throws: Vec<u32>,
     pub bot_difficulty: i32,
+    /// bo2mp: path nodes marked dangerous (`setdangerous`): by node, a
+    /// count per team (allies, axis), 0..15 like BO2's.
+    pub node_danger: BTreeMap<u32, [u8; 2]>,
     /// bo2mp: items picked up last tick (engine records, see `items`).
     pub item_pickups: Vec<crate::ItemPickupRecord>,
     pub game_end_time: i32,
@@ -723,12 +726,7 @@ fn node_objects(vm: &mut Vm<World>, nodes: &[T6PathNode]) -> Vec<ObjRef> {
     let mut node_objs = Vec::with_capacity(nodes.len());
     for n in nodes {
         let o = vm.alloc_object(ObjKind::Struct);
-        let kind = match n.ty {
-            nav::NODE_PATH => "Path",
-            nav::NODE_NEGOTIATION_BEGIN => "Begin",
-            nav::NODE_NEGOTIATION_END => "End",
-            _ => "Path",
-        };
+        let kind = nav::NODE_TYPE_NAMES.get(n.ty as usize).copied().unwrap_or("Path");
         let fields: [(&str, Value); 4] = [
             ("origin", Value::Vec3(n.origin)),
             ("angles", Value::Vec3([0.0, n.angle, 0.0])),

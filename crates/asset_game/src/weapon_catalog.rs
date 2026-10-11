@@ -143,6 +143,13 @@ pub struct WeaponBodyFacts {
 
     pub rechamber_while_ads: bool,
 
+    /// BO2: the gun lowers its sights for a reload (!bReloadWhileAds).
+    pub reload_lowers_ads: bool,
+
+    /// BO2 iPositionReloadTransTime: the sights come back up when this
+    /// much of the reload is left.
+    pub position_reload_trans_ms: i32,
+
     pub ads_fire_only: bool,
 
     pub melee_damage: i32,
@@ -1722,6 +1729,8 @@ impl WeaponCatalog {
                 ads_in_rate: geometry.ads_in_rate,
                 ads_out_rate: geometry.ads_out_rate,
                 rechamber_while_ads: geometry.rechamber_while_ads,
+                reload_lowers_ads: false,
+                position_reload_trans_ms: 0,
                 ads_fire_only: geometry.ads_fire_only,
                 melee_damage: geometry.melee_damage,
                 overlay_reticle: geometry.overlay_reticle,

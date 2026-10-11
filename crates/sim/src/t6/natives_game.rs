@@ -418,30 +418,71 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             .collect();
         Ok(list(v))
     });
-    for name in ["getnodesinradius", "getnodesinradiussorted"] {
-        vm.bind(name, false, |_, world, _, a| {
-            let center = arg(a, 0).as_vec3().unwrap_or([0.0; 3]);
-            let radius = arg(a, 1).as_float().unwrap_or(0.0);
-            let min = arg(a, 2).as_float().unwrap_or(0.0);
-            let height = arg(a, 3).as_float();
-            let zm = world.resource::<Zm>();
-            let mut hits: Vec<(f32, ObjRef)> = zm
-                .nav
-                .nodes
-                .iter()
-                .zip(&zm.node_objs)
-                .filter_map(|(n, o)| {
-                    let d = gsc_t6::math::sub(n.origin, center);
-                    let d2 = (d[0] * d[0] + d[1] * d[1]).sqrt();
-                    let ok = d2 <= radius && d2 >= min && height.is_none_or(|h| d[2].abs() <= h);
-                    ok.then_some((d2, *o))
-                })
-                .collect();
-            hits.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
-            Ok(list(
-                hits.into_iter().map(|(_, o)| Value::Object(o)).collect(),
-            ))
-        });
+    // BO2's GetNodesInRadius: (origin, radius, min radius, height = 512,
+    // kind, at most = 256). The nodes within the radius across and the
+    // height up or down, of the kind ("Cover": every cover kind; none:
+    // every kind but a bad node); at most that many (BO2 stops in its node
+    // tree's order, ours in node order); for the sorted one nearest first
+    // (3D); only then are those inside the min radius (across), without
+    // links or bad dropped.
+    vm.bind("getnodesinradius", false, |vm, world, _, a| nodes_in_radius(vm, world, a, false));
+    vm.bind("getnodesinradiussorted", false, |vm, world, _, a| nodes_in_radius(vm, world, a, true));
+    fn nodes_in_radius(vm: &mut Vm<World>, world: &mut World, a: &[Value], sorted: bool) -> Result<Value, String> {
+        use super::nav::{NODE_COVER_KINDS, NODE_TYPE_NAMES};
+        let center = arg(a, 0).as_vec3().unwrap_or([0.0; 3]);
+        let radius = arg(a, 1).as_float().unwrap_or(0.0);
+        let min = arg(a, 2).as_float().unwrap_or(0.0);
+        let height = arg(a, 3).as_float().unwrap_or(512.0);
+        let kinds: u32 = match arg(a, 4) {
+            Value::Undefined => !1,
+            _ => {
+                let k = text(vm, a, 4);
+                if k.eq_ignore_ascii_case("Cover") {
+                    NODE_COVER_KINDS
+                } else {
+                    NODE_TYPE_NAMES
+                        .iter()
+                        .position(|n| n.eq_ignore_ascii_case(&k))
+                        .map_or(!1, |i| 1 << i)
+                }
+            }
+        };
+        let most = match arg(a, 5) {
+            Value::Undefined => 256,
+            v => v.as_int().unwrap_or(256).clamp(1, 256) as usize,
+        };
+        let zm = world.resource::<Zm>();
+        let mut hits: Vec<(f32, u32)> = zm
+            .nav
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| {
+                let d = gsc_t6::math::sub(n.origin, center);
+                d[0] * d[0] + d[1] * d[1] <= radius * radius
+                    && kinds & (1 << (n.ty & 31)) != 0
+                    && (n.spawnflags & 1 == 0 || kinds & 1 != 0)
+                    && d[2] * d[2] <= height * height
+            })
+            .take(most)
+            .map(|(i, n)| {
+                let d = gsc_t6::math::sub(n.origin, center);
+                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2], i as u32)
+            })
+            .collect();
+        if sorted {
+            hits.sort_by(|x, y| x.0.total_cmp(&y.0));
+        }
+        let out = hits
+            .into_iter()
+            .filter(|&(_, i)| {
+                let n = &zm.nav.nodes[i as usize];
+                let d = gsc_t6::math::sub(n.origin, center);
+                (min * min == 0.0 || min * min <= d[0] * d[0] + d[1] * d[1]) && !n.links.is_empty() && n.ty != 0
+            })
+            .filter_map(|(_, i)| zm.node_objs.get(i as usize).map(|o| Value::Object(*o)))
+            .collect();
+        Ok(list(out))
     }
     // bo2zm M3: weapon facts the scripts ask (class, fire type).
     f!("weaponclass", |vm, world, _, a| {

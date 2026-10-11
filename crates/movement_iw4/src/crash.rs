@@ -39,7 +39,19 @@ pub fn crash_land(ps: &mut PlayerState, pml: &Pml, feel: Bo2Feel) {
             return;
         }
     }
-    crash_land_apply_sfx(ps, fall_height, surface);
+    crash_land_apply_sfx(ps, fall_height, surface, feel.on);
+}
+
+/// bo2zm: BO2's landing loudness, 4 at 12 units up rising to 24 (PM_CrashLand).
+const LAND_VOLUME_PER_UNIT: f32 = 0.038_461_54;
+const LAND_VOLUME_MAX: i32 = 24;
+
+fn land_volume(fall_height: f32) -> i32 {
+    if fall_height <= FALL_HARD_IN {
+        return 0;
+    }
+    ((((fall_height - FALL_HARD_IN) * LAND_VOLUME_PER_UNIT + 1.0) * FOUR) as i32)
+        .min(LAND_VOLUME_MAX)
 }
 
 /// bo2zm: dive to prone counts falls from this height (dtp_fall_damage_*).
@@ -134,18 +146,20 @@ pub fn crash_land_fall_height(ps: &PlayerState, pml: &Pml) -> Option<f32> {
     Some((land_vel * land_vel) / ((ps.gravity as f32) * TWO))
 }
 
-fn crash_land_apply_sfx(ps: &mut PlayerState, fall_height: f32, surface: i32) {
+/// `bo2`: BO2 plays the sound on any floor and a hard landing carries its
+/// loudness.
+fn crash_land_apply_sfx(ps: &mut PlayerState, fall_height: f32, surface: i32, bo2: bool) {
     if fall_height <= FALL_LIGHT_IN {
         return;
     }
     if fall_height < FALL_MEDIUM_IN {
-        if surface != 0 {
+        if surface != 0 || bo2 {
             add_predictable_event(ps, EV_FOOTSTEP_WALK, surface);
         }
         return;
     }
     if fall_height < FALL_HARD_IN {
-        if surface != 0 {
+        if surface != 0 || bo2 {
             add_predictable_event(ps, EV_FOOTSTEP_RUN, surface);
         }
         return;
@@ -153,7 +167,9 @@ fn crash_land_apply_sfx(ps: &mut PlayerState, fall_height: f32, surface: i32) {
     ps.velocity[0] *= HARD_LAND_VEL_SCALE;
     ps.velocity[1] *= HARD_LAND_VEL_SCALE;
     ps.velocity[2] *= HARD_LAND_VEL_SCALE;
-    if surface != 0 {
+    if bo2 {
+        add_predictable_event(ps, EV_LANDING_FIRST + surface, land_volume(fall_height));
+    } else if surface != 0 {
         add_predictable_event(ps, EV_LANDING_FIRST + surface, 0);
     }
 }
@@ -161,6 +177,16 @@ fn crash_land_apply_sfx(ps: &mut PlayerState, fall_height: f32, surface: i32) {
 #[cfg(test)]
 mod bo2_tests {
     use super::*;
+
+    /// BO2's landing loudness: 4 just over 12 units, 24 from 142 up.
+    #[test]
+    fn landing_loudness_follows_bo2() {
+        assert_eq!(land_volume(12.0), 0);
+        assert_eq!(land_volume(13.0), 4);
+        assert_eq!(land_volume(64.0), 12);
+        assert_eq!(land_volume(116.0), 20);
+        assert_eq!(land_volume(500.0), 24);
+    }
 
     const ZM: Bo2Feel = Bo2Feel {
         on: true,

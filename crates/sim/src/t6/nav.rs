@@ -12,6 +12,36 @@ pub(crate) const NODE_PATH: u32 = 1;
 pub(crate) const NODE_NEGOTIATION_BEGIN: u32 = 17;
 pub(crate) const NODE_NEGOTIATION_END: u32 = 18;
 
+/// BO2's names for the node kinds (by kind), as the scripts read
+/// `node.type`.
+pub(crate) const NODE_TYPE_NAMES: [&str; 21] = [
+    "BAD NODE",
+    "Path",
+    "Cover Stand",
+    "Cover Crouch",
+    "Cover Crouch Window",
+    "Cover Prone",
+    "Cover Right",
+    "Cover Left",
+    "Cover Pillar",
+    "Ambush",
+    "Exposed",
+    "Conceal Stand",
+    "Conceal Crouch",
+    "Conceal Prone",
+    "Reacquire",
+    "Balcony",
+    "Scripted",
+    "Begin",
+    "End",
+    "Turret",
+    "Guard",
+];
+
+/// The kinds a script's "Cover" means (a bit per kind): the cover and
+/// concealment kinds, exposed and turret nodes; not ambush ones.
+pub(crate) const NODE_COVER_KINDS: u32 = 0x83dfc;
+
 const CELL: f32 = 256.0;
 
 #[derive(Clone, Debug, Default)]
@@ -49,22 +79,27 @@ pub(crate) struct Baked {
 
 impl Baked {
     /// The tables as the map gave them: each one's side is the node count
-    /// its byte count fits (the map's nodes, or its compiled ones).
+    /// its byte count fits (the map's nodes, or its compiled ones). The
+    /// sight table holds only pairs i < j, so it ends at bit
+    /// n * (n - 2) + n - 1: n * (n - 1) bits; the smooth table is the
+    /// whole n * n square.
     pub(crate) fn new(t: &T6PathTables, nodes: usize) -> Self {
-        let side = |bytes: &[u8]| {
-            [t.node_count as usize, t.original_count as usize]
+        let side = |bytes: &[u8], bits: fn(usize) -> usize| {
+            let counts = [t.node_count as usize, t.original_count as usize];
+            let fits = |d: usize| d > 0 && d <= nodes;
+            counts
                 .into_iter()
-                .filter(|&d| d > 0 && d <= nodes)
-                .find(|&d| bytes.len() == (d * d).div_ceil(8))
+                .filter(|&d| fits(d))
+                .find(|&d| bytes.len() == bits(d).div_ceil(8))
                 .or_else(|| {
-                    [t.node_count as usize, t.original_count as usize]
+                    counts
                         .into_iter()
-                        .filter(|&d| d > 0 && d <= nodes && bytes.len() * 8 >= d * d)
+                        .filter(|&d| fits(d) && bytes.len() * 8 >= bits(d))
                         .max()
                 })
                 .unwrap_or(0)
         };
-        let (vis_n, smooth_n) = (side(&t.vis), side(&t.smooth));
+        let (vis_n, smooth_n) = (side(&t.vis, |d| d * (d - 1)), side(&t.smooth, |d| d * d));
         Self {
             vis_n,
             vis: if vis_n > 0 { t.vis.clone() } else { Vec::new() },
@@ -253,6 +288,32 @@ impl Nav {
             }
         }
         best.map(|b| b.1)
+    }
+
+    /// BO2's candidates for a place's nearest node (Path_NearestNode with
+    /// its height check): the nodes within 192 units across and from 120
+    /// below to 64 above it, closest across first; nodes with no links after
+    /// the rest.
+    pub(crate) fn near_cylinder(&self, p: [f32; 3]) -> Vec<(u32, [f32; 3])> {
+        let (cx, cy) = cell(p);
+        let mut out: Vec<(bool, f32, u32)> = Vec::new();
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                let Some(list) = self.grid.get(&(cx + dx, cy + dy)) else {
+                    continue;
+                };
+                for &i in list {
+                    let n = &self.nodes[i as usize];
+                    let o = n.origin;
+                    let d2 = (o[0] - p[0]).powi(2) + (o[1] - p[1]).powi(2);
+                    if d2 <= 192.0 * 192.0 && (-120.0..=64.0).contains(&(o[2] - p[2])) {
+                        out.push((n.links.is_empty(), d2, i));
+                    }
+                }
+            }
+        }
+        out.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal)));
+        out.into_iter().map(|(_, _, i)| (i, self.nodes[i as usize].origin)).collect()
     }
 
     /// Nodes within `radius` of `p` (by straight distance), nearest first.

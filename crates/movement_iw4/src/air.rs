@@ -12,6 +12,9 @@ pub struct AirMoveContext {
     pub shellshock_gravity_bias: f32,
 }
 
+/// `bo2`: Black Ops II's friction and slide (bo2zm). Returns a stair step's
+/// height for the camera (see `step_slide_move`).
+#[allow(clippy::too_many_arguments)]
 pub fn air_move<C: CollisionBackend>(
     ps: &mut PlayerState,
     pml: &Pml,
@@ -19,8 +22,10 @@ pub fn air_move<C: CollisionBackend>(
     context: AirMoveContext,
     bounds: MoveBounds,
     collision: &C,
-) {
-    air_move_with(ps, pml, cmd, context, bounds, collision, false, |_| 1.0);
+    bo2: bool,
+    zombies: bool,
+) -> f32 {
+    air_move_with(ps, pml, cmd, context, bounds, collision, bo2, zombies, |_| 1.0)
 }
 
 /// bo2zm: the air move with Black Ops II's friction (`bo2`) and its ground
@@ -34,9 +39,12 @@ pub(crate) fn air_move_with<C: CollisionBackend>(
     bounds: MoveBounds,
     collision: &C,
     bo2: bool,
+    zombies: bool,
     ground_scale: impl FnOnce(&mut PlayerState) -> f32,
-) {
-    friction_scaled(ps, pml, bo2, ground_scale);
+) -> f32 {
+    // Off the ground only a dive's slide meets ground friction, and a dive
+    // has ended any jump.
+    friction_scaled(ps, pml, bo2, true, ground_scale);
 
     steer(ps, pml, cmd, context.player_spectate_speed_scale);
 
@@ -62,7 +70,9 @@ pub(crate) fn air_move_with<C: CollisionBackend>(
         bounds.maxs,
         bounds.tracemask,
         Some(effective_gravity),
-    );
+        bo2,
+        zombies,
+    )
 }
 
 /// The player's own push in the air: wish speed from the keys or stick,
@@ -101,7 +111,8 @@ fn cmd_scale(ps: &PlayerState, cmd: &UserCmd, spectate_speed_scale: f32) -> f32 
     }
 
     let mut scale = (ps.speed as f32 * largest) / (magnitude * 127.0_f32);
-    if (ps.pm_flags & 0x40) != 0 || ps.leanf != 0.0 {
+    // bo2zm: BO2 also cuts the push to 0.4 through a dive (PM_CmdScale).
+    if (ps.pm_flags & 0x40) != 0 || ps.leanf != 0.0 || crate::dive::active(ps) {
         scale *= 0.4_f32;
     }
     scale *= match ps.pm_type {
@@ -142,5 +153,26 @@ fn adjusted_gravity(ps: &PlayerState, context: AirMoveContext) -> f32 {
         )
     } else {
         ps.gravity as f32
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// BO2's PM_CmdScale: a dive (in the air and sliding) steers at 0.4.
+    #[test]
+    fn dive_steers_at_four_tenths() {
+        let cmd = UserCmd {
+            forwardmove: 127,
+            ..UserCmd::default()
+        };
+        let mut ps = PlayerState::ZERO;
+        ps.speed = 190;
+        let full = cmd_scale(&ps, &cmd, 1.0);
+        ps.pm_flags = crate::dive::PMF_DIVE;
+        assert!((cmd_scale(&ps, &cmd, 1.0) / full - 0.4).abs() < 1e-6);
+        ps.pm_flags = crate::dive::PMF_DIVE_SLIDE | 0x40;
+        assert!((cmd_scale(&ps, &cmd, 1.0) / full - 0.4).abs() < 1e-6);
     }
 }

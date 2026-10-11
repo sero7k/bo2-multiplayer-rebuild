@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 
 use crate::ServerTime;
 use crate::client::predicted_error::PredictedError;
+use crate::client::view_z_smooth::ViewZSmoothing;
 use crate::reconciliation::CorrectionBoundary;
 use crate::transport::netfields::{Deviation, ps_deviation};
 
@@ -212,6 +213,9 @@ pub struct ClientPrediction {
 
     snapshots_since_ack: u32,
     predicted_error: PredictedError,
+
+    /// bo2zm: the camera easing over stair steps.
+    view_z: ViewZSmoothing,
     metrics: PredictionMetrics,
 
     predicted_local: Option<PlayerState>,
@@ -243,6 +247,7 @@ impl ClientPrediction {
             next_tick: 0,
             snapshots_since_ack: 0,
             predicted_error: PredictedError::default(),
+            view_z: ViewZSmoothing::default(),
             metrics: PredictionMetrics::default(),
             predicted_local: None,
             last_cmd: None,
@@ -291,6 +296,11 @@ impl ClientPrediction {
 
     pub fn predicted_error_mut(&mut self) -> &mut PredictedError {
         &mut self.predicted_error
+    }
+
+    /// bo2zm: the camera easing over stair steps.
+    pub fn view_z(&self) -> &ViewZSmoothing {
+        &self.view_z
     }
 
     pub fn predicted_local(&self) -> Option<&PlayerState> {
@@ -345,11 +355,17 @@ impl ClientPrediction {
         self.next_tick = self.next_tick.wrapping_add(1);
 
         let output = if msec > 0 {
-            self.step_predicted(tick, cmd, msec, sim::StepReason::PredictNew)
-                .unwrap_or(input)
+            let output = self
+                .step_predicted(tick, cmd, msec, sim::StepReason::PredictNew)
+                .unwrap_or(input);
+            // bo2zm: only a new move's step is eased (a replay's was already).
+            let rise = self.world.pmove_view_change(self.local);
+            self.view_z.note_step(rise, cmd.server_time);
+            output
         } else {
             input
         };
+        self.view_z.settle(server_time, output.pm_type);
 
         let evicted = self.history.push(MoveRecord {
             seq,
@@ -596,12 +612,12 @@ impl ClientPrediction {
         let floor_predecessor = self.replay_floor.and_then(|(floor, cmd)| {
             (self.history.oldest_seq() == Some(floor.next())).then_some(cmd)
         });
-        let (buttons, angles) = match acked
+        let (buttons, angles, moves) = match acked
             .map(|r| r.cmd)
             .or(floor_predecessor)
             .or(self.acknowledged_cmd)
         {
-            Some(cmd) => (cmd.buttons, cmd.angles),
+            Some(cmd) => (cmd.buttons, cmd.angles, [cmd.forwardmove, cmd.rightmove]),
             None => {
                 let mut seeded = 0;
                 if self
@@ -611,10 +627,11 @@ impl ClientPrediction {
                 {
                     seeded |= buttons::SPRINT;
                 }
-                (seeded, [0; 3])
+                (seeded, [0; 3], [0; 2])
             }
         };
         self.world.set_old_cmd(self.local, buttons, angles);
+        self.world.set_old_cmd_move(self.local, moves);
     }
 
     fn step_predicted(

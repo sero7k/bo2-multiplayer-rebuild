@@ -485,6 +485,9 @@ pub struct SimState {
 
     old_cmd_angles: Vec<(ClientId, [i32; 3])>,
 
+    /// bo2zm: last command's forward and side keys (BO2's prone aim hold).
+    old_cmd_moves: Vec<(ClientId, [i8; 2])>,
+
     player_anim_trees: HashMap<u32, PlayerAnimTreeSlot>,
 
     corpse_anim_trees: HashMap<i32, xmodel_runtime::XAnimTreeRuntime>,
@@ -579,6 +582,9 @@ pub struct SimState {
 
     last_pmove_walking: HashMap<ClientId, i32>,
 
+    /// bo2zm: the last move's stair step height per player (camera easing).
+    last_pmove_view_change: HashMap<ClientId, f32>,
+
     stuck_holdrand: u32,
 
     last_stuck_ejects: Vec<(ClientId, ClientId)>,
@@ -620,6 +626,7 @@ impl Default for SimState {
             model_library: Arc::default(),
             old_buttons: Vec::new(),
             old_cmd_angles: Vec::new(),
+            old_cmd_moves: Vec::new(),
             player_anim_trees: HashMap::new(),
             corpse_anim_trees: HashMap::new(),
             player_dobjs: HashMap::new(),
@@ -676,6 +683,7 @@ impl Default for SimState {
             pending_local_sounds: Vec::new(),
             pending_final_kill: None,
             last_pmove_walking: HashMap::new(),
+            last_pmove_view_change: HashMap::new(),
             stuck_holdrand: 0,
             last_stuck_ejects: Vec::new(),
             last_anim_movetype: HashMap::new(),
@@ -1425,6 +1433,7 @@ impl SimState {
         self.lagcomp_sample.remove(&id);
         self.lagcomp_commands.retain(|(client, _), _| *client != id);
         self.last_pmove_walking.remove(&id);
+        self.last_pmove_view_change.remove(&id);
         self.last_anim_movetype.remove(&id);
     }
 
@@ -2493,6 +2502,16 @@ impl SimState {
         self.last_pmove_walking.insert(id, walking);
     }
 
+    /// bo2zm: how far a stair step moved this player on their last move (0
+    /// for none); the client's camera eases over it like Black Ops II.
+    pub fn pmove_view_change(&self, id: ClientId) -> f32 {
+        self.last_pmove_view_change.get(&id).copied().unwrap_or(0.0)
+    }
+
+    pub(crate) fn set_pmove_view_change(&mut self, id: ClientId, view_change: f32) {
+        self.last_pmove_view_change.insert(id, view_change);
+    }
+
     pub(crate) fn stuck_holdrand_mut(&mut self) -> &mut u32 {
         &mut self.stuck_holdrand
     }
@@ -2922,6 +2941,7 @@ impl SimState {
 
         self.old_buttons.clear();
         self.old_cmd_angles.clear();
+        self.old_cmd_moves.clear();
 
         report.dropped = before.saturating_sub(adopted_player_count + self.clients.len());
         report.content_mismatch = snapshot.meta.rng.root_seed != self.root_seed;
@@ -2942,6 +2962,22 @@ impl SimState {
             return;
         }
         self.old_cmd_angles.push((id, angles));
+    }
+
+    /// bo2zm: last command's forward and side keys.
+    pub fn set_old_cmd_move(&mut self, id: ClientId, moves: [i8; 2]) {
+        if let Some(row) = self.old_cmd_moves.iter_mut().find(|(c, _)| *c == id) {
+            row.1 = moves;
+            return;
+        }
+        self.old_cmd_moves.push((id, moves));
+    }
+
+    pub fn old_cmd_move(&self, id: ClientId) -> Option<[i8; 2]> {
+        self.old_cmd_moves
+            .iter()
+            .find(|(c, _)| *c == id)
+            .map(|(_, moves)| *moves)
     }
 
     pub fn set_old_cmd(&mut self, id: ClientId, buttons: u32, angles: [i32; 3]) {
@@ -3088,6 +3124,10 @@ impl SimState {
 
     pub(crate) fn old_cmd_angles_mut(&mut self) -> &mut Vec<(ClientId, [i32; 3])> {
         &mut self.old_cmd_angles
+    }
+
+    pub(crate) fn old_cmd_moves_mut(&mut self) -> &mut Vec<(ClientId, [i8; 2])> {
+        &mut self.old_cmd_moves
     }
 
     pub fn shot_collision_verdicts(&self) -> &[crate::combat::ShotCollisionVerdict] {

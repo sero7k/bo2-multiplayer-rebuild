@@ -266,6 +266,8 @@ fn t6_body_facts(w: &asset_t6::WeaponRef) -> WeaponBodyFacts {
     f.ads_dof = (dof[1] > 0.0).then_some(dof);
     f.no_ads_when_mag_empty = w.def_u8(d::noAdsWhenMagEmpty) != 0;
     f.rechamber_while_ads = w.def_u8(d::bRechamberWhileAds) != 0;
+    f.reload_lowers_ads = w.def_u8(d::bReloadWhileAds) == 0;
+    f.position_reload_trans_ms = w.def_i32(d::iPositionReloadTransTime);
     f.ads_fire_only = w.def_u8(d::adsFireOnly) != 0;
     f.melee_damage = w.def_i32(d::iMeleeDamage);
     f.overlay_reticle = w.def_i32(d::overlayReticle);

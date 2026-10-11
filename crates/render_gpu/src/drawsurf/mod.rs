@@ -63,8 +63,8 @@ pub use colour_submit::{
 };
 pub(crate) use draw::register_drawsurf_render;
 pub use geometry_diagnostic::{
-    ExtractedDiagnosticGeometry, ExtractedT6Dynamic, T6DeferredFill, T6DynamicDraw, T6StaticDraw,
-    geometry_diagnostic_enabled,
+    ExtractedDiagnosticGeometry, ExtractedT6Dynamic, T6DeferredFill, T6DynamicDraw, T6SkinShape,
+    T6Skinned, T6StaticDraw, geometry_diagnostic_enabled,
 };
 pub use gpu_resources::*;
 pub use model_lighting_tiles::{ModelLightingTileUpload, ModelLightingTileUploads};

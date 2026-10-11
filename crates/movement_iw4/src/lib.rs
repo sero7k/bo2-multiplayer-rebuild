@@ -17,6 +17,7 @@ mod events;
 mod feel; // bo2zm
 mod footstep;
 mod friction;
+mod gjk; // bo2zm
 mod ground;
 mod integrate;
 mod is_in_air;
@@ -26,6 +27,7 @@ pub mod mantle;
 mod melee_charge;
 mod pml;
 mod pmove;
+mod prone_turn; // bo2zm
 mod single;
 mod slide;
 mod snap;
@@ -38,7 +40,9 @@ pub use accelerate::accelerate;
 pub use ads_frac::{AdsFracContext, update_ads_frac};
 pub use ads_intent::{AdsIntentContext, AdsIntentResult, BUTTON_ADS, update_ads_intent};
 pub use air::{AirMoveContext, air_move};
-pub use check_prone::{PRONE_CHECK_HEIGHT, PRONE_FEET_DIST, check_prone, player_prone_allowed};
+pub use check_prone::{
+    PRONE_CHECK_HEIGHT, PRONE_FEET_DIST, ProneRules, check_prone, player_prone_allowed,
+};
 pub use cmdscale::{CmdScaleWalkContext, cmd_scale_walk};
 pub use collision::CollisionBackend;
 pub use correct_solid::{BG_CORRECT_SOLID_DELTAS, CorrectSolidOutcome, correct_solid};
@@ -53,7 +57,7 @@ pub use drop_timers::drop_timers;
 pub use events::{SequencedPlayerEvent, add_event, add_predictable_event, consume_player_events};
 pub use feel::{
     Bo2Feel, PERK_FALLHEIGHT, PERK_FASTADS, PERK_FLAKJACKET, PERK_LONGERSPRINT, PERK_MOVEFASTER,
-    PRONE_LERP_MS, player_speed, quickdraw_ads_rates, shellshock_walk_scale,
+    PERK_STALKER, PRONE_LERP_MS, player_speed, quickdraw_ads_rates, shellshock_walk_scale,
 }; // bo2zm
 pub use footstep::{
     LADDER_SURFACE_FLAGS, LADDER_SURFACE_TYPE, SURFACE_TYPE_NAMES, bob_cycle_wrapped,

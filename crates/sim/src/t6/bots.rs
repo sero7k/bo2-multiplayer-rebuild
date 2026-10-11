@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 
 use bevy_ecs::prelude::World;
-use gsc_t6::{Array, ObjKind, Value, Vm};
+use gsc_t6::{Array, ObjKind, ObjRef, Value, Vm};
 use playerstate_iw4::buttons;
 
 use super::{Player, Zm, arg, entnum, frame, list, origin_of, text};
@@ -40,6 +40,21 @@ pub(crate) struct BotClass {
     pub attachments: Vec<(String, String, String)>,
 }
 
+/// A negotiation link on a route (BO2's path nodes mark ledges, railings
+/// and drops with a begin node linked to an end node): the begin node's
+/// spawnflags say how it is taken (0x800000 a jump, 0x2400000 a drop,
+/// 0x2000000 run straight across).
+#[derive(Clone, Copy, Debug)]
+struct NegLink {
+    begin: [f32; 3],
+    end: [f32; 3],
+    flags: u32,
+}
+
+const NEG_JUMP: u32 = 0x80_0000;
+const NEG_DROP: u32 = 0x240_0000;
+const NEG_RUN: u32 = 0x200_0000;
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Bot {
     goals: Vec<Goal>,
@@ -58,7 +73,9 @@ pub(crate) struct Bot {
     /// 0 stand, 1 crouch, 2 prone (`setstance`).
     stance: u8,
     no_sprint: bool,
-    failsafe: Option<[f32; 3]>,
+    /// The node `botsetfailsafenode` gave it (its place, and the node
+    /// handed back with "goal"): it walks there and nothing else.
+    failsafe: Option<([f32; 3], Option<ObjRef>)>,
     tick: u32,
     /// Where it was when it last made headway, and when (stuck checks).
     progress: Option<([f32; 3], i64)>,
@@ -70,6 +87,16 @@ pub(crate) struct Bot {
     /// cached far-sight answer belongs to.
     path_gen: u32,
     path_new: bool,
+    /// BO2's lookahead amount for this route (32768 when planned, 0 =
+    /// not set) and the last lookahead point the walk there was clear to.
+    la_amount: f32,
+    la_pos: Option<[f32; 3]>,
+    /// BO2's lookahead direction (its z the rise per unit) and distance to
+    /// the point the walk headed for at its last think, and whether that
+    /// walk was clear: `getlookaheaddir`/`dist` answer from them, and route
+    /// points behind it along them are done.
+    la_dir: Option<([f32; 3], f32)>,
+    la_clear: bool,
     /// The farthest route point seen from the one it heads to, for
     /// (route, points left, within 192 units of the next).
     seen: Option<(u32, usize, bool, [f32; 3])>,
@@ -82,6 +109,12 @@ pub(crate) struct Bot {
     fire_delay_until: i64,
     /// When its current sprint began.
     sprint_since: Option<i64>,
+    /// The negotiation links its route crosses, the one it is taking (and
+    /// since when), last tick's buttons, and whether it was mantling.
+    negs: Vec<NegLink>,
+    neg: Option<(NegLink, i64)>,
+    last_press: u32,
+    was_mantling: bool,
     pub classes: BTreeMap<i32, BotClass>,
 }
 
@@ -100,6 +133,10 @@ impl Bot {
             .iter()
             .max_by_key(|g| (g.priority, g.order))
     }
+}
+
+fn dist3(a: [f32; 3], b: [f32; 3]) -> f32 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
 }
 
 fn dist2d(a: [f32; 3], b: [f32; 3]) -> f32 {
@@ -123,6 +160,21 @@ fn angle_delta(from: f32, to: f32) -> f32 {
 fn reloading(state: i32) -> bool {
     use weapon_iw4::WeaponState as S;
     (S::Reloading as i32..=S::ReloadEnd as i32).contains(&state)
+}
+
+/// A player's state, as `read` sees it (not a player: false).
+fn player_is(vm: &Vm<World>, world: &mut World, s: &Value, read: fn(&playerstate_iw4::PlayerState) -> bool) -> Value {
+    let n = entnum(vm, s).unwrap_or(u32::MAX);
+    Value::bool(frame(world).player(ClientId(n)).is_some_and(read))
+}
+
+/// The danger count's slot for a team (BO2 keeps one per team).
+fn danger_slot(team: &str) -> Option<usize> {
+    match team {
+        "allies" => Some(0),
+        "axis" => Some(1),
+        _ => None,
+    }
 }
 
 /// The settings BO2's engine drives bots by (its own dvars; the bot
@@ -185,10 +237,11 @@ fn irand(n: u32, now: i64, lo: i64, hi: i64) -> i64 {
 
 /// BO2's lookahead down a route: along the route from where the bot is
 /// until the corner it would cut (each leg's length times how far its line
-/// passes from the bot, summed) reaches 32768; straight legs cost nothing.
-/// The point there, and how far it is.
-fn lookahead(origin: [f32; 3], path: &[[f32; 3]]) -> Option<([f32; 3], f32)> {
-    const AMOUNT: f32 = 32768.0;
+/// passes from the bot, summed) reaches the amount; straight legs cost
+/// nothing. The point there, and how far it is.
+fn lookahead(origin: [f32; 3], path: &[[f32; 3]], amount: f32) -> Option<([f32; 3], f32)> {
+    const AMOUNT_START: f32 = 32768.0;
+    let amount = if amount > 0.0 { amount } else { AMOUNT_START };
     let mut area = 0.0f32;
     let mut a = origin;
     for &b in path {
@@ -202,8 +255,8 @@ fn lookahead(origin: [f32; 3], path: &[[f32; 3]]) -> Option<([f32; 3], f32)> {
         let off = (dir[0] * (b[1] - origin[1]) - dir[1] * (b[0] - origin[0])).abs();
         let before = area;
         area += len * off;
-        if off > 0.0 && area >= AMOUNT {
-            let s = ((AMOUNT - before) / off).min(len) / len;
+        if off > 0.0 && area >= amount {
+            let s = ((amount - before) / off).min(len) / len;
             let p = [a[0] + d[0] * s, a[1] + d[1] * s, a[2] + (b[2] - a[2]) * s];
             return Some((p, dist2d(origin, p)));
         }
@@ -216,16 +269,18 @@ fn lookahead(origin: [f32; 3], path: &[[f32; 3]]) -> Option<([f32; 3], f32)> {
 /// after when that is within 192 units), the farthest later point seen
 /// from there; it looks toward that while it walks.
 fn farthest_seen(world: &mut World, origin: [f32; 3], path: &[[f32; 3]]) -> Option<[f32; 3]> {
-    let start = usize::from(path.len() > 1 && dist2d(origin, *path.first()?) < 192.0);
+    // The nodes: all but the goal point at the end.
+    let nodes = &path[..path.len().saturating_sub(1)];
+    let start = usize::from(nodes.len() > 1 && dist2d(origin, nodes[1]) < 192.0);
     let raise = |p: [f32; 3]| [p[0], p[1], p[2] + 60.0];
-    let from = raise(path[start]);
-    let last = (path.len() - 1).min(start + 12);
-    for &p in path[start + 1..=last].iter().rev() {
-        if dist2d(path[start], p) < 2048.0 && sight(world, from, raise(p)) {
+    let from = raise(*nodes.get(start)?);
+    let last = nodes.len().checked_sub(1)?.min(start + 20);
+    for &p in nodes.get(start + 1..=last)?.iter().rev() {
+        if dist2d(nodes[start], p) < 2048.0 && sight(world, from, raise(p)) {
             return Some(p);
         }
     }
-    Some(path[start])
+    None
 }
 
 /// BO2's bot steering, one 50 ms tick: the view (pitch, yaw) turns toward
@@ -477,6 +532,48 @@ fn blocked_ahead(world: &mut World, origin: [f32; 3], to: [f32; 3]) -> bool {
     t.startsolid != 0 || t.fraction < 1.0
 }
 
+/// BO2's prediction trace to the lookahead: can a player walk straight
+/// from `origin` to `to` (its box raised by the 18-unit step, against the
+/// map and what stands in it, as the walk itself collides)?
+fn walk_clear(world: &mut World, origin: [f32; 3], to: [f32; 3]) -> bool {
+    use crate::bullet_collision::{MASK_PLAYER_SOLID, PLAYER_MAXS, PLAYER_MINS};
+    if dist2d(origin, to) < 1.0 {
+        return true;
+    }
+    let start = [origin[0], origin[1], origin[2] + 18.0];
+    let end = [to[0], to[1], to[2] + 18.0];
+    let maxs = [PLAYER_MAXS[0], PLAYER_MAXS[1], PLAYER_MAXS[2] - 18.0];
+    let t = frame(world).trace_clip(start, end, PLAYER_MINS, maxs, MASK_PLAYER_SOLID);
+    t.startsolid == 0 && t.fraction >= 1.0
+}
+
+/// BO2's nearest node to a place (Path_NearestNode, as its path search
+/// starts and ends): of `near_cylinder`'s nodes, the first the place stands
+/// in (the node's box: 15 each way across, 48 up) or that a body-sized box
+/// (-10 -10 17 to 10 10 48) reaches in a straight line; a bot upstairs no
+/// longer starts from the node on the floor below. None: our closest node.
+fn nearest_reachable(world: &mut World, p: [f32; 3]) -> Option<u32> {
+    use crate::bullet_collision::MASK_PLAYER_SOLID;
+    let near = world.resource::<Zm>().nav.near_cylinder(p);
+    for (i, o) in near {
+        let inside = (p[0] - o[0]).abs() < 16.0 && (p[1] - o[1]).abs() < 16.0 && p[2] > o[2] - 1.0 && p[2] < o[2] + 49.0;
+        if inside {
+            return Some(i);
+        }
+        let t = frame(world).trace_clip(p, o, [-10.0, -10.0, 17.0], [10.0, 10.0, 48.0], MASK_PLAYER_SOLID);
+        if t.startsolid == 0 && t.fraction >= 1.0 {
+            return Some(i);
+        }
+    }
+    world.resource::<Zm>().nav.nearest(p)
+}
+
+/// BO2MP_BOTLOG=1 (test aid), read once.
+fn botlog() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("BO2MP_BOTLOG").is_some())
+}
+
 fn sight(world: &mut World, from: [f32; 3], to: [f32; 3]) -> bool {
     let t = frame(world).trace_static_world(
         from,
@@ -705,43 +802,28 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         };
         Ok(Value::bool(at))
     });
-    // The route ahead: its next point's direction and distance (undefined
-    // with no route).
+    // BO2's lookahead: the direction (z the rise per unit) and distance to
+    // the point its route walk heads for; undefined and 0 with no route or
+    // at its goal (its scripts then pick somewhere to look).
     m!("getlookaheaddir", |vm, world, s, _| {
         let n = entnum(vm, s).unwrap_or(u32::MAX);
-        let origin = frame(world).player(ClientId(n)).map(|ps| ps.origin);
-        let next = world
-            .resource::<Zm>()
-            .bots
-            .get(&n)
-            .and_then(|b| b.path.first().copied());
-        Ok(match (next, origin) {
-            (Some(p), Some(o)) => {
-                let d = [p[0] - o[0], p[1] - o[1], 0.0];
-                let len = (d[0] * d[0] + d[1] * d[1]).sqrt().max(1e-3);
-                Value::Vec3([d[0] / len, d[1] / len, 0.0])
-            }
-            _ => Value::Undefined,
-        })
+        let la = world.resource::<Zm>().bots.get(&n).and_then(|b| b.la_dir);
+        Ok(la.map_or(Value::Undefined, |(d, _)| Value::Vec3(d)))
     });
     m!("getlookaheaddist", |vm, world, s, _| {
         let n = entnum(vm, s).unwrap_or(u32::MAX);
-        let origin = frame(world).player(ClientId(n)).map(|ps| ps.origin);
-        let next = world
-            .resource::<Zm>()
-            .bots
-            .get(&n)
-            .and_then(|b| b.path.first().copied());
-        Ok(match (next, origin) {
-            (Some(p), Some(o)) => Value::Float(dist2d(p, o)),
-            _ => Value::Float(0.0),
-        })
+        let la = world.resource::<Zm>().bots.get(&n).and_then(|b| b.la_dir);
+        Ok(Value::Float(la.map_or(0.0, |(_, d)| d)))
     });
     m!("botsetfailsafenode", |vm, world, s, a| {
         let n = entnum(vm, s).unwrap_or(u32::MAX);
+        let node = match arg(a, 0) {
+            Value::Object(o) => Some(*o),
+            _ => None,
+        };
         let p = place(vm, world, arg(a, 0));
         if let Some(mut zm) = bot_mut(world, n) {
-            zm.bots.get_mut(&n).unwrap().failsafe = p;
+            zm.bots.get_mut(&n).unwrap().failsafe = p.map(|p| (p, node));
         }
         Ok(Value::Undefined)
     });
@@ -945,7 +1027,13 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let w = text(vm, a, 0);
         Ok(Value::bool(w.contains("+dw") || w.ends_with("dw_mp")))
     });
-    f!("isweaponscopeoverlay", |_, _, _, _| Ok(Value::Int(0)));
+    // A scoped weapon (BO2: it has an overlay reticle): its bots hold
+    // full sights a second before the shot.
+    f!("isweaponscopeoverlay", |vm, world, _, a| {
+        let w = super::weapon(world, &text(vm, a, 0)).ok();
+        let facts = w.and_then(|w| frame(world).combat_facts_for(w));
+        Ok(Value::bool(facts.is_some_and(|f| f.overlay_reticle != 0)))
+    });
     f!("target_istarget", |_, _, _, _| Ok(Value::Int(0)));
     m!("getplayercamerapos", |vm, world, s, _| {
         let n = entnum(vm, s).unwrap_or(u32::MAX);
@@ -1091,18 +1179,34 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         else {
             return Ok(Value::Undefined);
         };
-        let route = {
-            let nav = &world.resource::<Zm>().nav;
-            match (nav.nearest(from), nav.nearest(to)) {
-                (Some(x), Some(y)) => nav.path(x, y),
-                _ => None,
-            }
+        let route = match (nearest_reachable(world, from), nearest_reachable(world, to)) {
+            (Some(x), Some(y)) => world.resource::<Zm>().nav.path(x, y),
+            _ => None,
         };
         Ok(route.map_or(Value::Undefined, |r| {
             list(r.into_iter().map(|i| node_obj(world, i)).collect())
         }))
     });
     f!("canclaimnode", |_, _, _, _| Ok(Value::Int(1)));
+    // BO2's danger marks: a count per team on a node (0..15), raised and
+    // lowered by `setdangerous(team, on)`, dangerous while above 0 (bots
+    // keep clear of a killstreak's landing spot).
+    m!("setdangerous", |vm, world, s, a| {
+        let (Some(i), Some(t)) = (node_index(vm, world, s), danger_slot(&text(vm, a, 0))) else {
+            return Ok(Value::Undefined);
+        };
+        let on = arg(a, 1).as_int().unwrap_or(0) != 0;
+        let mut zm = world.resource_mut::<Zm>();
+        let c = &mut zm.node_danger.entry(i).or_default()[t];
+        *c = if on { (*c + 1).min(15) } else { c.saturating_sub(1) };
+        Ok(Value::Undefined)
+    });
+    m!("isdangerous", |vm, world, s, a| {
+        let (Some(i), Some(t)) = (node_index(vm, world, s), danger_slot(&text(vm, a, 0))) else {
+            return Ok(Value::Int(0));
+        };
+        Ok(Value::bool(world.resource::<Zm>().node_danger.get(&i).is_some_and(|c| c[t] > 0)))
+    });
     f!("claimnode", |_, _, _, _| Ok(Value::Undefined));
     f!("releaseclaimednode", |_, _, _, _| Ok(Value::Undefined));
     // Bots have every item (their scripts ask before building a class).
@@ -1114,7 +1218,28 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             reloading(ps.weaponstate_primary)
         })))
     });
-    for name in ["isfiring", "ismantling", "isonladder", "isthrowinggrenade", "isswitchingweapons", "isremotecontrolling", "iscarryingturret"] {
+    // As BO2 reads them: switching = the weapon raising or dropping,
+    // throwing = an offhand (grenade) state, mantling and on a ladder =
+    // the move flags.
+    m!("isswitchingweapons", |vm, world, s, _| {
+        use weapon_iw4::WeaponState as S;
+        Ok(player_is(vm, world, s, |ps| {
+            (S::Raising as i32..=S::DroppingAltswitch as i32).contains(&ps.weaponstate_primary)
+        }))
+    });
+    m!("isthrowinggrenade", |vm, world, s, _| {
+        use weapon_iw4::WeaponState as S;
+        Ok(player_is(vm, world, s, |ps| {
+            (S::OffhandInit as i32..=S::OffhandEnd as i32).contains(&ps.weaponstate_primary)
+        }))
+    });
+    m!("ismantling", |vm, world, s, _| {
+        Ok(player_is(vm, world, s, |ps| ps.pm_flags & playerstate_iw4::pm_flags::MANTLE != 0))
+    });
+    m!("isonladder", |vm, world, s, _| {
+        Ok(player_is(vm, world, s, |ps| ps.pm_flags & playerstate_iw4::pm_flags::LADDER != 0))
+    });
+    for name in ["isfiring", "isremotecontrolling", "iscarryingturret"] {
         vm.bind(name, true, |_, _, _, _| Ok(Value::Int(0)));
     }
 }
@@ -1126,6 +1251,7 @@ pub(super) fn drive(world: &mut World, now: i64) {
     if ids.is_empty() {
         return;
     }
+    log_negotiations(world);
     let dv = BotDvars::read(world);
     let crowd = crowd(world);
     let throws = std::mem::take(&mut world.resource_mut::<Zm>().bot_throws);
@@ -1142,7 +1268,7 @@ pub(super) fn drive(world: &mut World, now: i64) {
             }
             continue;
         }
-        let Some((origin, view, height, ladder, mantling, sprinting, ads_frac, wstate, standing, weapon)) = frame(world)
+        let Some((origin, view, height, ladder, mantling, sprinting, ads_frac, wstate, standing, weapon, on_ground)) = frame(world)
             .player(ClientId(n))
             .map(|ps| {
                 use playerstate_iw4::pm_flags;
@@ -1157,6 +1283,7 @@ pub(super) fn drive(world: &mut World, now: i64) {
                     ps.weaponstate_primary,
                     ps.pm_flags & (pm_flags::CROUCH | pm_flags::PRONE) == 0,
                     ps.weapon,
+                    ps.ground_entity_num != playerstate_iw4::ENTITYNUM_NONE,
                 )
             })
         else {
@@ -1166,26 +1293,72 @@ pub(super) fn drive(world: &mut World, now: i64) {
         let full_auto = frame(world)
             .combat_facts_for(weapon)
             .is_none_or(|f| f.fire_type == 0);
+        // Taking a negotiation link (BO2's Bot_AtNegotiationEnd): done once
+        // its mantle finishes, once it stands within 15 units of the link's
+        // end, or (a drop) once it leaves the ground; then it plans on at
+        // once. Ours also gives up after 4 s or when the route is gone.
+        {
+            let mut zm = world.resource_mut::<Zm>();
+            let b = zm.bots.get_mut(&n).unwrap();
+            let was_mantling = std::mem::replace(&mut b.was_mantling, mantling);
+            if let Some((l, since)) = b.neg {
+                let near_end = on_ground && !mantling && dist3(origin, l.end) < 15.0;
+                let landed = (was_mantling && !mantling) || near_end || (l.flags & NEG_DROP != 0 && !on_ground);
+                let gave_up = now - since > 4000 || b.path.is_empty();
+                if landed || gave_up {
+                    b.neg = None;
+                    b.path.clear();
+                    b.path_to = None;
+                    b.replan_at = now;
+                    if botlog() {
+                        diag::info!(
+                            Sim,
+                            "bo2mp bot {n} negotiation {} flags {:#x} at {:.0} {:.0} {:.0} end {:.0} {:.0} {:.0} after {} ms",
+                            if landed { "done" } else { "gave up" },
+                            l.flags,
+                            origin[0],
+                            origin[1],
+                            origin[2],
+                            l.end[0],
+                            l.end[1],
+                            l.end[2],
+                            now - since
+                        );
+                    }
+                }
+            }
+        }
         // The route: replan when the best goal moved or the route ran out.
+        // (BO2's Bot_Seek: moved = the goal is its radius or more from
+        // where the route ends, in 3D.)
         let (goal, path_to, replan_at) = {
             let zm = world.resource::<Zm>();
             let b = &zm.bots[&n];
             (b.best_goal().cloned(), b.path_to, b.replan_at)
         };
         if let Some(g) = &goal {
-            let moved = path_to.is_none_or(|p| dist2d(p, g.pos) > 16.0);
+            let moved = path_to.is_none_or(|p| {
+                let d = [p[0] - g.pos[0], p[1] - g.pos[1], p[2] - g.pos[2]];
+                g.radius * g.radius <= d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+            });
             let far = dist2d(origin, g.pos) > g.radius;
             let empty = world.resource::<Zm>().bots[&n].path.is_empty();
             if (moved || (empty && far)) && now >= replan_at {
-                let route = plan(world, origin, g.pos);
+                let (route, negs) = plan(world, origin, g.pos);
                 let mut zm = world.resource_mut::<Zm>();
                 let b = zm.bots.get_mut(&n).unwrap();
                 b.path = route;
+                b.negs = negs;
+                b.neg = None;
                 b.path_to = Some(g.pos);
                 b.replan_at = now + 500;
                 b.prev = Some(origin);
                 b.path_gen = b.path_gen.wrapping_add(1);
                 b.path_new = true;
+                b.la_amount = 0.0;
+                b.la_pos = None;
+                b.la_dir = None;
+                b.la_clear = false;
             }
         } else {
             let mut zm = world.resource_mut::<Zm>();
@@ -1216,30 +1389,76 @@ pub(super) fn drive(world: &mut World, now: i64) {
         let ahead_blocked = climb_blocked.is_some_and(|(_, b)| b);
         let climb_blocked = climb_blocked
             .is_some_and(|(p, b)| b && p[2] - origin[2] > 18.0 && dist2d(origin, p) < 96.0);
+        // BO2MP_BOTLOG (test aid): is it standing inside the map or a prop,
+        // or against another player?
+        let (in_solid, touching) = if botlog() {
+            use crate::bullet_collision::{MASK_PLAYER_SOLID, PLAYER_MAXS, PLAYER_MINS};
+            let t = frame(world).trace_clip(origin, origin, PLAYER_MINS, PLAYER_MAXS, MASK_PLAYER_SOLID);
+            let ids: Vec<u32> = world.resource::<Zm>().players.keys().copied().filter(|&id| id != n).collect();
+            let touching = ids.into_iter().find(|&id| {
+                frame(world).player(ClientId(id)).is_some_and(|ps| {
+                    dist2d(ps.origin, origin) < 32.0 && (ps.origin[2] - origin[2]).abs() < 72.0
+                })
+            });
+            (t.startsolid != 0, touching)
+        } else {
+            (false, None)
+        };
         let at_goal = goal
             .as_ref()
             .is_none_or(|g| dist2d(origin, g.pos) <= g.radius.max(16.0));
         // Past a route point once beyond the line across it (the walk cuts
-        // corners toward its lookahead, so it seldom touches one).
+        // corners toward its lookahead, so it seldom touches one), or (BO2's
+        // Path_TrimCompletedPath) once it lies behind the bot along its last
+        // lookahead, when that walk was clear or the amount has shrunk to
+        // half: a nearest node behind it is no walk back.
         let (route, seen_key, seen) = {
             let mut zm = world.resource_mut::<Zm>();
             let b = zm.bots.get_mut(&n).unwrap();
+            let trim = b
+                .la_dir
+                .filter(|_| b.la_clear || (b.la_amount > 0.0 && b.la_amount <= 16384.0))
+                .map(|(d, _)| d);
             while b.path.len() > 1 {
                 let p = b.path[0];
+                if b.neg.is_none() && b.negs.iter().any(|l| l.begin == p) {
+                    break;
+                }
                 let from = b.prev.unwrap_or(origin);
                 let d = [p[0] - from[0], p[1] - from[1]];
                 let beyond = d[0] * d[0] + d[1] * d[1] > 1.0
                     && (origin[0] - p[0]) * d[0] + (origin[1] - p[1]) * d[1] >= 0.0;
-                if !(beyond || dist2d(origin, p) < 24.0) {
+                let behind = trim.is_some_and(|t| t[0] * (p[0] - origin[0]) + t[1] * (p[1] - origin[1]) <= 0.0);
+                if !(beyond || behind || dist2d(origin, p) < 24.0) {
                     break;
                 }
                 b.prev = Some(p);
                 b.path.remove(0);
             }
-            let near = b.path.first().is_some_and(|p| dist2d(origin, *p) < 192.0);
+            let near = b.path.get(1).is_some_and(|p| dist2d(origin, *p) < 192.0);
             let key = (b.path_gen, b.path.len(), near);
             let seen = b.seen.filter(|s| (s.0, s.1, s.2) == key).map(|s| s.3);
             ((!at_goal && !b.path.is_empty()).then(|| b.path.clone()), key, seen)
+        };
+        // The link its route crosses next, when it heads for the link's
+        // begin now (BO2: the lookahead's next node is the begin): the walk
+        // goes no farther than the begin, and it is at the begin (BO2's
+        // Bot_AtNegotiationBegin) once no farther from the end than the begin
+        // is (ours: or within 20 units of the begin).
+        let neg_ahead = {
+            let zm = world.resource::<Zm>();
+            let b = &zm.bots[&n];
+            match (&route, b.neg) {
+                (Some(r), None) => b.negs.iter().find(|l| l.begin == r[0]).copied(),
+                _ => None,
+            }
+        };
+        let at_begin = neg_ahead.is_some_and(|l| {
+            dist3(origin, l.end) < dist3(l.begin, l.end) + 0.5 || dist3(origin, l.begin) < 20.0
+        });
+        let route = match (route, neg_ahead) {
+            (Some(r), Some(_)) => Some(r[..2.min(r.len())].to_vec()),
+            (r, _) => r,
         };
         let far_seen = match (&route, seen) {
             (Some(_), Some(p)) => Some(p),
@@ -1253,8 +1472,45 @@ pub(super) fn drive(world: &mut World, now: i64) {
             }
             _ => None,
         };
-        let la = route.as_deref().and_then(|r| lookahead(origin, r));
+        // BO2's Path_UpdateLookaheadAmount: the walk to the lookahead is
+        // traced each think; clear, it heads there and the amount grows
+        // (x1.18 + 6.4, up to 65536); blocked, the amount shrinks (x0.8),
+        // which pulls the point in toward the route's next bend. Its bots
+        // drop the kept point every think (Bot_UpdateLookahead), so blocked
+        // it heads for the new point, but for the one think right after a
+        // clear walk (that walk's heading holds).
+        let amount = world.resource::<Zm>().bots[&n].la_amount;
+        let la_route = route.as_deref().map(|r| if neg_ahead.is_some() { &r[..1] } else { r });
+        let la = match la_route.and_then(|r| lookahead(origin, r, amount)) {
+            Some((p, reach)) => {
+                let clear = walk_clear(world, origin, p);
+                let mut zm = world.resource_mut::<Zm>();
+                let b = zm.bots.get_mut(&n).unwrap();
+                let amount = if b.la_amount > 0.0 { b.la_amount } else { 32768.0 };
+                let was_clear = std::mem::replace(&mut b.la_clear, clear);
+                if clear {
+                    b.la_amount = (amount * 1.176_470_5 + 6.4).min(65536.0);
+                    b.la_pos = Some(p);
+                    Some((p, reach))
+                } else {
+                    b.la_amount = (amount * 0.8).max(0.001);
+                    match b.la_pos.filter(|q| was_clear && dist2d(*q, origin) > 1.0) {
+                        Some(q) => Some((q, dist2d(origin, q))),
+                        None => Some((p, reach)),
+                    }
+                }
+            }
+            None => None,
+        };
         let next = la.map(|(p, _)| p);
+        {
+            let mut zm = world.resource_mut::<Zm>();
+            zm.bots.get_mut(&n).unwrap().la_dir = la.and_then(|(p, _)| {
+                let d = [p[0] - origin[0], p[1] - origin[1]];
+                let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+                (len > 1e-3).then(|| ([d[0] / len, d[1] / len, (p[2] - origin[2]) / len], len))
+            });
+        }
         // Avoidance (Bot_UpdateAvoidance): off ladders and ledges, a bot on
         // a team bends its walk around teammates close by, keeping the
         // lookahead's distance; a bend into a clip brush right in front of
@@ -1350,8 +1606,36 @@ pub(super) fn drive(world: &mut World, now: i64) {
         // Moving toward the lookahead, relative to where it faces; on a
         // ladder straight on (up it), while mantling not at all.
         let (mut forward, mut right) = (0i8, 0i8);
+        let taking = b.neg.map(|(l, _)| l).or(neg_ahead.filter(|_| at_begin));
         if ladder {
             forward = 127;
+        } else if let Some(l) = taking {
+            // At the begin or on the link: toward its end, half speed (from
+            // the eye, in the view's own axes), or full speed and flat for a
+            // link run straight across.
+            if !mantling {
+                if l.flags & NEG_RUN != 0 {
+                    let wish = [l.end[0] - origin[0], l.end[1] - origin[1]];
+                    let len = (wish[0] * wish[0] + wish[1] * wish[1]).sqrt();
+                    if len > 1e-3 {
+                        let (s, c) = want[1].to_radians().sin_cos();
+                        forward = (((wish[0] * c + wish[1] * s) / len).clamp(-1.0, 1.0) * 127.0) as i8;
+                        right = (((wish[0] * s - wish[1] * c) / len).clamp(-1.0, 1.0) * 127.0) as i8;
+                    }
+                } else {
+                    let e = [l.end[0] - eye[0], l.end[1] - eye[1], l.end[2] - eye[2]];
+                    let len = (e[0] * e[0] + e[1] * e[1] + e[2] * e[2]).sqrt();
+                    if len > 1e-3 {
+                        let e = [e[0] / len, e[1] / len, e[2] / len];
+                        let (sp, cp) = want[0].to_radians().sin_cos();
+                        let (sy, cy) = want[1].to_radians().sin_cos();
+                        let ahead = (e[0] * cp * cy + e[1] * cp * sy - e[2] * sp).clamp(-1.0, 1.0);
+                        let left = (e[1] * cy - e[0] * sy).clamp(-1.0, 1.0);
+                        forward = (ahead * 64.0) as i8;
+                        right = (left * -64.0) as i8;
+                    }
+                }
+            }
         } else if !mantling && !hold && let Some(p) = walk_to {
             let wish = [p[0] - origin[0], p[1] - origin[1]];
             let len = (wish[0] * wish[0] + wish[1] * wish[1]).sqrt();
@@ -1417,14 +1701,45 @@ pub(super) fn drive(world: &mut World, now: i64) {
         // mantles from a jump), and when walking makes no headway.
         // On a ladder it climbs (looking up its route, walking forward):
         // a jump would let go of it.
-        if next.is_some() && !ladder && climb_blocked {
+        // At a jump link's begin it jumps (BO2's Bot_Seek), once; still
+        // there and not mantling, again on the whole second if it let go of
+        // jump the tick before. Then it is taking the link.
+        if let Some(l) = neg_ahead.filter(|_| at_begin) {
+            if l.flags & NEG_JUMP != 0 && !mantling {
+                press |= buttons::JUMP;
+            }
+            b.neg = Some((l, now));
+            if botlog() {
+                diag::info!(
+                    Sim,
+                    "bo2mp bot {n} negotiation begin flags {:#x} at {:.0} {:.0} {:.0} end {:.0} {:.0} {:.0}",
+                    l.flags,
+                    origin[0],
+                    origin[1],
+                    origin[2],
+                    l.end[0],
+                    l.end[1],
+                    l.end[2]
+                );
+            }
+        } else if let Some((l, _)) = b.neg
+            && l.flags & NEG_JUMP != 0
+            && !mantling
+            && on_ground
+            && dist3(origin, l.end) < dist3(l.begin, l.end) + 0.5
+            && b.last_press & buttons::JUMP == 0
+            && now % 1000 == 0
+        {
             press |= buttons::JUMP;
         }
-        if next.is_some() {
+        if next.is_some() && !ladder && climb_blocked && taking.is_none() {
+            press |= buttons::JUMP;
+        }
+        if next.is_some() && b.failsafe.is_none() {
             match b.progress {
                 Some((at, since)) if dist2d(at, origin) < 12.0 => {
                     let stuck = now - since;
-                    if stuck > 600 && (stuck / 300) % 2 == 0 && !ladder && ahead_blocked {
+                    if stuck > 600 && (stuck / 300) % 2 == 0 && !ladder && ahead_blocked && taking.is_none() {
                         press |= buttons::JUMP;
                     }
                     // No headway: back off and step aside for a moment
@@ -1433,14 +1748,18 @@ pub(super) fn drive(world: &mut World, now: i64) {
                         forward = -127;
                         right = if (n + (since / 3000) as u32) % 2 == 0 { 127 } else { -127 };
                     }
-                    if std::env::var_os("BO2MP_BOTLOG").is_some() && stuck % 1000 == 0 && stuck > 0 {
+                    if stuck % 1000 == 0 && stuck > 0 && botlog() {
                         diag::info!(
                             Sim,
-                            "bo2mp bot {n} stuck {stuck} ms at {:.0} {:.0} {:.0} next {:?} ahead_blocked {ahead_blocked}",
+                            "bo2mp bot {n} stuck {stuck} ms at {:.0} {:.0} {:.0} next {:?} ahead_blocked {ahead_blocked} in_solid {in_solid} touching {touching:?} goal {:?} routes {} left {} hold {hold} look {} stick {forward} {right}",
                             origin[0],
                             origin[1],
                             origin[2],
-                            next.map(|p| [p[0] as i32, p[1] as i32, p[2] as i32])
+                            next.map(|p| [p[0] as i32, p[1] as i32, p[2] as i32]),
+                            goal.as_ref().map(|g| (g.name.as_str(), [g.pos[0] as i32, g.pos[1] as i32, g.pos[2] as i32], g.radius as i32)),
+                            b.path_gen,
+                            b.path.len(),
+                            b.look.is_some()
                         );
                     }
                     // Still stuck: drop the route; the next tick plans again.
@@ -1456,11 +1775,38 @@ pub(super) fn drive(world: &mut World, now: i64) {
         } else {
             b.progress = None;
         }
+        // The failsafe (BO2's Bot_UpdateFailsafe), set by the stuck script:
+        // it overrides the rest of the think. No buttons, the view left
+        // alone; on a ladder straight on, else straight at the node from
+        // the eye in its own axes; within 15 units it stands and notifies
+        // "goal" with the node each think until the script clears it.
+        let mut failsafe_goal = None;
+        if let Some((p, node)) = b.failsafe {
+            (press, want) = (0, view);
+            (forward, right) = (0, 0);
+            if ladder {
+                forward = 127;
+            } else if (0..3).map(|i| (p[i] - origin[i]).powi(2)).sum::<f32>() >= 225.0 {
+                let e = [p[0] - eye[0], p[1] - eye[1], p[2] - eye[2]];
+                let len = (e[0] * e[0] + e[1] * e[1] + e[2] * e[2]).sqrt();
+                let e = if len > 0.0 { [e[0] / len, e[1] / len, e[2] / len] } else { e };
+                let (sp, cp) = view[0].to_radians().sin_cos();
+                let (sy, cy) = view[1].to_radians().sin_cos();
+                let ahead = (e[0] * cp * cy + e[1] * cp * sy - e[2] * sp).clamp(-1.0, 1.0);
+                let left = (e[1] * cy - e[0] * sy).clamp(-1.0, 1.0);
+                forward = (ahead * 127.0) as i8;
+                right = (left * -127.0) as i8;
+            } else {
+                failsafe_goal = Some(node);
+            }
+            b.progress = None;
+        }
+        b.last_press = press;
         // BO2MP_BOTLOG=1: each bot every 2 s (test aid).
-        if std::env::var_os("BO2MP_BOTLOG").is_some() && now % 2000 == 0 {
+        if now % 2000 == 0 && botlog() {
             diag::info!(
                 Sim,
-                "bo2mp botlog {n}: at {:.0} {:.0} {:.0} view {:.0} {:.0} goal {:?} path {} look {:?} attack {} ads {} press {press:#x} move {forward} {right} sprint {sprint} dodge {} hold {hold}",
+                "bo2mp botlog {n}: at {:.0} {:.0} {:.0} view {:.0} {:.0} goal {:?} path {} walk {:?} face {:?} look {:?} attack {} ads {} press {press:#x} move {forward} {right} sprint {sprint} dodge {} hold {hold}",
                 origin[0],
                 origin[1],
                 origin[2],
@@ -1468,6 +1814,8 @@ pub(super) fn drive(world: &mut World, now: i64) {
                 view[1],
                 goal.as_ref().map(|g| g.name.as_str()),
                 b.path.len(),
+                walk_to.map(|p| [p[0] as i32, p[1] as i32]),
+                far_seen.map(|p| [p[0] as i32, p[1] as i32]),
                 b.look.map(|l| [l[0] as i32, l[1] as i32, l[2] as i32]),
                 b.allow_attack,
                 b.ads,
@@ -1475,6 +1823,13 @@ pub(super) fn drive(world: &mut World, now: i64) {
             );
         }
         drop(zm);
+        if let Some(node) = failsafe_goal {
+            let obj = world.resource::<Zm>().players.get(&n).map(|p| p.obj);
+            if let Some(obj) = obj {
+                let args: Vec<Value> = node.map(Value::Object).into_iter().collect();
+                super::with_vm(world, |vm, world| vm.notify_str(world, obj, "goal", &args));
+            }
+        }
         // BO2MP_BOTS_STILL=1: the bots stand where they are and do nothing;
         // =fire:N (or fire:N,M) and those bots fire where they face too
         // (test aids, for a target that stays put and a shooter that does).
@@ -1514,25 +1869,67 @@ pub(super) fn drive(world: &mut World, now: i64) {
     }
 }
 
-/// A route from a place to a goal over the path nodes (the goal last);
-/// straight there when the map has no route between them.
-fn plan(world: &mut World, from: [f32; 3], to: [f32; 3]) -> Vec<[f32; 3]> {
-    let zm = world.resource::<Zm>();
-    let nav = &zm.nav;
-    let (Some(a), Some(b)) = (nav.nearest(from), nav.nearest(to)) else {
-        return vec![to];
+/// A route from a place to a goal over the path nodes (the goal last),
+/// and the negotiation links it crosses; straight there when the map has no
+/// route between them.
+fn plan(world: &mut World, from: [f32; 3], to: [f32; 3]) -> (Vec<[f32; 3]>, Vec<NegLink>) {
+    let (Some(a), Some(b)) = (nearest_reachable(world, from), nearest_reachable(world, to)) else {
+        return (vec![to], Vec::new());
     };
+    let nav = &world.resource::<Zm>().nav;
     let Some(nodes) = nav.path(a, b) else {
-        return vec![to];
+        return (vec![to], Vec::new());
     };
     let mut out: Vec<[f32; 3]> = nodes
         .iter()
         .map(|&i| nav.nodes[i as usize].origin)
         .collect();
-    // Skip the first node when the second is nearer (already past it).
-    if out.len() > 1 && dist2d(from, out[1]) < dist2d(out[0], out[1]) {
-        out.remove(0);
-    }
+    let negs: Vec<NegLink> = nodes
+        .windows(2)
+        .filter(|w| nav.nodes[w[0] as usize].ty == super::nav::NODE_NEGOTIATION_BEGIN && nav.negotiation(w[0], w[1]))
+        .map(|w| NegLink {
+            begin: nav.nodes[w[0] as usize].origin,
+            end: nav.nodes[w[1] as usize].origin,
+            flags: nav.nodes[w[0] as usize].spawnflags,
+        })
+        .collect();
     out.push(to);
-    out
+    // BO2 smooths each path it plans (Path_SmoothPath: from a node straight
+    // on to the farthest later one it can walk to). Ours does it from where
+    // the bot stands, up to three nodes on (a trace each), so a nearest
+    // node behind it is no U-turn it then rocks on.
+    let mut skipped = 0;
+    while out.len() > 1 && skipped < 3 && walk_clear(world, from, out[1]) {
+        out.remove(0);
+        skipped += 1;
+    }
+    (out, negs)
+}
+
+/// The map's negotiation links by kind, once a run (test aid).
+fn log_negotiations(world: &World) {
+    static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if DONE.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let nav = &world.resource::<Zm>().nav;
+    if nav.nodes.is_empty() {
+        return;
+    }
+    DONE.store(true, std::sync::atomic::Ordering::Relaxed);
+    let mut kinds: BTreeMap<String, u32> = BTreeMap::new();
+    for node in nav.nodes.iter().filter(|n| n.ty == super::nav::NODE_NEGOTIATION_BEGIN) {
+        let f = node.spawnflags;
+        let kind = if f & NEG_DROP != 0 {
+            "drop"
+        } else if f & NEG_JUMP != 0 {
+            "jump"
+        } else if f & NEG_RUN != 0 {
+            "run"
+        } else {
+            "other"
+        };
+        *kinds.entry(format!("{kind} {:#x}", f & (NEG_JUMP | NEG_DROP | NEG_RUN))).or_default() += 1;
+    }
+    diag::info!(Sim, "bo2mp negotiation links: {kinds:?}");
 }

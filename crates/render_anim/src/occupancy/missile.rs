@@ -93,6 +93,35 @@ impl T6MissileModel {
 pub struct PosedVerts {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
+    /// bo2mp: or skinned on the graphics card instead: the skin matrices
+    /// of the model's own bones (its bone 0 first), and no vertices here.
+    pub bones: Vec<Mat4>,
+}
+
+impl PosedVerts {
+    /// A pose the graphics card skins: the model's `count` bones, read
+    /// through `bone`.
+    pub fn from_bones(count: usize, bone: impl Fn(usize) -> Mat4) -> Self {
+        Self {
+            bones: (0..count.max(1)).map(bone).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// Only bones: the vertices are skinned on the graphics card.
+    pub fn on_gpu(&self) -> bool {
+        self.positions.is_empty() && !self.bones.is_empty()
+    }
+
+    /// This pose's vertices on the CPU (a bones-only pose skinned here
+    /// once, for a model held still).
+    pub fn on_cpu(&self, skel: &asset_model::ModelSkel) -> std::borrow::Cow<'_, PosedVerts> {
+        if self.on_gpu() {
+            std::borrow::Cow::Owned(skin_verts(skel, |b| self.bones.get(b).copied().unwrap_or(Mat4::IDENTITY)))
+        } else {
+            std::borrow::Cow::Borrowed(self)
+        }
+    }
 }
 
 #[derive(Resource, Default)]
@@ -261,7 +290,7 @@ fn collect_t6_script_models(
         // refreshed a frame after a new snapshot lands, so for that frame
         // the old times were carried on from the new snapshot's start and
         // the pose stepped back: every zombie's walk hitched 20 times a
-        // second, his "the way they walk is just super glitchy looking".
+        // second, and the walk looked glitchy.
         let state = owner
             .authority_owner
             .and_then(|o| presented_states.get(&o).copied())
@@ -523,7 +552,7 @@ fn pose_t6_composition(
 
 /// CPU skinning: each vertex by its bones and weights (rigid models by
 /// their first bone).
-pub(crate) fn skin_verts(skel: &asset_model::ModelSkel, bone: impl Fn(usize) -> Mat4) -> PosedVerts {
+pub fn skin_verts(skel: &asset_model::ModelSkel, bone: impl Fn(usize) -> Mat4) -> PosedVerts {
     let n = skel.positions.len();
     let mut positions = Vec::with_capacity(n);
     let mut normals = Vec::with_capacity(n);
@@ -557,7 +586,11 @@ pub(crate) fn skin_verts(skel: &asset_model::ModelSkel, bone: impl Fn(usize) -> 
         positions.push(op.to_array());
         normals.push(on.normalize_or_zero().to_array());
     }
-    PosedVerts { positions, normals }
+    PosedVerts {
+        positions,
+        normals,
+        bones: Vec::new(),
+    }
 }
 
 pub fn register_missile_systems(app: &mut App) {

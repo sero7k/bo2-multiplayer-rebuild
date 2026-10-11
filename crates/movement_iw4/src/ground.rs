@@ -4,6 +4,11 @@ use trace_iw4::Trace;
 use crate::{CollisionBackend, GroundTraceInput, MoveBounds, Pml, jump};
 
 const STARTSOLID_RETRY_EPSILON: f32 = 0.001;
+/// bo2zm: PM_GroundTraceMissed's probe in the air (1) and on leaving the
+/// ground (64), and the gap that still counts as almost on the ground.
+const MISSED_AIR_PROBE: f32 = 1.0;
+const MISSED_LEFT_PROBE: f32 = 64.0;
+const MISSED_ALMOST_FRACTION: f32 = 1.0 / 64.0;
 
 pub fn complete_ground_trace<C: CollisionBackend>(
     ps: &mut PlayerState,
@@ -13,10 +18,16 @@ pub fn complete_ground_trace<C: CollisionBackend>(
     feel: crate::Bo2Feel, // bo2zm
 ) {
     let origin = ps.origin;
-    let probe_depth = if (ps.e_flags & 0xc00) == 0 { 0.25 } else { 0.0 };
+    let on_turret = (ps.e_flags & 0xc00) != 0;
+    let (above, below) = match (on_turret, feel.on) {
+        (false, _) => (0.25, 0.25),
+        // bo2zm: on a turret Black Ops II still probes 1 unit down.
+        (true, true) => (0.0, 1.0),
+        (true, false) => (0.0, 0.0),
+    };
     let input = GroundTraceInput {
-        start: [origin[0], origin[1], origin[2] + probe_depth],
-        end: [origin[0], origin[1], origin[2] - probe_depth],
+        start: [origin[0], origin[1], origin[2] + above],
+        end: [origin[0], origin[1], origin[2] - below],
         mins: bounds.mins,
         maxs: bounds.maxs,
         tracemask: bounds.tracemask,
@@ -45,6 +56,14 @@ pub fn complete_ground_trace<C: CollisionBackend>(
         };
         trace = collision.trace(retry);
         if trace.startsolid != 0 {
+            if feel.on {
+                // bo2zm: BO2 keeps a player stuck in the floor on it.
+                ps.ground_entity_num = trace_entity_id(&trace);
+                pml.ground_plane = 1;
+                pml.almost_ground_plane = 1;
+                pml.walking = u32::from(trace.walkable);
+                return;
+            }
             clear_ground_state(ps, pml);
             return;
         }
@@ -52,6 +71,10 @@ pub fn complete_ground_trace<C: CollisionBackend>(
     }
 
     if trace.fraction == 1.0 {
+        if feel.on {
+            ground_trace_missed(ps, pml, bounds, collision);
+            return;
+        }
         clear_ground_state(ps, pml);
         return;
     }
@@ -59,6 +82,8 @@ pub fn complete_ground_trace<C: CollisionBackend>(
     let velocity_dot_normal = ps.velocity[2] * trace.normal[2]
         + trace.normal[0] * ps.velocity[0]
         + ps.velocity[1] * trace.normal[1];
+    // bo2zm: BO2's kick-off here only runs in collision mode 0; its
+    // phys_player_collision_mode is 1, so no kick-off there either.
     if (ps.pm_flags & 8) == 0 && ps.velocity[2] > 0.0 && 10.0 < velocity_dot_normal {}
 
     if trace.walkable != 0 && trace.contents != 0x0200_0000 {
@@ -78,6 +103,40 @@ pub fn complete_ground_trace<C: CollisionBackend>(
         pml.walking = 0;
         jump::clear_state(ps);
     }
+}
+
+/// bo2zm: BO2's PM_GroundTraceMissed. In the air a 1-unit probe, on leaving
+/// the ground a 64-unit one, decides whether the player is still almost on
+/// the ground (footsteps and the bob keep going down stairs and off curbs).
+fn ground_trace_missed<C: CollisionBackend>(
+    ps: &mut PlayerState,
+    pml: &mut Pml,
+    bounds: MoveBounds,
+    collision: &C,
+) {
+    let origin = ps.origin;
+    let was_airborne = ps.ground_entity_num == ENTITYNUM_NONE;
+    let depth = if was_airborne {
+        MISSED_AIR_PROBE
+    } else {
+        MISSED_LEFT_PROBE
+    };
+    let trace = collision.trace(GroundTraceInput {
+        start: origin,
+        end: [origin[0], origin[1], origin[2] - depth],
+        mins: bounds.mins,
+        maxs: bounds.maxs,
+        tracemask: bounds.tracemask,
+    });
+    let almost = if was_airborne {
+        trace.fraction != 1.0
+    } else {
+        trace.fraction < MISSED_ALMOST_FRACTION
+    };
+    ps.ground_entity_num = ENTITYNUM_NONE;
+    pml.ground_plane = 0;
+    pml.almost_ground_plane = u32::from(almost);
+    pml.walking = 0;
 }
 
 fn clear_ground_state(ps: &mut PlayerState, pml: &mut Pml) {

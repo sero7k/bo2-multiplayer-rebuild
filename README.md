@@ -170,6 +170,20 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
 
 ## Recent changes
 
+- 2026-10-10: aiming down the sights no longer blurs the whole gun (every gun, with or without an optic): the blur
+  now works out each gun pixel's distance with the same near plane the gun is drawn with, so only the far end of the
+  gun softens, by each weapon's own values (checked side by side against the original with the M27 + reflex sight
+  and the MTAR's iron sights).
+- 2026-10-10: a game no longer quits with "lost the graphics card" when the PC is busy for over a second: the
+  graphics library counted a slow hand-over of a finished frame as a lost card, so it now waits again instead (a
+  fixed copy of the library is in `third_party/wgpu-hal`).
+- 2026-10-10: the render thread takes about 30% less time a frame (12.8 to 9.2 ms in a Nuketown match on the fast
+  setting): props that share a model are drawn together (about 1,500 props in about 540 draws), posed bodies' index
+  lists are sent again only when they change, bullet marks lit alike share one draw, and the body-posing pass goes
+  out with the rest of the frame.
+- 2026-10-10: bodies are posed on the graphics card instead of the processor, so each game window needs about half
+  the processor time. 8 game windows now run at once on one PC at 27 to 29 frames a second each
+  (`bo2_quality=fast`), each with about 2.1 GB of RAM and 0.9 GB of graphics memory.
 - 2026-10-10: bots move and aim by the original's own rules (how fast they turn and settle their aim, where they
   look while walking, when they sprint, how fast semi-automatic guns fire, when they knife) and step around
   teammates the way the original's bots do; they judge what they can see and reach from the map's own baked node
@@ -226,11 +240,28 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
 
 - Bots that stop getting stuck on corners and props: the original's own stuck rescue and its look-ahead check on
   the route.
-- Bodies posed on the graphics card instead of the processor, so 8 drawn game windows run smoothly on one PC.
+- Bots that never stand facing a wall, and always shoot at an enemy walking in front of them.
+- Bots on Nuketown's upper floor: its ledge links carry no jump or drop mark, so bots walk them; match how the
+  original moves its bots over them.
+- A hit marker and the original's hit sound every time you hit someone, its own headshot marker and sound, and no
+  marker when someone else hits you.
+- Enemy names in red.
+- Getting up from a dive at the original's speed, and diving over low objects the original way.
+- Bodies that fall cleanly when a player dies: no glitching, spinning or popping back up.
+- Riot-shield hit boxes exactly as in the original.
+- Movement speed checked against the original.
+- Scorestreaks that work from their buttons.
+- A kill replay without players jumping around.
+- A death camera that stays on your body until you respawn or the kill replay starts.
+- The announcer, and its warning when the match is close to ending.
+- No slowdown late in a match (drawing time grows over a match; the cause is not found yet).
+- The reflex sight's red dot as bright as the original's.
+- Demolition without script errors at a kill.
+- Players never start a match inside a wall.
+- The next map after Nuketown.
 - The Hellstorm's steer prompt key.
-- Movement and gun-feel numbers checked side by side against the original game.
 - The care package's drop and pick-up checked side by side against the original game.
-- More per-map test runs to fill in the mechanics bars; visual comparison shots for each map.
+- No-graphics test matches skip more drawing-only work, so even more fit at once.
 - Playing together over LAN, and one build with Black Ops II's main menu for both Multiplayer and Zombies.
 
 ## Credits and license
@@ -240,6 +271,8 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
 - For Black Ops II, [OpenAssetTools](https://github.com/Laupetin/OpenAssetTools) and
   [gsc-tool](https://github.com/xensik/gsc-tool) (both GPL-3.0) were read for format facts only; none of their code
   is copied. Other projects read during development are listed in [`NOTICE`](NOTICE).
+- [wgpu](https://github.com/gfx-rs/wgpu): a copy of its `wgpu-hal` 29.0.4 with one fix is in
+  `third_party/wgpu-hal` (MIT or Apache-2.0, its license files are kept there).
 - Black Ops II multiplayer rebuild and the Black Ops II zone, script and menu work by DaffyDabz.
 - Call of Duty, Black Ops and their assets, trademarks and intellectual property belong to their owners
   (Activision). No game files are included.
