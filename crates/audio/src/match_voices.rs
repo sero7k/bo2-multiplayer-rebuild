@@ -118,54 +118,81 @@ impl T6Announcer {
     }
 }
 
-/// BO2 faction voice → the BO1 voice that replaces it. The side BO2 puts a
-/// faction on picks the voice: the American and allied factions speak as
-/// Black Ops, their opponents as Spetsnaz.
-const T6_TO_T5_VOICE: [(&str, &str); 6] = [
-    ("vox_st6_", "vox_ops_"),
-    ("vox_fbi_", "vox_ops_"),
-    ("vox_isa_", "vox_ops_"),
-    ("vox_pmc_", "vox_rus_"),
-    ("vox_cda_", "vox_rus_"),
-    ("vox_pla_", "vox_rus_"),
+/// BO2 faction voice → the BO1 voice and MW3 voice that replace it. The
+/// side BO2 puts a faction on picks the voice: the American and allied
+/// factions speak as Black Ops (MW3: US), their opponents as Spetsnaz
+/// (MW3: Russian).
+const T6_VOICES: [(&str, &str, &str); 6] = [
+    ("vox_st6_", "vox_ops_", "US_1mc_"),
+    ("vox_fbi_", "vox_ops_", "US_1mc_"),
+    ("vox_isa_", "vox_ops_", "US_1mc_"),
+    ("vox_pmc_", "vox_rus_", "RU_1mc_"),
+    ("vox_cda_", "vox_rus_", "RU_1mc_"),
+    ("vox_pla_", "vox_rus_", "RU_1mc_"),
 ];
 
-/// BO2 lines with no line of the same name in BO1, and the BO1 line said in
-/// their place. Lines whose names match play as themselves; a line in
-/// neither keeps BO2's voice.
-const T6_TO_T5_LINES: &[(&str, &str)] = &[
-    ("koth_start", "hq_start"),
-    ("koth_located", "hq_located"),
-    ("koth_online", "hq_online"),
-    ("koth_secured", "hq_secured"),
-    ("koth_captured", "hq_capture"),
-    ("koth_lost", "hq_capture"),
-    ("sd_bomb_taken", "sd_bomb_taken_taken"),
-    ("kls_planemortar_ready", "kls_airstrike_ready"),
-    ("kls_planemortar_used", "kls_airstrike_used"),
-    ("kls_planemortar_enemy", "kls_airstrike_enemy"),
-    ("kls_straferun_ready", "kls_napalm_ready"),
-    ("kls_straferun_used", "kls_napalm_used"),
-    ("kls_straferun_enemy", "kls_napalm_enemy"),
-    ("kls_mgl_ready", "kls_grim_ready"),
-    ("kls_mgl_used", "kls_grim_used"),
-    ("kls_mgl_enemy", "kls_grim_enemy"),
-    ("kls_predator_ready", "kls_tv_ready"),
-    ("kls_predator_used", "kls_tv_used"),
-    ("kls_predator_enemy", "kls_tv_enemy"),
-    ("kls_littlebird_ready", "kls_cobra_ready"),
-    ("kls_littlebird_used", "kls_cobra_used"),
-    ("kls_littlebird_enemy", "kls_cobra_enemy"),
-    ("kls_playerheli_ready", "kls_huey_ready"),
-    ("kls_playerheli_used", "kls_huey_used"),
-    ("kls_playerheli_enemy", "kls_huey_enemy"),
-    ("kls_microwave_ready", "kls_turret_ready"),
-    ("kls_microwave_used", "kls_turret_used"),
-    ("kls_microwave_enemy", "kls_turret_enemy"),
+/// What a BO2 line with no same-named BO1 line is said with instead.
+#[derive(Clone, Copy)]
+enum Stand {
+    /// A BO1 team line, spoken in the faction's BO1 voice.
+    Bo1(&'static str),
+    /// A BO1 wager-match line (one announcer for everyone).
+    Bo1Wager(&'static str),
+    /// An MW3 team line, for what BO1 never said.
+    Mw3(&'static str),
+}
+
+/// Lines whose names match BO1 play as themselves; a line in neither this
+/// table nor BO1 keeps BO2's voice.
+const T6_STAND_INS: &[(&str, Stand)] = &[
+    ("koth_start", Stand::Bo1("hq_start")),
+    ("koth_located", Stand::Bo1("hq_located")),
+    ("koth_online", Stand::Bo1("hq_online")),
+    ("koth_secured", Stand::Bo1("hq_secured")),
+    ("koth_captured", Stand::Bo1("hq_capture")),
+    ("koth_lost", Stand::Bo1("hq_capture")),
+    ("sd_bomb_taken", Stand::Bo1("sd_bomb_taken_taken")),
+    ("kls_planemortar_ready", Stand::Bo1("kls_airstrike_ready")),
+    ("kls_planemortar_used", Stand::Bo1("kls_airstrike_used")),
+    ("kls_planemortar_enemy", Stand::Bo1("kls_airstrike_enemy")),
+    ("kls_straferun_ready", Stand::Bo1("kls_napalm_ready")),
+    ("kls_straferun_used", Stand::Bo1("kls_napalm_used")),
+    ("kls_straferun_enemy", Stand::Bo1("kls_napalm_enemy")),
+    ("kls_mgl_ready", Stand::Bo1("kls_grim_ready")),
+    ("kls_mgl_used", Stand::Bo1("kls_grim_used")),
+    ("kls_mgl_enemy", Stand::Bo1("kls_grim_enemy")),
+    ("kls_predator_ready", Stand::Bo1("kls_tv_ready")),
+    ("kls_predator_used", Stand::Bo1("kls_tv_used")),
+    ("kls_predator_enemy", Stand::Bo1("kls_tv_enemy")),
+    ("kls_littlebird_ready", Stand::Bo1("kls_cobra_ready")),
+    ("kls_littlebird_used", Stand::Bo1("kls_cobra_used")),
+    ("kls_littlebird_enemy", Stand::Bo1("kls_cobra_enemy")),
+    ("kls_playerheli_ready", Stand::Bo1("kls_huey_ready")),
+    ("kls_playerheli_used", Stand::Bo1("kls_huey_used")),
+    ("kls_playerheli_enemy", Stand::Bo1("kls_huey_enemy")),
+    ("kls_microwave_ready", Stand::Bo1("kls_turret_ready")),
+    ("kls_microwave_used", Stand::Bo1("kls_turret_used")),
+    ("kls_microwave_enemy", Stand::Bo1("kls_turret_enemy")),
+    ("gg_start", Stand::Bo1Wager("gg_start_00")),
+    ("oic_start", Stand::Bo1Wager("start_gen")),
+    ("oic_last", Stand::Bo1Wager("oic_finallife")),
+    ("ss_start", Stand::Bo1Wager("ss_start")),
+    ("sns_start", Stand::Bo1Wager("sstones_start")),
+    ("sns_hum", Stand::Bo1Wager("sstones_bank_00")),
+    ("kc_start", Stand::Mw3("kill_confirmed")),
+    ("kls_emp_ready", Stand::Mw3("achieve_emp")),
+    ("kls_emp_used", Stand::Mw3("use_emp")),
+    ("kls_emp_enemy", Stand::Mw3("enemy_emp")),
+    ("kls_aitank_ready", Stand::Mw3("achieve_assault_drone")),
+    ("kls_aitank_used", Stand::Mw3("use_assault_drone")),
+    ("kls_aitank_enemy", Stand::Mw3("enemy_assault_drone")),
 ];
+
+const BO1_WAGER_VOICE: &str = "vox_wm_";
 
 /// Routes Black Ops II announcer aliases (`vox_<faction>_<line>`) to BO1's
-/// lines in the T5 namespace, where the bank carries them.
+/// lines (T5 namespace), or MW3's (IW5) where BO1 has none. Only a target the
+/// bank carries is routed.
 pub(crate) fn t6_bo1_routes(
     bank: &asset_audio::SoundCatalog,
     t6_aliases: &[String],
@@ -174,17 +201,23 @@ pub(crate) fn t6_bo1_routes(
         .iter()
         .filter_map(|alias| {
             let lower = alias.to_ascii_lowercase();
-            let (t6_prefix, t5_prefix) = T6_TO_T5_VOICE
-                .iter()
-                .find(|(t6, _)| lower.starts_with(t6))?;
-            let line = &lower[t6_prefix.len()..];
-            let line = T6_TO_T5_LINES
+            let &(t6_voice, bo1_voice, mw3_voice) =
+                T6_VOICES.iter().find(|(t6, _, _)| lower.starts_with(t6))?;
+            let line = &lower[t6_voice.len()..];
+            let stand = T6_STAND_INS
                 .iter()
                 .find(|(from, _)| *from == line)
-                .map_or(line, |(_, to)| to);
-            let routed = format!("{t5_prefix}{line}");
-            bank.index_in(AssetNamespace::T5, &routed)?;
-            Some((lower, (AssetNamespace::T5, routed)))
+                .map(|&(_, stand)| stand);
+            let (namespace, routed) = match stand {
+                None => (AssetNamespace::T5, format!("{bo1_voice}{line}")),
+                Some(Stand::Bo1(to)) => (AssetNamespace::T5, format!("{bo1_voice}{to}")),
+                Some(Stand::Bo1Wager(to)) => {
+                    (AssetNamespace::T5, format!("{BO1_WAGER_VOICE}{to}"))
+                }
+                Some(Stand::Mw3(to)) => (AssetNamespace::Iw5, format!("{mw3_voice}{to}")),
+            };
+            bank.index_in(namespace, &routed)?;
+            Some((lower, (namespace, routed)))
         })
         .collect()
 }
