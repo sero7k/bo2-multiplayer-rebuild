@@ -481,6 +481,9 @@ struct CorpseMeta {
     new_body_bit: u32,
     /// How long it has been out of the snapshot (ms of drawn frames).
     away: i32,
+    /// When this body first showed (client clock): the newest of a player's
+    /// corpses is his latest death.
+    since: i32,
 }
 
 /// What the live world keeps for its bodies, while a killcam's replay uses
@@ -1557,6 +1560,7 @@ fn collect_t6_bodies(
     };
     let mut seen: Vec<u16> = Vec::new();
     for (entity, identity, runtime) in &ents {
+        let mut corpse_since: Option<i32> = None;
         let kind = net::remote_body_submit_kind(identity.number(), runtime, gate);
         if !kind.submits() {
             continue;
@@ -1575,6 +1579,7 @@ fn collect_t6_bodies(
             // same one seen again after a gap carries on where it was.
             let at = identity.number();
             let bit = runtime.next_state.e_flags & eflags::TELEPORT;
+            let mut since = now;
             match locals.corpse_meta.get(&at).copied() {
                 Some(m) if m.client != client.0 || m.new_body_bit != bit => {
                     forget_corpse(&mut locals, at);
@@ -1588,15 +1593,18 @@ fn collect_t6_bodies(
                         );
                     }
                 }
-                Some(m) if m.away > 0 && body_log() => {
-                    diag::info!(
-                        World,
-                        "bo2mp corpse {at}: back after {} ms out of the snapshot, its death animation and {} carry on",
-                        m.away,
-                        if locals.limp.contains_key(&at) { "running ragdoll" } else { "ragdoll (not started)" }
-                    );
+                Some(m) => {
+                    since = m.since;
+                    if m.away > 0 && body_log() {
+                        diag::info!(
+                            World,
+                            "bo2mp corpse {at}: back after {} ms out of the snapshot, its death animation and {} carry on",
+                            m.away,
+                            if locals.limp.contains_key(&at) { "running ragdoll" } else { "ragdoll (not started)" }
+                        );
+                    }
                 }
-                _ => {}
+                None => {}
             }
             locals.corpse_meta.insert(
                 at,
@@ -1604,8 +1612,10 @@ fn collect_t6_bodies(
                     client: client.0,
                     new_body_bit: bit,
                     away: 0,
+                    since,
                 },
             );
+            corpse_since = Some(since);
         }
         let current = snapshot
             .meta
@@ -1919,13 +1929,16 @@ fn collect_t6_bodies(
             locals.spent.still += 1;
         }
         // The local player's own corpse: where its j_mainroot is, for the
-        // death-watch camera (the newest one if he has several).
+        // death-watch camera. With several, the body that showed last: his
+        // latest death (a corpse's trajectory time is no age: it goes to 0
+        // once it lands, so every settled body of his ties).
         if corpse
             && local_id == Some(client)
-            && corpse_root_time.is_none_or(|t| runtime.next_state.tr_time >= t)
+            && let Some(since) = corpse_since
+            && corpse_root_time.is_none_or(|t| since >= t)
             && let Some(root) = built.mainroot.and_then(|i| world.get(i))
         {
-            corpse_root_time = Some(runtime.next_state.tr_time);
+            corpse_root_time = Some(since);
             poses.local_corpse_root = Some(world_from_local.transform_point3(root.w_axis.truncate()).to_array());
             if std::env::var_os("BO2MP_BODYDRAWLOG").is_some() {
                 diag::info!(World, "bo2mp corpse root: {:?} entity origin {:?}", poses.local_corpse_root, origin);

@@ -49,6 +49,9 @@ pub(crate) struct Craft {
     /// over the map's path nodes (`route`), on the ground.
     pub ground: bool,
     pub route: Vec<[f32; 3]>,
+    /// Gunners whose weapon may not fire (`disablegunnerfiring`: the AGR's
+    /// rockets while it reloads).
+    pub gunner_off: [bool; 4],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -79,6 +82,7 @@ impl Default for Craft {
             aim: None,
             ground: false,
             route: Vec::new(),
+            gunner_off: [false; 4],
         }
     }
 }
@@ -429,10 +433,44 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         "makevehicleunusable",
         "makevehicleusable",
         "setangularvelocity",
-        "disablegunnerfiring",
     ] {
         vm.bind(name, true, |_, _, _, _| Ok(Value::Undefined));
     }
+    // A chopper's turret sees its target (`heliturretsighttrace(start,
+    // target, last)`, `heliturretdogtrace`: the Stealth Chopper's missile
+    // and dog checks): 0 when the line from its turret point to the
+    // target's middle is clear, else 1.
+    fn turret_sight(vm: &mut Vm<World>, world: &mut World, a: &[Value]) -> Result<Value, String> {
+        let from = super::super::vec3(a, 0)?;
+        let target = arg(a, 1).clone();
+        let Some(to) = super::super::origin_of(vm, world, &target) else {
+            return Ok(Value::Int(1));
+        };
+        let mid = if super::super::is_player(vm, world, &target) { 40.0 } else { 16.0 };
+        let t = super::super::frame(world).trace_static_world(
+            from,
+            [to[0], to[1], to[2] + mid],
+            [0.0; 3],
+            [0.0; 3],
+            crate::bullet_collision::MASK_SHOT,
+        );
+        Ok(Value::Int(i32::from(t.fraction < 1.0)))
+    }
+    m!("heliturretsighttrace", |vm, world, _, a| turret_sight(vm, world, a));
+    m!("heliturretdogtrace", |vm, world, _, a| turret_sight(vm, world, a));
+    // `disablegunnerfiring(gunner, off)`: that gunner's weapon holds fire.
+    m!("disablegunnerfiring", |vm, world, s, a| {
+        let n = entnum(vm, s).unwrap_or(u32::MAX);
+        let gunner = arg(a, 0).as_int().unwrap_or(0);
+        let off = arg(a, 1).as_float().unwrap_or(1.0) != 0.0;
+        if let Ok(g) = usize::try_from(gunner)
+            && let Some(c) = streaks(world).craft.get_mut(&n)
+            && let Some(slot) = c.gunner_off.get_mut(g)
+        {
+            *slot = off;
+        }
+        Ok(Value::Undefined)
+    });
     m!("getangularvelocity", |_, _, _, _| Ok(Value::Vec3([0.0; 3])));
     // Inside the playable area's height lock (`isinsideheightlock`,
     // `ismissileinsideheightlock`: a Dragonfire or a missile out of it
@@ -451,6 +489,33 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             (0.0..=map.world_size[0]).contains(&x) && (0.0..=map.world_size[1]).contains(&y),
         )
     }
+    // The height lock's ceiling over a point (`getheliheightlockheight`:
+    // the Escort Drone flies at this or its owner's height, whichever is
+    // higher). PLACEHOLDER: the map's height-lock mesh is not loaded; the
+    // map's lowest air support height stands for it (BO2's own
+    // `air_support_height` struct, else 850, as getminimumflyheight).
+    m!("getheliheightlockheight", |vm, _, _, _| {
+        let path = ["struct_class_names", "targetname", "air_support_height"];
+        let names = vm.intern(path[0]);
+        let mut at = vm.raw_field(vm.level, names);
+        for key in &path[1..] {
+            let k = gsc_t6::Key::Str(vm.intern(key));
+            at = match at {
+                Value::Array(a) => a.read().get(&k).cloned().unwrap_or_default(),
+                _ => Value::Undefined,
+            };
+        }
+        let first = match at {
+            Value::Array(a) => a.read().values_in_order().next().cloned(),
+            _ => None,
+        };
+        let origin = vm.intern("origin");
+        let height = match first {
+            Some(Value::Object(o)) => vm.raw_field(o, origin).as_vec3().map(|v| v[2]),
+            _ => None,
+        };
+        Ok(Value::Float(height.unwrap_or(850.0)))
+    });
     m!("isinsideheightlock", |vm, world, s, _| Ok(inside_lock(
         vm, world, s
     )));

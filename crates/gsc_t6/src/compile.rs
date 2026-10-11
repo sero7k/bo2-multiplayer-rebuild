@@ -1554,4 +1554,50 @@ mod tests {
         let ticks = level_int(&mut vm, "ticks").unwrap_or(0);
         assert!((5..=7).contains(&ticks), "ticks {ticks}");
     }
+
+    /// bo2mp: a deleted object is no longer defined at once, but its fields
+    /// read until the frame's scripts are done (BO2's `destroyhelicopter`
+    /// deletes the chopper, then reads its `killstreak_id`); its waiters end.
+    #[test]
+    fn deleted_object_fields_last_the_frame() {
+        let obj = compile(
+            "test/t",
+            "waits(e) { e waittill(\"never\"); level.woke = 1; }
+             main() {
+                 e = spawnstruct();
+                 e.id = 7;
+                 level thread waits(e);
+                 gone(e);
+                 level.defined = isdefined(e);
+                 level.id = e.id;
+                 wait 0.05;
+                 level.later = e.id;
+                 level.done = 1;
+             }",
+        )
+        .expect("compiles");
+        let mut strings = Strings::default();
+        let program = Program::link(vec![obj], &mut strings).expect("links");
+        let mut vm: Vm<()> = Vm::new(program, strings);
+        crate::natives::bind_core(&mut vm);
+        vm.bind("gone", false, |vm, host, _, a| {
+            if let Some(Value::Object(o)) = a.first() {
+                vm.free_object(host, *o);
+            }
+            Ok(Value::Undefined)
+        });
+        let level = Value::Object(vm.level);
+        vm.spawn_named(&mut (), "test/t", "main", level, vec![])
+            .expect("main exists");
+        // The rest of that frame's scripts.
+        vm.run_due(&mut ());
+        for _ in 0..3 {
+            vm.run_frame(&mut ());
+        }
+        assert_eq!(level_int(&mut vm, "defined"), Some(0));
+        assert_eq!(level_int(&mut vm, "id"), Some(7));
+        assert_eq!(level_int(&mut vm, "later"), None);
+        assert_eq!(level_int(&mut vm, "woke"), None);
+        assert_eq!(level_int(&mut vm, "done"), Some(1));
+    }
 }

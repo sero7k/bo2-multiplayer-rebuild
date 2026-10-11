@@ -27,8 +27,9 @@ pub(crate) struct Turret {
     pub team: String,
     /// The player carrying it (`carryturret`).
     pub carrier: Option<u32>,
-    /// `setmode`: "auto_ai" / "auto_nonai" turrets pick their own targets;
-    /// "manual" ones are driven by a player.
+    /// `setmode`: an "auto_nonai" turret picks its own (player) targets;
+    /// "auto_ai" ones (carried, stunned) none here; "manual" ones are driven
+    /// by a player.
     pub mode: String,
     pub target: Option<u32>,
 }
@@ -324,7 +325,16 @@ pub(super) fn advance(world: &mut World) {
             }
             continue;
         }
-        if !t.mode.starts_with("auto") {
+        // Only a placed gun turret hunts players: "auto_nonai" (BO2 puts a
+        // carried or stunned one in "auto_ai", which no player draws). The
+        // Guardian's microwave never turns: its cone is where it was set
+        // down facing.
+        if t.mode != "auto_nonai" || t.weapon.starts_with("microwave_turret") {
+            if t.target.take().is_some() {
+                events.push((n, "turretstatechange", Vec::new()));
+                events.push((n, "turret_target_lost", Vec::new()));
+                streaks(world).turrets.insert(n, t);
+            }
             continue;
         }
         let eye = [origin[0], origin[1], origin[2] + EYE];

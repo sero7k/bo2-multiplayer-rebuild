@@ -90,6 +90,13 @@ pub(super) fn get(
             "velocity" => Some(Value::Vec3(
                 frame(world).player(id).map_or([0.0; 3], |ps| ps.velocity),
             )),
+            // bo2mp: the scorestreak vehicle his view is locked to (the
+            // VTOL's and the Dragonfire's ends unlink him only while set).
+            "viewlockedentity" => Some(
+                super::killstreaks::view_locked(world, n)
+                    .and_then(|v| world.resource::<Zm>().ents.get(&v).and_then(|e| e.obj))
+                    .map_or(Value::Undefined, Value::Object),
+            ),
             // 1 from a dive's take-off until its slide ends.
             "divetoprone" => Some(Value::Int(
                 frame(world)
@@ -104,6 +111,13 @@ pub(super) fn get(
                     .and_then(|p| p.stats.get(s).copied())
                     .unwrap_or(0),
             )),
+            // bo2mp: engine fields, 0 until a script sets them (a
+            // free-for-all's spy plane does); the Lightning Strike's pick
+            // shows his enemies only while `hasspyplane` is 0.
+            "hasspyplane" | "hassatellite" => match vm.raw_field(obj, field) {
+                Value::Undefined => Some(Value::Int(0)),
+                v => Some(v),
+            },
             _ => None,
         };
     }

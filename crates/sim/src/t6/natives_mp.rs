@@ -509,11 +509,12 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     }
     f!("registerxp", |_, _, _, _| Ok(Value::Undefined));
     // A sound's length in ms, its longest variant's clip in his banks (the
-    // announcer waits for one line before the next).
+    // announcer waits for one line before the next); -1 for one with no
+    // known length, as BO2's (the announcer then waits 3.1 s, not 0.1).
     f!("soundgetplaybacktime", |vm, world, _, a| {
         let name = text(vm, a, 0).to_ascii_lowercase();
         Ok(Value::Int(
-            world.resource::<Zm>().sound_lengths.get(&name).map_or(0, |ms| *ms as i32),
+            world.resource::<Zm>().sound_lengths.get(&name).map_or(-1, |ms| *ms as i32),
         ))
     });
     // A weapon's blast radius (its weapon file's explosionRadius).

@@ -1429,7 +1429,8 @@ fn encode_client_meta(out: &mut WireWriter, meta: &ClientSnapshotMeta) {
             out.put_u8(
                 u8::from(remote.armed)
                     | (u8::from(remote.boosted) << 1)
-                    | (u8::from(remote.attack) << 2),
+                    | (u8::from(remote.attack) << 2)
+                    | (u8::from(remote.coasting) << 3),
             );
             out.put_i32(remote.unlink_at_ms.unwrap_or(i32::MIN));
         }
@@ -1601,6 +1602,7 @@ fn decode_client_meta(input: &mut WireReader<'_>) -> Result<ClientSnapshotMeta, 
                 armed: flags & 1 != 0,
                 boosted: flags & 2 != 0,
                 attack: flags & 4 != 0,
+                coasting: flags & 8 != 0,
                 unlink_at_ms,
             })
         }

@@ -30,6 +30,10 @@ pub(crate) struct HudElem {
     pub timer: Option<(f32, i64)>,
     /// A picture instead of text (`setshader(name, width, height)`).
     pub shader: Option<(String, f32, f32)>,
+    /// bo2mp: a picture's size changing (`scaleovertime`: a progress
+    /// bar filling): (size it started from, start ms, length ms) toward
+    /// the shader's size.
+    pub scale: Option<([f32; 2], i64, i64)>,
     /// bo2mp: shown to one team only (`newteamhudelem(team)`).
     pub team: Option<String>,
     /// bo2mp: a picture in the world (`setwaypoint(constant size)`): over
@@ -180,7 +184,23 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let h = arg(a, 2).as_float().unwrap_or(0.0);
         if let Some(e) = elem_mut(&mut world.resource_mut::<Zm>(), s) {
             e.shader = Some((name, w, h));
+            e.scale = None;
             e.text.clear();
+        }
+        Ok(Value::Undefined)
+    });
+    // `scaleovertime(seconds, width, height)`: its picture grows or shrinks
+    // to that size (BO2's progress bars: a care package's capture).
+    vm.bind("scaleovertime", true, |_, world, s, a| {
+        let secs = arg(a, 0).as_float().unwrap_or(0.0);
+        let to = [arg(a, 1).as_float().unwrap_or(0.0), arg(a, 2).as_float().unwrap_or(0.0)];
+        let now = world.resource::<Zm>().now_ms;
+        if let Some(e) = elem_mut(&mut world.resource_mut::<Zm>(), s) {
+            let from = shown_size(e, now);
+            if let (Some((_, w, h)), Some(from)) = (e.shader.as_mut(), from) {
+                (*w, *h) = (to[0], to[1]);
+                e.scale = Some((from, now, (secs * 1000.0) as i64));
+            }
         }
         Ok(Value::Undefined)
     });
@@ -227,6 +247,18 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         }
         Ok(Value::Undefined)
     });
+}
+
+/// A picture's size now (mid-scale or its own).
+fn shown_size(e: &HudElem, now: i64) -> Option<[f32; 2]> {
+    let (_, w, h) = e.shader.as_ref()?;
+    Some(match e.scale {
+        Some((from, start, len)) if len > 0 && now < start + len => {
+            let t = (now - start) as f32 / len as f32;
+            [from[0] + (w - from[0]) * t, from[1] + (h - from[1]) * t]
+        }
+        _ => [*w, *h],
+    })
 }
 
 /// The alpha an element shows now (mid-fade or its field).
@@ -321,7 +353,7 @@ pub(crate) fn publish(world: &mut World) {
                 }
             }
             // A picture rides in the text field as `#shader:<name>:<w>:<h>`.
-            if let Some((name, w, h)) = &e.shader {
+            if let (Some((name, _, _)), Some([w, h])) = (&e.shader, shown_size(e, now)) {
                 text = format!("#shader:{name}:{w}:{h}");
             }
             if text.is_empty() || alpha <= 0.01 {

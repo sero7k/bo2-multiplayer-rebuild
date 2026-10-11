@@ -351,6 +351,18 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         if cls.starts_with("trigger_radius") {
             ent.radius = arg(a, 3).as_float().unwrap_or(0.0);
             ent.height = arg(a, 4).as_float().unwrap_or(0.0);
+            // bo2mp: a use trigger spawned with no size (a turret's or a
+            // claymore's pick-up, `spawn("trigger_radius_use", pos)`) is
+            // reached from the player's use radius.
+            if cls == "trigger_radius_use" && ent.radius <= 0.0 && world.resource::<Zm>().mp {
+                let reach = vm
+                    .dvars
+                    .get("player_useradius")
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .unwrap_or(128.0);
+                ent.radius = reach;
+                ent.height = reach;
+            }
         }
         if cls.starts_with("trigger_box") {
             ent.box_dims = Some([
@@ -387,6 +399,13 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             super::items::forget(world, number);
         }
         if let Some(o) = obj {
+            // bo2mp: a deleted entity tells its waiters `death` first; BO2's
+            // multiplayer scripts count on it to free a scorestreak's rule
+            // (the care package's helicopter is deleted once it has flown
+            // off, and only its `death` ends the drop's count).
+            if world.resource::<Zm>().mp && vm.alive(o) {
+                vm.notify_str(world, o, "death", &[]);
+            }
             vm.free_object(world, o);
         }
         Ok(Value::Undefined)

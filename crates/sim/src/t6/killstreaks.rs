@@ -73,6 +73,59 @@ pub(crate) struct Streaks {
     /// objects live until the ride's own script has finished (see
     /// `projectiles`), by entity -> level time it is freed at the latest.
     pub late_free: BTreeMap<u32, i32>,
+    /// When each player last pressed each d-pad slot's key (server ms), by
+    /// client: `actionslot*buttonpressed`.
+    pub slot_presses: BTreeMap<u32, [i64; 4]>,
+    /// Client flags the scripts set on entities (`setclientflag`), by
+    /// entity: bit n is flag n. A counter-UAV jams its enemies' minimaps
+    /// while it carries flag 11.
+    pub client_flags: BTreeMap<u32, u32>,
+    /// Players an enemy EMP jams (`setempjammed`).
+    pub emp_jammed: BTreeSet<u32>,
+    /// How many times each player was shown his enemies for a moment
+    /// (`g_compassShowEnemies`); his HUD pings them all when it changes.
+    pub radar_pulse: BTreeMap<u32, u32>,
+}
+
+/// His radar shows his enemies once, now: BO2 turns the flag on for 0.2 s
+/// and every enemy it shows is pinged, fading like a sweep's ping.
+pub(super) fn radar_pulse(world: &mut World, client: u32) {
+    let mut st = streaks(world);
+    let n = st.radar_pulse.entry(client).or_default();
+    *n += 1;
+    let n = *n;
+    diag::info!(Sim, "bo2mp radar: pulse for player {client} (count {n})");
+}
+
+/// The client flag BO2's counter-UAV plane carries while it jams
+/// (`_spyplane`'s callcounteruav; its client script scrambles the enemies'
+/// minimap while it is set).
+const FLAG_COUNTERUAV: u32 = 11;
+
+/// How long a slot key's press reads as held (the key sends one press, BO2's
+/// scripts poll it every 50 ms).
+const SLOT_PRESS_MS: i64 = 150;
+
+/// He pressed a d-pad slot's key (0-based slot).
+pub(super) fn action_slot_pressed(world: &mut World, client: u32, slot: u8) {
+    let now = world.resource::<Zm>().now_ms;
+    if let Some(at) = streaks(world)
+        .slot_presses
+        .entry(client)
+        .or_insert([i64::MIN; 4])
+        .get_mut(usize::from(slot))
+    {
+        *at = now;
+    }
+}
+
+/// Whether his slot key (0-based) was pressed just now.
+fn slot_pressed(world: &mut World, client: u32, slot: usize) -> bool {
+    let now = world.resource::<Zm>().now_ms;
+    streaks(world)
+        .slot_presses
+        .get(&client)
+        .is_some_and(|p| now.saturating_sub(p[slot]) <= SLOT_PRESS_MS)
 }
 
 /// His client's vision dvar (`bo2mp_vision`): the server's vision for him
@@ -158,11 +211,100 @@ fn streaks(world: &mut World) -> bevy_ecs::prelude::Mut<'_, Streaks> {
     world.resource_mut::<Streaks>()
 }
 
+/// A scorestreak's own entity that takes damage from weapons (a plane, a
+/// helicopter, a drone or vehicle, a turret, a crate): BO2's scripts watch
+/// its `damage`.
+pub(super) fn damage_target(world: &World, n: u32) -> bool {
+    let zm = world.resource::<Zm>();
+    zm.mp
+        && (world
+            .get_resource::<Streaks>()
+            .is_some_and(|s| s.craft.contains_key(&n) || s.turrets.contains_key(&n))
+            || zm.ents.get(&n).is_some_and(|e| e.can_damage))
+}
+
+/// A weapon's hit on such an entity: its `damage` (amount, attacker,
+/// direction, point, means, model, tag, part, weapon, flags), as BO2 sends
+/// it.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn damage_entity(
+    world: &mut World,
+    n: u32,
+    amount: i32,
+    attacker: Option<ClientId>,
+    means: &str,
+    weapon: &str,
+    point: [f32; 3],
+    dir: [f32; 3],
+    flags: i32,
+) {
+    let Some(obj) = world.resource::<Zm>().ents.get(&n).and_then(|e| e.obj) else {
+        return;
+    };
+    super::with_vm(world, |vm, world| {
+        let attacker = attacker
+            .and_then(|a| world.resource::<Zm>().players.get(&a.0).map(|p| Value::Object(p.obj)))
+            .unwrap_or(Value::Undefined);
+        let (m, w, none) = (vm.string(means), vm.string(weapon), vm.string(""));
+        let args = [
+            Value::Int(amount),
+            attacker,
+            Value::Vec3(gsc_t6::math::normalize(dir)),
+            Value::Vec3(point),
+            m,
+            none.clone(),
+            none.clone(),
+            none,
+            w,
+            Value::Int(flags),
+        ];
+        if vm.alive(obj) {
+            vm.notify_str(world, obj, "damage", &args);
+        }
+    });
+}
+
+/// His HUD's vehicle screen (`bo2mp_vehicle`) goes, if it is still the one
+/// `kind` (its first word) put up: a screen another of his streaks put up
+/// since stays.
+pub(super) fn clear_vehicle_hud(world: &mut World, client: u32, kind: &str) {
+    let shown = frame(world)
+        .client_meta(ClientId(client))
+        .and_then(|m| {
+            m.client_dvars
+                .iter()
+                .find(|(k, _)| k == "bo2mp_vehicle")
+                .map(|(_, v)| v.split_whitespace().next().unwrap_or("").to_owned())
+        })
+        .unwrap_or_default();
+    if shown == kind {
+        super::set_client_dvar(world, client, "bo2mp_vehicle", "");
+    }
+}
+
 /// He is in a scorestreak vehicle (BO2's eFlags 0x4000, EF_IN_VEHICLE).
 pub(super) fn riding(world: &World, client: u32) -> bool {
     world
         .get_resource::<Streaks>()
         .is_some_and(|s| s.rides.contains_key(&client))
+}
+
+/// The entity his view is locked to (`viewlockedentity`): the vehicle he
+/// rides or drives, or the one his view sits on (the Lodestar).
+pub(super) fn view_locked(world: &World, client: u32) -> Option<u32> {
+    let s = world.get_resource::<Streaks>()?;
+    s.rides
+        .get(&client)
+        .map(|r| r.vehicle)
+        .or_else(|| s.view_links.get(&client).map(|l| l.ent))
+}
+
+/// He steers a scorestreak from where he stands: drives or rides one of its
+/// vehicles, or his view sits on one (the Lodestar).
+pub(super) fn remote_control(world: &World, client: u32) -> bool {
+    world
+        .get_resource::<Streaks>()
+        .is_some_and(|s| s.rides.contains_key(&client) || s.view_links.contains_key(&client))
 }
 
 pub(super) fn bind(vm: &mut Vm<World>) {
@@ -301,10 +443,57 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let held = crate::script_player::buttons(&mut frame(world), id);
         Ok(Value::bool(held & playerstate_iw4::buttons::INVENTORY != 0))
     });
-    // His fourth-slot button: our keys raise d-pad weapons only.
-    m!("actionslotfourbuttonpressed", |_, _, _, _| Ok(Value::Int(
-        0
-    )));
+    // A use trigger only he may use (`player clientclaimtrigger(trigger)`:
+    // his turret's pick-up), or only a team (`trigger
+    // setteamfortrigger(team)`); the scripts read them back as
+    // `claimedby` and `triggerteam`.
+    m!("clientclaimtrigger", |vm, _, s, a| {
+        if let Value::Object(t) = arg(a, 0) {
+            let f = vm.intern("claimedby");
+            vm.set_raw_field(*t, f, s.clone());
+        }
+        Ok(Value::Undefined)
+    });
+    m!("clientreleasetrigger", |vm, _, _, a| {
+        if let Value::Object(t) = arg(a, 0) {
+            let f = vm.intern("claimedby");
+            vm.set_raw_field(*t, f, Value::Undefined);
+        }
+        Ok(Value::Undefined)
+    });
+    m!("releaseclaimedtrigger", |vm, _, s, _| {
+        if let Value::Object(t) = s {
+            let f = vm.intern("claimedby");
+            vm.set_raw_field(*t, f, Value::Undefined);
+        }
+        Ok(Value::Undefined)
+    });
+    m!("setteamfortrigger", |vm, _, s, a| {
+        if let Value::Object(t) = s {
+            let f = vm.intern("triggerteam");
+            let team = arg(a, 0).clone();
+            vm.set_raw_field(*t, f, team);
+        }
+        Ok(Value::Undefined)
+    });
+    // His d-pad slot keys (a placed-to-be Sentry or Guardian goes back to
+    // his streaks on the fourth: `watchreturnturrettoinventory`).
+    m!("actionslotonebuttonpressed", |vm, world, s, _| {
+        let id = super::client(vm, world, s)?;
+        Ok(Value::bool(slot_pressed(world, id.0, 0)))
+    });
+    m!("actionslottwobuttonpressed", |vm, world, s, _| {
+        let id = super::client(vm, world, s)?;
+        Ok(Value::bool(slot_pressed(world, id.0, 1)))
+    });
+    m!("actionslotthreebuttonpressed", |vm, world, s, _| {
+        let id = super::client(vm, world, s)?;
+        Ok(Value::bool(slot_pressed(world, id.0, 2)))
+    });
+    m!("actionslotfourbuttonpressed", |vm, world, s, _| {
+        let id = super::client(vm, world, s)?;
+        Ok(Value::bool(slot_pressed(world, id.0, 3)))
+    });
     // Lock-on targets (spy planes, helicopters, drones): what launchers and
     // the missile drone may home on.
     f!("target_set", |vm, world, _, a| {
@@ -541,6 +730,9 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                 projectile: p.id,
                 entnum: p.entnum,
                 angles: math_iw4::vect_to_angles(p.velocity),
+                // BO2's fire button splits the Hellstorm into bomblets (its
+                // scripts' missile_deploy_watch); it never speeds it up.
+                boosted: true,
                 ..Default::default()
             });
         }
@@ -556,8 +748,34 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         if f.client_meta(id).is_some() {
             f.client_meta_mut(id).remote_missile = None;
         }
-        super::set_client_dvar(world, id.0, "bo2mp_vehicle", "");
+        clear_vehicle_hud(world, id.0, "remote_missile_mp");
         diag::info!(Sim, "bo2mp hellstorm: player {} lets go of the missile", id.0);
+        Ok(Value::Undefined)
+    });
+    // A missile flies on unsteered (`missile setmissilecoasting(1)`: the
+    // Hellstorm, hidden once its bomblets are out, until it goes off).
+    m!("setmissilecoasting", |vm, world, s, a| {
+        let Some(n) = entnum(vm, s) else {
+            return Ok(Value::Undefined);
+        };
+        let on = arg(a, 0).as_float().unwrap_or(1.0) != 0.0;
+        let Some(pid) = streaks(world)
+            .thrown
+            .iter()
+            .find(|(_, t)| t.ent == n)
+            .map(|(id, _)| *id)
+        else {
+            return Ok(Value::Undefined);
+        };
+        let mut f = frame(world);
+        for c in f.client_ids_sorted() {
+            if let Some(mut link) = f.client_meta(c).and_then(|m| m.remote_missile)
+                && link.projectile.0 == pid
+            {
+                link.coasting = on;
+                f.client_meta_mut(c).remote_missile = Some(link);
+            }
+        }
         Ok(Value::Undefined)
     });
     // A missile homes on what the scripts name (the Hunter Killer's car).
@@ -794,9 +1012,47 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         Ok(Value::Undefined)
     });
     m!("clearentitytarget", |_, _, _, _| Ok(Value::Undefined));
-    // Client flags on an entity (`setclientflag` is the client's): none set
-    // by the engine itself.
-    m!("getclientflag", |_, _, _, _| Ok(Value::Int(0)));
+    // Client flags on an entity: its client scripts' switches (a
+    // counter-UAV's jam, a turret's open or closed, a Hellstorm rider's
+    // screen).
+    m!("setclientflag", |vm, world, s, a| {
+        if let (Some(n), Some(bit)) = (entnum(vm, s), arg(a, 0).as_int().filter(|b| (0..32).contains(b))) {
+            *streaks(world).client_flags.entry(n).or_default() |= 1 << bit;
+        }
+        Ok(Value::Undefined)
+    });
+    m!("clearclientflag", |vm, world, s, a| {
+        if let (Some(n), Some(bit)) = (entnum(vm, s), arg(a, 0).as_int().filter(|b| (0..32).contains(b))) {
+            let mut st = streaks(world);
+            if let Some(f) = st.client_flags.get_mut(&n) {
+                *f &= !(1 << bit);
+            }
+        }
+        Ok(Value::Undefined)
+    });
+    m!("getclientflag", |vm, world, s, a| {
+        let n = entnum(vm, s).unwrap_or(u32::MAX);
+        let bit = arg(a, 0).as_int().filter(|b| (0..32).contains(b));
+        let flags = streaks(world).client_flags.get(&n).copied().unwrap_or(0);
+        Ok(Value::bool(bit.is_some_and(|b| flags & (1 << b) != 0)))
+    });
+    // An enemy EMP jams him (`setempjammed`, `_emp`'s team tracker): no
+    // scorestreaks, no remote rides, a dead minimap.
+    m!("setempjammed", |vm, world, s, a| {
+        let id = super::client(vm, world, s)?;
+        let on = arg(a, 0).as_float().unwrap_or(0.0) != 0.0;
+        let mut st = streaks(world);
+        if on {
+            st.emp_jammed.insert(id.0);
+        } else {
+            st.emp_jammed.remove(&id.0);
+        }
+        Ok(Value::Undefined)
+    });
+    m!("isempjammed", |vm, world, s, _| {
+        let n = entnum(vm, s).unwrap_or(u32::MAX);
+        Ok(Value::bool(streaks(world).emp_jammed.contains(&n)))
+    });
     // A weapon kept out of a match's first moments (none in a local match).
     f!("isweapondisallowedatmatchstart", |_, _, _, _| Ok(
         Value::Int(0)
@@ -934,6 +1190,7 @@ pub(super) fn location_pick(world: &mut World, client: u32, picked: [u8; 3], con
         return;
     }
     let Some(map) = streaks(world).minimap else {
+        diag::warn!(Sim, "bo2mp location: player {client}'s pick dropped: no minimap bounds");
         return;
     };
     let at = |byte: u8| (f32::from(byte as i8) + 128.0) / 255.0;
@@ -1173,7 +1430,7 @@ fn missile_hud_end(world: &mut World) {
             .collect()
     };
     for id in over {
-        super::set_client_dvar(world, id, "bo2mp_vehicle", "");
+        clear_vehicle_hud(world, id, "remote_missile_mp");
     }
 }
 
@@ -1474,6 +1731,23 @@ fn falling(world: &mut World) {
     notify_all(world, events);
 }
 
+/// The hint of the nearest usable model within his reach (a care package's
+/// "Hold [Use] to capture"), as BO2 shows a trigger's.
+pub(super) fn usable_hint(world: &World, at: [f32; 3]) -> Option<String> {
+    let st = world.get_resource::<Streaks>()?;
+    let zm = world.resource::<Zm>();
+    st.usable
+        .iter()
+        .filter_map(|n| {
+            let e = zm.ents.get(n)?;
+            let d = ((e.origin[0] - at[0]).powi(2) + (e.origin[1] - at[1]).powi(2) + (e.origin[2] - at[2]).powi(2))
+                .sqrt();
+            (d <= 128.0).then(|| Some((d, e.hint.clone()?))).flatten()
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, h)| h)
+}
+
 /// Usable models: a living player pressing use within reach (BO2's
 /// player_useRadius, 128) fires the nearest one's `trigger`.
 fn use_models(world: &mut World) {
@@ -1525,41 +1799,80 @@ fn use_models(world: &mut World) {
     notify_all(world, events);
 }
 
-/// Each player's HUD hears his team's radar (`bo2mp_radar`: spy plane mode,
-/// satellite, an enemy counter-UAV up), as BO2's minimap reads it.
+/// A player's radar as his HUD hears it.
+struct RadarView {
+    client: u32,
+    team: String,
+    /// Free-for-all: his own spy plane mode and satellite (`hasspyplane`,
+    /// `hassatellite`), which `_spyplane` keeps on him instead of his team.
+    own: Option<(i32, i32)>,
+}
+
+/// Each player's HUD hears his radar (`bo2mp_radar`: spy plane mode,
+/// satellite, jammed, free-for-all), as BO2's minimap reads it. Team games
+/// keep it by team (`setteamspyplane`, `setteamsatellite`); a free-for-all
+/// keeps it on each player, and every counter-UAV but his own jams him.
 fn publish_radar(world: &mut World) {
     if world.resource::<Zm>().now_ms % 500 != 0 {
         return;
     }
-    let (teams, cuav) = super::with_vm(world, |vm, world| {
-        let (team, tn) = (vm.intern("team"), vm.intern("targetname"));
+    // An entity's client flags go with it (its number comes back as
+    // something else).
+    let live: BTreeSet<u32> = {
         let zm = world.resource::<Zm>();
-        let teams: Vec<(u32, String)> = zm
+        zm.ents.keys().chain(zm.players.keys()).copied().collect()
+    };
+    streaks(world).client_flags.retain(|n, _| live.contains(n));
+    let (views, cuav) = super::with_vm(world, |vm, world| {
+        let (team, owner) = (vm.intern("team"), vm.intern("owner"));
+        let (teambased, spy, sat) = (vm.intern("teambased"), vm.intern("hasspyplane"), vm.intern("hassatellite"));
+        let ffa = !gsc_t6::truthy(&vm.raw_field(vm.level, teambased));
+        let zm = world.resource::<Zm>();
+        let views: Vec<RadarView> = zm
             .players
             .iter()
-            .map(|(c, p)| (*c, vm.to_text(&vm.raw_field(p.obj, team))))
+            .map(|(c, p)| RadarView {
+                client: *c,
+                team: vm.to_text(&vm.raw_field(p.obj, team)),
+                own: ffa.then(|| {
+                    let n = |f| vm.raw_field(p.obj, f).as_int().unwrap_or(0);
+                    (n(spy), n(sat))
+                }),
+            })
             .collect();
-        // Counter-UAVs up, by team (BO2's scripts name them `counteruav`).
-        let cuav: Vec<String> = zm
+        // Counter-UAVs jamming: their team and owner. A plane carries the
+        // jam flag from its arrival until it turns to leave (cleared before
+        // its 10 s exit).
+        let flags = &world.resource::<Streaks>().client_flags;
+        let cuav: Vec<(String, Option<u32>)> = zm
             .ents
-            .values()
-            .filter_map(|e| e.obj)
-            .filter(|o| vm.to_text(&vm.raw_field(*o, tn)) == "counteruav")
-            .map(|o| vm.to_text(&vm.raw_field(o, team)))
+            .iter()
+            .filter(|(n, _)| flags.get(n).is_some_and(|f| f & (1 << FLAG_COUNTERUAV) != 0))
+            .filter_map(|(_, e)| e.obj)
+            .map(|o| (vm.to_text(&vm.raw_field(o, team)), entnum(vm, &vm.raw_field(o, owner))))
             .collect();
-        (teams, cuav)
+        (views, cuav)
     })
     .unwrap_or_default();
-    for (c, team) in teams {
-        let (uav, sat) = {
+    for v in views {
+        let (uav, sat) = v.own.unwrap_or_else(|| {
             let st = streaks(world);
             (
-                st.spyplane.get(&team).copied().unwrap_or(0),
-                st.satellite.get(&team).copied().unwrap_or(0),
+                st.spyplane.get(&v.team).copied().unwrap_or(0),
+                st.satellite.get(&v.team).copied().unwrap_or(0),
             )
-        };
-        let jammed = i32::from(cuav.iter().any(|t| *t != team));
-        super::set_client_dvar(world, c, "bo2mp_radar", &format!("{uav} {sat} {jammed}"));
+        });
+        let pulse = streaks(world).radar_pulse.get(&v.client).copied().unwrap_or(0);
+        let emp = streaks(world).emp_jammed.contains(&v.client);
+        let jammed = i32::from(
+            emp || if v.own.is_some() {
+                cuav.iter().any(|(_, o)| *o != Some(v.client))
+            } else {
+                cuav.iter().any(|(t, _)| *t != v.team)
+            },
+        );
+        let ffa = i32::from(v.own.is_some());
+        super::set_client_dvar(world, v.client, "bo2mp_radar", &format!("{uav} {sat} {jammed} {ffa} {pulse}"));
     }
 }
 

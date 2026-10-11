@@ -1177,6 +1177,9 @@ pub fn sample_client_input(
             }
             cmd.buttons &= playerstate_iw4::buttons::CROUCH | playerstate_iw4::buttons::PRONE;
             if held & playerstate_iw4::buttons::ATTACK != 0 {
+                if template.cmd.buttons & playerstate_iw4::buttons::LOCATION_SELECT == 0 {
+                    diag::info!(Net, "bo2mp location: pick at {:?}", cmd.selected_location);
+                }
                 cmd.buttons |= playerstate_iw4::buttons::LOCATION_SELECT;
             } else if held & cancel != 0 {
                 cmd.buttons |= playerstate_iw4::buttons::LOCATION_CANCEL;

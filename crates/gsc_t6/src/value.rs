@@ -316,6 +316,9 @@ pub enum ObjKind {
 pub struct Object {
     pub generation: u32,
     pub alive: bool,
+    /// Deleted this frame: no longer defined, its fields still readable
+    /// until the frame's scripts are done.
+    pub dying: bool,
     pub kind: ObjKind,
     pub fields: FxHashMap<Str, Value>,
 }

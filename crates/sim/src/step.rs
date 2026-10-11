@@ -950,6 +950,7 @@ fn apply_actions(world: &mut FrameWorld, tick: Tick, actions: &[(ClientId, Clien
                 slot,
             } => {
                 crate::script::action_slot_command(world.ecs(), id.0, slot);
+                crate::t6::action_slot_pressed(world.ecs(), id.0, slot);
             }
             ClientAction::SelectClass {
                 request_id,

@@ -515,7 +515,10 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     ] {
         vm.bind(name, true, |_, _, _, _| Ok(Value::Undefined));
     }
-    m!("melee", |vm, world, s, _| {
+    // An actor's bite or blow at its enemy (`melee`); a dog bites a prone
+    // player the same way (`meleewithoffset(offset)`: K9 Unit, its bite
+    // aimed lower).
+    fn actor_melee(vm: &mut Vm<World>, world: &mut World, s: &Value, _: &[Value]) -> R {
         let n = actor_n(vm, world, s)?;
         let (enemy, me) = {
             let zm = world.resource::<Zm>();
@@ -587,7 +590,9 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             "torso_upper",
         );
         Ok(ev)
-    });
+    }
+    vm.bind("melee", true, actor_melee);
+    vm.bind("meleewithoffset", true, actor_melee);
     m!("finishactordamage", |vm, world, s, a| {
         let n = actor_n(vm, world, s)?;
         let obj = s.as_obj().unwrap();

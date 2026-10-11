@@ -151,6 +151,40 @@ pub(super) fn dispatch(world: &mut World) {
     .flatten()
     .unwrap_or(64.0)
     .max(1.0);
+    // bo2mp: a use trigger only its claimant (`clientclaimtrigger`) or its
+    // team (`setteamfortrigger`) may use: a turret's pick-up is its owner's.
+    // (trigger entity, claimant client, team) and each player's team.
+    let mp = world.resource::<Zm>().mp;
+    let (claims, teams): (Vec<(u32, Option<u32>, Option<String>)>, Vec<(u32, String)>) = if !mp {
+        Default::default()
+    } else {
+        with_vm(world, |vm, world| {
+            let (by, team) = (vm.intern("claimedby"), vm.intern("triggerteam"));
+            let pteam = vm.intern("team");
+            let claims = triggers
+                .iter()
+                .filter(|(_, _, k)| *k == Kind::Use)
+                .filter_map(|(n, e, _)| {
+                    let o = e.obj?;
+                    let claimant = super::entnum(vm, &vm.raw_field(o, by));
+                    let t = match vm.raw_field(o, team) {
+                        Value::Undefined => None,
+                        v => Some(vm.to_text(&v)),
+                    };
+                    (claimant.is_some() || t.is_some()).then_some((*n, claimant, t))
+                })
+                .collect();
+            let teams = world
+                .resource::<Zm>()
+                .players
+                .iter()
+                .map(|(c, p)| (*c, vm.to_text(&vm.raw_field(p.obj, pteam))))
+                .collect();
+            (claims, teams)
+        })
+        .unwrap_or_default()
+    };
+    let playing: Vec<u32> = players.iter().map(|(c, _)| *c).collect();
     let mut fire: Vec<(ObjRef, ObjRef)> = Vec::new();
     for (client, pobj) in players {
         let Some((mins, maxs)) = player_box(world, client) else {
@@ -187,8 +221,19 @@ pub(super) fn dispatch(world: &mut World) {
         // eFlags 0x4000 is set).
         let in_vehicle = super::killstreaks::riding(world, client);
         let mut best: Option<(f32, ObjRef, Option<String>)> = None;
-        for (_, e, k) in &triggers {
+        let my_team = teams
+            .iter()
+            .find(|(c, _)| *c == client)
+            .map(|(_, t)| t.as_str());
+        for (n, e, k) in &triggers {
             if in_vehicle && *k == Kind::Use {
+                continue;
+            }
+            // (A claim by someone no longer playing holds nothing.)
+            if let Some((_, claimant, team)) = claims.iter().find(|(t, _, _)| t == n)
+                && (claimant.is_some_and(|c| c != client && playing.contains(&c))
+                    || team.as_deref().is_some_and(|t| Some(t) != my_team))
+            {
                 continue;
             }
             if e.invisible_to.contains(&client) || e.invisible_to_all {
@@ -252,6 +297,14 @@ pub(super) fn dispatch(world: &mut World) {
                     zm.hints.remove(&client);
                 }
             }
+        }
+        // bo2mp: else a usable model's (a care package's capture prompt).
+        if !in_vehicle
+            && best.as_ref().is_none_or(|b| b.2.is_none())
+            && let Some(origin) = frame(world).player(ClientId(client)).map(|ps| ps.origin)
+            && let Some(h) = super::killstreaks::usable_hint(world, origin)
+        {
+            world.resource_mut::<Zm>().hints.insert(client, h);
         }
         if pressed && let Some((_, obj, _)) = best {
             if std::env::var("IW4L_T6_TRIGLOG").is_ok() {

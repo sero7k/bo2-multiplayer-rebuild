@@ -208,12 +208,22 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     vm.bind("camerasetlookat", true, |_, _, _, _| Ok(Value::Undefined));
     // setclientuivisibilityflag("hud_visible", 0): his HUD hides (the
     // game-over shot); script HUD text still shows.
+    // bo2mp: setclientuivisibilityflag("g_compassShowEnemies", 1): a moment
+    // of radar (the Lightning Strike's pick shows where enemies are).
     vm.bind("setclientuivisibilityflag", true, |vm, world, s, a| {
-        if vm.to_text(arg(a, 0)) == "hud_visible"
+        let flag = vm.to_text(arg(a, 0));
+        if flag == "hud_visible"
             && let Some(n) = entnum(vm, s)
         {
             let hidden = matches!(arg(a, 1), Value::Int(0));
             super::set_client_dvar(world, n, "bo2zm_hud_hidden", if hidden { "1" } else { "" });
+        }
+        if flag == "g_compassShowEnemies"
+            && arg(a, 1).as_float().unwrap_or(0.0) != 0.0
+            && let Some(n) = entnum(vm, s)
+            && world.resource::<Zm>().mp
+        {
+            super::killstreaks::radar_pulse(world, n);
         }
         Ok(Value::Undefined)
     });

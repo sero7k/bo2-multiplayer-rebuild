@@ -2401,6 +2401,7 @@ pub(crate) fn load_t6_combat(
                 if n.starts_with("compass_map_")
                     || n.starts_with("compassping_")
                     || n == "mp_minimap_overlay"
+                    || n == "compass_radarline"
                     || n.starts_with("damage_feedback")
                     || n.starts_with("faction_")
                     || n.starts_with("overlay_low_health")

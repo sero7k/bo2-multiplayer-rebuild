@@ -104,6 +104,26 @@ blank( arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10 )
 {
 }
 
+// A faction's announcer prefix, as its teamset names it.
+factionvoice( faction )
+{
+    switch ( faction )
+    {
+        case "seals":
+            return "vox_st6_";
+        case "fbi":
+            return "vox_fbi_";
+        case "isa":
+            return "vox_isa_";
+        case "pla":
+            return "vox_pla_";
+        case "cd":
+            return "vox_cda_";
+        default:
+            return "vox_pmc_";
+    }
+}
+
 // Every level.* hook the game type may replace: spawning, scoring, the end
 // of a match and its outcome screens, all pointing at the game's own scripts.
 setupcallbacks()
@@ -175,10 +195,18 @@ callback_startgametype()
             game["attackers"] = "allies";
         if ( !isdefined( game["defenders"] ) )
             game["defenders"] = "axis";
+        // Every team's announcer prefix (BO2 asserts one per team): a team
+        // without one stops its players' leader dialog queue for good at
+        // the first line (_globallogic_audio's playnextleaderdialog returns
+        // with the queue still marked active).
+        if ( !isdefined( game["voice"] ) )
+            game["voice"] = [];
         foreach ( team in level.teams )
         {
             if ( !isdefined( game[team] ) )
                 game[team] = "pmc";
+            if ( !isdefined( game["voice"][team] ) )
+                game["voice"][team] = factionvoice( game[team] );
         }
         if ( !isdefined( game["state"] ) )
             game["state"] = "playing";
@@ -339,6 +367,8 @@ callback_startgametype()
     level.maxplayercount = 0;
     level.activeplayers = [];
     level.allowannouncer = getgametypesetting( "allowAnnouncer" );
+    foreach ( team in level.teams )
+        println( "bo2mp announcer: " + team + " voice " + game["voice"][team] + ", allowed " + level.allowannouncer );
     if ( !isdefined( level.timelimit ) )
         maps/mp/_utility::registertimelimit( 1, 1440 );
     if ( !isdefined( level.scorelimit ) )

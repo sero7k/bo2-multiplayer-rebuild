@@ -164,6 +164,8 @@ pub struct Vm<H> {
     pub hooks: Hooks<H>,
     objects: Vec<Object>,
     free_objects: Vec<u32>,
+    /// Objects freed this frame, their fields kept until it ends.
+    dying: Vec<u32>,
     pub level: ObjRef,
     pub anim: ObjRef,
     pub game: Value,
@@ -207,6 +209,7 @@ impl<H> Vm<H> {
             hooks: Hooks::default(),
             objects: Vec::new(),
             free_objects: Vec::new(),
+            dying: Vec::new(),
             level: ObjRef {
                 index: 0,
                 generation: 0,
@@ -292,6 +295,7 @@ impl<H> Vm<H> {
             let o = &mut self.objects[i as usize];
             o.generation = o.generation.wrapping_add(1);
             o.alive = true;
+            o.dying = false;
             o.kind = kind;
             o.fields.clear();
             return ObjRef {
@@ -303,6 +307,7 @@ impl<H> Vm<H> {
         self.objects.push(Object {
             generation: 0,
             alive: true,
+            dying: false,
             kind,
             fields: FxHashMap::default(),
         });
@@ -322,6 +327,13 @@ impl<H> Vm<H> {
             .is_some_and(|x| x.alive && x.generation == o.generation)
     }
 
+    /// Deleted this frame (its fields still read).
+    fn dying(&self, o: ObjRef) -> bool {
+        self.objects
+            .get(o.index as usize)
+            .is_some_and(|x| x.dying && x.generation == o.generation)
+    }
+
     pub fn kind(&self, o: ObjRef) -> Option<ObjKind> {
         self.objects
             .get(o.index as usize)
@@ -329,10 +341,12 @@ impl<H> Vm<H> {
             .map(|x| x.kind)
     }
 
-    /// The script field (not the engine's).
+    /// The script field (not the engine's). A deleted object's last until
+    /// the frame's scripts are done (BO2's `destroyhelicopter` deletes the
+    /// chopper, then reads its `hardpointtype` and `killstreak_id`).
     pub fn raw_field(&self, o: ObjRef, f: Str) -> Value {
         match self.objects.get(o.index as usize) {
-            Some(x) if x.alive && x.generation == o.generation => {
+            Some(x) if (x.alive || x.dying) && x.generation == o.generation => {
                 x.fields.get(&f).cloned().unwrap_or_default()
             }
             _ => Value::Undefined,
@@ -341,7 +355,7 @@ impl<H> Vm<H> {
 
     pub fn set_raw_field(&mut self, o: ObjRef, f: Str, v: Value) {
         if let Some(x) = self.objects.get_mut(o.index as usize)
-            && x.alive
+            && (x.alive || x.dying)
             && x.generation == o.generation
         {
             if v.is_undefined() {
@@ -363,7 +377,7 @@ impl<H> Vm<H> {
 
     pub fn get_field(&mut self, host: &mut H, o: ObjRef, f: Str) -> Value {
         let Some(kind) = self.kind(o) else {
-            return Value::Undefined;
+            return self.raw_field(o, f);
         };
         if matches!(kind, ObjKind::Entity(_) | ObjKind::HudElem(_))
             && let Some(hook) = self.hooks.get_field
@@ -376,7 +390,11 @@ impl<H> Vm<H> {
 
     pub fn set_field(&mut self, host: &mut H, o: ObjRef, f: Str, v: Value) {
         let Some(kind) = self.kind(o) else {
-            self.report_once(format!("field '{}' set on a deleted object", self.str(f)));
+            if self.dying(o) {
+                self.set_raw_field(o, f, v);
+            } else {
+                self.report_once(format!("field '{}' set on a deleted object", self.str(f)));
+            }
             return;
         };
         if matches!(kind, ObjKind::Entity(_) | ObjKind::HudElem(_))
@@ -428,8 +446,8 @@ impl<H> Vm<H> {
         }
         let x = &mut self.objects[o.index as usize];
         x.alive = false;
-        x.fields.clear();
-        self.free_objects.push(o.index);
+        x.dying = true;
+        self.dying.push(o.index);
         for t in kill {
             self.unwind(host, t, 0);
         }
@@ -444,6 +462,7 @@ impl<H> Vm<H> {
     /// dvars and the dice stay. A new `level` and `anim`.
     pub fn restart(&mut self) {
         debug_assert!(self.running.is_empty());
+        self.collect_deleted();
         for (i, t) in self.threads.iter_mut().enumerate() {
             if t.take().is_some() {
                 self.free_threads.push(i as u32);
@@ -760,6 +779,20 @@ impl<H> Vm<H> {
                 }
             }
         }
+        self.collect_deleted();
+    }
+
+    /// The frame's scripts are done: objects deleted in it lose their
+    /// fields and their slots can be reused.
+    fn collect_deleted(&mut self) {
+        for i in std::mem::take(&mut self.dying) {
+            let x = &mut self.objects[i as usize];
+            if x.dying {
+                x.dying = false;
+                x.fields.clear();
+                self.free_objects.push(i);
+            }
+        }
     }
 
     fn exec(&mut self, host: &mut H, t: ThreadId) {
@@ -849,10 +882,11 @@ impl<H> Vm<H> {
         }
     }
 
-    /// A value made fit to read: dead objects read as undefined.
+    /// A value made fit to read: dead objects read as undefined (one
+    /// deleted this frame stays, for its fields; it is not defined).
     fn live(&self, v: Value) -> Value {
         match v {
-            Value::Object(o) if !self.alive(o) => Value::Undefined,
+            Value::Object(o) if !self.alive(o) && !self.dying(o) => Value::Undefined,
             v => v,
         }
     }
@@ -1646,7 +1680,7 @@ impl<H> Vm<H> {
                 Op::CastObject => {
                     let v = pop!();
                     match v {
-                        Value::Object(o) if self.alive(o) => obj = Some(o),
+                        Value::Object(o) if self.alive(o) || self.dying(o) => obj = Some(o),
                         other => {
                             obj = None;
                             if !matches!(other, Value::Object(_)) {

@@ -1013,10 +1013,23 @@ pub(crate) fn constrain_cmd(
     if controls.usability_disabled {
         cmd.buttons &= !(buttons::USE | buttons::USE_RELOAD);
     }
+    // bo2mp: while he steers a scorestreak (the Hellstorm's missile, a
+    // drone or vehicle, the Lodestar) his keys switch no weapon: BO2's
+    // engine holds it, its scripts do not (the Hellstorm clears
+    // `usingremote` and turns weapon cycling back on while he still rides
+    // the missile, so a streak raised then would start beside it).
+    let steering = world
+        .client_meta(id)
+        .and_then(|m| m.remote_missile)
+        .is_some_and(|l| l.unlink_at_ms.is_none())
+        || crate::t6::remote_control(world.ecs(), id.0);
     if controls.switch_to != 0 {
         cmd.weapon = controls.switch_to as u16;
-    } else if controls.switch_disabled || controls.frozen {
+    } else if controls.switch_disabled || controls.frozen || steering {
         cmd.weapon = held as u16;
+        if steering {
+            cmd.buttons &= !buttons::INVENTORY;
+        }
     }
 }
 

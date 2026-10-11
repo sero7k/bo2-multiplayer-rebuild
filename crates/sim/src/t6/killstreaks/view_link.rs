@@ -100,7 +100,7 @@ pub(super) fn end(world: &mut World, client: u32) {
     }
     super::super::set_client_dvar(world, client, "bo2mp_vehicle_view", "");
     if !link.hud.is_empty() {
-        super::super::set_client_dvar(world, client, "bo2mp_vehicle", "");
+        super::clear_vehicle_hud(world, client, link.hud);
     }
     diag::info!(Sim, "bo2mp view link: player {client} lets go of ent {}", link.ent);
 }

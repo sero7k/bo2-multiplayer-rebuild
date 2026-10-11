@@ -390,7 +390,7 @@ pub(crate) struct MatchValues {
     /// The minimap ("<material>,<ul x>,<ul y>,<lr x>,<lr y>,<north yaw>,
     /// <range>").
     pub minimap: String,
-    /// His team's radar ("<uav> <satellite> <jammed>", `bo2mp_radar`).
+    /// His radar ("<uav> <satellite> <jammed> <free-for-all>", `bo2mp_radar`).
     pub radar: String,
     /// A spot being picked on the map (lane D's `bo2mp_locsel`:
     /// "<selector material> <radius>", "" when not).
@@ -440,12 +440,15 @@ pub(crate) struct MinimapView {
     pub me: ([f32; 2], f32),
     pub friends: Vec<([f32; 2], f32)>,
     /// Enemies the map shows: spotted by his team's radar, or firing
-    /// (position, yaw, firing).
-    pub enemies: Vec<([f32; 2], f32, bool)>,
+    /// (position, yaw, firing, how bright: a radar ping fades out).
+    pub enemies: Vec<([f32; 2], f32, bool, f32)>,
+    /// BO2's radar line while a UAV is up: its offset along the map's east
+    /// (see `line_at`).
+    pub line: Option<f32>,
 }
 
 impl MinimapView {
-    pub(crate) fn of(m: &MatchValues, me: ([f32; 2], f32), friends: Vec<([f32; 2], f32)>, enemies: Vec<([f32; 2], f32, bool)>) -> Option<MinimapView> {
+    pub(crate) fn of(m: &MatchValues, me: ([f32; 2], f32), friends: Vec<([f32; 2], f32)>, enemies: Vec<([f32; 2], f32, bool, f32)>) -> Option<MinimapView> {
         let f: Vec<&str> = m.minimap.split(',').collect();
         let (material, a, b, c, d, n, r) = match f[..] {
             [material, a, b, c, d, n, r] => (material, a, b, c, d, n, r),
@@ -462,7 +465,26 @@ impl MinimapView {
             me,
             friends,
             enemies,
+            line: None,
         })
+    }
+
+    /// BO2's radar line `progress` (0..1) of the way across the map: the
+    /// east offset of a line running north-south. It starts and ends a
+    /// margin off the map (half the line's width past the minimap's
+    /// corner, `compassRadarLineThickness` 0.4 of `compassMaxRange`, or
+    /// `cg_hudMapRadarLineThickness` 0.15 of the map, the larger).
+    pub(crate) fn line_at(&self, progress: f32) -> f32 {
+        let (_, east) = self.axes();
+        let world = self.span_size()[0];
+        let margin = (self.range * std::f32::consts::SQRT_2 + 0.4 * self.range).max(0.15 * world) * 0.5;
+        (margin * 2.0 + world) * progress + east[0] * self.ul[0] + east[1] * self.ul[1] - margin
+    }
+
+    /// Which side of a radar line a world point is on.
+    pub(crate) fn behind_line(&self, line: f32, p: [f32; 2]) -> bool {
+        let (_, east) = self.axes();
+        p[0] * east[0] + p[1] * east[1] - line < 0.0
     }
 
     /// The picture's change per world unit east and per world unit south.
@@ -477,8 +499,10 @@ impl MinimapView {
 
     /// BO2's HUD minimap as an `n` x `n` RGBA8 picture: the map around him,
     /// `range` world units across, turned so he faces up (bilinear
-    /// samples of the map's picture; off the picture is see-through).
-    pub(crate) fn render(&self, src: &[u8], sw: usize, sh: usize, n: usize) -> Vec<u8> {
+    /// samples of the map's picture; off the picture is see-through), with
+    /// the radar line over it (`compass_radarline`, `lw` x `lh`: across the
+    /// line its picture spans 0.4 of `range`, along it it repeats).
+    pub(crate) fn render(&self, src: &[u8], sw: usize, sh: usize, n: usize, radarline: Option<(&[u8], usize, usize)>) -> Vec<u8> {
         let mut out = vec![0u8; n * n * 4];
         if sw < 2 || sh < 2 || src.len() < sw * sh * 4 {
             return out;
@@ -489,6 +513,9 @@ impl MinimapView {
         let (c, s) = (h.cos(), h.sin());
         let world_per_px = self.range / n as f32;
         let texel = |x: usize, y: usize, k: usize| f32::from(src[(y * sw + x) * 4 + k]);
+        let (_, east) = self.axes();
+        let me_east = self.me.0[0] * east[0] + self.me.0[1] * east[1];
+        let line = self.line.zip(radarline.filter(|(d, lw, lh)| *lw > 0 && *lh > 0 && d.len() >= lw * lh * 4));
         for j in 0..n {
             for i in 0..n {
                 // Right and down from the middle (world units), turned back
@@ -496,6 +523,15 @@ impl MinimapView {
                 let sx = (i as f32 + 0.5 - n as f32 * 0.5) * world_per_px;
                 let sy = (j as f32 + 0.5 - n as f32 * 0.5) * world_per_px;
                 let (ex, so) = (sx * c - sy * s, sx * s + sy * c);
+                let o = (j * n + i) * 4;
+                if let Some((at, (ld, lw, lh))) = line {
+                    let ls = ((me_east + ex - at) / self.range) / 0.4 + 0.5;
+                    if (0.0..1.0).contains(&ls) {
+                        let lt = (-so / (0.4 * self.range)).rem_euclid(1.0);
+                        let (x, y) = (((ls * lw as f32) as usize).min(lw - 1), ((lt * lh as f32) as usize).min(lh - 1));
+                        out[o..o + 4].copy_from_slice(&ld[(y * lw + x) * 4..][..4]);
+                    }
+                }
                 let (u, v) = (u0 + ex * du, v0 + so * dv);
                 if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
                     continue;
@@ -504,12 +540,20 @@ impl MinimapView {
                 let (x0, y0) = (fx.floor().clamp(0.0, (sw - 1) as f32) as usize, fy.floor().clamp(0.0, (sh - 1) as f32) as usize);
                 let (x1, y1) = ((x0 + 1).min(sw - 1), (y0 + 1).min(sh - 1));
                 let (tx, ty) = ((fx - x0 as f32).clamp(0.0, 1.0), (fy - y0 as f32).clamp(0.0, 1.0));
-                let o = (j * n + i) * 4;
-                for k in 0..4 {
+                let mut map = [0.0f32; 4];
+                for (k, m) in map.iter_mut().enumerate() {
                     let top = texel(x0, y0, k) * (1.0 - tx) + texel(x1, y0, k) * tx;
                     let bottom = texel(x0, y1, k) * (1.0 - tx) + texel(x1, y1, k) * tx;
-                    out[o + k] = (top * (1.0 - ty) + bottom * ty).round() as u8;
+                    *m = top * (1.0 - ty) + bottom * ty;
                 }
+                // The line (laid down above) over the map.
+                let (la, ma) = (f32::from(out[o + 3]) / 255.0, map[3] / 255.0);
+                let a = la + ma * (1.0 - la);
+                for k in 0..3 {
+                    let mixed = f32::from(out[o + k]) * la + map[k] * ma * (1.0 - la);
+                    out[o + k] = if a > 0.0 { (mixed / a).round().min(255.0) as u8 } else { 0 };
+                }
+                out[o + 3] = (a * 255.0).round() as u8;
             }
         }
         out

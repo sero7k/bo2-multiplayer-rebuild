@@ -111,6 +111,63 @@ pub(crate) fn streak_picks(world: &World) -> String {
     picks.iter().map(|(i, c)| format!("{i}:{c}")).collect::<Vec<_>>().join(";")
 }
 
+/// A player's own scorestreaks as BO2's HUD column lists them:
+/// `icon:cost:held` by `;`, dearest first, `held` 1 while his streak weapon
+/// holds one (its quantity: earned and not used yet). His picks are the
+/// menu references BO2's class script gives him (`player.killstreak`);
+/// none read yet: the default ones (`streak_picks`).
+pub(crate) fn his_streaks(vm: &mut Vm<World>, world: &mut World, client: u32) -> Option<String> {
+    let obj = world.resource::<Zm>().players.get(&client)?.obj;
+    let f = vm.intern("killstreak");
+    let refs: Vec<String> = match vm.raw_field(obj, f) {
+        Value::Array(a) => a.read().values_in_order().map(|v| vm.to_text(v)).collect(),
+        _ => return None,
+    };
+    if refs.is_empty() {
+        return None;
+    }
+    let all = items(world);
+    let (types, killstreaks, weapon) = (
+        vm.intern("menureferenceforkillstreak"),
+        vm.intern("killstreaks"),
+        vm.intern("weapon"),
+    );
+    let lookup = |vm: &mut Vm<World>, table: &Value, key: &str| match table {
+        Value::Array(a) => {
+            let k = gsc_t6::Key::Str(vm.intern(key));
+            a.read().get(&k).cloned().unwrap_or_default()
+        }
+        _ => Value::Undefined,
+    };
+    let (by_menu, by_type) = (vm.raw_field(vm.level, types), vm.raw_field(vm.level, killstreaks));
+    let mut out: Vec<(String, i32, bool)> = Vec::new();
+    for r in refs {
+        let Some(it) = all.iter().find(|i| i.reference == r) else {
+            continue;
+        };
+        let kind = lookup(vm, &by_menu, &r);
+        let kind = vm.to_text(&kind);
+        let held = match lookup(vm, &by_type, &kind) {
+            Value::Object(o) => {
+                let name = vm.to_text(&vm.raw_field(o, weapon));
+                super::weapon(world, &name).ok().filter(|w| *w != 0).is_some_and(|w| {
+                    crate::script_player::ammo_clip(&super::frame(world), crate::world::ClientId(client), w)
+                        > 0
+                })
+            }
+            _ => false,
+        };
+        out.push((it.icon.clone(), it.cost, held));
+    }
+    out.sort_by_key(|p| std::cmp::Reverse(p.1));
+    Some(
+        out.iter()
+            .map(|(i, c, h)| format!("{i}:{c}:{}", u8::from(*h)))
+            .collect::<Vec<_>>()
+            .join(";"),
+    )
+}
+
 /// A player's perks as BO2's perk list draws them (the spawn list, the
 /// killcam's killer card): `icon|name` by `;`, perk 1 to 3.
 pub(crate) fn perk_card(vm: &mut Vm<World>, world: &mut World, who: &Value, class: i32) -> String {

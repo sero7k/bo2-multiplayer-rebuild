@@ -25,6 +25,9 @@ pub(crate) fn steer(
     else {
         return;
     };
+    if link.coasting {
+        return;
+    }
     let seconds = msec as f32 * 0.001;
     let delta = math_iw4::angles_to_axis([
         f32::from(cmd.remote_control[0] as i8) / 127.0 * seconds * PITCH_RATE,
@@ -61,7 +64,7 @@ pub(crate) fn advance(world: &mut FrameWorld, tick: Tick) {
             world.client_meta_mut(id).remote_missile = None;
             continue;
         }
-        if link.unlink_at_ms.is_some() {
+        if link.unlink_at_ms.is_some() || link.coasting {
             continue;
         }
         let Some(projectile) = world

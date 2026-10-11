@@ -49,6 +49,10 @@ pub(crate) enum Drive {
 #[derive(Clone, Debug)]
 pub(crate) struct Ride {
     pub vehicle: u32,
+    /// Its vehicle type (the first word of his HUD's `bo2mp_vehicle`).
+    pub kind: String,
+    /// The seat he took (`usevehicle`): 0 drives.
+    pub seat: i32,
     pub drive: Drive,
     /// Its own driving and camera values (his zones' vehicle def).
     pub info: T6VehicleDrive,
@@ -107,6 +111,14 @@ fn on_vehicle(origin: [f32; 3], yaw: f32, local: [f32; 3]) -> [f32; 3] {
     ]
 }
 
+/// He rides a missile (the Hellstorm) that has not let him go.
+fn in_missile(world: &mut World, id: ClientId) -> bool {
+    frame(world)
+        .client_meta(id)
+        .and_then(|m| m.remote_missile)
+        .is_some_and(|l| l.unlink_at_ms.is_none())
+}
+
 /// Ends his ride: his own controls back, his screen back, `unlink`.
 pub(super) fn end_ride(world: &mut World, client: u32) {
     let Some(ride) = streaks(world).rides.remove(&client) else {
@@ -125,7 +137,7 @@ pub(super) fn end_ride(world: &mut World, client: u32) {
         }
     }
     super::super::set_client_dvar(world, client, "bo2mp_vehicle_view", "");
-    super::super::set_client_dvar(world, client, "bo2mp_vehicle", "");
+    super::clear_vehicle_hud(world, client, &ride.kind);
     notify_all(world, vec![(client, "unlink", Vec::new())]);
 }
 
@@ -166,6 +178,8 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             id.0,
             Ride {
                 vehicle: v,
+                kind: kind.clone(),
+                seat,
                 drive,
                 info,
                 eye,
@@ -234,18 +248,42 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         }
         Ok(Value::Undefined)
     });
+    // He steers something from where he stands: drives a vehicle, or rides
+    // the Hellstorm's missile (bots and objectives leave him be).
     m!("isremotecontrolling", |vm, world, s, _| {
         let n = entnum(vm, s).unwrap_or(u32::MAX);
-        Ok(Value::bool(
-            streaks(world)
-                .rides
-                .get(&n)
-                .is_some_and(|r| r.drive != Drive::Gunner),
-        ))
+        let driving = streaks(world)
+            .rides
+            .get(&n)
+            .is_some_and(|r| r.drive != Drive::Gunner);
+        Ok(Value::bool(driving || in_missile(world, ClientId(n))))
     });
     m!("isinvehicle", |vm, world, s, _| {
         let n = entnum(vm, s).unwrap_or(u32::MAX);
         Ok(Value::bool(streaks(world).rides.contains_key(&n)))
+    });
+    // Who sits in a seat (`vehicle getseatoccupant(seat)`: the RC-XD blows
+    // up on a death trigger only while driven), and his seat
+    // (`vehicle getoccupantseat(player)`).
+    m!("getseatoccupant", |vm, world, s, a| {
+        let v = entnum(vm, s).unwrap_or(u32::MAX);
+        let seat = arg(a, 0).as_int().unwrap_or(0);
+        let rider = streaks(world)
+            .rides
+            .iter()
+            .find(|(_, r)| r.vehicle == v && r.seat == seat)
+            .map(|(c, _)| *c);
+        Ok(rider.map_or(Value::Undefined, |c| super::craft::world_obj(world, c)))
+    });
+    m!("getoccupantseat", |vm, world, s, a| {
+        let v = entnum(vm, s).unwrap_or(u32::MAX);
+        let who = entnum(vm, arg(a, 0)).unwrap_or(u32::MAX);
+        let seat = streaks(world)
+            .rides
+            .get(&who)
+            .filter(|r| r.vehicle == v)
+            .map(|r| r.seat);
+        Ok(seat.map_or(Value::Undefined, Value::Int))
     });
     m!("getvehicleoccupied", |vm, world, s, _| {
         let n = entnum(vm, s).unwrap_or(u32::MAX);
@@ -337,6 +375,12 @@ pub(super) fn advance(world: &mut World) {
                 cmd.rightmove = 0;
             }
             out
+        };
+        // While he rides a missile his keys steer it, not this.
+        let (fwd, right, held) = if in_missile(world, id) {
+            (0, 0, 0)
+        } else {
+            (fwd, right, held)
         };
         {
             let mut f = frame(world);
@@ -457,6 +501,50 @@ pub(super) fn advance(world: &mut World) {
         // His guns: fire shoots the turret's, aim-down-sights the gunner's
         // (the VTOL's rockets), where he looks. The RC-XD's fire is its
         // script's (it blows up).
+        // A driven ground vehicle with a gun (the AGR): its fire is its
+        // scripts' (`turret_fire` on it: they fire it, pace it, hold it
+        // while stunned) at where he looks; aim-down-sight fires its rocket
+        // gunner and tells him (`missile_fire`) unless its scripts hold it
+        // (reloading). The RC-XD has no gun: its fire is its blowing up.
+        let armed_ground = ride.drive == Drive::Ground
+            && streaks(world)
+                .craft
+                .get(&ride.vehicle)
+                .is_some_and(|c| !c.weapon.is_empty());
+        if armed_ground {
+            let eye = on_vehicle(new_pos, new_ang[1], ride.eye);
+            let far: [f32; 3] = std::array::from_fn(|i| eye[i] + f3[i] * 8192.0);
+            let t = frame(world).trace_static_world(
+                eye,
+                far,
+                [0.0; 3],
+                [0.0; 3],
+                crate::bullet_collision::MASK_SHOT,
+            );
+            let fr = t.fraction.clamp(0.0, 1.0);
+            let aim: [f32; 3] = std::array::from_fn(|i| eye[i] + (far[i] - eye[i]) * fr);
+            let rockets_off = {
+                let mut st = streaks(world);
+                let Some(craft) = st.craft.get_mut(&ride.vehicle) else {
+                    continue;
+                };
+                craft.aim = Some(Aim::Point(aim));
+                craft.gunner_off[0]
+            };
+            let mut events = Vec::new();
+            if held & buttons::ATTACK != 0 && now >= ride.next_fire[0] {
+                events.push((ride.vehicle, "turret_fire", Vec::new()));
+                ride.next_fire[0] = now + 100;
+            }
+            if held & buttons::ADS != 0 && now >= ride.next_fire[1] && !rockets_off {
+                let interval = super::craft::fire_from(world, ride.vehicle, Some(0), Aim::Point(aim));
+                if let Some(ms) = interval {
+                    ride.next_fire[1] = now + i64::from(ms.max(50));
+                    events.push((c, "missile_fire", Vec::new()));
+                }
+            }
+            notify_all(world, events);
+        }
         if ride.drive != Drive::Ground {
             let eye = on_vehicle(new_pos, new_ang[1], ride.eye);
             let far: [f32; 3] = std::array::from_fn(|i| eye[i] + f3[i] * 8192.0);

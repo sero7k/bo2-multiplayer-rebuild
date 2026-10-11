@@ -1335,12 +1335,27 @@ fn autoplay_tests(world: &mut World, now: i64) {
     autoplay::look_test(world);
 }
 
-/// bo2mp: a player picked a spot on the map for a scorestreak (or backed
-/// out); BO2's scripts hear it.
-pub(crate) fn location_pick(world: &mut World, client: u32, picked: [u8; 3], confirm: bool) {
+/// bo2mp: he steers a scorestreak from where he stands (a vehicle he
+/// drives or rides, the Lodestar's view).
+pub(crate) fn remote_control(world: &World, client: u32) -> bool {
+    world.get_resource::<Zm>().is_some_and(|z| z.mp) && killstreaks::remote_control(world, client)
+}
+
+/// bo2mp: he pressed a d-pad slot's key (`+actionslot`, 0-based slot).
+pub(crate) fn action_slot_pressed(world: &mut World, client: u32, slot: u8) {
     if world.get_resource::<Zm>().is_some_and(|z| z.mp) {
-        killstreaks::location_pick(world, client, picked, confirm);
+        killstreaks::action_slot_pressed(world, client, slot);
     }
+}
+
+/// bo2mp: a player picked a spot on the map for a scorestreak (or backed
+/// out); BO2's scripts hear it. False when no BO2 match runs.
+pub(crate) fn location_pick(world: &mut World, client: u32, picked: [u8; 3], confirm: bool) -> bool {
+    if !world.get_resource::<Zm>().is_some_and(|z| z.mp) {
+        return false;
+    }
+    killstreaks::location_pick(world, client, picked, confirm);
+    true
 }
 
 /// bo2mp: the console's `give killstreak`, to BO2's own scripts. False when
@@ -1642,6 +1657,23 @@ pub(crate) fn entity_hit(world: &mut World, hit: &crate::script::EntityHit) -> b
             .ents
             .get(&n)
             .is_some_and(|e| e.destructible.is_some());
+        // bo2mp: a scorestreak's plane, chopper, drone, vehicle or turret:
+        // its scripts hear the hit.
+        if !breakable && killstreaks::damage_target(world, n) {
+            let weapon = weapon_text(world, hit.weapon);
+            killstreaks::damage_entity(
+                world,
+                n,
+                hit.amount,
+                hit.attacker,
+                hit.means,
+                &weapon,
+                hit.point,
+                hit.dir,
+                hit.flags,
+            );
+            return true;
+        }
         if breakable {
             let t = tick(world);
             crate::t5_destructible::apply_damage(
@@ -1824,7 +1856,7 @@ fn publish_hud(world: &mut World) {
     .unwrap_or(0)
     .to_string();
     let clients: Vec<u32> = world.resource::<Zm>().players.keys().copied().collect();
-    // bo2mp: the scorestreak column's picks, the same for everyone.
+    // bo2mp: the scorestreak column's default picks.
     let picks = loadout::streak_picks(world);
     for c in clients {
         if is_bot(world, c) {
@@ -1851,6 +1883,11 @@ fn publish_hud(world: &mut World) {
             .and_then(|p| p.stats.get("momentum").copied())
             .unwrap_or(0)
             .to_string();
+        // His own picks, each lit while he holds it; the defaults until his
+        // class script has given him his.
+        let picks = with_vm(world, |vm, world| loadout::his_streaks(vm, world, c))
+            .flatten()
+            .unwrap_or_else(|| picks.clone());
         if !picks.is_empty() {
             let mut f = frame(world);
             if f.client_meta(crate::world::ClientId(c)).is_some() {
@@ -1953,6 +1990,21 @@ pub(crate) fn radius_targets(
         .collect();
     // bo2mp: and the map's breakables, measured to their nearest part.
     out.extend(destructible::radius_targets(world, origin, radius));
+    // bo2mp: and the scorestreaks' planes, drones, vehicles and turrets.
+    let streak_ents: Vec<(crate::ScriptModelId, [f32; 3], f32)> = {
+        let zm = world.resource::<Zm>();
+        zm.presences
+            .by_ent
+            .iter()
+            .filter(|(n, _)| !zm.actors.contains_key(n) && killstreaks::damage_target(world, **n))
+            .filter_map(|(n, p)| {
+                let at = zm.ents.get(n)?.origin;
+                let d = gsc_t6::math::length(gsc_t6::math::sub(at, origin));
+                (d < radius).then_some((p.id, at, d))
+            })
+            .collect()
+    };
+    out.extend(streak_ents);
     out.sort_by(|a, b| a.2.total_cmp(&b.2));
     out
 }

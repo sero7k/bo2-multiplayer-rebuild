@@ -691,7 +691,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         "setclockup",
         "fadeovertime",
         "moveovertime",
-        "scaleovertime",
         "changefontscaleovertime",
         "setwaypoint",
         "settargetent",

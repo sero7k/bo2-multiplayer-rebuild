@@ -190,6 +190,10 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
 
 ## Recent changes
 
+- 2026-10-11 (r130): the Lightning Strike can be called in: its tablet shows where the enemies are as it opens, you
+  pick three spots on the map, and the strikes land on those spots in the original's order and timing; the UAV says
+  "UAV inbound" and its sweep crosses the minimap every 4 seconds, showing enemies where it finds them and fading them
+  over 4 seconds, by the original's own values.
 - 2026-10-11 (r129): bullets pass through players and thin surfaces the way the original works it out, using its own
   penetration table (how deep a bullet gets into each surface type), with the damage dropping after each target it
   goes through; a sniper shot can now kill the player behind the one it hits (a collateral), checked for the DSR 50,
@@ -288,9 +292,17 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
   marker when someone else hits you.
 - Getting up from a dive at the original's speed, and diving over low objects the original way.
 - Bodies that fall without spinning, the way the original's ragdolls throw them.
-- Every scorestreak working as in the original (Lightning Strike can't be called in yet, and the UAV barely shows
-  enemies). Fixes from a check of every scorestreak against the original's scripts are written; each ships once it
-  is proven side by side, Lightning Strike's target pick and the UAV's sweep first.
+- Every other scorestreak proven against the original. Fixes from a check of every scorestreak against the original's
+  scripts are in the game since r130 but not yet checked side by side: Care Package capture bar and prompt, K9 Unit,
+  Stealth Chopper, AGR, VTOL Warship, Dragonfire, Escort Drone, Sentry Gun, Guardian, Hellstorm, RC-XD, Counter-UAV,
+  EMP, Orbital VSAT, the UAV in free-for-all, streaks taking damage, and the scorestreak icons on the HUD.
+- Lightning Strike's tablet looking exactly like the original's: a mark left on each picked spot, the "Press [key]
+  to Target (N remaining)" line, the map inside the tablet's lit screen at the original's size and position, the
+  world blurred behind it, the tablet itself at the original's size and place in view, Nuketown's map turned and
+  fitted as the original does, and teammates' arrows at the original's size (the target pick, the enemies it shows
+  and where the strikes land already match the original).
+- The UAV's sweep sound.
+- Two scorestreaks at once, and a key of your own for each scorestreak.
 - Every map started from the menus: Nuketown 2025 is played from them; the others are checked started directly.
 - Every attachment checked against the original's own numbers and behaviour.
 - FMJ: bullets go through walls and players twice as well, as the original's perk does (bullets already pass

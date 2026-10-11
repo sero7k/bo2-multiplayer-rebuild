@@ -95,7 +95,32 @@ struct LuiHud {
     /// bo2mp: when each client was last seen firing (an
     /// enemy firing shows on the minimap for a moment).
     shots: std::collections::HashMap<u32, f64>,
+    /// bo2mp: his radar's sweep line and the enemies it pinged.
+    sweep: RadarSweep,
 }
+
+/// BO2's radar sweep: a line crosses the map while his radar is up, and
+/// each enemy it passes (or who walks across it) is pinged where he stood;
+/// the ping fades out.
+#[derive(Default)]
+struct RadarSweep {
+    /// How far across the map the line is (0..1).
+    progress: f32,
+    last_ms: Option<f64>,
+    /// Each enemy where he was last frame (to catch him walking across).
+    last_pos: std::collections::HashMap<u32, [f32; 2]>,
+    /// Each enemy's last ping: where, facing, when.
+    pings: std::collections::HashMap<u32, ([f32; 2], f32, f64)>,
+    /// The server's count of "show his enemies" moments (Lightning Strike).
+    pulse: i32,
+}
+
+/// One sweep across the map (ms): BO2's `compassRadarUpdateTime` 4 s, and
+/// `compassRadarUpdateFastTime` 2 s when two UAVs are up (spy plane mode 2).
+const RADAR_SWEEP_MS: f64 = 4000.0;
+const RADAR_SWEEP_FAST_MS: f64 = 2000.0;
+/// How long a radar ping takes to fade out (`compassRadarPingFadeTime`).
+const RADAR_PING_FADE_MS: f64 = 4000.0;
 
 impl LuiHud {
     /// The root's width in units (720 high).
@@ -666,6 +691,7 @@ fn build(ui: &assets::T6Ui, front: Option<&crate::lui_frontend::Bo2mpFrontend>, 
         back_in: 0,
         loading_open: false,
         shots: std::collections::HashMap::new(),
+        sweep: RadarSweep::default(),
     }
 }
 
@@ -917,12 +943,17 @@ fn send_changes(host: &mut Host, old: Option<&Values>, new: &Values) {
         // ammo (one once its cost is in), momentumCost }, then the bar.
         let mut items = Vec::new();
         for (i, e) in new.streaks.split(';').enumerate() {
-            let Some((icon, cost)) = e.split_once(':') else { continue };
+            // "icon:cost" or "icon:cost:held" (held: his streak weapon has
+            // one to use).
+            let mut parts = e.split(':');
+            let (Some(icon), Some(cost)) = (parts.next(), parts.next()) else { continue };
             let cost: i32 = cost.trim().parse().unwrap_or(0);
+            let held = parts.next().map(|h| h.trim() == "1");
             let t = hks_t6::value::Table::new_ref();
             t.borrow_mut().set_str("slotIndex", Value::Num((i + 1) as f32));
             t.borrow_mut().set_str("material", host.material(icon));
-            t.borrow_mut().set_str("ammo", Value::Num(if new.momentum >= cost { 1.0 } else { 0.0 }));
+            let ready = held.unwrap_or(new.momentum >= cost);
+            t.borrow_mut().set_str("ammo", Value::Num(if ready { 1.0 } else { 0.0 }));
             t.borrow_mut().set_str("momentumCost", Value::Num(cost as f32));
             items.push(Value::Table(t));
         }
@@ -1535,7 +1566,8 @@ fn lui_hud(
         v.dvars.entry("r_monitor".to_owned()).or_insert_with(|| "0".to_owned());
     }
     settings_bridge(hud, &mut io.settings);
-    let open = !hud.host.open_menus().is_empty();
+    let open_names = hud.host.open_menus();
+    let open = !open_names.is_empty();
     // bo2mp: the front end holds his keyboard and mouse (a free, shown
     // pointer) though its main menu is no `Menu.*` child of the root.
     let front_end = io.front.is_some() && !hud.match_mp;
@@ -1544,6 +1576,9 @@ fn lui_hud(
     let open = open && !bo2_loading;
     let state = frame::LuiMenus { active: true, open: open || front_end };
     if *io.menus != state {
+        if io.menus.open != state.open {
+            diag::info!(Ui, "bo2mp lui: menus hold input {} {open_names:?}", state.open);
+        }
         *io.menus = state;
     }
     // A solo game pauses under its menus (Black Ops II's solo pause).
@@ -1613,6 +1648,8 @@ fn lui_hud(
     // bo2mp: his minimap this frame (the engine draws BO2's compass).
     let now_ms = hud.host.now_ms();
     let mut shots = std::mem::take(&mut hud.shots);
+    let mut sweep = std::mem::take(&mut hud.sweep);
+    let mut scan_sound = false;
     let minimap = (hud.match_mp)
         .then(|| {
             let (p, l) = (presented.as_deref()?, local.as_deref()?);
@@ -1620,24 +1657,61 @@ fn lui_hud(
             let ps = p.player(l.0)?;
             let me = ([ps.origin[0], ps.origin[1]], ps.viewangles[1]);
             let my_team = m.team.clone();
+            // BO2 shows an enemy only while his radar is up, or for a moment
+            // after he fires; a jammed map shows none. A UAV pings each
+            // enemy as its line passes him; the satellite (Orbital VSAT)
+            // shows them all the time. In a free-for-all (fourth value)
+            // everyone else is an enemy: the team each player is filed
+            // under there is no side. The fifth value counts the moments
+            // the scripts showed him all his enemies (Lightning Strike).
+            let radar: Vec<i32> = m.radar.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+            let uav = radar.first().copied().unwrap_or(0);
+            let sat = radar.get(1).copied().unwrap_or(0);
+            let live = sat > 0;
+            let jammed = radar.get(2).is_some_and(|v| *v > 0);
+            let ffa = radar.get(3).is_some_and(|v| *v > 0);
+            let pulse = radar.get(4).copied().unwrap_or(0);
+            let killcam = p
+                .snapshot()
+                .is_some_and(|s| s.meta.script_dvars(l.0).string("bo2mp_killcam").is_some_and(|k| k.starts_with("1|") || k.starts_with("2|")));
             let friends: Vec<([f32; 2], f32)> = m
                 .teams
                 .split(',')
                 .filter_map(|e| e.split_once(':'))
-                .filter(|(c, t)| *t == my_team && c.parse::<u32>().ok() != Some(l.0.0))
+                .filter(|(c, t)| !ffa && *t == my_team && c.parse::<u32>().ok() != Some(l.0.0))
                 .filter_map(|(c, _)| p.player(sim::ClientId(c.parse().ok()?)))
                 .map(|ps| ([ps.origin[0], ps.origin[1]], ps.viewangles[1]))
                 .collect();
-            // BO2 shows an enemy only while his team's radar (UAV, satellite)
-            // is up, or for a moment after he fires; a jammed map shows none.
-            let radar: Vec<i32> = m.radar.split_whitespace().filter_map(|x| x.parse().ok()).collect();
-            let spotted = radar.first().is_some_and(|v| *v > 0) || radar.get(1).is_some_and(|v| *v > 0);
-            let jammed = radar.get(2).is_some_and(|v| *v > 0);
-            let enemies: Vec<([f32; 2], f32, bool)> = m
+            let mut view = crate::lui_frontend::MinimapView::of(m, me, friends, Vec::new())?;
+            // The line moves while a UAV or the satellite is up (a sweep a
+            // `compassRadarUpdateTime`, the fast time in mode 2) and starts
+            // over from the map's west edge when both are down.
+            let dt = sweep.last_ms.map_or(0.0, |t| (now_ms - t).max(0.0));
+            sweep.last_ms = Some(now_ms);
+            let old = sweep.progress;
+            if uav <= 0 && sat <= 0 {
+                sweep.progress = 0.0;
+            } else {
+                let mode = if sat > 0 { sat } else { uav };
+                let period = if mode == 2 { RADAR_SWEEP_FAST_MS } else { RADAR_SWEEP_MS };
+                sweep.progress = (old + (dt / period) as f32).rem_euclid(1.0);
+            }
+            let wrapped = sweep.progress < old;
+            let (was, line) = (view.line_at(old), view.line_at(sweep.progress));
+            // The UAV's pings: an enemy the line passed this frame, or who
+            // walked across it; none in a killcam. Each wrap of the line
+            // plays the sweep sound (`mpl_minimap_scan`) instead.
+            let sweeping = uav > 0 && !jammed && !killcam;
+            if uav > 0 && wrapped {
+                scan_sound = true;
+            }
+            let pulsed = pulse > sweep.pulse;
+            sweep.pulse = pulse;
+            let enemies: Vec<([f32; 2], f32, bool, f32)> = m
                 .teams
                 .split(',')
                 .filter_map(|e| e.split_once(':'))
-                .filter(|(c, t)| *t != my_team && matches!(*t, "allies" | "axis") && c.parse::<u32>().ok() != Some(l.0.0))
+                .filter(|(c, t)| (ffa || *t != my_team) && matches!(*t, "allies" | "axis") && c.parse::<u32>().ok() != Some(l.0.0))
                 .filter_map(|(c, _)| {
                     let id: u32 = c.parse().ok()?;
                     let es = p.alive_player(sim::ClientId(id))?;
@@ -1647,13 +1721,49 @@ fn lui_hud(
                         *seen = now_ms;
                     }
                     let firing = now_ms - *seen < 2000.0;
-                    (!jammed && (spotted || firing)).then(|| ([es.origin[0], es.origin[1]], es.viewangles[1], firing))
+                    let at = ([es.origin[0], es.origin[1]], es.viewangles[1]);
+                    let before = sweep.last_pos.insert(id, at.0);
+                    let passed = !wrapped && view.behind_line(was, at.0) != view.behind_line(line, at.0);
+                    let crossed = before.is_some_and(|b| view.behind_line(line, b) != view.behind_line(line, at.0));
+                    if (sweeping && (passed || crossed)) || pulsed {
+                        sweep.pings.insert(id, (at.0, at.1, now_ms));
+                    }
+                    if jammed {
+                        None
+                    } else if live || firing {
+                        Some((at.0, at.1, firing, 1.0))
+                    } else {
+                        let (pos, yaw, t) = *sweep.pings.get(&id)?;
+                        let age = now_ms - t;
+                        (age < RADAR_PING_FADE_MS).then(|| (pos, yaw, false, (1.0 - age / RADAR_PING_FADE_MS).clamp(0.0, 1.0) as f32))
+                    }
                 })
                 .collect();
-            crate::lui_frontend::MinimapView::of(m, me, friends, enemies)
+            if jammed {
+                sweep.pings.clear();
+            }
+            // BO2MP_RADARLOG=1 (test aid): his radar values and the enemy
+            // marks, whenever they change.
+            if std::env::var_os("BO2MP_RADARLOG").is_some() {
+                static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+                let line = format!("radar \"{}\" pulsed {pulsed} team {my_team} pings {} shown {}", m.radar, sweep.pings.len(), enemies.len());
+                if let Ok(mut last) = LAST.lock()
+                    && *last != line
+                {
+                    diag::info!(Ui, "bo2mp radar: {line} teams \"{}\"", m.teams);
+                    *last = line;
+                }
+            }
+            view.enemies = enemies;
+            view.line = (uav > 0 && !jammed).then_some(line);
+            Some(view)
         })
         .flatten();
     hud.shots = shots;
+    hud.sweep = sweep;
+    if scan_sound {
+        io.sounds.write(frame::UiPlaySound { alias: "mpl_minimap_scan".to_owned() });
+    }
     sub[0] = lap(&mut hud_t);
     // (The scripts' whole list once a frame: walking their tree is the dear
     // part. The blur flag sits on a menu container that is no picture or
@@ -1888,6 +1998,16 @@ fn lui_hud(
         );
     }
     let first_blur = dim_at.unwrap_or(usize::MAX);
+    // bo2mp: the whole map's square (FULL) is the underlay's: the picture is
+    // drawn there, and the items widget (the pick cursor, the markers) has a
+    // box of its own in BO2's location selector, so its own square left the
+    // cursor off the map. Left, top, side in the scripts' units.
+    let full_map = drawn.iter().find(|d| d.kind == "compass_under_full").map(|d| {
+        let [x0, y0, x1, y1] = d.rect;
+        let (w, h) = ((x1 - x0).abs(), (y1 - y0).abs());
+        let fit = w.min(h);
+        [x0 + (w - fit) * 0.5, y0 + (h - fit) * 0.5, fit]
+    });
     for (order, d) in drawn.iter().enumerate() {
         let [x0, y0, x1, y1] = d.rect;
         // The scripts' colours are linear (BO2 draws into an sRGB target:
@@ -2238,8 +2358,13 @@ fn lui_hud(
             let mut kids: Vec<(Node, ImageNode, UiTransform)> = Vec::new();
             let mut real_backing = false;
             // The whole map's square inside the widget (FULL).
-            let fit = w.min(h);
-            let (fx0, fy0) = ((w - fit) * 0.5, (h - fit) * 0.5);
+            let (fx0, fy0, fit) = match full_map.filter(|_| full) {
+                Some([mx, my, side]) => ((mx - x0) * scale, (my - y0) * scale, side * scale),
+                None => {
+                    let fit = w.min(h);
+                    ((w - fit) * 0.5, (h - fit) * 0.5, fit)
+                }
+            };
             let flat = |left: f32, top: f32, width: f32, height: f32| Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(left),
@@ -2261,7 +2386,13 @@ fn lui_hud(
                     };
                     let (sw, sh) = (src.texture_descriptor.size.width as usize, src.texture_descriptor.size.height as usize);
                     let n = (w.round() as usize).clamp(32, 320);
-                    let pixels = src.data.as_deref().map(|d| view.render(d, sw, sh, n)).unwrap_or_default();
+                    // BO2's radar line material over the map while a UAV is up.
+                    let line = view.line.and_then(|_| icons.as_deref()?.0.iter().find(|(k, _)| *k == "compass_radarline")).map(|(_, i)| i);
+                    let line = line.and_then(|i| {
+                        let (lw, lh) = (i.texture_descriptor.size.width as usize, i.texture_descriptor.size.height as usize);
+                        Some((i.data.as_deref()?, lw, lh))
+                    });
+                    let pixels = src.data.as_deref().map(|d| view.render(d, sw, sh, n, line)).unwrap_or_default();
                     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
                     let size = Extent3d { width: n as u32, height: n as u32, depth_or_array_layers: 1 };
                     let mut made =
@@ -2317,14 +2448,14 @@ fn lui_hud(
                 } else {
                     Color::WHITE
                 };
-                let mut ping = |name: &str, at: [f32; 2], turn: f32| {
+                let mut ping = |name: &str, at: [f32; 2], turn: f32, alpha: f32| {
                     if at[0] < 0.0 || at[1] < 0.0 || at[0] > w || at[1] > h {
                         return;
                     }
                     let Some(handle) = picture(&mut pictures, icons.as_deref(), &mut image_assets, name) else { return };
                     kids.push((
                         flat(at[0] - arrow * 0.5, at[1] - arrow * 0.5, arrow, arrow),
-                        ImageNode { image: handle, color: ping_tint, ..default() },
+                        ImageNode { image: handle, color: ping_tint.with_alpha(ping_tint.alpha() * alpha), ..default() },
                         UiTransform { rotation: Rot2::radians(turn), ..UiTransform::IDENTITY },
                     ));
                 };
@@ -2341,13 +2472,13 @@ fn lui_hud(
                     }
                 };
                 let turn = |yaw: f32| if full { view.heading(yaw) } else { view.heading(yaw) - me_turn };
-                for (p, yaw, firing) in &view.enemies {
-                    ping(if *firing { "compassping_enemyfiring" } else { "compassping_enemy" }, at(*p), turn(*yaw));
+                for (p, yaw, firing, alpha) in &view.enemies {
+                    ping(if *firing { "compassping_enemyfiring" } else { "compassping_enemy" }, at(*p), turn(*yaw), *alpha);
                 }
                 for (p, yaw) in &view.friends {
-                    ping("compassping_friendly_mp", at(*p), turn(*yaw));
+                    ping("compassping_friendly_mp", at(*p), turn(*yaw), 1.0);
                 }
-                ping("compassping_player", at(view.me.0), turn(view.me.1));
+                ping("compassping_player", at(view.me.0), turn(view.me.1), 1.0);
                 // Picking a spot (bo2mp_locsel "<material> <radius>"): the
                 // selector where his cursor is, its radius to the map's scale.
                 let locsel = hud.sent.as_ref().and_then(|v| v.mp.as_ref()).map(|m| m.locsel.clone()).unwrap_or_default();
@@ -2359,12 +2490,26 @@ fn lui_hud(
                     let radius: f32 = radius.trim().parse().unwrap_or(0.0);
                     let span = view.span_size();
                     let (sw, sh) = ((2.0 * radius / span[0]).max(0.02) * fit, (2.0 * radius / span[1]).max(0.02) * fit);
-                    let (cx, cy) = (fx0 + c.at[0] * fit, fy0 + c.at[1] * fit);
-                    kids.push((
-                        flat(cx - sw * 0.5, cy - sh * 0.5, sw, sh),
-                        ImageNode { image: handle, ..default() },
-                        UiTransform::IDENTITY,
-                    ));
+                    let (cx, cy) = (fx0 + c.at[0].clamp(0.0, 1.0) * fit, fy0 + c.at[1].clamp(0.0, 1.0) * fit);
+                    // The part of the selector over the map: past the map's
+                    // edge it is cut off, not drawn over the blurred world.
+                    let (l, t) = (cx - sw * 0.5, cy - sh * 0.5);
+                    let (x_lo, y_lo) = (l.max(fx0), t.max(fy0));
+                    let (x_hi, y_hi) = ((l + sw).min(fx0 + fit), (t + sh).min(fy0 + fit));
+                    if x_hi > x_lo && y_hi > y_lo {
+                        let size = image_assets.get(&handle).map_or(Vec2::ONE, |i| i.size_f32());
+                        let cut = Rect::new(
+                            (x_lo - l) / sw * size.x,
+                            (y_lo - t) / sh * size.y,
+                            (x_hi - l) / sw * size.x,
+                            (y_hi - t) / sh * size.y,
+                        );
+                        kids.push((
+                            flat(x_lo, y_lo, x_hi - x_lo, y_hi - y_lo),
+                            ImageNode { image: handle, rect: Some(cut), ..default() },
+                            UiTransform::IDENTITY,
+                        ));
+                    }
                 }
             }
             // bo2mp: the HUD map's dark square and thin border (the real

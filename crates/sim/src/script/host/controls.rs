@@ -378,12 +378,32 @@ pub(crate) fn select_location(
         .resource::<crate::step::StepRequest>()
         .reason
         .advances_authority_world();
-    let receiver = world
-        .resource::<Runtime>()
-        .players
-        .get(&client)
-        .map(|slot| Value::Object(slot.object));
-    if let (true, Some(receiver)) = (authority, receiver) {
+    let picked = pressed & (buttons::LOCATION_SELECT | buttons::LOCATION_CANCEL);
+    // bo2mp: in a Black Ops II match its own scripts hear the pick (its
+    // players have a slot in the IW4 runtime too, whose scripts never asked).
+    if authority
+        && picked != 0
+        && crate::t6::location_pick(
+            world,
+            client,
+            cmd.selected_location,
+            pressed & buttons::LOCATION_SELECT != 0,
+        )
+    {
+        diag::info!(
+            Sim,
+            "bo2mp location: client {client} {} at {:?}",
+            if picked & buttons::LOCATION_SELECT != 0 { "picked" } else { "backed out" },
+            cmd.selected_location
+        );
+    } else if let (true, Some(receiver)) = (
+        authority,
+        world
+            .resource::<Runtime>()
+            .players
+            .get(&client)
+            .map(|slot| Value::Object(slot.object)),
+    ) {
         if pressed & buttons::LOCATION_SELECT != 0 {
             let map = world.resource::<Runtime>().engine.minimap;
             let loc = |byte: u8| (f32::from(byte as i8) + 128.0) / 255.0;
@@ -408,16 +428,11 @@ pub(crate) fn select_location(
         } else if pressed & buttons::LOCATION_CANCEL != 0 {
             crate::script::runtime::raise(world, receiver, "cancel_location", Vec::new());
         }
-    } else if authority && pressed & (buttons::LOCATION_SELECT | buttons::LOCATION_CANCEL) != 0 {
-        // bo2mp: a Black Ops II map's own scripts hear the pick.
-        crate::t6::location_pick(
-            world,
-            client,
-            cmd.selected_location,
-            pressed & buttons::LOCATION_SELECT != 0,
-        );
     }
-    cmd.buttons &= buttons::CROUCH | buttons::PRONE;
+    // bo2mp: the pick's own bits stay, so the next command of a held click
+    // (several reach one server frame) is not a new pick: BO2's Lightning
+    // Strike takes three picks, one a click.
+    cmd.buttons &= buttons::CROUCH | buttons::PRONE | buttons::LOCATION_SELECT | buttons::LOCATION_CANCEL;
 }
 
 pub(crate) fn command_buttons(command: &str) -> u32 {

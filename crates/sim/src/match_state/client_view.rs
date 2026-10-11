@@ -121,6 +121,9 @@ pub struct RemoteMissile {
     pub armed: bool,
     pub boosted: bool,
     pub attack: bool,
+    /// bo2mp: it flies on as it was, unsteered (`setmissilecoasting`: the
+    /// Hellstorm once its bomblets are out).
+    pub coasting: bool,
     pub unlink_at_ms: Option<i32>,
 }
 
