@@ -423,6 +423,24 @@ fn menu_input(hud: &mut LuiHud, io: &mut LuiIo<'_, '_>, console_open: bool, curs
     }
 }
 
+/// The party changed (`party_statechanged`, or a menu's
+/// `SystemNeedsUpdate(_, "lobby")`): the lobbies get `partylobby_update` and
+/// `gamelobby_update` with who is in the lobby (him alone).
+fn lobby_update(hud: &mut LuiHud) {
+    let get = hud.host.field("Engine", "GetPlayersInLobby");
+    let members = hud.host.call(get, vec![]).and_then(|r| r.into_iter().next()).unwrap_or(Value::Nil);
+    for event in ["partylobby_update", "gamelobby_update"] {
+        hud.host.root_event(
+            event,
+            &[
+                ("controller", Value::Num(0.0)),
+                ("actualPartyMemberCount", Value::Num(1.0)),
+                ("members", members.clone()),
+            ],
+        );
+    }
+}
+
 /// Carry out what the menus asked of the engine.
 fn engine_calls(hud: &mut LuiHud, io: &mut LuiIo<'_, '_>, local: Option<&LocalPresentClient>) {
     for call in hud.host.take_calls() {
@@ -500,17 +518,18 @@ fn engine_calls(hud: &mut LuiHud, io: &mut LuiIo<'_, '_>, local: Option<&LocalPr
                 // lists (`gamelobby_update`): BO2's lobbies list who is in
                 // them from these events.
                 if word.eq_ignore_ascii_case("party_statechanged") {
-                    let get = hud.host.field("Engine", "GetPlayersInLobby");
-                    let members = hud.host.call(get, vec![]).and_then(|r| r.into_iter().next()).unwrap_or(Value::Nil);
-                    for event in ["partylobby_update", "gamelobby_update"] {
-                        hud.host.root_event(
-                            event,
-                            &[
-                                ("controller", Value::Num(0.0)),
-                                ("actualPartyMemberCount", Value::Num(1.0)),
-                                ("members", members.clone()),
-                            ],
-                        );
+                    lobby_update(hud);
+                    continue;
+                }
+                // `Engine.SystemNeedsUpdate`: a menu changed what the lobby
+                // or the game options show (Change Map sets `ui_mapname`,
+                // then asks for both), so the lobby's map picture and name
+                // and its buttons redraw from the new values.
+                if word.eq_ignore_ascii_case("bo2mpSystemNeedsUpdate") {
+                    match text.split_whitespace().nth(1).unwrap_or("") {
+                        "lobby" => lobby_update(hud),
+                        "game_options" => hud.host.root_event("game_options_update", &[("controller", Value::Num(0.0))]),
+                        _ => {}
                     }
                     continue;
                 }

@@ -977,7 +977,6 @@ pub fn install(host: &mut Host) -> Mp {
     }
     for name in [
         "IsBetaBuild",
-        "SystemNeedsUpdate",
         "IsFeatureBanned",
         "IsLivestreamEnabled",
         "IsItemIndexRestricted",

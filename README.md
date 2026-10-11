@@ -190,6 +190,8 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
 
 ## Recent changes
 
+- 2026-10-11 (r131): Custom Games > Setup Game > Change Map works: the lobby shows the picked map's picture, name
+  and mode, as the original does, and START MATCH loads that map (it used to stay on Aftermath).
 - 2026-10-11 (r130): the Lightning Strike can be called in: its tablet shows where the enemies are as it opens, you
   pick three spots on the map, and the strikes land on those spots in the original's order and timing; the UAV says
   "UAV inbound" and its sweep crosses the minimap every 4 seconds, showing enemies where it finds them and fading them
@@ -303,6 +305,7 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
   and where the strikes land already match the original).
 - The UAV's sweep sound.
 - Two scorestreaks at once, and a key of your own for each scorestreak.
+- Public Match: the original's map rotation and the vote for the next map (being built, tested next).
 - Every map started from the menus: Nuketown 2025 is played from them; the others are checked started directly.
 - Every attachment checked against the original's own numbers and behaviour.
 - FMJ: bullets go through walls and players twice as well, as the original's perk does (bullets already pass

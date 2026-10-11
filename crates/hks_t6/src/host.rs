@@ -564,6 +564,16 @@ impl Host {
             Ok(vec![])
         });
         set_field(&engine, "FetchLeagueTeams", f);
+        // SystemNeedsUpdate(controller, system): a menu changed what a
+        // system shows (Change Map: "lobby", "game_options"); the engine
+        // then tells the menus `<system>` updates (the UI raises them).
+        let c = calls.clone();
+        let f = vm.native("SystemNeedsUpdate", move |_, a| {
+            let system = arg(&a, 1).as_str().map(str::to_owned).unwrap_or_default();
+            c.borrow_mut().push(EngineCall::Exec(format!("bo2mpSystemNeedsUpdate {system}")));
+            Ok(vec![])
+        });
+        set_field(&engine, "SystemNeedsUpdate", f);
         for name in ["IsMigrating", "LockInput", "SetUIActive", "ProbationCheckIfPenalizedForQuit"] {
             set_field(&engine, name, if name == "IsMigrating" || name == "ProbationCheckIfPenalizedForQuit" { falsy.clone() } else { nothing.clone() });
         }
