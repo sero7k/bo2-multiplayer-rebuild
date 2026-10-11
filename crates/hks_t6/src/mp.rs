@@ -897,6 +897,9 @@ pub fn install(host: &mut Host) -> Mp {
         "IsAnyControllerMPRestricted",
         "IsItemLockedForAll",
         "IsPlayerJoinable",
+        // End Game (ranked host) goes on only when this is 0: nobody is
+        // waiting on a host migration.
+        "HostMigrationWaitingForPlayers",
     ] {
         host.bind("UIExpression", name, zero);
     }

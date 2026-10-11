@@ -34,6 +34,10 @@ pub struct LobbyReturn {
     /// After Action Report's "before", BO2's STATS_LOCATION_STABLE).
     pub playlist: Option<i32>,
     pub stats_before: Option<String>,
+    /// End Game ran BO2's `xpartydisbandafterround`: in a public online game
+    /// (Combat Training) the engine marks the public party to disband at the
+    /// round's end, so there is no public lobby to come back to.
+    pub disbanded: bool,
 }
 
 /// The front end's own scripts, pictures and fonts, kept to come back to
@@ -127,12 +131,30 @@ pub(crate) fn open(host: &mut Host, mp: Option<&Mp>, back: Option<&LobbyReturn>)
             m.game_modes.extend(back.game_modes.iter().copied());
             m.playlist = back.playlist;
             // Combat Training's lobby counts down to the next match.
-            if back.playlist.is_some() {
+            if back.playlist.is_some() && !back.disbanded {
                 m.public_start_in = Some(hks_t6::playlists::NEXT_MATCH_MS);
             }
             if let Some(text) = &back.stats_before {
                 m.set_stable_text(text);
             }
+        }
+        // The public party disbanded (End Game): BO2's own way out of that
+        // lobby, `CoD.PublicGameLobby.ShutdownLobby` (it picks LeaveLobby1-3:
+        // stop the party, back to a private one), then the menu its goBack
+        // reaches, the one `PublicGameLobby.New` sets as previous for
+        // multiplayer (publicgamelobby.lua).
+        if back.disbanded && back.menu == "PublicGameLobby" {
+            // The lobby's script loads when its menu first opens; it has not yet.
+            host.require("T6.Menus.PublicGameLobby");
+            let shutdown = host.field("CoD", "PublicGameLobby");
+            let f = host.vm.index(&shutdown, &Value::str("ShutdownLobby")).unwrap_or(Value::Nil);
+            let found = matches!(f, Value::Func(_));
+            let event = hks_t6::value::Table::new_ref();
+            event.borrow_mut().set(Value::str("controller"), Value::Num(0.0));
+            let ran = found && host.call(f, vec![Value::Nil, Value::Table(event)]).is_some();
+            diag::info!(Ui, "bo2mp front end: the public lobby disbanded (End Game; ShutdownLobby found {found}, ran {ran}); back to `PlayerMatchPartyLobby`");
+            host.root_event("open_menu", &[("menuName", Value::str("PlayerMatchPartyLobby"))]);
+            return;
         }
         diag::info!(Ui, "bo2mp front end: back to `{}`", back.menu);
         host.root_event("open_menu", &[("menuName", Value::str(&back.menu))]);
@@ -326,6 +348,7 @@ pub(crate) fn tick(
             settings: v.settings.iter().map(|(k, x)| (k.clone(), *x)).collect(),
             playlist: training.map(|p| p.index),
             stats_before: training.map(|_| mp.borrow().to_text()),
+            disbanded: false,
         });
     }
     commands.insert_resource(setup);

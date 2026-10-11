@@ -170,6 +170,11 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
 
 ## Recent changes
 
+- 2026-10-11 (r128): the final killcam plays for everyone at the end of a match, including a player who is still
+  alive (the original seats every player on it); End Game in the pause menu leaves the match, and from Combat
+  Training it goes back to the Public Match menu, as the original does when the public lobby breaks up; the scripts
+  that run for each life now end when a player dies, so they no longer pile up over a match (one part of the
+  late-match slowdown); with vsync on, frames are queued the way the original leaves them (the graphics default of 3).
 - 2026-10-10 (r127): riot-shield hits use the shield's own model from the original instead of a guessed angle, so
   shots that reach the body or legs before the shield now count, and a shield on the back still stops them; the kill
   replay draws players between the right two snapshots, the way the original does, so they move smoothly instead of
@@ -263,7 +268,11 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
 - Movement speed: walking, sprint, crouch, prone and Lightweight already match the original's numbers; still to
   check the water slowdown and each attachment's aiming speed.
 - A death camera that stays on your body until you respawn or the kill replay starts.
-- No slowdown late in a match (drawing time grows over a match; the cause is not found yet).
+- No slowdown late in a match: the script part is fixed; the drawing time that still grows over a match is not
+  found yet.
+- The announcer clear over gunfire: the original turns the other sounds down while it speaks.
+- The music, sound effects and voice volume sliders (only the master volume works now).
+- End Game counts the quit in your stats the way the original does.
 - The reflex sight's red dot as bright as the original's.
 - Demolition without script errors at a kill.
 - Players never start a match inside a wall.

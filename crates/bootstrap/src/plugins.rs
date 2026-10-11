@@ -51,10 +51,15 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         // inherit the window runner's 60 Hz sleep.
         app.insert_resource(bevy::winit::WinitSettings::continuous());
     } else if !frame::Headless::requested() && !app.world().contains_resource::<frame::Headless>() {
-        // bo2mp: the window he plays in runs flat out; the others (8 games
-        // at once on one PC) draw about 30 times a second
-        // (IW4L_BACKGROUND_FPS, 0 for no limit).
-        let fps = std::env::var("IW4L_BACKGROUND_FPS").ok().and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(30);
+        // bo2mp: the window he plays in runs flat out, focused or not. Test
+        // games are hidden or headless now and keep their own pace above, so
+        // a background cap only slowed his game: with another window focused
+        // it dropped to 30 fps, which read as "laggier towards the end of the
+        // match". IW4L_BACKGROUND_FPS still caps it when set (0 for no limit).
+        let fps = std::env::var("IW4L_BACKGROUND_FPS").ok().and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(0);
+        if fps > 0 {
+            diag::info!(Launch, "window: {fps} fps while another window has focus (IW4L_BACKGROUND_FPS)");
+        }
         app.insert_resource(bevy::winit::WinitSettings {
             focused_mode: bevy::winit::UpdateMode::Continuous,
             unfocused_mode: match fps {
@@ -218,8 +223,10 @@ const FRAME_LATENCY_ENV: &str = "IW4L_FRAME_LATENCY";
 ///
 /// wgpu calls this a hint and the backend is free to clamp it: on Vulkan it is
 /// bound to the number of swapchain images, so a run that asked for two did
-/// not necessarily get two, and only a measurement says which. One is the
-/// default because it is what the runtime shipped; the variable exists so the
+/// not necessarily get two, and only a measurement says which. Three is the
+/// default because it is Black Ops II's: its renderer presents with the sync
+/// interval and never sets a frame latency, so D3D's own default of three
+/// holds. The variable exists so the
 /// other arm needs no rebuild, and the manifest records the number that was
 /// asked for — never the number the driver granted, which this process cannot
 /// read back.
@@ -228,7 +235,7 @@ const FRAME_LATENCY_ENV: &str = "IW4L_FRAME_LATENCY";
 /// default, and says so rather than silently picking an arm. Read once, so the
 /// window and the manifest cannot disagree and the complaint is made once.
 pub(crate) fn frame_latency() -> u32 {
-    const DEFAULT: u32 = 1;
+    const DEFAULT: u32 = 3;
     static FRAMES: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
     *FRAMES.get_or_init(|| {
         let Some(asked) = std::env::var_os(FRAME_LATENCY_ENV) else {

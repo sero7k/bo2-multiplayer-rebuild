@@ -154,7 +154,7 @@ struct LuiIo<'w, 's> {
     /// bo2mp: booted into BO2's multiplayer front end; its match swap.
     front: Option<Res<'w, crate::lui_frontend::Bo2mpFrontend>>,
     /// Where he left the front end for a match (its lobby, reopened).
-    lobby_return: Option<Res<'w, crate::lui_frontend::LobbyReturn>>,
+    lobby_return: Option<ResMut<'w, crate::lui_frontend::LobbyReturn>>,
     identity: Option<Res<'w, frame::LaunchIdentity>>,
     swap: Option<ResMut<'w, session::SessionSwapRequest>>,
     /// bo2mp: a match loading (BO2's own loading screen draws it).
@@ -529,9 +529,22 @@ fn engine_calls(hud: &mut LuiHud, io: &mut LuiIo<'_, '_>, local: Option<&LocalPr
                     hud.back_in = 3;
                     continue;
                 }
+                // End Game as the host: BO2's hostmigration_start with no one
+                // to migrate to ends the match, so the player lands back in
+                // the menus, our disconnect. The party disband after it: a
+                // public online game's lobby goes, so the way back leaves it
+                // (lui_frontend::open).
+                if word.eq_ignore_ascii_case("xpartydisbandafterround") {
+                    if let Some(back) = io.lobby_return.as_deref_mut() {
+                        back.disbanded = back.menu == "PublicGameLobby";
+                        diag::info!(Ui, "bo2mp front end: party disbands after the round ({})", back.disbanded);
+                    }
+                    continue;
+                }
                 let ours = match word {
                     "fast_restart" | "map_restart" => Some("map_restart".to_owned()),
                     "disconnect" | "quit" => Some(word.to_owned()),
+                    "hostmigration_start" => Some("disconnect".to_owned()),
                     _ => None,
                 };
                 match ours {

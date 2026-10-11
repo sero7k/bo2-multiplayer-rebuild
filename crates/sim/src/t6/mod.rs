@@ -833,6 +833,9 @@ pub(crate) fn killcam_seats(world: &World) -> Vec<(ClientId, crate::ScriptSeat)>
         Some(vm.raw_field(o, f))
     };
     let num = |o: ObjRef, name: &str| field(o, name).and_then(|v| v.as_float());
+    // BO2's final replay (_killcam.gsc dofinalkillcam) seats every player,
+    // the living too: the match end freezes them, it does not kill them.
+    let final_kill = field(vm.level, "infinalkillcam").and_then(|v| v.as_int()).is_some_and(|v| v != 0);
     let mut out = Vec::new();
     for (client, p) in &zm.players {
         if p.sessionstate != "spectator" {
@@ -850,6 +853,7 @@ pub(crate) fn killcam_seats(world: &World) -> Vec<(ClientId, crate::ScriptSeat)>
             archive_ms: (archive * 1000.0).round() as i32,
             ps_offset_ms: num(p.obj, "psoffsettime").map_or(0, |v| v as i32),
             length_ms: (num(p.obj, "killcamlength").unwrap_or(0.0) * 1000.0).round() as i32,
+            final_kill,
         };
         out.push((ClientId(*client), seat));
     }

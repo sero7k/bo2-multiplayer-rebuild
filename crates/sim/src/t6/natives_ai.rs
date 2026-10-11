@@ -732,6 +732,15 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             super::playeranim::death(world, id, &means, dir, &weapon);
             crate::script_player::kill(&mut frame(world), tick, id, attacker, None);
             let obj = s.as_obj().unwrap();
+            // The engine's "death" on him, as Black Ops II sends it: every
+            // thread of this life (`self endon("death")`) ends. Without it
+            // each life left about a hundred behind, all woken by his next
+            // shot or weapon switch: the match got slower the longer it ran.
+            // BO2 sends three values with it (player_die): the attacker,
+            // whether it was a headshot, and the weapon's name.
+            let head = Value::Int((means == "MOD_HEAD_SHOT") as i32);
+            let wname = vm.string(&weapon);
+            vm.notify_str(world, obj, "death", &[arg(a, 1).clone(), head, wname]);
             let args = vec![
                 arg(a, 0).clone(),
                 arg(a, 1).clone(),
