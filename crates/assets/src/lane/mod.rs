@@ -55,6 +55,9 @@ pub struct LoadedWorld {
     pub world_weapons: WorldWeaponBuild,
     /// bo2zm: tracers the map zone itself defines.
     pub tracers: asset_game::TracerCatalog,
+    /// bo2mp: the bullet penetration depths the map's zones carry (Black
+    /// Ops II has no common zones read yet; its table comes this way).
+    pub pen_table: Option<weapon_iw4::PenetrationDepthTable>,
     pub facts: crate::MapFacts,
     /// Bytes the zone arenas held while the walk read them. The arenas
     /// themselves die with the walk; only their size travels.

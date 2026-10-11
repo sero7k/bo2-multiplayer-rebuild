@@ -170,6 +170,12 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
 
 ## Recent changes
 
+- 2026-10-11 (r129): bullets pass through players and thin surfaces the way the original works it out, using its own
+  penetration table (how deep a bullet gets into each surface type), with the damage dropping after each target it
+  goes through; a sniper shot can now kill the player behind the one it hits (a collateral), checked for the DSR 50,
+  Ballista, SVU-AS and XPR-50 against the original's numbers; Create a Class: the weapon category list under the
+  guns no longer draws names on top of each other or repeats a row, and every category screen lists the others in
+  the original's order.
 - 2026-10-11 (r128): the final killcam plays for everyone at the end of a match, including a player who is still
   alive (the original seats every player on it); End Game in the pause menu leaves the match, and from Combat
   Training it goes back to the Public Match menu, as the original does when the public lobby breaks up; the scripts
@@ -262,6 +268,11 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
   marker when someone else hits you.
 - Getting up from a dive at the original's speed, and diving over low objects the original way.
 - Bodies that fall without spinning, the way the original's ragdolls throw them.
+- Every scorestreak working as in the original (Lightning Strike can't be called in yet, and the UAV barely shows
+  enemies).
+- Every attachment checked against the original's own numbers and behaviour.
+- FMJ: bullets go through walls and players twice as well, as the original's perk does (bullets already pass
+  through at the base rate).
 - Riot shield: a test that it stops shots from the front exactly as in the original (shots from behind and around
   it are checked).
 - A riot shield carried on the back shows the wrong texture (a sheet of letters) instead of the original's.

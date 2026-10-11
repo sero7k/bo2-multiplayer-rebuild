@@ -79,6 +79,9 @@ pub(crate) struct T6Combat {
     pub hud_fonts: crate::T6HudFonts,
     /// bo2zm M4: Black Ops II's UI scripts and what they read.
     pub ui: crate::T6Ui,
+    /// bo2mp: Black Ops II's bullet penetration depths
+    /// (`info/bullet_penetration_mp`, later zones winning).
+    pub pen_table: Option<weapon_iw4::PenetrationDepthTable>,
     pub report: Vec<String>,
 }
 
@@ -1540,6 +1543,29 @@ pub(crate) fn load_t6_combat(
             .join(", ")
     ));
 
+    // bo2mp: the bullet penetration depths every gun's penetrate type
+    // reads (`BULLET_PEN_TABLE`, keyed by Black Ops II's 32 surfaces).
+    let mut pen_table = None;
+    for (name, bytes) in captures.iter().flat_map(|c| c.raw_files.iter()) {
+        if name.replace('\\', "/") != "info/bullet_penetration_mp" {
+            continue;
+        }
+        match asset_game::parse_pen_table_t6(bytes) {
+            Ok(table) => pen_table = Some(table),
+            Err(e) => report.push(format!("t6 bullet penetration table: {e:?}")),
+        }
+    }
+    match pen_table {
+        Some(table) => report.push(format!(
+            "t6 bullet penetration table: flesh small {} medium {} large {}, wood large {}",
+            table.depth(1, 7),
+            table.depth(2, 7),
+            table.depth(3, 7),
+            table.depth(3, 21)
+        )),
+        None => report.push("t6 bullet penetration table: no info/bullet_penetration_mp".to_owned()),
+    }
+
     // bo2mp vehicle screens: the match zones' named visions
     // (`vision/<name>.vision`, later zones winning a name) for the scripts'
     // `visionsetnaked` and `setvisionsetforplayer` (the VTOL Warship's
@@ -2439,6 +2465,7 @@ pub(crate) fn load_t6_combat(
         hud_icons,
         hud_fonts,
         ui,
+        pen_table,
         report,
     }
 }

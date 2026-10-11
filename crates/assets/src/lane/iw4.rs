@@ -441,6 +441,7 @@ impl ZoneLane for Iw4Lane {
                 weapons: Default::default(), // bo2zm
                 world_weapons: Default::default(), // bo2zm
                 tracers: Default::default(), // bo2zm
+                pen_table: None, // bo2mp
                 facts: crate::MapFacts {
                     compass,
                     script_sound,
@@ -684,6 +685,7 @@ impl ZoneLane for Iw4Lane {
                     weapons: Default::default(), // bo2zm
                 world_weapons: Default::default(), // bo2zm
                 tracers: Default::default(), // bo2zm
+                pen_table: None, // bo2mp
                     facts: crate::MapFacts {
                         minimap_corners,
                         north_yaw,
@@ -729,6 +731,7 @@ impl ZoneLane for Iw4Lane {
                     weapons: Default::default(), // bo2zm
                 world_weapons: Default::default(), // bo2zm
                 tracers: Default::default(), // bo2zm
+                pen_table: None, // bo2mp
                     facts: crate::MapFacts {
                         compass,
                         script_sound,

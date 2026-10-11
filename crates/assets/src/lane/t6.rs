@@ -1140,6 +1140,7 @@ impl ZoneLane for T6Lane {
                     weapons: combat.weapons,
                     world_weapons: combat.world_weapons,
                     tracers: combat.tracers,
+                    pen_table: combat.pen_table,
                     sound: Some(combat.sound),
                     facts,
                     report,

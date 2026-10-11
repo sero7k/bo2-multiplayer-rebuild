@@ -234,6 +234,8 @@ struct Anim {
     duration_ms: f64,
     ease_in: bool,
     ease_out: bool,
+    /// bo2mp: when it began, in order (see `tick`).
+    seq: u64,
 }
 
 /// bo2mp: an entity container (`setupEntityContainer`): an element the
@@ -363,6 +365,15 @@ thread_local! {
     /// bo2mp: inside an edge pointer that turns: its turn (degrees,
     /// counter-clockwise) and the point it turns about (root units).
     static ROT: std::cell::Cell<Option<(f32, f32, f32)>> = const { std::cell::Cell::new(None) };
+    /// bo2mp: animations begun so far (`Anim::seq`).
+    static ANIM_SEQ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn next_anim_seq() -> u64 {
+    ANIM_SEQ.with(|c| {
+        c.set(c.get() + 1);
+        c.get()
+    })
 }
 
 thread_local! {
@@ -494,12 +505,38 @@ fn add_child(parent: &Rc<UserData>, child: &Rc<UserData>, at: Option<(usize, boo
         with(&old, |e| e.children.retain(|c| !Rc::ptr_eq(c, child)));
     }
     with(child, |e| e.parent = Some(Rc::downgrade(parent)));
+    let prio = with(child, |e| e.priority);
     with(parent, |e| match at {
         Some((i, after)) => {
             let i = if after { i + 1 } else { i };
             e.children.insert(i.min(e.children.len()), child.clone());
         }
-        None => e.children.push(child.clone()),
+        // bo2mp: LUI keeps a parent's children in priority order (a new one goes after
+        // the last whose priority is not above its own), so the card carousel's rows
+        // (priority 0, or -100 for the one added on top) sit ahead of the UITimer
+        // (priority 10000) its scroll adds, and a chained scroll finds them in order.
+        None => {
+            let pos = e.children.iter().rposition(|c| with(c, |k| k.priority) <= prio).map_or(0, |i| i + 1);
+            e.children.insert(pos, child.clone());
+        }
+    });
+}
+
+/// bo2mp: after `child`'s priority changed, move it past the siblings it is now
+/// out of order with (equals stay where they are, so a row going from -100 back
+/// to 0 keeps its place).
+fn place_by_priority(parent: &Rc<UserData>, child: &Rc<UserData>) {
+    let prio = with(child, |e| e.priority);
+    with(parent, |e| {
+        let Some(mut i) = e.children.iter().position(|c| Rc::ptr_eq(c, child)) else { return };
+        while i > 0 && with(&e.children[i - 1], |k| k.priority) > prio {
+            e.children.swap(i - 1, i);
+            i -= 1;
+        }
+        while i + 1 < e.children.len() && with(&e.children[i + 1], |k| k.priority) < prio {
+            e.children.swap(i, i + 1);
+            i += 1;
+        }
     });
 }
 
@@ -567,10 +604,18 @@ pub fn tick(now_ms: f64) -> Vec<(Rc<UserData>, String, bool, f64)> {
     l.borrow_mut().now_ms = now_ms;
     let roots = l.borrow().roots.clone();
     let mut done = Vec::new();
-    let mut stack = roots;
+    // bo2mp: animations that end on one frame go to the scripts by end time,
+    // then in the order they began: a UITimer is a plain animation (luitimer.lua
+    // animates to "default" for its interval), so a scroll's rows, begun before
+    // the timer that ends with them, end (and close) first, and a card carousel's
+    // fade_out (begun by lose_focus before the title list's 50 ms timer) moves the
+    // list to the new category before that timer adds the row below it. Tree
+    // order sent the timer first, so the bottom row showed the category before
+    // the old one (SMG twice on the shotguns screen).
+    let mut stack: Vec<_> = roots.into_iter().rev().collect();
     while let Some(u) = stack.pop() {
         let ended = with(&u, |e| {
-            stack.extend(e.children.iter().cloned());
+            stack.extend(e.children.iter().rev().cloned());
             let a = e.anim.as_ref()?;
             let t = if a.duration_ms <= 0.0 { 1.0 } else { (now_ms - a.start_ms) / a.duration_ms };
             let k = ease(t, a.ease_in, a.ease_out) as f32;
@@ -578,15 +623,17 @@ pub fn tick(now_ms: f64) -> Vec<(Rc<UserData>, String, bool, f64)> {
             if t >= 1.0 {
                 let a = e.anim.take()?;
                 e.state = a.to;
-                Some((a.name, (now_ms - a.start_ms - a.duration_ms).max(0.0)))
+                Some((a.name, (now_ms - a.start_ms - a.duration_ms).max(0.0), (a.start_ms + a.duration_ms, a.seq)))
             } else {
                 None
             }
         });
-        if let Some((name, late)) = ended {
-            done.push((u.clone(), name, false, late));
+        if let Some((name, late, at)) = ended {
+            done.push((at, (u.clone(), name, false, late)));
         }
     }
+    done.sort_by(|x, y| x.0 .0.total_cmp(&y.0 .0).then(x.0 .1.cmp(&y.0 .1)));
+    let mut done: Vec<_> = done.into_iter().map(|d| d.1).collect();
     let mut l = l.borrow_mut();
     done.extend(l.finished.drain(..).map(|(u, n, i)| (u, n, i, 0.0)));
     done
@@ -986,7 +1033,10 @@ pub fn install(vm: &mut Vm) {
     reg(vm, n, "setPriority", |_, a| {
         let u = this(&a, "setPriority")?;
         let v = arg(&a, 1).as_num().unwrap_or(0.0);
-        with(&u, |e| e.priority = v);
+        let changed = with(&u, |e| std::mem::replace(&mut e.priority, v) != v);
+        if changed && let Some(p) = with(&u, |e| e.parent.as_ref().and_then(Weak::upgrade)) {
+            place_by_priority(&p, &u);
+        }
         Ok(vec![])
     });
     reg(vm, n, "setUseStencil", |_, a| {
@@ -1093,6 +1143,7 @@ pub fn install(vm: &mut Vm) {
                 duration_ms: ms,
                 ease_in: ei,
                 ease_out: eo,
+                seq: next_anim_seq(),
             });
             old
         });
@@ -1139,6 +1190,7 @@ pub fn install(vm: &mut Vm) {
                     duration_ms: ms,
                     ease_in: ei,
                     ease_out: eo,
+                    seq: next_anim_seq(),
                 });
             }
         });

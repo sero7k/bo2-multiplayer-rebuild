@@ -61,8 +61,8 @@ pub(super) async fn walk_prepared_match(
         shared_surfaces,
         scene_models: mut common_scene_models,
         light_defs: common_light_defs,
-        pen_table: common_pen_table,
-        pen_table_loaded: common_pen_loaded,
+        pen_table: mut common_pen_table,
+        pen_table_loaded: mut common_pen_loaded,
         lochit_table: common_lochit_table,
         tracers: mut common_tracers,
         xmodel_walk,
@@ -172,6 +172,7 @@ pub(super) async fn walk_prepared_match(
         weapons: map_weapons,
         world_weapons: map_world_weapons,
         tracers: map_tracers,
+        pen_table: map_pen_table,
         mut facts,
         arena_bytes: s1_map_bytes,
         sound,
@@ -263,6 +264,13 @@ pub(super) async fn walk_prepared_match(
     // own) join the catalog before anything resolves against it.
     if !map_world_weapons.is_empty() {
         world_weapons.absorb(map_world_weapons);
+    }
+    // bo2mp: Black Ops II's penetration depths come with the map's zones.
+    if !common_pen_loaded {
+        if let Some(table) = map_pen_table {
+            common_pen_table = table;
+            common_pen_loaded = true;
+        }
     }
     if !map_tracers.is_empty() {
         let before = common_tracers.len();

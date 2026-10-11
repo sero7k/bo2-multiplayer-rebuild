@@ -2,6 +2,11 @@ pub const PENETRATE_TYPE_COUNT: usize = 4;
 
 pub const PEN_SURF_TYPE_COUNT: usize = 31;
 
+/// Surfaces a depth table holds: Black Ops II has 32 (its
+/// `penetrationDepthTable` is 4 types by 32 surfaces); the older games' 31
+/// fit inside.
+pub const PEN_TABLE_SURF_COUNT: usize = 32;
+
 pub const SURF_NOPENETRATE: u32 = 0x100;
 
 pub const CONTENTS_GLASS: u32 = 0x10;
@@ -23,6 +28,44 @@ pub const ADVANCE_DOT_MIN: f32 = 0.125;
 pub const RIFLE_COLLATERAL_SCALE: f32 = 0.5;
 
 pub const PEN_THICKNESS_FLOOR: f32 = 1.0;
+
+/// Black Ops II's surface types, in its order (its `bullet_penetration_mp`
+/// keys and its maps' surface flags name these): the older games' list up
+/// to `paintedmetal`, then `player`, `tallgrass` and `riotshield`.
+pub const T6_SURFACE_TYPE_NAMES: [&str; PEN_TABLE_SURF_COUNT] = [
+    "default",
+    "bark",
+    "brick",
+    "carpet",
+    "cloth",
+    "concrete",
+    "dirt",
+    "flesh",
+    "foliage",
+    "glass",
+    "grass",
+    "gravel",
+    "ice",
+    "metal",
+    "mud",
+    "paper",
+    "plaster",
+    "rock",
+    "sand",
+    "snow",
+    "water",
+    "wood",
+    "asphalt",
+    "ceramic",
+    "plastic",
+    "rubber",
+    "cushion",
+    "fruit",
+    "paintedmetal",
+    "player",
+    "tallgrass",
+    "riotshield",
+];
 
 pub const SURFACE_TYPE_NAMES: [&str; PEN_SURF_TYPE_COUNT] = [
     "default",
@@ -85,7 +128,7 @@ impl BulletPenFacts {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PenetrationDepthTable {
-    depths: [[f32; PEN_SURF_TYPE_COUNT]; PENETRATE_TYPE_COUNT],
+    depths: [[f32; PEN_TABLE_SURF_COUNT]; PENETRATE_TYPE_COUNT],
 }
 
 impl Default for PenetrationDepthTable {
@@ -97,16 +140,16 @@ impl Default for PenetrationDepthTable {
 impl PenetrationDepthTable {
     pub const fn empty() -> Self {
         Self {
-            depths: [[0.0; PEN_SURF_TYPE_COUNT]; PENETRATE_TYPE_COUNT],
+            depths: [[0.0; PEN_TABLE_SURF_COUNT]; PENETRATE_TYPE_COUNT],
         }
     }
 
-    pub const fn from_depths(depths: [[f32; PEN_SURF_TYPE_COUNT]; PENETRATE_TYPE_COUNT]) -> Self {
+    pub const fn from_depths(depths: [[f32; PEN_TABLE_SURF_COUNT]; PENETRATE_TYPE_COUNT]) -> Self {
         Self { depths }
     }
 
     pub fn set_depth(&mut self, penetrate_type: usize, surface_type: usize, value: f32) {
-        if penetrate_type < PENETRATE_TYPE_COUNT && surface_type < PEN_SURF_TYPE_COUNT {
+        if penetrate_type < PENETRATE_TYPE_COUNT && surface_type < PEN_TABLE_SURF_COUNT {
             self.depths[penetrate_type][surface_type] = value;
         }
     }
@@ -114,7 +157,7 @@ impl PenetrationDepthTable {
     pub fn depth(self, penetrate_type: i32, surface_type: u32) -> f32 {
         let pt = penetrate_type as usize;
         let st = surface_type as usize;
-        if pt == 0 || pt >= PENETRATE_TYPE_COUNT || st >= PEN_SURF_TYPE_COUNT || st == 0 {
+        if pt == 0 || pt >= PENETRATE_TYPE_COUNT || st >= PEN_TABLE_SURF_COUNT || st == 0 {
             return 0.0;
         }
         self.depths[pt][st]
@@ -156,6 +199,12 @@ fn vec3_mad(a: [f32; 3], s: f32, b: [f32; 3]) -> [f32; 3] {
 }
 
 pub fn split_pen_key(key: &str) -> Option<(usize, usize)> {
+    split_pen_key_in(key, &SURFACE_TYPE_NAMES)
+}
+
+/// `split_pen_key` against a game's own surface list (Black Ops II:
+/// `T6_SURFACE_TYPE_NAMES`).
+pub fn split_pen_key_in(key: &str, surface_names: &[&str]) -> Option<(usize, usize)> {
     let (prefix, surf_name) = key.split_once('_')?;
     let ptype = match prefix {
         "small" => 1usize,
@@ -163,6 +212,6 @@ pub fn split_pen_key(key: &str) -> Option<(usize, usize)> {
         "large" => 3,
         _ => return None,
     };
-    let surf = SURFACE_TYPE_NAMES.iter().position(|&n| n == surf_name)?;
+    let surf = surface_names.iter().position(|&n| n == surf_name)?;
     Some((ptype, surf))
 }

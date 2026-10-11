@@ -319,6 +319,9 @@ fn t6_body_facts(w: &asset_t6::WeaponRef) -> WeaponBodyFacts {
         idle_prone_factor: w.def_f32(d::fIdleProneFactor),
     };
     f.penetrate_type = w.def_i32(d::penetrateTWeaponAttachmentype);
+    // bo2mp: a Black Ops II gun has no penetration multiplier of its own;
+    // the depth table is used as is (only the FMJ perk scales it).
+    f.penetrate_multiplier = 1.0;
     f.rifle_bullet = w.def_u8(d::bRifleBullet) != 0;
     let var_vec3 = |off: usize| [w.var_f32(off), w.var_f32(off + 4), w.var_f32(off + 8)];
     f.stowed_offset = var_vec3(v::stowedModelOffsets);

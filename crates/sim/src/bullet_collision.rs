@@ -1528,6 +1528,19 @@ fn bullet_trace_filtered(
     outcome
 }
 
+/// `IW4L_DAMAGE_LOG`: why a penetrating bullet stopped early (test aid).
+fn pen_stop_log(reason: &str, at: [f32; 3]) {
+    if crate::combat::damage_log() {
+        diag::info!(
+            Sim,
+            "bo2mp damage: bullet stopped ({reason}) at ({:.1} {:.1} {:.1})",
+            at[0],
+            at[1],
+            at[2]
+        );
+    }
+}
+
 fn shield_log_on() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("BO2MP_SHIELDLOG").is_some())
@@ -1904,10 +1917,12 @@ fn fire_penetrate(
     for _ in 0..MAX_PENETRATE_STEPS {
         // A riot shield stops the bullet.
         if is_shield(last_hit.collider) {
+            pen_stop_log("riot shield", last_hit.end);
             break;
         }
         let mut max_depth = table.depth(pen.penetrate_type, last_surf) * pen.penetrate_multiplier;
         if max_depth <= 0.0 {
+            pen_stop_log("no depth for this surface", last_hit.end);
             break;
         }
         let hit_world = is_world(last_hit.collider);
@@ -1950,6 +1965,7 @@ fn fire_penetrate(
                     ignore_hit,
                     (max_depth + PEN_THICKNESS_FLOOR).max(2.0),
                 ) else {
+                    pen_stop_log("started inside a solid it could not leave", start);
                     break;
                 };
                 let mut thickness = segment_length(entry_pos, exit);
@@ -1967,7 +1983,10 @@ fn fire_penetrate(
                 }
                 continue;
             }
-            Decode::Invalid => break,
+            Decode::Invalid => {
+                pen_stop_log("invalid trace", start);
+                break;
+            }
         };
         if let Some(hit) = &fwd_hit {
             if is_open_pane(world, hit.collider) {

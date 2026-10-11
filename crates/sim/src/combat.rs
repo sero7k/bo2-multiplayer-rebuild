@@ -963,6 +963,14 @@ pub(crate) fn ammo_log() -> bool {
     *ON.get_or_init(|| std::env::var_os("IW4L_AMMO_LOG").is_some())
 }
 
+/// bo2mp: `IW4L_DAMAGE_LOG` set = log every bullet that reaches a player:
+/// its damage at that range, the multiplier left after what it passed
+/// through, and the damage dealt (test aid).
+pub(crate) fn damage_log() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("IW4L_DAMAGE_LOG").is_some())
+}
+
 /// bo2mp: `IW4L_SWAP_LOG` set = log how long each alternate (Hybrid Optic)
 /// weapon swap takes, tick by tick (test aid).
 pub(crate) fn swap_log() -> bool {
@@ -1209,6 +1217,21 @@ pub(crate) fn phase_trace(
             };
             let scaled =
                 ((bullet_damage_at_distance(&facts, dist) as f32) * segment.damage_mult) as i32;
+            if damage_log() {
+                diag::info!(
+                    Sim,
+                    "bo2mp damage: shot {:?} segment surface {} at ({:.1} {:.1} {:.1}) exit {} thickness {:.2} into {:?} multiplier {:.3}",
+                    em.shot_id,
+                    segment.surf_type,
+                    segment.end[0],
+                    segment.end[1],
+                    segment.end[2],
+                    exit,
+                    segment.thickness,
+                    segment.collider,
+                    segment.damage_mult
+                );
+            }
             let mut flesh_flags = 0u8;
             if !exit
                 && let Some(ColliderId::Player {
@@ -1218,6 +1241,22 @@ pub(crate) fn phase_trace(
                 }) = segment.collider
             {
                 let head = hud_iw4::obituary_is_headshot(hitloc);
+                if damage_log() {
+                    diag::info!(
+                        Sim,
+                        "bo2mp damage: shot {:?} weapon {} pen type {} x{} hit player {:?} hitloc {:?} at {:.0} base {} pen multiplier {:.3} damage {}",
+                        em.shot_id,
+                        em.weapon,
+                        pen.penetrate_type,
+                        pen.penetrate_multiplier,
+                        victim,
+                        hitloc,
+                        dist,
+                        bullet_damage_at_distance(&facts, dist),
+                        segment.damage_mult,
+                        scaled
+                    );
+                }
                 let mut fatal = false;
                 if world.publishes_snapshot()
                     && scaled > 0
