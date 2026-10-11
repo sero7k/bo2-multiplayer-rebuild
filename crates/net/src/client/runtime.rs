@@ -1649,6 +1649,100 @@ impl GameplaySendPacer {
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct ClientReliableAck(pub u16);
 
+/// BO2MP_KILLCAMLOG=1 prints one line per presented frame while the kill
+/// replay plays, plus a line for every body that moved over 40 units between
+/// two frames. Grep the log for "killcamlog:".
+fn killcam_log_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("BO2MP_KILLCAMLOG").is_some_and(|v| v != "0"))
+}
+
+const KILLCAM_JUMP_UNITS: f32 = 40.0;
+
+#[derive(Default)]
+pub struct KillcamLogState {
+    active: bool,
+    check_jumps: bool,
+    frame: u32,
+    last_origin: HashMap<i32, [f32; 3]>,
+}
+
+impl KillcamLogState {
+    fn note_frame(
+        &mut self,
+        archived: bool,
+        clock_ms: i32,
+        body_ms: i32,
+        proxy: &crate::RemoteProxy,
+    ) {
+        if archived != self.active {
+            diag::info!(
+                Net,
+                "killcamlog: {} clock={clock_ms}",
+                if archived { "replay begins" } else { "replay ends" }
+            );
+            self.frame = 0;
+        }
+        // The frame that ends the replay is still checked for jumps.
+        if archived {
+            self.frame += 1;
+            let left = proxy.snapshot_at(clock_ms).map(|s| s.tick.0 as i32 * AUTHORITY_MS);
+            let right = proxy
+                .snapshot_after(clock_ms)
+                .map(|s| s.tick.0 as i32 * AUTHORITY_MS);
+            let effective = clock_ms.saturating_sub(crate::PROXY_DELAY_MS);
+            let alpha = match (left, right) {
+                (Some(l), Some(r)) if r > l => {
+                    Some(((effective - l) as f32 / (r - l) as f32).clamp(0.0, 1.0))
+                }
+                _ => None,
+            };
+            diag::info!(
+                Net,
+                "killcamlog: frame={} replay_t={clock_ms} effective={effective} body_t={body_ms} left={left:?} right={right:?} alpha={alpha:?}",
+                self.frame
+            );
+        }
+        self.check_jumps = archived || self.active;
+        self.active = archived;
+    }
+
+    fn note_entity(
+        &mut self,
+        number: i32,
+        client_num: i32,
+        e_type: u8,
+        origin: [f32; 3],
+        via_proxy: bool,
+    ) {
+        let was = self.last_origin.insert(number, origin);
+        let Some(was) = was else {
+            return;
+        };
+        if !self.check_jumps {
+            return;
+        }
+        let d = ((origin[0] - was[0]).powi(2)
+            + (origin[1] - was[1]).powi(2)
+            + (origin[2] - was[2]).powi(2))
+        .sqrt();
+        if d > KILLCAM_JUMP_UNITS {
+            diag::info!(
+                Net,
+                "killcamlog: jump frame={} ent={number} client={client_num} e_type={e_type} d={d:.1} from=({:.0} {:.0} {:.0}) to=({:.0} {:.0} {:.0}) via={}",
+                self.frame,
+                was[0],
+                was[1],
+                was[2],
+                origin[0],
+                origin[1],
+                origin[2],
+                if via_proxy { "proxy_pose" } else { "present_pose" }
+            );
+        }
+    }
+}
+
 pub fn publish_presented(
     clock: Res<ClientClock>,
     cg_clock: Res<FrameClock>,
@@ -1663,6 +1757,7 @@ pub fn publish_presented(
     mut present_census: ResMut<PresentLocalCensus>,
     phase: Option<ResMut<crate::UpdatePhaseCensus>>,
     trace: Option<ResMut<ClientPhaseTrace>>,
+    mut killcam_log: Local<KillcamLogState>,
 ) {
     let publish_started = std::time::Instant::now();
     struct PublishStamp<'a> {
@@ -1775,6 +1870,11 @@ pub fn publish_presented(
         cg_clock.time().saturating_sub(AUTHORITY_MS)
     };
 
+    let killcam_log_on = killcam_log_enabled();
+    if killcam_log_on {
+        killcam_log.note_frame(archived, cg_clock.time(), body_time_ms, &proxy.0);
+    }
+
     let mut remote_poses = HashMap::new();
     let mut remote_provenance = HashMap::new();
     for (id, _) in &snapshot.players {
@@ -1802,10 +1902,12 @@ pub fn publish_presented(
     }
     for mut runtime in &mut entities {
         runtime.presented_player = None;
+        let mut via_proxy = false;
         if runtime.pose_e_type as i32 == entity_iw4::ET_PLAYER
             && let Ok(number) = u32::try_from(runtime.next_state.client_num)
             && let Some(ps) = remote_poses.get(&sim::ClientId(number))
         {
+            via_proxy = true;
             runtime.origin = ps.origin;
             runtime.angles = ps.viewangles;
             let provenance = remote_provenance[&sim::ClientId(number)];
@@ -1829,6 +1931,15 @@ pub fn publish_presented(
             ));
         } else {
             runtime.present_pose(body_time_ms);
+        }
+        if killcam_log_on {
+            killcam_log.note_entity(
+                runtime.next_state.number,
+                runtime.next_state.client_num,
+                runtime.pose_e_type,
+                runtime.origin,
+                via_proxy,
+            );
         }
     }
 

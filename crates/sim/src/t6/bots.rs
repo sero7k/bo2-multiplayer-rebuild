@@ -115,6 +115,9 @@ pub(crate) struct Bot {
     neg: Option<(NegLink, i64)>,
     last_press: u32,
     was_mantling: bool,
+    /// BO2MP_BOTFIRELOG: the weapon it held and its magazine at the last
+    /// tick, to tell whether the trigger pull before it let a shot out.
+    fire_dbg: Option<(u32, i32)>,
     pub classes: BTreeMap<i32, BotClass>,
 }
 
@@ -572,6 +575,88 @@ fn nearest_reachable(world: &mut World, p: [f32; 3]) -> Option<u32> {
 fn botlog() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("BO2MP_BOTLOG").is_some())
+}
+
+/// BO2MP_BOTFIRELOG=1 (test aid), read once: one line per bot per tick while
+/// an enemy is in sight or within 400 units, to show why a bot holds fire.
+fn botfirelog() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("BO2MP_BOTFIRELOG").is_some())
+}
+
+/// What a bot's think settled on for the tick, for the fire log.
+struct FireLog {
+    now: i64,
+    /// The view yaw the command carries (after the steering).
+    view_yaw: f32,
+    /// How far the steering still has to turn toward what it chases.
+    steer_err: f32,
+    weapon: u32,
+    wstate: i32,
+    sprinting: bool,
+    /// Its think wanted to sprint (before the trigger took it off).
+    sprint_wanted: bool,
+    allow: bool,
+    delay_until: i64,
+    looking: bool,
+    /// The buttons in its command.
+    press: u32,
+}
+
+/// The fire log's line (BO2MP_BOTFIRELOG): the nearest enemy that is in
+/// sight or within 400 units, how far off its aim is, what the trigger and
+/// sprint did, the gun's state, and whether the pull before this tick let a
+/// shot out (its magazine dropped since).
+fn log_botfire(world: &mut World, n: u32, l: &FireLog) {
+    let clip = frame(world).combat_facts_for(l.weapon).and_then(|facts| {
+        let key = weapon_iw4::clip_table_key(facts.clip_index, l.weapon);
+        frame(world)
+            .player(ClientId(n))
+            .filter(|ps| weapon_iw4::clip_row_present(&ps.ammoclip, key))
+            .map(|ps| weapon_iw4::get_clip_for_hand(&ps.ammoclip, key, 0))
+    });
+    let wtime = frame(world).player(ClientId(n)).map_or(0, |ps| ps.weapon_time);
+    let shot = {
+        let mut zm = world.resource_mut::<Zm>();
+        let Some(b) = zm.bots.get_mut(&n) else { return };
+        let prev = b.fire_dbg.replace((l.weapon, clip.unwrap_or(-1)));
+        prev.is_some_and(|(w, c)| w == l.weapon && c >= 0 && clip.is_some_and(|now| now < c))
+    };
+    let Some(from) = eye(world, n) else { return };
+    let enemies = super::with_vm(world, |vm, world| enemies_of(vm, world, n, true)).unwrap_or_default();
+    let mut best: Option<(f32, u32, bool, [f32; 3])> = None;
+    for e in enemies {
+        let Some(to) = eye(world, e) else { continue };
+        let d = dist3(from, to);
+        if best.is_some_and(|(bd, ..)| bd <= d) {
+            continue;
+        }
+        let seen = sight(world, from, to);
+        if seen || d < 400.0 {
+            best = Some((d, e, seen, to));
+        }
+    }
+    let Some((d, e, seen, to)) = best else { return };
+    let (yaw, _) = angles_to(from, to);
+    diag::info!(
+        Sim,
+        "bo2mp botfire t={} bot={n} enemy={e} dist={d:.0} sight={} yawerr={:.1} steer={:.1} look={} allow={} attack={} sprintbtn={} sprintwant={} sprinting={} wstate={} wtime={wtime} clip={} delay_until={} wait={} shot={}",
+        l.now,
+        u8::from(seen),
+        angle_delta(l.view_yaw, yaw).abs(),
+        l.steer_err,
+        u8::from(l.looking),
+        u8::from(l.allow),
+        u8::from(l.press & buttons::ATTACK != 0),
+        u8::from(l.press & buttons::SPRINT != 0),
+        u8::from(l.sprint_wanted),
+        u8::from(l.sprinting),
+        l.wstate,
+        clip.unwrap_or(-1),
+        l.delay_until,
+        (l.delay_until - l.now).max(0),
+        u8::from(shot),
+    );
 }
 
 fn sight(world: &mut World, from: [f32; 3], to: [f32; 3]) -> bool {
@@ -1802,6 +1887,7 @@ pub(super) fn drive(world: &mut World, now: i64) {
             b.progress = None;
         }
         b.last_press = press;
+        let fire_dbg = botfirelog().then(|| (b.allow_attack, b.fire_delay_until, b.look.is_some()));
         // BO2MP_BOTLOG=1: each bot every 2 s (test aid).
         if now % 2000 == 0 && botlog() {
             diag::info!(
@@ -1840,6 +1926,22 @@ pub(super) fn drive(world: &mut World, now: i64) {
                 .is_some_and(|ids| ids.split(',').any(|i| i.trim().parse::<u32>() == Ok(n)));
             let attack = if firing && (now / 100) % 2 == 0 { buttons::ATTACK } else { 0 };
             (forward, right, press, want) = (0, 0, attack, view);
+        }
+        if let Some((allow, delay_until, looking)) = fire_dbg {
+            let line = FireLog {
+                now,
+                view_yaw: want[1],
+                steer_err: yaw_err,
+                weapon,
+                wstate,
+                sprinting,
+                sprint_wanted: sprint,
+                allow,
+                delay_until,
+                looking,
+                press,
+            };
+            log_botfire(world, n, &line);
         }
         // Its command for the tick, the view turned as a script's
         // setplayerangles turns it (the delta under the command angles).

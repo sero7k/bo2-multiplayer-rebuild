@@ -776,6 +776,7 @@ fn hit_bones(
     if look.model.is_empty() {
         return None;
     }
+    let mut shield_slot: Option<usize> = None;
     let caps: Vec<(Arc<xmodel_runtime::RetainedModelCapability>, Option<String>)> = {
         let f = frame(world);
         let body = f.model_capability(&look.model).flatten()?;
@@ -784,6 +785,14 @@ fn hit_bones(
             if let Some(cap) = f.model_capability(m).flatten() {
                 v.push((cap, Some(tag.clone())));
             }
+        }
+        // The riot shield he bears is a model attached to him like the rest
+        // (in his left hand or on his back), and it has boxes of its own.
+        if let Some((m, tag)) = &look.shield
+            && let Some(cap) = f.model_capability(m).flatten()
+        {
+            shield_slot = Some(v.len());
+            v.push((cap, Some((*tag).to_string())));
         }
         v
     };
@@ -883,7 +892,9 @@ fn hit_bones(
         }
     }
     let mut out = Vec::new();
-    for (slot, (cap, _)) in dobj.models.iter().zip(&caps) {
+    // The shield model's boxes as its own file classes them (for the log).
+    let mut shield_classes: Vec<u8> = Vec::new();
+    for (index, (slot, (cap, _))) in dobj.models.iter().zip(&caps).enumerate() {
         for local in 0..slot.bone_count {
             let Some(Some(bc)) = cap.bone_collision.get(local) else {
                 continue;
@@ -900,8 +911,29 @@ fn hit_bones(
                 continue;
             };
             b.part_classification = bc.part_classification;
+            // A bullet that meets the shield's box is a hit on the shield
+            // ("riotshield", the highest-priority part in BO2's bullet
+            // table), whatever the box's own class number.
+            if shield_slot == Some(index) {
+                shield_classes.push(bc.part_classification);
+                b.part_classification = crate::bullet_collision::HITLOC_SHIELD;
+            }
             out.push(b);
         }
+    }
+    if std::env::var_os("BO2MP_SHIELDLOG").is_some()
+        && look.shield.is_some()
+        && now % 5000 < crate::MATCH_TICK_MS as i64
+    {
+        diag::info!(
+            Sim,
+            "bo2mp shield boxes {c}: {} boxes on the shield model {:?} at {:?} (model loaded: {}, its own classes {shield_classes:?}); the cone fallback is {}",
+            shield_classes.len(),
+            look.shield.as_ref().map(|s| s.0.as_str()),
+            look.shield.as_ref().map(|s| s.1),
+            shield_slot.is_some(),
+            if shield_classes.is_empty() { "in use" } else { "off" }
+        );
     }
     if std::env::var_os("BO2MP_HITLOG").is_some() && now % 5000 < crate::MATCH_TICK_MS as i64 {
         let mut kinds: Vec<u8> = out.iter().map(|b| b.part_classification).collect();

@@ -459,11 +459,13 @@ impl SimContentBuilder {
     }
 }
 
-/// bo2mp: BO2's `shieldPlayerBulletProtectionDegrees`, how far from the way
-/// a riot shield faces a bullet may come and still be stopped. Its default
-/// is not readable (t6mp's code is encrypted); 50 is the float stored with
-/// the dvar's name in t6mp's data, and matches the carried shield's cover
-/// (17 units either side at 18 in front: 43 degrees).
+/// bo2mp: how far from the way a riot shield faces a bullet may come and
+/// still be taken for a hit on it, for a shield whose model gives no boxes
+/// to shoot (the fallback only). BO2 registers `shieldPlayerBulletProtectionDegrees`
+/// at 60 but its bullets never read it: they meet the shield model's own box
+/// (part "riotshield"), which the hit boxes of a player carry when the
+/// model has them. 50 matches the carried shield's cover (17 units either
+/// side at 18 in front: 43 degrees).
 pub(crate) const SHIELD_PROTECTION_DEGREES: f32 = 50.0;
 
 #[derive(Component, Clone, Debug)]

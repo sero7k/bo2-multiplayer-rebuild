@@ -958,10 +958,13 @@ pub const HITLOC_SHIELD: u8 = 19;
 /// The surface a riot shield is (its impact effects; nothing goes through).
 pub const SURF_TYPE_RIOTSHIELD: u32 = 29;
 
-/// A riot shield on a player (Black Ops II): BO2's engine stops a bullet
-/// fired at a shield-bearing player when it comes from within
-/// `shieldPlayerBulletProtectionDegrees` of the way the shield faces — his
-/// forward for the shield in his hands, his back for the one stowed there.
+/// A riot shield on a player (Black Ops II), for when the shield's model
+/// gives no boxes of its own to shoot. Black Ops II's bullets meet the
+/// shield as its own part of his body (a box on the model in his hand, or on
+/// his back, that outranks the body's parts); this stands in for that box
+/// only when it is missing: a bullet from within the angle of the way the
+/// shield faces — his forward for the shield in his hands, his back for the
+/// one stowed there — is taken for a hit on the shield.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ShieldCover {
     /// The way the shield faces (flat, unit length).
@@ -980,8 +983,14 @@ impl ShieldCover {
     }
 }
 
-/// A hit on a shield-bearing player from the side his shield faces is a
-/// hit on the shield.
+/// True when the shield he bears has boxes of its own among his bones.
+fn has_shield_box(pose: &PlayerCollisionPose) -> bool {
+    pose.bones.iter().any(|b| b.part_classification == HITLOC_SHIELD)
+}
+
+/// With no box of its own, a hit on a shield-bearing player from the side
+/// his shield faces is taken for a hit on the shield. (A pose with the
+/// shield's boxes needs none: the bullet meets them or the body directly.)
 fn shield_hits(candidates: &mut [TraceCandidate], players: &[PlayerCollisionPose], query: &BulletTraceQuery) {
     let dir = [
         query.end[0] - query.start[0],
@@ -993,6 +1002,7 @@ fn shield_hits(candidates: &mut [TraceCandidate], players: &[PlayerCollisionPose
             && players
                 .iter()
                 .find(|p| p.client == client && p.life_sequence == life)
+                .filter(|p| !has_shield_box(p))
                 .and_then(|p| p.shield)
                 .is_some_and(|s| s.stops(dir))
         {
@@ -1511,7 +1521,96 @@ fn bullet_trace_filtered(
     }
 
     shield_hits(&mut candidates, players, query);
-    select_first_hit(query, &mut candidates)
+    let outcome = select_first_hit(query, &mut candidates);
+    if shield_log_on() {
+        log_shield_holders(players, query, entity_end, &candidates, &outcome);
+    }
+    outcome
+}
+
+fn shield_log_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("BO2MP_SHIELDLOG").is_some())
+}
+
+/// `BO2MP_SHIELDLOG=1`: for each bullet that reaches a player bearing a
+/// riot shield, whether it hit the shield or a part of his body (and which),
+/// or went by him.
+fn log_shield_holders(
+    players: &[PlayerCollisionPose],
+    query: &BulletTraceQuery,
+    reach: [f32; 3],
+    candidates: &[TraceCandidate],
+    outcome: &TraceOutcome,
+) {
+    let name_of = |hitloc: u8| -> &'static str {
+        if hitloc == HITLOC_SHIELD {
+            "riotshield"
+        } else {
+            crate::t6::T6_HITLOC_NAMES.get(usize::from(hitloc)).copied().unwrap_or("none")
+        }
+    };
+    for pose in players {
+        let shield_boxes = pose.bones.iter().filter(|b| b.part_classification == HITLOC_SHIELD).count();
+        if (pose.shield.is_none() && shield_boxes == 0)
+            || query.ignore == Some(pose.client)
+            || query.ignore_hit == Some(pose.client)
+            || query.mask & CONTENTS_BODY == 0
+        {
+            continue;
+        }
+        let (mins, maxs) = pose_bones_aabb(pose).unwrap_or_else(|| {
+            (
+                [
+                    pose.origin[0] + pose.mins[0],
+                    pose.origin[1] + pose.mins[1],
+                    pose.origin[2] + pose.mins[2],
+                ],
+                [
+                    pose.origin[0] + pose.maxs[0],
+                    pose.origin[1] + pose.maxs[1],
+                    pose.origin[2] + pose.maxs[2],
+                ],
+            )
+        });
+        if matches!(ray_aabb_box(query.start, reach, mins, maxs), RayAabb::Miss) {
+            continue;
+        }
+        let mut crossed: Vec<(f32, &'static str)> = candidates
+            .iter()
+            .filter_map(|c| match c.collider {
+                ColliderId::Player { client, life, hitloc } if client == pose.client && life == pose.life_sequence => {
+                    Some((c.fraction, name_of(hitloc)))
+                }
+                _ => None,
+            })
+            .collect();
+        crossed.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        let crossed: Vec<String> = crossed.iter().map(|(f, n)| format!("{n}@{f:.3}")).collect();
+        let verdict = match outcome {
+            TraceOutcome::Hit {
+                collider: ColliderId::Player { client, hitloc, .. },
+                fraction,
+                ..
+            } if *client == pose.client => {
+                if *hitloc == HITLOC_SHIELD {
+                    format!("hit SHIELD at {fraction:.3}")
+                } else {
+                    format!("hit BODY {} at {fraction:.3}", name_of(*hitloc))
+                }
+            }
+            TraceOutcome::Hit { fraction, .. } => format!("blocked by something else at {fraction:.3}"),
+            TraceOutcome::StartSolid { .. } => "started inside something".to_string(),
+            _ => "MISSED him".to_string(),
+        };
+        diag::info!(
+            Sim,
+            "bo2mp shield: holder {}: bullet {verdict}; his boxes on its line (nearest first) [{}]; shield boxes {shield_boxes}; cone fallback {}",
+            pose.client.0,
+            crossed.join(", "),
+            if shield_boxes == 0 && pose.shield.is_some() { "in use" } else { "off" }
+        );
+    }
 }
 
 pub fn bullet_trace_segments(

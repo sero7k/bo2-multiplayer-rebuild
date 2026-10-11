@@ -129,11 +129,20 @@ pub fn sync_client_entities(
             local.as_ref().is_some_and(|local| *id == local.0) && !ps.is_live_frame()
         })
     });
+    // In a replay the entities blend from the snapshot the clock has passed to
+    // the one after it, so the clock always sits between the pair (as the live
+    // pair does). Taking the one it has already passed leaves the blend
+    // finished, and every body steps once per snapshot.
     let selected = if archived {
         proxy
             .as_ref()
             .zip(clock.as_ref())
-            .and_then(|(proxy, clock)| proxy.0.snapshot_at(clock.time()))
+            .and_then(|(proxy, clock)| {
+                proxy
+                    .0
+                    .snapshot_after(clock.time())
+                    .or_else(|| proxy.0.snapshot_at(clock.time()))
+            })
     } else {
         None
     };
@@ -148,6 +157,9 @@ pub fn sync_client_entities(
     {
         return;
     }
+    // Going into or out of a replay every body is set where the other world
+    // has it, not slid there from where it was.
+    let seat_changed = selected_tick.is_some_and(|(_, was_archived)| was_archived != archived);
     *selected_tick = key;
     let players = next
         .map(|snapshot| snapshot.players.as_slice())
@@ -177,6 +189,7 @@ pub fn sync_client_entities(
         archived
             .then(|| local.as_ref().map(|local| local.0))
             .flatten(),
+        seat_changed,
         CEntitySyncArm::Client,
         Some(&mut census),
     );
@@ -225,6 +238,7 @@ pub(crate) fn sync_authority_entities(
         at_time_ms,
         false,
         None,
+        false,
         CEntitySyncArm::Authority,
         Some(&mut census),
     );
@@ -283,6 +297,7 @@ fn sync_snapshot_entities(
     at_time_ms: i32,
     pair_ready: bool,
     seated_viewer: Option<ClientId>,
+    reset_all: bool,
     arm: CEntitySyncArm,
     mut census: Option<&mut CEntityBirthCensus>,
 ) {
@@ -361,7 +376,11 @@ fn sync_snapshot_entities(
         if valid {
             let entity = slots.slots[index].expect("valid slot").entity;
             if let Ok(mut runtime) = runtimes.get_mut(entity) {
-                apply_existing(&mut runtime, next_state, at_time_ms);
+                if reset_all {
+                    reset_entity(&mut runtime, next_state, at_time_ms, false);
+                } else {
+                    apply_existing(&mut runtime, next_state, at_time_ms);
+                }
             }
             if let Some(census) = census.as_mut() {
                 census.note_apply(arm);

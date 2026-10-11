@@ -170,6 +170,10 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
 
 ## Recent changes
 
+- 2026-10-10 (r127): riot-shield hits use the shield's own model from the original instead of a guessed angle, so
+  shots that reach the body or legs before the shield now count, and a shield on the back still stops them; the kill
+  replay draws players between the right two snapshots, the way the original does, so they move smoothly instead of
+  jumping around.
 - 2026-10-10: scorestreaks are earned again with Hardline (the perks' own numbers were never set, so a Hardline
   kill counted for nothing; every perk now has the original's values), the announcer speaks (match start, lead
   taken and lost, one minute left, time's up, win or loss) along with the match-end countdown, enemy names are red
@@ -253,10 +257,11 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
   marker when someone else hits you.
 - Getting up from a dive at the original's speed, and diving over low objects the original way.
 - Bodies that fall without spinning, the way the original's ragdolls throw them.
-- Riot-shield hit boxes exactly as in the original.
+- Riot shield: a test that it stops shots from the front exactly as in the original (shots from behind and around
+  it are checked).
+- A riot shield carried on the back shows the wrong texture (a sheet of letters) instead of the original's.
 - Movement speed: walking, sprint, crouch, prone and Lightweight already match the original's numbers; still to
   check the water slowdown and each attachment's aiming speed.
-- A kill replay without players jumping around.
 - A death camera that stays on your body until you respawn or the kill replay starts.
 - No slowdown late in a match (drawing time grows over a match; the cause is not found yet).
 - The reflex sight's red dot as bright as the original's.
