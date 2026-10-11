@@ -6,9 +6,8 @@ use fastfile_iw4::{
     load_zone,
 };
 
-use crate::discover::{
-    GamesRoot, find_runtime_zone, find_t5_localized_zone, find_zone_file, find_zone_file_version,
-};
+use crate::discover::{GamesRoot, find_runtime_zone, find_zone_file, find_zone_file_version};
+use asset_transport::discover::find_t5_localized_zone;
 use crate::sound_catalog::SoundCatalog;
 use crate::zone::{ZoneMemory, open_zone_shared};
 use crate::zone_sound::{ZoneSoundOrigin, ensure_zone_sound};
