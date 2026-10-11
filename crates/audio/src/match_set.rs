@@ -271,14 +271,36 @@ fn queue_match_clips(
         // bo2mp: the team announcer (`vox_<faction>_<line>`: match ending
         // soon, lead taken/lost, ...), ready before the script plays it.
         let announcer_lines = crate::match_voices::t6_announcer_aliases(&bank.0);
+        let voice = crate::match_voices::T6Announcer::from_env();
+        if voice == crate::match_voices::T6Announcer::Bo1 {
+            let routes = crate::match_voices::t6_bo1_routes(&bank.0, &announcer_lines);
+            diag::info!(
+                Audio,
+                "audio: announcer: Black Ops 1 voice for {} of {} Black Ops II lines (the rest keep Black Ops II's voice)",
+                routes.len(),
+                announcer_lines.len()
+            );
+            if routes.is_empty() {
+                diag::warn!(
+                    Audio,
+                    "audio: announcer: no Black Ops 1 lines in the sound bank — is BO1 under IW4L_GAMES (its zone/English/en_{}.ff)?",
+                    asset_audio::BO1_ANNOUNCER_ZONE
+                );
+            }
+            announcer.extend(routes);
+        }
         diag::info!(
             Audio,
-            "audio: announcer: {} Black Ops II team voice lines queued",
+            "audio: announcer: {} Black Ops II team voice lines queued ({voice:?} voice)",
             announcer_lines.len()
         );
         for alias in &announcer_lines {
             aliases += 1;
-            request_named(clips, &bank.0, AssetNamespace::T6, alias, &mut set);
+            let lower = alias.to_ascii_lowercase();
+            let (ns, alias) = announcer
+                .routed(AssetNamespace::T6, &lower)
+                .unwrap_or((AssetNamespace::T6, alias.as_str()));
+            request_named(clips, &bank.0, ns, alias, &mut set);
         }
     }
     for alias in &type10.0 {

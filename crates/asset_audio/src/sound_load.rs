@@ -6,7 +6,9 @@ use fastfile_iw4::{
     load_zone,
 };
 
-use crate::discover::{GamesRoot, find_runtime_zone, find_zone_file, find_zone_file_version};
+use crate::discover::{
+    GamesRoot, find_runtime_zone, find_t5_localized_zone, find_zone_file, find_zone_file_version,
+};
 use crate::sound_catalog::SoundCatalog;
 use crate::zone::{ZoneMemory, open_zone_shared};
 use crate::zone_sound::{ZoneSoundOrigin, ensure_zone_sound};
@@ -232,8 +234,30 @@ fn sound_sources(games: &GamesRoot, map: &Path) -> (Vec<SoundSource>, Vec<SoundS
             "localized_common_mp",
             fastfile_t5::ZONE_VERSION_PC,
         ),
+        bo1_announcer_source(games),
     ];
     (before_map, after_map)
+}
+
+/// BO1's multiplayer announcer (`vox_ops_*`, `vox_rus_*`) is carried by its
+/// maps' language zones, not by `common_mp`. Nuketown's holds both the Black
+/// Ops and Spetsnaz voices, which the BO1 presentation speaks with.
+pub const BO1_ANNOUNCER_ZONE: &str = "mp_nuked";
+
+fn bo1_announcer_source(games: &GamesRoot) -> SoundSource {
+    let found = find_zone_file_version(games, "common_mp", fastfile_t5::ZONE_VERSION_PC)
+        .and_then(|common| find_t5_localized_zone(&common.path, Some("english"), BO1_ANNOUNCER_ZONE))
+        .and_then(|zone| {
+            zone.map(|zone| zone.path)
+                .ok_or_else(|| format!("no language zone for {BO1_ANNOUNCER_ZONE}"))
+        });
+    SoundSource {
+        namespace: AssetNamespace::T5,
+        name: "localized_mp_nuked",
+        found,
+        merge: Merge::Missing,
+        absent: Absent::Skip,
+    }
 }
 
 pub struct SoundSources {

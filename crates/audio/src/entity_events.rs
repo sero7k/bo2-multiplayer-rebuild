@@ -159,13 +159,14 @@ fn entity_event_sound(
     weapons: Option<Res<PreparedWeapons>>,
     bank: Option<Res<SoundBank>>,
     adopted: Option<Res<net::LastAdoptedSnapshot>>,
+    announcer: Option<Res<crate::match_voices::AnnouncerRoutes>>,
     mut output: MessageWriter<WeaponSound>,
     mut play: MessageWriter<crate::AliasCommand>,
     mut unvoiced: Local<HashSet<(i32, u32)>>,
 ) {
     let event = sound.event.event;
     if event == EntityEventKind::SOUND_ALIAS {
-        play_cs_sound_alias(&sound.event, adopted.as_deref(), &mut play);
+        play_cs_sound_alias(&sound.event, adopted.as_deref(), announcer.as_deref(), &mut play);
         return;
     }
     if event == EntityEventKind::SOUND_ALIAS_AS_MASTER {
@@ -276,6 +277,7 @@ fn entity_event_sound(
 fn play_cs_sound_alias(
     payload: &net::DispatchedEntityEvent,
     adopted: Option<&net::LastAdoptedSnapshot>,
+    announcer: Option<&crate::match_voices::AnnouncerRoutes>,
     play: &mut MessageWriter<crate::AliasCommand>,
 ) {
     let index = u8::try_from(payload.payload.event_parm).unwrap_or(0);
@@ -300,6 +302,10 @@ fn play_cs_sound_alias(
             asset_core::AssetNamespace::parse(ns).map(|ns| (ns, name.to_owned()))
         })
         .unwrap_or((asset_core::AssetNamespace::Iw4, alias));
+    let (namespace, alias) = match announcer.and_then(|routes| routes.routed(namespace, &alias)) {
+        Some((namespace, routed)) => (namespace, routed.to_owned()),
+        None => (namespace, alias),
+    };
     play.write(crate::AliasCommand::Play(PlayAlias {
         namespace,
         alias,

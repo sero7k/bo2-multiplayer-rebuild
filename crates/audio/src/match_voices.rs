@@ -101,6 +101,94 @@ pub(crate) fn t6_announcer_aliases(bank: &asset_audio::SoundCatalog) -> Vec<Stri
         .collect()
 }
 
+/// Which announcer a Black Ops II match speaks with. BO1's is the default;
+/// `BO2_ANNOUNCER=bo2` keeps Black Ops II's own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum T6Announcer {
+    Bo1,
+    Bo2,
+}
+
+impl T6Announcer {
+    pub(crate) fn from_env() -> Self {
+        match std::env::var("BO2_ANNOUNCER") {
+            Ok(value) if value.eq_ignore_ascii_case("bo2") => Self::Bo2,
+            _ => Self::Bo1,
+        }
+    }
+}
+
+/// BO2 faction voice → the BO1 voice that replaces it. The side BO2 puts a
+/// faction on picks the voice: the American and allied factions speak as
+/// Black Ops, their opponents as Spetsnaz.
+const T6_TO_T5_VOICE: [(&str, &str); 6] = [
+    ("vox_st6_", "vox_ops_"),
+    ("vox_fbi_", "vox_ops_"),
+    ("vox_isa_", "vox_ops_"),
+    ("vox_pmc_", "vox_rus_"),
+    ("vox_cda_", "vox_rus_"),
+    ("vox_pla_", "vox_rus_"),
+];
+
+/// BO2 lines with no line of the same name in BO1, and the BO1 line said in
+/// their place. Lines whose names match play as themselves; a line in
+/// neither keeps BO2's voice.
+const T6_TO_T5_LINES: &[(&str, &str)] = &[
+    ("koth_start", "hq_start"),
+    ("koth_located", "hq_located"),
+    ("koth_online", "hq_online"),
+    ("koth_secured", "hq_secured"),
+    ("koth_captured", "hq_capture"),
+    ("koth_lost", "hq_capture"),
+    ("sd_bomb_taken", "sd_bomb_taken_taken"),
+    ("kls_planemortar_ready", "kls_airstrike_ready"),
+    ("kls_planemortar_used", "kls_airstrike_used"),
+    ("kls_planemortar_enemy", "kls_airstrike_enemy"),
+    ("kls_straferun_ready", "kls_napalm_ready"),
+    ("kls_straferun_used", "kls_napalm_used"),
+    ("kls_straferun_enemy", "kls_napalm_enemy"),
+    ("kls_mgl_ready", "kls_grim_ready"),
+    ("kls_mgl_used", "kls_grim_used"),
+    ("kls_mgl_enemy", "kls_grim_enemy"),
+    ("kls_predator_ready", "kls_tv_ready"),
+    ("kls_predator_used", "kls_tv_used"),
+    ("kls_predator_enemy", "kls_tv_enemy"),
+    ("kls_littlebird_ready", "kls_cobra_ready"),
+    ("kls_littlebird_used", "kls_cobra_used"),
+    ("kls_littlebird_enemy", "kls_cobra_enemy"),
+    ("kls_playerheli_ready", "kls_huey_ready"),
+    ("kls_playerheli_used", "kls_huey_used"),
+    ("kls_playerheli_enemy", "kls_huey_enemy"),
+    ("kls_microwave_ready", "kls_turret_ready"),
+    ("kls_microwave_used", "kls_turret_used"),
+    ("kls_microwave_enemy", "kls_turret_enemy"),
+];
+
+/// Routes Black Ops II announcer aliases (`vox_<faction>_<line>`) to BO1's
+/// lines in the T5 namespace, where the bank carries them.
+pub(crate) fn t6_bo1_routes(
+    bank: &asset_audio::SoundCatalog,
+    t6_aliases: &[String],
+) -> HashMap<String, (AssetNamespace, String)> {
+    t6_aliases
+        .iter()
+        .filter_map(|alias| {
+            let lower = alias.to_ascii_lowercase();
+            let (t6_prefix, t5_prefix) = T6_TO_T5_VOICE
+                .iter()
+                .find(|(t6, _)| lower.starts_with(t6))?;
+            let line = &lower[t6_prefix.len()..];
+            let line = T6_TO_T5_LINES
+                .iter()
+                .find(|(from, _)| *from == line)
+                .map_or(line, |(_, to)| to);
+            let routed = format!("{t5_prefix}{line}");
+            bank.index_in(AssetNamespace::T5, &routed)?;
+            Some((lower, (AssetNamespace::T5, routed)))
+        })
+        .collect()
+}
+
 const TEAM_MUSIC: [&str; 5] = [
     "spawn_music",
     "victory_music",
@@ -165,6 +253,25 @@ impl AnnouncerRoutes {
 
     pub(crate) fn len(&self) -> usize {
         self.0.len()
+    }
+
+    /// The route for a script-played alias of `namespace`, if one is set.
+    /// Black Ops II's routes are keyed by bare alias name.
+    pub(crate) fn routed(
+        &self,
+        namespace: AssetNamespace,
+        alias: &str,
+    ) -> Option<(AssetNamespace, &str)> {
+        if namespace != AssetNamespace::T6 {
+            return None;
+        }
+        self.0
+            .get(alias)
+            .map(|(ns, routed)| (*ns, routed.as_str()))
+    }
+
+    pub(crate) fn extend(&mut self, routes: HashMap<String, (AssetNamespace, String)>) {
+        self.0.extend(routes);
     }
 
     pub(crate) fn build(
