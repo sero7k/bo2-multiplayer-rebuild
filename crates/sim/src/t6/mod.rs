@@ -554,6 +554,50 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
                 vm.dvars.insert(k.to_owned(), v.to_owned());
             }
         }
+        // The engine's perk dvars at their registered defaults. The scripts
+        // read them (Hardline: a kill's momentum x perk_killstreakMomentumMultiplier
+        // in giveplayermomentumnotification); unset they read 0, so Hardline
+        // gave 0 momentum a kill and no scorestreak was ever earned.
+        for (k, v) in [
+            ("perk_weapswitchmultiplier", "0.5"),
+            ("perk_weapspreadmultiplier", "0.65"),
+            ("perk_weapreloadmultiplier", "0.5"),
+            ("perk_weapratemultiplier", "0.75"),
+            ("perk_weapadsmultiplier", "0.5"),
+            ("perk_weapmeleemultiplier", "0.5"),
+            ("perk_weaptossmultiplier", "0.5"),
+            ("perk_weapequipmentusemultiplier", "0.6"),
+            ("perk_extrabreath", "5"),
+            ("perk_bulletpenetrationmultiplier", "2"),
+            ("perk_sprintmultiplier", "2"),
+            ("perk_grenadetossbacktimer", "2500"),
+            ("perk_killstreakreduction", "1"),
+            ("perk_killstreakmomentummultiplier", "1.2"),
+            ("perk_killstreakdeathpenaltymultiplier", "0.5"),
+            ("perk_delayexplosivetime", "0.9"),
+            ("perk_disarmexplosivetime", "2"),
+            ("perk_speedmultiplier", "1.07"),
+            ("perk_deathstreakcountrequired", "3"),
+            ("perk_sprintrecoverymultiplier", "0.3"),
+            ("perk_healthregenmultiplier", "1.5"),
+            ("perk_damagekickreduction", "0.25"),
+            ("perk_shellshockreduction", "0.5"),
+            ("perk_mantlereduction", "0.4"),
+            ("perk_interactspeedmultiplier", "1.15"),
+            ("perk_throwbackinnerradius", "120"),
+            ("perk_flakjacket", "35"),
+            ("perk_fireproof", "95"),
+            ("perk_armorpiercing", "95"),
+            ("perk_dogsattackghost", "1"),
+            ("perk_blackbirdshowsgpsjammer", "1"),
+            ("perk_fastladderclimbmultiplier", "1.75"),
+            ("perk_marksmanenemynamefadein", "5"),
+            ("perk_marksmanenemynamefadeout", "5"),
+            ("perk_nottargetedbyai_min_speed", "0"),
+            ("perk_nottargetedbyai_graceperiod", "2000"),
+        ] {
+            vm.dvars.entry(k.to_owned()).or_insert_with(|| v.to_owned());
+        }
     }
     for (k, v) in [
         ("mapname", inst.map.as_str()),

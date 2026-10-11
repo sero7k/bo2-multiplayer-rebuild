@@ -82,6 +82,11 @@ fn mp_setting(settings: &BTreeMap<String, String>, name: &str) -> Value {
     match raw {
         Some(v) if v.contains('.') => Value::Float(v.parse().unwrap_or(0.0)),
         Some(v) => Value::Int(v.parse().unwrap_or(0)),
+        // BO2 plays its announcer unless a game type turns it off:
+        // `_globallogic_audio.gsc:496,525` skip every line when
+        // `level.allowannouncer` (this setting) is 0, so an unnamed one must
+        // not read as off.
+        None if key == "allowannouncer" => Value::Int(1),
         None => Value::Int(0),
     }
 }

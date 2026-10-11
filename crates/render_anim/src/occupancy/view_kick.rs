@@ -223,6 +223,9 @@ pub struct SessionViewKick {
     vzoom_scoped: bool,
     /// Aiming through a Hybrid Optic, for the input to read.
     optic_ready: bool,
+
+    /// bo2mp: BO2MP_DEATHCAMLOG - what the view was made from last frame.
+    death_cam_source: Option<&'static str>,
 }
 
 /// bo2mp: hold breath on a scoped sniper (Black Ops II's
@@ -326,6 +329,28 @@ impl HoldBreath {
 }
 
 impl SessionViewKick {
+    /// bo2mp: BO2MP_DEATHCAMLOG=1 writes one line each time the view changes
+    /// what it is made from (alive, eye = his own eyes while dead, corpse =
+    /// his body, spectator, killcam), with the time, so a glitch after a
+    /// death can be matched to the moment the source changed.
+    fn note_death_cam_source(&mut self, time_ms: i32, source: &'static str, pm_type: i32) {
+        if self.death_cam_source == Some(source) {
+            return;
+        }
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *ON.get_or_init(|| std::env::var("BO2MP_DEATHCAMLOG").is_ok_and(|v| v == "1")) {
+            diag::info!(
+                Fpv,
+                "deathcam: t={} source={} was={} pm_type={}",
+                time_ms,
+                source,
+                self.death_cam_source.unwrap_or("none"),
+                pm_type
+            );
+        }
+        self.death_cam_source = Some(source);
+    }
+
     pub fn clear_for_new_life(&mut self) {
         self.state.reset();
         self.sway.reset();
@@ -583,6 +608,7 @@ pub fn sync_camera_from_presented(
         kick.refdef_vieworg = pose.origin;
         kick.refdef_view_angles = pose.angles;
         kick.killcam_focus_distance = focus_distance;
+        kick.note_death_cam_source(clock.time(), "killcam", ps.pm_type);
         return;
     }
     if let Some(pose) = remote_missile_camera(&presented, local.0, clock.time()) {
@@ -662,8 +688,12 @@ pub fn sync_camera_from_presented(
     if presented_is_third_person(&presented, local.0, view.in_killcam()) {
         let Some(pose) = death_watch_camera(&presented, local.0, death_cam_clip.0.as_deref(), corpse_root.as_ref().and_then(|r| r.0))
         else {
+            // No collision to pull the camera back against: it holds.
+            kick.note_death_cam_source(clock.time(), "frozen", ps.pm_type);
             return;
         };
+        let on_body = ps.pm_type > 7 && corpse_root.as_ref().is_some_and(|r| r.0.is_some());
+        kick.note_death_cam_source(clock.time(), if on_body { "corpse" } else { "eye" }, ps.pm_type);
         let pose = earthquake_pose(pose, &presented, clock.time());
         let eye = transform_from_iw_view(pose);
         for mut transform in &mut q {
@@ -684,6 +714,12 @@ pub fn sync_camera_from_presented(
         );
         return;
     }
+    let first_person_source = if ps.pm_type == playerstate_iw4::PM_TYPE_SPECTATOR {
+        "spectator"
+    } else {
+        "alive"
+    };
+    kick.note_death_cam_source(clock.time(), first_person_source, ps.pm_type);
     let offset = presented.view_offset();
     let xyspeed = {
         let vx = ps.velocity[0];

@@ -268,6 +268,18 @@ fn queue_match_clips(
             aliases += 1;
             request_named(clips, &bank.0, AssetNamespace::T6, alias, &mut set);
         }
+        // bo2mp: the team announcer (`vox_<faction>_<line>`: match ending
+        // soon, lead taken/lost, ...), ready before the script plays it.
+        let announcer_lines = crate::match_voices::t6_announcer_aliases(&bank.0);
+        diag::info!(
+            Audio,
+            "audio: announcer: {} Black Ops II team voice lines queued",
+            announcer_lines.len()
+        );
+        for alias in &announcer_lines {
+            aliases += 1;
+            request_named(clips, &bank.0, AssetNamespace::T6, alias, &mut set);
+        }
     }
     for alias in &type10.0 {
         aliases += 1;

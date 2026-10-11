@@ -170,6 +170,12 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
 
 ## Recent changes
 
+- 2026-10-10: scorestreaks are earned again with Hardline (the perks' own numbers were never set, so a Hardline
+  kill counted for nothing; every perk now has the original's values), the announcer speaks (match start, lead
+  taken and lost, one minute left, time's up, win or loss) along with the match-end countdown, enemy names are red
+  and teammates' green in the original's own colours, the class menu inside a match shows the same classes as the
+  lobby, and a body no longer pops back up after the kill replay. Bots, hit markers, the dive, the riot shield, the
+  death camera, the kill replay and body spin are still on the list below.
 - 2026-10-10: aiming down the sights no longer blurs the whole gun (every gun, with or without an optic): the blur
   now works out each gun pixel's distance with the same near plane the gun is drawn with, so only the far end of the
   gun softens, by each weapon's own values (checked side by side against the original with the M27 + reflex sight
@@ -245,15 +251,13 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
   original moves its bots over them.
 - A hit marker and the original's hit sound every time you hit someone, its own headshot marker and sound, and no
   marker when someone else hits you.
-- Enemy names in red.
 - Getting up from a dive at the original's speed, and diving over low objects the original way.
-- Bodies that fall cleanly when a player dies: no glitching, spinning or popping back up.
+- Bodies that fall without spinning, the way the original's ragdolls throw them.
 - Riot-shield hit boxes exactly as in the original.
-- Movement speed checked against the original.
-- Scorestreaks that work from their buttons.
+- Movement speed: walking, sprint, crouch, prone and Lightweight already match the original's numbers; still to
+  check the water slowdown and each attachment's aiming speed.
 - A kill replay without players jumping around.
 - A death camera that stays on your body until you respawn or the kill replay starts.
-- The announcer, and its warning when the match is close to ending.
 - No slowdown late in a match (drawing time grows over a match; the cause is not found yet).
 - The reflex sight's red dot as bright as the original's.
 - Demolition without script errors at a kill.

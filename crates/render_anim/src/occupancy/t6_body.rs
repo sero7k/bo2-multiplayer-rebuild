@@ -450,6 +450,79 @@ struct BodyLocals {
     /// Each body's composition, kept while what he wears and holds stays.
     built: HashMap<u16, Built>,
     spent: BodySpent,
+    /// Which body each corpse entity holds, and how long it has been out of
+    /// the snapshot (so its animation and ragdoll can be kept through a gap).
+    corpse_meta: HashMap<u16, CorpseMeta>,
+    /// The live world's bodies, set aside while a killcam replays the past.
+    live: Option<Box<LiveBodies>>,
+}
+
+/// BO2 lets a ragdoll live 9000 ms (ragdoll_max_life); a corpse that leaves
+/// the snapshot is kept that long, so one that comes back is the same body
+/// carrying on and not a new one standing up again.
+const CORPSE_GAP_KEEP_MS: i32 = 9000;
+
+/// A step back in the clock smaller than this is a hiccup, not a killcam's
+/// replay starting.
+const CLOCK_BACK_REPLAY_MS: i32 = 250;
+
+/// Whether bodies are logged (BO2MP_BODYLOG, as the server side does).
+fn body_log() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("BO2MP_BODYLOG").is_some())
+}
+
+/// Which body a corpse entity holds. BO2 hands each new clone its entity with
+/// the "new body" flag flipped and a fresh use count; this is how that shows
+/// here: the flag and the client it belongs to, as last seen.
+#[derive(Clone, Copy, Debug)]
+struct CorpseMeta {
+    client: u32,
+    new_body_bit: u32,
+    /// How long it has been out of the snapshot (ms of drawn frames).
+    away: i32,
+}
+
+/// What the live world keeps for its bodies, while a killcam's replay uses
+/// the same maps for its own.
+#[derive(Default)]
+struct LiveBodies {
+    tracks: HashMap<u16, BodyTrack>,
+    corpse_bodies: HashMap<(u16, u32, i32), String>,
+    limp: HashMap<u16, (Option<Ragdoll>, bool)>,
+    joints_before: HashMap<u16, (Vec<Vec3>, i32)>,
+    corpse_meta: HashMap<u16, CorpseMeta>,
+}
+
+/// A corpse entity that now holds a different body: everything kept for the
+/// old one goes, so the new one starts its death animation and ragdoll over.
+fn forget_corpse(l: &mut BodyLocals, number: u16) {
+    l.tracks.remove(&number);
+    l.limp.remove(&number);
+    l.joints_before.remove(&number);
+    l.built.remove(&number);
+    l.corpse_bodies.retain(|(n, _, _), _| *n != number);
+}
+
+/// Corpses out of the snapshot this frame grow older; one gone longer than
+/// BO2 keeps a ragdoll is forgotten (the retains that follow drop its state).
+fn age_corpse_gaps(l: &mut BodyLocals, seen: &[u16], frame_ms: i32) {
+    let mut gone: Vec<(u16, i32)> = Vec::new();
+    for (n, m) in &mut l.corpse_meta {
+        if seen.contains(n) {
+            continue;
+        }
+        m.away += frame_ms;
+        if m.away > CORPSE_GAP_KEEP_MS {
+            gone.push((*n, m.away));
+        }
+    }
+    for (n, away) in gone {
+        l.corpse_meta.remove(&n);
+        if body_log() {
+            diag::info!(World, "bo2mp corpse {n}: out of the snapshot {away} ms, its animation and ragdoll are dropped");
+        }
+    }
 }
 
 /// What a body's composition is built from: what he wears, what is in his
@@ -1393,17 +1466,60 @@ fn collect_t6_bodies(
         .map(|c| c.time())
         .unwrap_or_else(|| sim::level_time_ms(snapshot.tick));
     // The clock went back (a killcam's replay starts): every animation
-    // starts again from what the replay shows.
-    if now < locals.last_now {
-        locals.tracks.clear();
-        locals.limp.clear();
-        locals.joints_before.clear();
+    // starts again from what the replay shows. The live world's bodies are
+    // set aside, not thrown away: they carry on when the replay is over.
+    let rewound = now + CLOCK_BACK_REPLAY_MS < locals.last_now;
+    if rewound {
+        let aside = LiveBodies {
+            tracks: std::mem::take(&mut locals.tracks),
+            corpse_bodies: std::mem::take(&mut locals.corpse_bodies),
+            limp: std::mem::take(&mut locals.limp),
+            joints_before: std::mem::take(&mut locals.joints_before),
+            corpse_meta: std::mem::take(&mut locals.corpse_meta),
+        };
+        if locals.live.is_none() {
+            if body_log() {
+                diag::info!(
+                    World,
+                    "bo2mp corpse: the clock went back {} ms, {} bodies' animations and {} ragdolls set aside for the replay",
+                    locals.last_now - now,
+                    aside.tracks.len(),
+                    aside.limp.len()
+                );
+            }
+            locals.live = Some(Box::new(aside));
+        }
     }
     let ragdoll_def = ragdoll_def.and_then(|r| r.0.clone());
-    let dt = (now - locals.last_now).clamp(0, 250) as f32 / 1000.0;
+    let frame_ms = (now - locals.last_now).clamp(0, 250);
+    let dt = frame_ms as f32 / 1000.0;
     locals.last_now = now;
     let local_id = local.as_ref().map(|l| l.0);
     let in_killcam = subject.as_ref().is_some_and(|s| s.in_killcam());
+    // The replay is over: the live world's bodies are back, where they were.
+    if !rewound
+        && !in_killcam
+        && let Some(live) = locals.live.take()
+    {
+        let live = *live;
+        locals.tracks = live.tracks;
+        locals.corpse_bodies = live.corpse_bodies;
+        locals.limp = live.limp;
+        locals.joints_before = live.joints_before;
+        locals.corpse_meta = live.corpse_meta;
+        // Time spent watching the replay is not time the bodies were gone.
+        for m in locals.corpse_meta.values_mut() {
+            m.away = 0;
+        }
+        if body_log() {
+            diag::info!(
+                World,
+                "bo2mp corpse: the replay is over, {} bodies' animations and {} ragdolls carry on",
+                locals.tracks.len(),
+                locals.limp.len()
+            );
+        }
+    }
     let eyes = match subject.as_deref() {
         Some(ViewSubject::Seat {
             focus: Some(focus), ..
@@ -1453,6 +1569,44 @@ fn collect_t6_bodies(
             identity.client()
         };
         let Some(client) = client else { continue };
+        if corpse {
+            // Which body this entity holds: a new one in the same entity (BO2
+            // flips the new-body flag and counts a new use) starts over, the
+            // same one seen again after a gap carries on where it was.
+            let at = identity.number();
+            let bit = runtime.next_state.e_flags & eflags::TELEPORT;
+            match locals.corpse_meta.get(&at).copied() {
+                Some(m) if m.client != client.0 || m.new_body_bit != bit => {
+                    forget_corpse(&mut locals, at);
+                    if body_log() {
+                        diag::info!(
+                            World,
+                            "bo2mp corpse {at}: a new body (client {} flag {bit}, was client {} flag {}) starts its death animation and ragdoll over",
+                            client.0,
+                            m.client,
+                            m.new_body_bit
+                        );
+                    }
+                }
+                Some(m) if m.away > 0 && body_log() => {
+                    diag::info!(
+                        World,
+                        "bo2mp corpse {at}: back after {} ms out of the snapshot, its death animation and {} carry on",
+                        m.away,
+                        if locals.limp.contains_key(&at) { "running ragdoll" } else { "ragdoll (not started)" }
+                    );
+                }
+                _ => {}
+            }
+            locals.corpse_meta.insert(
+                at,
+                CorpseMeta {
+                    client: client.0,
+                    new_body_bit: bit,
+                    away: 0,
+                },
+            );
+        }
         let current = snapshot
             .meta
             .for_client(client)
@@ -1870,8 +2024,13 @@ fn collect_t6_bodies(
         });
     }
     locals.spent.skin += ms_since(skinning);
-    locals.tracks.retain(|n, _| seen.contains(n));
-    locals.built.retain(|n, _| seen.contains(n));
+    // A corpse out of the snapshot for a moment keeps its animation and
+    // ragdoll (until BO2's ragdoll would be gone); everything else goes with
+    // the frame it was last seen in.
+    age_corpse_gaps(&mut locals, &seen, frame_ms);
+    let l = &mut *locals;
+    l.tracks.retain(|n, _| seen.contains(n) || l.corpse_meta.contains_key(n));
+    l.built.retain(|n, _| seen.contains(n));
     let took = ms_since(bodies_started);
     locals.spent.all += took;
     locals.spent.frames += 1;
@@ -1890,9 +2049,10 @@ fn collect_t6_bodies(
             s.corpses - before.corpses
         );
     }
-    locals.corpse_bodies.retain(|(n, _, _), _| seen.contains(n));
-    locals.limp.retain(|n, _| seen.contains(n));
-    locals.joints_before.retain(|n, _| seen.contains(n));
+    let l = &mut *locals;
+    l.corpse_bodies.retain(|(n, _, _), _| seen.contains(n) || l.corpse_meta.contains_key(n));
+    l.limp.retain(|n, _| seen.contains(n) || l.corpse_meta.contains_key(n));
+    l.joints_before.retain(|n, _| seen.contains(n) || l.corpse_meta.contains_key(n));
 
     let _slow_items = SlowGuard::new("t6 ground items");
     let items_started = std::time::Instant::now();

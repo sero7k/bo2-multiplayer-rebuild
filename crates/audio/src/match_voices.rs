@@ -73,6 +73,34 @@ pub(crate) fn team_voice_aliases(
     aliases
 }
 
+/// bo2mp: every `game["voice"][team]` prefix Black Ops II's faction scripts
+/// set (`MP/Factions/faction_*_mp/maps/mp/teams/_teamset_*.gsc:41`, and
+/// `_teamset_multiteam.gsc`): seals, pmc, cd, fbi, isa, pla.
+const T6_ANNOUNCER_PREFIXES: [&str; 6] = [
+    "vox_st6_", "vox_pmc_", "vox_cda_", "vox_fbi_", "vox_isa_", "vox_pla_",
+];
+
+/// bo2mp: the announcer lines of the match's factions. BO2 plays
+/// `game["voice"][team] + game["dialog"][line]` with `playlocalsound`
+/// (`_globallogic_audio.gsc:523-527`), e.g. `vox_st6_timesup`. The map's
+/// zones load only this match's two factions' language zones, so every
+/// T6 alias with one of the six prefixes is one of theirs. They are not in
+/// the weapon or map sets, so without this they were first decoded when the
+/// script played them and missed the start deadline (a late line is dropped).
+pub(crate) fn t6_announcer_aliases(bank: &asset_audio::SoundCatalog) -> Vec<String> {
+    (0..bank.sounds.len())
+        .filter(|&index| bank.namespace_of_alias(index) == AssetNamespace::T6)
+        .filter_map(|index| bank.name_at(index))
+        .filter(|name| {
+            let lower = name.to_ascii_lowercase();
+            T6_ANNOUNCER_PREFIXES
+                .iter()
+                .any(|prefix| lower.starts_with(prefix))
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
 const TEAM_MUSIC: [&str; 5] = [
     "spawn_music",
     "victory_music",

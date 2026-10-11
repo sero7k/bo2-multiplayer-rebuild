@@ -2015,6 +2015,10 @@ pub fn install(host: &mut Host) -> Mp {
         let m = st(&m);
         let m = m.borrow();
         let class = num(&a, 1);
+        // BO2MP_CLASSLOG=1: which class each menu asks for (test runs).
+        if std::env::var_os("BO2MP_CLASSLOG").is_some() {
+            eprintln!("bo2mp classlog: GetCustomClass({class}) key {} primary {:?}", m.class_key(class, "primary"), m.stat(&m.class_key(class, "primary")));
+        }
         let t = Table::new_ref();
         let mut spent = 0;
         for slot in SLOTS {

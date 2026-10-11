@@ -15,6 +15,12 @@ pub struct ViewAngleClamp {
 }
 
 pub fn update_view_angles(ps: &mut PlayerState, cmd: &UserCmd, clamp: ViewAngleClamp) {
+    // bo2mp: in Black Ops II a dead player's view no longer follows the
+    // mouse; the death-watch camera keeps the angles of the moment of death
+    // until the player decides (the kill replay or the respawn).
+    if ps.pm_type == playerstate_iw4::PM_TYPE_DEAD {
+        return;
+    }
     let unclamped = (ps.pm_type == 1 || ps.pm_type == 9) && clamp.unclamped_pitch_bit;
 
     for axis in 0..3usize {

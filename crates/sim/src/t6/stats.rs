@@ -33,7 +33,7 @@ pub fn set_local_match_ranked(ranked: bool) {
     RANKED.store(ranked, std::sync::atomic::Ordering::Relaxed);
 }
 
-pub(crate) fn ranked() -> bool {
+pub fn ranked() -> bool {
     RANKED.load(std::sync::atomic::Ordering::Relaxed) || std::env::var("BO2MP_RANKED").is_ok_and(|v| v == "1")
 }
 

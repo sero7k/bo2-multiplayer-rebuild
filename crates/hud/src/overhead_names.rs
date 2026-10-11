@@ -55,19 +55,19 @@ pub(crate) fn register(app: &mut App) {
     );
 }
 
-/// bo2mp: BO2's name colours. The engine colours a name by its team against
-/// yours (`name_color`: MW2's g_TeamColor_MyTeam / EnemyTeam); these are
-/// BO2's values of the same two dvars, as its kill feed measures them
-/// (`hks_t6` ENGINE_DVARS: your side blue-grey). An enemy's name over his
-/// head is red in BO2 (the engine's enemy red, as `name_color` below), not
-/// the feed's tan.
+/// bo2mp: BO2's name colours. Its overhead names take the relative team
+/// colour (CG_RelativeTeamColor): g_TeamColor_MyTeam for your side,
+/// g_TeamColor_EnemyTeam for the other, g_TeamColor_Spectator for a
+/// spectator, at BO2's own defaults (the same values its Zombies scoreboard
+/// script sets). The kill feed's tan and blue-grey are the faction colours
+/// (g_TeamColor_Axis / Allies), not these.
 fn bo2_name_color(local_team: i32, target_team: i32) -> [f32; 4] {
     if target_team == 3 {
-        [0.65, 0.65, 0.65, 1.0]
+        [0.25, 0.25, 0.25, 1.0]
     } else if local_team != 0 && local_team == target_team {
-        [0.6, 0.64, 0.69, 1.0]
+        [0.4, 0.7, 0.4, 1.0]
     } else {
-        [0.75, 0.25, 0.25, 1.0]
+        [1.0, 0.315, 0.35, 1.0]
     }
 }
 

@@ -9,7 +9,9 @@ use sim::ClientId;
 
 use render_scene::WorldCameraPose;
 
-pub const CG_THIRD_PERSON_ANGLE_MP: f32 = 356.0;
+/// bo2mp: Black Ops II's multiplayer script sets the death-watch camera angle
+/// to 354 (the old 356 was off by two degrees).
+pub const CG_THIRD_PERSON_ANGLE_MP: f32 = 354.0;
 
 pub fn presented_is_third_person(
     presented: &PresentedSnapshot,

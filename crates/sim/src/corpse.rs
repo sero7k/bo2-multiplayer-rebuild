@@ -10,6 +10,10 @@ use crate::bullet_collision::{MASK_PLAYER_SOLID, PLAYER_MAXS, PLAYER_MINS};
 
 pub const G_CLONE_PLAYER_MAX_VELOCITY: f32 = 80.0;
 
+/// Entity-flag bit a clone flips each time its entity number is reused (the same bit the
+/// teleport flag uses, 0x2). The client restarts a body's animation and ragdoll when it flips.
+pub const CLONE_NEW_BODY_FLAG: u32 = playerstate_iw4::eflags::TELEPORT;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlayerCorpseSlot {
     pub occupied: bool,
@@ -88,11 +92,26 @@ impl Default for PlayerCorpsePool {
 }
 
 impl PlayerCorpsePool {
+    /// Next clone entity number. Same as `alloc_clone_entity_with_toggle` without the flag.
     pub fn alloc_clone_entity(&mut self) -> i32 {
-        let entnum = PLAYER_CORPSE_ENTITY_BASE + i32::from(self.spawn_ring);
-        self.spawn_ring = (self.spawn_ring + 1) % MAX_CLIENT_CORPSES as u8;
+        self.alloc_clone_entity_with_toggle().0
+    }
+
+    /// Next clone entity number plus the "new body in this slot" bit for its entity flags.
+    ///
+    /// The ring counts twice around (0..16): the low half picks the entity, and which lap it
+    /// is flips every time the same entity is handed out again, so a reused entity number
+    /// always carries the opposite bit from the body it replaces. That bit is how the client
+    /// tells a new body from the same body seen again. The counter still fits the one wire
+    /// byte the pool already sends.
+    pub fn alloc_clone_entity_with_toggle(&mut self) -> (i32, u32) {
+        let ring_len = MAX_CLIENT_CORPSES as u8;
+        let ring = self.spawn_ring % (ring_len * 2);
+        let entnum = PLAYER_CORPSE_ENTITY_BASE + i32::from(ring % ring_len);
+        let toggle = if ring >= ring_len { CLONE_NEW_BODY_FLAG } else { 0 };
+        self.spawn_ring = (ring + 1) % (ring_len * 2);
         self.clear_entnum(entnum);
-        entnum
+        (entnum, toggle)
     }
 
     pub fn clear_entnum(&mut self, entnum: i32) {
@@ -156,7 +175,7 @@ pub(crate) fn occupy_player_clone(
     time_ms: i32,
 ) -> u8 {
     let pool = world.corpses_mut();
-    let entnum = pool.alloc_clone_entity();
+    let (entnum, new_body_bit) = pool.alloc_clone_entity_with_toggle();
     let slot = pool.get_free(ps.origin);
     let slot = pool.occupy(
         slot,
@@ -169,7 +188,9 @@ pub(crate) fn occupy_player_clone(
             anim: ps.anim(),
             view_height_current: ps.view_height_current,
             weapon: ps.weapon,
-            e_flags: ps.e_flags,
+            // The dead player's own teleport bit means nothing for a body; the new-body bit
+            // replaces it so a reused entity number never repeats the previous body's flags.
+            e_flags: (ps.e_flags & !CLONE_NEW_BODY_FLAG) | new_body_bit,
             tr_type: TR_GRAVITY,
             tr_time: time_ms,
             tr_duration: 0,

@@ -793,8 +793,8 @@ pub(crate) fn match_install(host: &mut Host, stats: &std::path::Path) -> Mp {
     mp
 }
 
-/// After CoD's base: a local online private match (BO2's CUSTOM GAMES; its
-/// classes are the custom match set the server gives), in game, his HUD
+/// After CoD's base: a local online match (BO2's CUSTOM GAMES, or Combat
+/// Training when ranked; its classes are the set the server gives), in game, his HUD
 /// shown; then BO2's own HUD scripts (`T6.HUD`).
 pub(crate) fn match_load(host: &mut Host, mp: &Mp, gametype: &str, map: &str) {
     hks_t6::mp::after_base(host);
@@ -815,8 +815,14 @@ pub(crate) fn match_load(host: &mut Host, mp: &Mp, gametype: &str, map: &str) {
         .iter()
         .filter_map(|m| host.field("CoD", m).as_num())
         .collect();
+    // The class set the menus read is the server's: a ranked match (Combat
+    // Training) gives the public set, any other the custom match set.
     let private = host.field("CoD", "GAMEMODE_PRIVATE_MATCH").as_num().map_or(1, |n| n as i32);
-    mp.borrow_mut().game_modes.insert(private);
+    if sim::local_match_ranked() {
+        mp.borrow_mut().game_modes.remove(&private);
+    } else {
+        mp.borrow_mut().game_modes.insert(private);
+    }
     {
         let mut v = host.values.borrow_mut();
         for (k, x) in [
