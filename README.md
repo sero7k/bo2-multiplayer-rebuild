@@ -15,6 +15,7 @@ redistributes it. Unofficial fan project, not affiliated with or endorsed by Act
 
 - [Map completion](#map-completion)
 - [Features](#features)
+- [Screenshots](#screenshots)
 - [Requirements](#requirements)
 - [Build and run](#build-and-run)
 - [Configuration](#configuration)
@@ -91,6 +92,49 @@ Mechanics: each map's systems and modes work by Black Ops II's rules. Visuals: s
   screen back to the main menu.
 - **Scorestreaks.** Score earns streaks through the game's own momentum code; bots call in Orbital VSAT,
   Counter-UAV, EMP, Death Machine, War Machine, Swarm, Escort Drone and K9 Unit.
+
+## Screenshots
+
+<!-- shots:start -->
+Drawn by this engine; the art is Black Ops II's own, read from the player's install at run time.
+
+**Aiming down the sights** (fixed 2026-10-10): the gun used to blur whenever you aimed; now the sights and the gun
+stay sharp, as in the original.
+
+| | |
+|---|---|
+| ![Aiming before the fix: the gun blurred](docs/screenshots/ads_before.jpg) | ![Aiming now: the gun stays sharp](docs/screenshots/ads_now.jpg) |
+| Before: the MP7 blurred while aiming | Now: sharp, as in the original |
+
+**Every map** (31), from a spawn point with the HUD hidden, taken 2026-10-11 (build r129). Nuketown 2025
+is the map played from the menus so far; each of the others is checked loading, spawning and playing Team
+Deathmatch with bots when started directly, and picking it from the menus is still to come.
+
+| | | |
+|---|---|---|
+| ![Aftermath](docs/screenshots/mp_la.jpg) | ![Cargo](docs/screenshots/mp_dockside.jpg) | ![Carrier](docs/screenshots/mp_carrier.jpg) |
+| Aftermath | Cargo | Carrier |
+| ![Cove](docs/screenshots/mp_castaway.jpg) | ![Detour](docs/screenshots/mp_bridge.jpg) | ![Dig](docs/screenshots/mp_dig.jpg) |
+| Cove | Detour | Dig |
+| ![Downhill](docs/screenshots/mp_downhill.jpg) | ![Drone](docs/screenshots/mp_drone.jpg) | ![Encore](docs/screenshots/mp_concert.jpg) |
+| Downhill | Drone | Encore |
+| ![Express](docs/screenshots/mp_express.jpg) | ![Frost](docs/screenshots/mp_frostbite.jpg) | ![Grind](docs/screenshots/mp_skate.jpg) |
+| Express | Frost | Grind |
+| ![Hijacked](docs/screenshots/mp_hijacked.jpg) | ![Hydro](docs/screenshots/mp_hydro.jpg) | ![Magma](docs/screenshots/mp_magma.jpg) |
+| Hijacked | Hydro | Magma |
+| ![Meltdown](docs/screenshots/mp_meltdown.jpg) | ![Mirage](docs/screenshots/mp_mirage.jpg) | ![Nuketown 2025](docs/screenshots/mp_nuketown_2020.jpg) |
+| Meltdown | Mirage | Nuketown 2025 |
+| ![Overflow](docs/screenshots/mp_overflow.jpg) | ![Plaza](docs/screenshots/mp_nightclub.jpg) | ![Pod](docs/screenshots/mp_pod.jpg) |
+| Overflow | Plaza | Pod |
+| ![Raid](docs/screenshots/mp_raid.jpg) | ![Rush](docs/screenshots/mp_paintball.jpg) | ![Slums](docs/screenshots/mp_slums.jpg) |
+| Raid | Rush | Slums |
+| ![Standoff](docs/screenshots/mp_village.jpg) | ![Studio](docs/screenshots/mp_studio.jpg) | ![Takeoff](docs/screenshots/mp_takeoff.jpg) |
+| Standoff | Studio | Takeoff |
+| ![Turbine](docs/screenshots/mp_turbine.jpg) | ![Uplink](docs/screenshots/mp_uplink.jpg) | ![Vertigo](docs/screenshots/mp_vertigo.jpg) |
+| Turbine | Uplink | Vertigo |
+| ![Yemen](docs/screenshots/mp_socotra.jpg) |  |  |
+| Yemen |  |  |
+<!-- shots:end -->
 
 ## Requirements
 
@@ -269,7 +313,9 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
 - Getting up from a dive at the original's speed, and diving over low objects the original way.
 - Bodies that fall without spinning, the way the original's ragdolls throw them.
 - Every scorestreak working as in the original (Lightning Strike can't be called in yet, and the UAV barely shows
-  enemies).
+  enemies). Fixes from a check of every scorestreak against the original's scripts are written; each ships once it
+  is proven side by side, Lightning Strike's target pick and the UAV's sweep first.
+- Every map started from the menus: Nuketown 2025 is played from them; the others are checked started directly.
 - Every attachment checked against the original's own numbers and behaviour.
 - FMJ: bullets go through walls and players twice as well, as the original's perk does (bullets already pass
   through at the base rate).
