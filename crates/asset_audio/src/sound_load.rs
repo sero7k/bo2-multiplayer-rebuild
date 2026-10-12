@@ -234,6 +234,7 @@ fn sound_sources(games: &GamesRoot, map: &Path) -> (Vec<SoundSource>, Vec<SoundS
             fastfile_t5::ZONE_VERSION_PC,
         ),
         bo1_announcer_source(games),
+        mw3_announcer_source(),
     ];
     (before_map, after_map)
 }
@@ -242,6 +243,31 @@ fn sound_sources(games: &GamesRoot, map: &Path) -> (Vec<SoundSource>, Vec<SoundS
 /// maps' language zones, not by `common_mp`. Nuketown's holds both the Black
 /// Ops and Spetsnaz voices, which the BO1 presentation speaks with.
 pub const BO1_ANNOUNCER_ZONE: &str = "mp_nuked";
+
+/// `IW4L_VOICE_GAMES`: a folder of games lent for their announcer only (MW3,
+/// for lines BO1 never had). Nothing else is read from it, so a match does
+/// not take in that game's weapons or materials.
+pub fn voice_games_root() -> Option<GamesRoot> {
+    std::env::var_os("IW4L_VOICE_GAMES")
+        .filter(|root| !root.is_empty())
+        .map(|root| GamesRoot(std::path::PathBuf::from(root)))
+}
+
+fn mw3_announcer_source() -> SoundSource {
+    let found = voice_games_root()
+        .ok_or_else(|| "IW4L_VOICE_GAMES is not set".to_owned())
+        .and_then(|root| {
+            find_zone_file_version(&root, "localized_common_mp", fastfile_iw5::ZONE_VERSION_PC)
+        })
+        .map(|zone| zone.path);
+    SoundSource {
+        namespace: AssetNamespace::Iw5,
+        name: "localized_common_mp (MW3 announcer)",
+        found,
+        merge: Merge::Missing,
+        absent: Absent::Skip,
+    }
+}
 
 fn bo1_announcer_source(games: &GamesRoot) -> SoundSource {
     let found = find_zone_file_version(games, "common_mp", fastfile_t5::ZONE_VERSION_PC)

@@ -467,7 +467,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         "clientclaimtrigger",
         "clientreleasetrigger",
         "releaseclaimedtrigger",
-        "showtoplayer",
         "allowtacticalinsertion",
         // Spawn logging flags (BO2's spawn telemetry).
         "setspawnclientflag",

@@ -497,8 +497,14 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         )*};
     }
     flagset!(
-        "hide" => |e| e.hidden = true,
-        "show" => |e| e.hidden = false,
+        "hide" => |e| {
+            e.hidden = true;
+            e.shown_to = None;
+        },
+        "show" => |e| {
+            e.hidden = false;
+            e.shown_to = None;
+        },
         "ghost" => |e| e.hidden = true,
         "notsolid" => |e| e.solid = false,
         "solid" => |e| e.solid = true,
@@ -792,6 +798,22 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             } else {
                 e.invisible_to.remove(&p);
             }
+        }
+        Ok(Value::Undefined)
+    });
+    m!("showtoplayer", |vm, world, s, a| {
+        let Ok(n) = me(vm, world, s) else {
+            return Ok(Value::Undefined);
+        };
+        let Some(p) = entnum(vm, arg(a, 0)) else {
+            return Ok(Value::Undefined);
+        };
+        if let Some(mut zm) = ent_mut(world, n) {
+            let e = zm.ents.get_mut(&n).unwrap();
+            e.hidden = false;
+            e.shown_to
+                .get_or_insert_with(std::collections::BTreeSet::new)
+                .insert(p);
         }
         Ok(Value::Undefined)
     });

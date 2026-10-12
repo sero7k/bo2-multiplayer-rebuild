@@ -259,6 +259,15 @@ pub(crate) fn start_sound_bank_compose(
                 if let Ok(zone) = asset_transport::find_zone_file(&games, &opened_zone) {
                     trees.adopt_zone(&zone.path);
                 }
+                // The MW3 announcer's streamed lines, from the voice-only folder.
+                if trees.get(AssetNamespace::Iw5).is_none()
+                    && let Some(voice) = asset_audio::voice_games_root()
+                {
+                    let voice = NamespaceTrees::discover(&voice);
+                    if let Some(mw3) = voice.get(AssetNamespace::Iw5) {
+                        trees.adopt_zone(&mw3.anchor);
+                    }
+                }
                 NamespaceSoundIwd::open(&trees)
             }))
         }

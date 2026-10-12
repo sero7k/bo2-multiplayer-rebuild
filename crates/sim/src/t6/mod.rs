@@ -226,6 +226,10 @@ pub(crate) struct Ent {
     /// Players a trigger (or model) is hidden from.
     pub invisible_to: BTreeSet<u32>,
     pub invisible_to_all: bool,
+    /// `showtoplayer`: the players a model is drawn for (Kill Confirmed's
+    /// tags: the enemy pair to one side, the friendly pair to the other).
+    /// `None` is everyone; `hide` and `show` clear it.
+    pub shown_to: Option<BTreeSet<u32>>,
     pub trigger_off: bool,
     /// bo2mp: the engine's dropped item (a gun, a scavenger bag) this is.
     pub item: Option<i32>,

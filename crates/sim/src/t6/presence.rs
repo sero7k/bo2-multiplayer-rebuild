@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use bevy_ecs::prelude::World;
 
-use super::{Zm, frame};
+use super::{Ent, Zm, frame};
 use crate::ScriptModelId;
 use crate::bullet_collision::{AuthorityDObjState, EntityCollisionCapabilities};
 
@@ -242,6 +242,19 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
             .find(|p| p.shown && p.model.contains("magic_box"))?;
         (!e.hidden).then(|| (*n, e.origin, e.angles, piece.model.clone()))
     }));
+    // A model shown only to some players (`showtoplayer`) is drawn when one
+    // of them plays at this PC: the server's own humans, not its bots.
+    let humans: Vec<u32> = zm
+        .players
+        .iter()
+        .filter(|(_, p)| !p.test_client)
+        .map(|(c, _)| *c)
+        .collect();
+    let shown_here = |e: &Ent| {
+        e.shown_to
+            .as_ref()
+            .is_none_or(|to| humans.iter().any(|h| to.contains(h)))
+    };
     let mut wanted: BTreeMap<u32, ([f32; 3], [f32; 3], String, Vec<(String, String)>, bool)> = zm
         .ents
         .iter()
@@ -260,7 +273,10 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                     e.angles,
                     e.model.clone(),
                     e.attached.clone(),
-                    e.hidden || e.invisible_to_all || collision_only(&e.model),
+                    e.hidden
+                        || e.invisible_to_all
+                        || !shown_here(e)
+                        || collision_only(&e.model),
                 ),
             )
         })
