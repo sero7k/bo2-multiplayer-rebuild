@@ -131,6 +131,13 @@ pub fn register_remote_body_systems(app: &mut App) {
                 finish_body_draw_plan.after(submit_remote_bodies),
             )
                 .in_set(WorkerCmdSet::AddSceneEnt),
+        )
+        .init_resource::<crate::occupancy::body_path::PlayerBodyCensus>()
+        .add_systems(
+            Update,
+            crate::occupancy::body_path::log_player_body_census
+                .after(finish_body_draw_plan)
+                .after(crate::occupancy::t6_body::T6BodiesCollected),
         );
 }
 
@@ -182,12 +189,18 @@ fn occupy_remote_scene_ents(
             Without<FlyCamera>,
         ),
     >,
+    bo2_script: Option<Res<sim::t6_playeranim::T6PlayerAnimsRes>>,
 ) {
     let Some(bodies) = bodies.as_deref() else {
         return;
     };
     if let Some(world) = world_weapons.as_deref() {
         scene_skels.seed(bodies, world);
+    }
+    // bo2mp: under Black Ops II's rules the players are BO2's characters
+    // (occupancy::t6_body); the map game's soldier kit is never a player.
+    if !crate::occupancy::body_path::legacy_bodies_allowed(bo2_script.as_deref()) {
+        return;
     }
     let live_kits = match (weapons.as_deref(), world_weapons.as_deref()) {
         (Some(weapons), Some(world)) if prepared_kits.owned_by(bodies, weapons, world) => {
@@ -304,8 +317,21 @@ fn sync_remote_bodies(
     subject: Option<Res<ViewSubject>>,
     bodies: Option<Res<PreparedBodies>>,
     existing: Query<(Entity, &CEntity, &CEntityRuntime, Option<&RemotePlayer>)>,
+    bo2_script: Option<Res<sim::t6_playeranim::T6PlayerAnimsRes>>,
 ) {
     let _slow = crate::occupancy::t6_body::SlowGuard::new("sync_remote_bodies");
+    // bo2mp: see `occupy_remote_scene_ents`: no player is the engine's own
+    // remote body under Black Ops II's rules (nor his corpse, nor its gun).
+    if !crate::occupancy::body_path::legacy_bodies_allowed(bo2_script.as_deref()) {
+        for (entity, _, _, remote) in &existing {
+            if remote.is_some() {
+                commands
+                    .entity(entity)
+                    .remove::<(RemotePlayer, RemoteFxBolts)>();
+            }
+        }
+        return;
+    }
     let Some(bodies) = bodies else {
         return;
     };
@@ -508,10 +534,17 @@ fn pose_remote_bodies(
             Without<render_scene::FlyCamera>,
         ),
     >,
+    bo2_script: Option<Res<sim::t6_playeranim::T6PlayerAnimsRes>>,
 ) {
     let _slow = crate::occupancy::t6_body::SlowGuard::new("pose_remote_bodies");
     let (cameras, lod_skinned, mut dobj_poses, mut posed_players, gfx, cg_clock) = dpvs;
     submit.clear();
+    // bo2mp: nothing to pose under Black Ops II's rules (an empty queue
+    // clears the draw plan in `submit_remote_bodies`); BO2's bodies own the
+    // players' poses, heads and gun bolts.
+    if !crate::occupancy::body_path::legacy_bodies_allowed(bo2_script.as_deref()) {
+        return;
+    }
     for (_, _, _, mut bolts, _) in &mut roots {
         *bolts = RemoteFxBolts::default();
     }

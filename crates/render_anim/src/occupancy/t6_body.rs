@@ -296,6 +296,7 @@ pub fn register_t6_body_systems(app: &mut App) {
         .add_systems(
             Update,
             collect_t6_bodies
+                .in_set(T6BodiesCollected)
                 .in_set(frame::RenderSet::Anim)
                 .after(net::PresentedPublished)
                 .before(frame::WorkerCmdSet::CellDynModel),
@@ -315,6 +316,11 @@ pub fn register_t6_body_systems(app: &mut App) {
 /// The BO2 bodies' bones and heads are published for this frame.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct T6BodyPosesPublished;
+
+/// This frame's BO2 bodies are in [`T6BodyModels`] (and counted in the
+/// player body census).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct T6BodiesCollected;
 
 /// Each posed player's bones go where the effect system looks for bolted
 /// effects (his number), and his entity carries his gun's flash and brass
@@ -1432,10 +1438,11 @@ fn collect_t6_bodies(
     local: Option<Res<LocalPresentClient>>,
     subject: Option<Res<ViewSubject>>,
     cg_clock: Option<Res<FrameClock>>,
-    (clip, ragdoll_def, cameras): (
+    (clip, ragdoll_def, cameras, mut census): (
         Option<Res<crate::occupancy::DynEntPhysClip>>,
         Option<Res<sim::t6_ragdoll::T6RagdollRes>>,
         Query<(&GlobalTransform, &Projection, &Camera), With<FpvLens>>,
+        ResMut<crate::occupancy::body_path::PlayerBodyCensus>,
     ),
     mut shapes: ResMut<T6ItemShapes>,
     ents: Query<(Entity, &CEntity, &CEntityRuntime)>,
@@ -1445,6 +1452,7 @@ fn collect_t6_bodies(
     mut sounds: MessageWriter<audio::AliasCommand>,
 ) {
     out.items.clear();
+    census.bo2.clear();
     poses.rows.clear();
     poses.heads.clear();
     poses.local_corpse_root = None;
@@ -1952,6 +1960,13 @@ fn collect_t6_bodies(
                     bones: world.clone(),
                 });
             }
+            census.bo2.push(crate::occupancy::body_path::Bo2BodyDrawn {
+                number,
+                corpse,
+                items: parts.len(),
+                surfaces: parts.iter().map(|p| p.materials.iter().filter(|m| m.is_some()).count()).sum(),
+                body: parts[0].skel.name.clone(),
+            });
             for (i, part) in parts.iter().enumerate() {
                 out.items.push(T6MissileModel {
                     skel: part.skel.clone(),
@@ -2016,6 +2031,7 @@ fn collect_t6_bodies(
     for (job, posed) in skin_jobs.into_iter().zip(skinned) {
         let Some(posed) = posed else {
             unskinned = true;
+            census.bo2.retain(|b| b.number != job.number);
             continue;
         };
         for (k, verts) in posed.iter().enumerate() {
