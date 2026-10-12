@@ -26,6 +26,7 @@ pub(crate) mod cards;
 pub(crate) mod classes;
 pub(crate) mod ingame;
 mod loading;
+mod looks;
 mod online;
 pub(crate) mod options;
 pub(crate) mod pics; // (hud_match reuses the picture resolver)
@@ -61,6 +62,9 @@ pub(crate) enum Screen {
     /// Options (its tab is `page`), Barracks.
     Options,
     Barracks,
+    /// Barracks' calling card and emblem pickers (a page of them, `page`).
+    CardPick,
+    EmblemPick,
     /// Zombies: its lobby (map, start, starting round, START), its map
     /// picker (a page per game, `page`) and the map's starts and modes.
     Zombies,
@@ -107,9 +111,6 @@ pub(crate) enum Setting {
     ZmRound,
     /// An Options row (of the tab he is on).
     Option(u8),
-    /// Barracks: his calling card, his emblem.
-    Card,
-    Emblem,
 }
 
 /// What a row does.
@@ -138,6 +139,8 @@ pub(crate) enum Act {
     ZmPickStart,
     /// Options > ACCOUNT: type a new name.
     TypeName,
+    /// Barracks: open the calling card or emblem picker.
+    Looks(cards::Kind),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -240,6 +243,10 @@ pub(crate) fn pages(c: &Catalog) -> Vec<(String, Vec<usize>)> {
     out
 }
 
+fn rows_len(s: &Shell, c: &Catalog) -> usize {
+    rows(s, c).len()
+}
+
 /// The rows the screen shows.
 pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
     match s.screen {
@@ -300,13 +307,13 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
         }
         Screen::Barracks => {
             let mut r = vec![Row::new("COMBAT RECORD", "Your kills, wins and time played.", Act::Barracks)];
-            for (label, sub, kind, what) in [
-                ("CALLING CARD", "Your calling card, from Modern Warfare 2 and 3.", cards::Kind::Card, Setting::Card),
-                ("EMBLEM", "Your emblem, from Modern Warfare 2 and 3.", cards::Kind::Emblem, Setting::Emblem),
+            for (label, sub, kind) in [
+                ("CALLING CARD", "Your calling card, from Modern Warfare 2 and 3.", cards::Kind::Card),
+                ("EMBLEM", "Your emblem, from Modern Warfare 2 and 3.", cards::Kind::Emblem),
             ] {
                 let stat = if kind == cards::Kind::Card { &c.player.card } else { &c.player.emblem };
-                let mut row = Row::new(label, sub, Act::Cycle(what));
-                row.value = Some(cards::label(&cards::mine(kind, stat)));
+                let mut row = Row::new(label, sub, Act::Looks(kind));
+                row.value = Some(cards::title(&cards::mine(kind, stat)));
                 r.push(row);
             }
             if c.player.can_prestige {
@@ -317,6 +324,11 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
             r
         }
         Screen::Zombies | Screen::ZmMapPick | Screen::ZmStartPick => zombies::rows(s),
+        Screen::CardPick | Screen::EmblemPick => {
+            let kind = look_kind(s.screen);
+            let list = cards::list(kind);
+            cards::page_items(kind, &list, s.page).iter().enumerate().map(|(k, n)| Row::new(&cards::title(n), &cards::label(n), Act::Choose(k))).collect()
+        }
         Screen::MapPick => {
             let p = pages(c);
             p.get(s.page.min(p.len().saturating_sub(1)))
@@ -329,6 +341,11 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
                 .unwrap_or_default()
         }
     }
+}
+
+/// The kind a picker screen picks.
+pub(crate) fn look_kind(screen: Screen) -> cards::Kind {
+    if screen == Screen::EmblemPick { cards::Kind::Emblem } else { cards::Kind::Card }
 }
 
 impl Shell {
@@ -378,6 +395,12 @@ impl Shell {
                     })
                     .unwrap_or(0);
             }
+            Screen::CardPick | Screen::EmblemPick => {
+                let from = self.screen;
+                self.go(Screen::Barracks);
+                self.page = 0;
+                self.focus = if from == Screen::CardPick { 1 } else { 2 };
+            }
             Screen::Main => {}
             Screen::Multiplayer => self.go(Screen::Main),
             Screen::Zombies => {
@@ -419,8 +442,6 @@ impl Shell {
             Setting::Difficulty => self.difficulty = step(self.difficulty, 3),
             Setting::ZmRound => self.zm_round = step(self.zm_round as u32, zombies::ROUNDS.len() as u32 - 1) as usize,
             Setting::Option(k) => options::queue(self.page, k, by),
-            Setting::Card => cards::pick(cards::Kind::Card, &c.player.card, by),
-            Setting::Emblem => cards::pick(cards::Kind::Emblem, &c.player.emblem, by),
             Setting::LethalCount | Setting::TacticalCount => {
                 if let Some(b) = classes::book() {
                     cac::count(self, &b, what == Setting::LethalCount, by, self.now);
@@ -464,6 +485,16 @@ impl Shell {
                 self.go(Screen::Barracks);
             }
             Act::Barracks => {}
+            Act::Looks(kind) => {
+                // The page and place of the one he has.
+                let stat = if kind == cards::Kind::Card { &c.player.card } else { &c.player.emblem };
+                let list = cards::list(kind);
+                let at = list.iter().position(|n| *n == cards::mine(kind, stat)).unwrap_or(0);
+                let per = cards::per_page(kind);
+                self.go(if kind == cards::Kind::Card { Screen::CardPick } else { Screen::EmblemPick });
+                self.page = at / per;
+                self.focus = at % per;
+            }
             Act::Prestige => {
                 if !c.player.can_prestige {
                     self.note("Reach level 155 to enter the next prestige.", now);
@@ -556,6 +587,15 @@ impl Shell {
                     self.zm_start = i;
                     self.back();
                 }
+                Screen::CardPick | Screen::EmblemPick => {
+                    let kind = look_kind(self.screen);
+                    let list = cards::list(kind);
+                    if let Some(name) = cards::page_items(kind, &list, self.page).get(i) {
+                        cards::set(kind, name);
+                        self.note(&format!("{} equipped.", cards::title(name)), now);
+                    }
+                    self.back();
+                }
                 _ => {}
             },
         }
@@ -571,6 +611,8 @@ pub(crate) enum Hit {
     Page(usize),
     /// A selector's arrow: the row, -1 or +1.
     Step(usize, i32),
+    /// A picker's page arrow: -1 or +1.
+    PageStep(i32),
     Back,
 }
 
@@ -752,6 +794,12 @@ fn shell_input(
             s.page = (s.page as i32 + by).rem_euclid(np) as usize;
             s.focus = 0;
         }
+        Screen::CardPick | Screen::EmblemPick => {
+            let kind = look_kind(s.screen);
+            let np = cards::pages(kind, cards::list(kind).len()) as i32;
+            s.page = (s.page as i32 + by).rem_euclid(np) as usize;
+            s.focus = 0;
+        }
         _ => {}
     };
     if prev_tab {
@@ -762,20 +810,36 @@ fn shell_input(
     }
     // Moving.
     if n > 0 && dir != (0, 0) {
-        if matches!(shell.screen, Screen::MapPick | Screen::ItemPick | Screen::ZmMapPick) {
+        if matches!(shell.screen, Screen::MapPick | Screen::ItemPick | Screen::ZmMapPick | Screen::CardPick | Screen::EmblemPick) {
             let f = shell.focus as i32;
-            let cols = GRID_COLS.load(std::sync::atomic::Ordering::Relaxed).max(1) as i32;
+            let picker = matches!(shell.screen, Screen::CardPick | Screen::EmblemPick);
+            let cols = if picker {
+                cards::columns(look_kind(shell.screen)) as i32
+            } else {
+                GRID_COLS.load(std::sync::atomic::Ordering::Relaxed).max(1) as i32
+            };
+            // (A picker's page turns off its left or right edge, onto the
+            // same row of the next page.)
+            let edge = picker && dir.0 != 0 && dir.1 == 0 && ((dir.0 < 0 && f % cols == 0) || (dir.0 > 0 && (f % cols == cols - 1 || f + 1 >= n as i32)));
             let mut t = f + dir.0 + dir.1 * cols;
-            if t < 0 || t >= n as i32 {
-                // Off the page's side: the next page.
-                if dir.0 != 0 && dir.1 == 0 {
-                    tabbed(&mut shell, dir.0);
-                    t = 0;
-                } else {
-                    t = f;
+            if edge {
+                let row = f / cols;
+                tabbed(&mut shell, dir.0);
+                let m = rows_len(&shell, &c) as i32;
+                t = (row * cols + if dir.0 > 0 { 0 } else { cols - 1 }).min(m - 1);
+                shell.focus = t.max(0) as usize;
+            } else {
+                if t < 0 || t >= n as i32 {
+                    // Off the page's side: the next page.
+                    if dir.0 != 0 && dir.1 == 0 {
+                        tabbed(&mut shell, dir.0);
+                        t = 0;
+                    } else {
+                        t = f;
+                    }
                 }
+                shell.focus = t.clamp(0, n as i32 - 1) as usize;
             }
-            shell.focus = t.clamp(0, n as i32 - 1) as usize;
         } else {
             if dir.1 != 0 {
                 shell.focus = ((shell.focus as i32 + dir.1).rem_euclid(n as i32)) as usize;
@@ -820,6 +884,16 @@ fn shell_input(
                     shell.focus = i;
                     shell.cycle(what, by, &c);
                 }
+                return;
+            }
+            Hit::PageStep(by) if clicked => {
+                tabbed(&mut shell, by);
+                return;
+            }
+            // (The main menu's EXIT quits.)
+            Hit::Back if clicked && shell.screen == Screen::Main => {
+                sounds.write(frame::UiPlaySound { alias: "uin_navigation_select_main".to_owned() });
+                shell.activate(Act::Quit, &c, now, &mut exit);
                 return;
             }
             Hit::Back if clicked => {

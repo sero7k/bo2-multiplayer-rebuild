@@ -83,14 +83,17 @@ const REGULAR: &[u8] = include_bytes!("../../assets/BarlowCondensed-400.ttf");
 const SEMIBOLD: &[u8] = include_bytes!("../../assets/BarlowCondensed-600.ttf");
 /// The countdown's thin numerals.
 const LIGHT: &[u8] = include_bytes!("../../assets/BarlowCondensed-200.ttf");
+/// The main menu's CALL OF DUTY and the end screen's VICTORY / DEFEAT.
+const BLACK: &[u8] = include_bytes!("../../assets/BarlowCondensed-900.ttf");
 
 /// The shell's weights (the in-game HUD's `GameUiFont` is the semibold;
-/// the thin one is the lobby countdown's).
+/// the thin one is the lobby countdown's, the black one the logo's).
 #[derive(Resource, Clone)]
 pub(crate) struct ShellFonts {
     pub regular: Handle<Font>,
     pub bold: Handle<Font>,
     pub light: Handle<Font>,
+    pub black: Handle<Font>,
 }
 
 pub(crate) fn load_fonts(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
@@ -98,6 +101,7 @@ pub(crate) fn load_fonts(mut commands: Commands, mut fonts: ResMut<Assets<Font>>
         regular: fonts.add(Font::from_bytes(REGULAR.to_vec())),
         bold: fonts.add(Font::from_bytes(SEMIBOLD.to_vec())),
         light: fonts.add(Font::from_bytes(LIGHT.to_vec())),
+        black: fonts.add(Font::from_bytes(BLACK.to_vec())),
     });
 }
 

@@ -158,15 +158,6 @@ pub(crate) fn chosen(kind: Kind, stat: &str) -> String {
     chosen_in(kind, stat, &list(kind))
 }
 
-/// The next (`by` +1) or previous (-1) name after `current` in `list`.
-pub(crate) fn step_in(list: &[String], current: &str, by: i32) -> Option<String> {
-    if list.is_empty() {
-        return None;
-    }
-    let at = list.iter().position(|n| n == current).map_or(if by > 0 { -1 } else { 0 }, |i| i as i32);
-    Some(list[(at + by).rem_euclid(list.len() as i32) as usize].clone())
-}
-
 /// `current`'s place in `list` (1-based) and how many there are.
 pub(crate) fn place_in(list: &[String], current: &str) -> (usize, usize) {
     (list.iter().position(|n| n == current).map_or(0, |i| i + 1), list.len())
@@ -195,15 +186,78 @@ pub(crate) fn mine(kind: Kind, stat: &str) -> String {
     picked.unwrap_or_else(|| chosen(kind, stat))
 }
 
-/// He picks the next (`by` +1) or previous (-1) one: kept in his stats.
-pub(crate) fn pick(kind: Kind, stat: &str, by: i32) {
-    let now = mine(kind, stat);
-    if let Some(next) = step_in(&list(kind), &now, by) {
-        if let Ok(mut p) = PICKED.lock() {
-            p[slot(kind)] = Some(next.clone());
-        }
-        super::bridge::request(super::bridge::Request::SetLook(kind, next));
+/// He picks one (Barracks' picker): kept in his stats.
+pub(crate) fn set(kind: Kind, name: &str) {
+    if let Ok(mut p) = PICKED.lock() {
+        p[slot(kind)] = Some(name.to_owned());
     }
+    super::bridge::request(super::bridge::Request::SetLook(kind, name.to_owned()));
+}
+
+/// The pickers' pages, as Modern Warfare 2's: emblems 8 across and 6 down,
+/// calling cards in 3 columns of 9.
+pub(crate) fn columns(kind: Kind) -> usize {
+    match kind {
+        Kind::Card => 3,
+        Kind::Emblem => 8,
+    }
+}
+
+pub(crate) fn per_page(kind: Kind) -> usize {
+    match kind {
+        Kind::Card => 27,
+        Kind::Emblem => 48,
+    }
+}
+
+/// How many pages `n` of a kind fill (at least one).
+pub(crate) fn pages(kind: Kind, n: usize) -> usize {
+    n.div_ceil(per_page(kind)).max(1)
+}
+
+/// The names on page `page` (the last page when past it).
+pub(crate) fn page_items(kind: Kind, list: &[String], page: usize) -> Vec<String> {
+    let per = per_page(kind);
+    let page = page.min(pages(kind, list.len()) - 1);
+    list.iter().skip(page * per).take(per).cloned().collect()
+}
+
+/// Words the material names run together or shorten, as he reads them.
+const WORDS: [(&str, &str); 12] = [
+    ("bloodsplat", "Blood Splat"),
+    ("ac130", "AC-130"),
+    ("tf141", "Task Force 141"),
+    ("seals", "Navy SEALs"),
+    ("seal", "Navy SEAL"),
+    ("op", "Op"),
+    ("mp", "MP"),
+    ("cod", "CoD"),
+    ("ffa", "FFA"),
+    ("uav", "UAV"),
+    ("emp", "EMP"),
+    ("rpg", "RPG"),
+];
+
+/// A calling card's or emblem's name to show: Modern Warfare 2 and 3 keep
+/// their titles' text in their string tables and localized zones, which the
+/// shell does not read; the name comes from the material's
+/// (`iw4:cardtitle_army_ranger` -> `Army Ranger`, `cardicon_1st_place` ->
+/// `1st Place`).
+pub(crate) fn title(name: &str) -> String {
+    let material = name.split_once(':').map_or(name, |(_, m)| m);
+    let rest = material.trim_start_matches("cardtitle_").trim_start_matches("cardicon_");
+    let words: Vec<String> = rest
+        .split(['_', '-'])
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            if let Some((_, nice)) = WORDS.iter().find(|(k, _)| *k == w) {
+                return (*nice).to_owned();
+            }
+            let mut c = w.chars();
+            c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c).collect())
+        })
+        .collect();
+    if words.is_empty() { material.to_owned() } else { words.join(" ") }
 }
 
 /// FNV-1a: a name's number, the same every run.
@@ -251,6 +305,22 @@ mod tests {
     fn labels_read_well() {
         assert_eq!(label("iw4:cardtitle_blood_splat"), "MW2 · BLOOD SPLAT");
         assert_eq!(label("iw5:cardicon_skull"), "MW3 · SKULL");
+        assert_eq!(title("iw4:cardtitle_army_ranger"), "Army Ranger");
+        assert_eq!(title("iw4:cardtitle_bloodsplat"), "Blood Splat");
+        assert_eq!(title("iw5:cardicon_1st_place"), "1st Place");
+        assert_eq!(title("iw4:cardicon_ac130"), "AC-130");
+    }
+
+    #[test]
+    fn picker_pages() {
+        let l: Vec<String> = (0..100).map(|i| format!("iw4:cardicon_{i}")).collect();
+        assert_eq!(pages(Kind::Emblem, l.len()), 3);
+        assert_eq!(page_items(Kind::Emblem, &l, 0).len(), 48);
+        assert_eq!(page_items(Kind::Emblem, &l, 2).len(), 4);
+        // (Past the last page: the last.)
+        assert_eq!(page_items(Kind::Emblem, &l, 9)[0], "iw4:cardicon_96");
+        assert_eq!(pages(Kind::Card, 0), 1);
+        assert_eq!(page_items(Kind::Card, &l, 1).len(), 27);
     }
 
     #[test]
@@ -278,13 +348,9 @@ mod tests {
     }
 
     #[test]
-    fn stepping_wraps() {
+    fn places() {
         let l = names(&["a", "b", "c"]);
-        assert_eq!(step_in(&l, "a", 1).as_deref(), Some("b"));
-        assert_eq!(step_in(&l, "c", 1).as_deref(), Some("a"));
-        assert_eq!(step_in(&l, "a", -1).as_deref(), Some("c"));
-        assert_eq!(step_in(&l, "zz", 1).as_deref(), Some("a"));
-        assert_eq!(step_in(&[], "a", 1), None);
         assert_eq!(place_in(&l, "b"), (2, 3));
+        assert_eq!(place_in(&l, "zz"), (0, 3));
     }
 }
