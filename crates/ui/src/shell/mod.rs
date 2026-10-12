@@ -752,8 +752,8 @@ fn shell_input(
         sounds.write(frame::UiPlaySound { alias: "cac_cmn_backout".to_owned() });
         shell.back();
     }
-    // (The screen changed by his choice: no move sound for it.)
-    *heard = Some((shell.screen, shell.focus, shell.tab, shell.page));
+    // (Moves made this frame - keys, the stick, the mouse over a row - are
+    // heard next frame against `heard`; a new screen makes no move sound.)
 }
 
 /// The screens are up while the front end is (`covers_lui`), and the
