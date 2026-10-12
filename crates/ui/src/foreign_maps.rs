@@ -348,6 +348,19 @@ fn discover() -> Vec<Category> {
     );
     installed.sort();
     installed.dedup();
+    // bo2mp: a Call of Duty 4 map MW2's folder also has (IW4x's CoD4 pack:
+    // Backlot, Crossfire, Wet Work, ...) is played as MW2's port - it loads
+    // through MW2's lane like the rest of MW2 - so CoD4's own copy is not
+    // listed.
+    let ported: Vec<String> = installed
+        .iter()
+        .filter(|(g, s)| g == "iw3" && installed.iter().any(|(g2, s2)| g2 == "iw4" && s2 == s))
+        .map(|(_, s)| s.clone())
+        .collect();
+    if !ported.is_empty() {
+        diag::info!(Ui, "bo2mp maps: {} Call of Duty 4 maps played as MW2's ports instead: {}", ported.len(), ported.join(", "));
+        installed.retain(|(g, s)| !(g == "iw3" && ported.contains(s)));
+    }
     let shared = |stem: &str| installed.iter().filter(|(_, s)| s == stem).count() > 1;
     // Every game's maps in one list (base maps, then DLC, game by game),
     // split into sections of at most `PAGE` so no list runs off the screen.
@@ -367,16 +380,36 @@ fn discover() -> Vec<Category> {
         };
         let base = known(game.base);
         let mut dlc = known(game.dlc);
+        // Another game's map ported into this one (IW4x's CoD4 and MW3
+        // packs in MW2): its own title, listed as that game's map.
+        let mut ports: Vec<(String, String, &'static str)> = Vec::new();
         // Maps the tables do not name (a remaster's extra, a mod map) go
         // with the DLC, by their zone names.
         for stem in &mine {
-            if !game.base.iter().chain(game.dlc).any(|(s, _)| *s == stem.as_str()) {
-                dlc.push(((*stem).clone(), title_of(stem)));
+            if game.base.iter().chain(game.dlc).any(|(s, _)| *s == stem.as_str()) {
+                continue;
+            }
+            let from = GAMES
+                .iter()
+                .filter(|g| g.prefix != game.prefix)
+                .find_map(|g| g.base.iter().chain(g.dlc).find(|(s, _)| *s == stem.as_str()).map(|(_, t)| ((*t).to_owned(), g.title)));
+            match from {
+                Some((title, origin)) => ports.push(((*stem).clone(), title, origin)),
+                None => dlc.push(((*stem).clone(), title_of(stem))),
             }
         }
         // Usermaps last, titled from their zone names.
         let custom_maps: Vec<(String, String)> =
             custom_mine.iter().map(|s| ((*s).clone(), usermap_title(s))).collect();
+        for (stem, title, origin) in ports {
+            all.push(ForeignMap {
+                ui_name: if shared(&stem) { format!("{stem}_{}", game.prefix) } else { stem.clone() },
+                game: game.prefix,
+                stem,
+                title,
+                origin: format!("{origin} (in {})", game.title),
+            });
+        }
         for (maps, suffix) in [(base, ""), (dlc, " (DLC)"), (custom_maps, " (Custom)")] {
             for (stem, title) in maps {
                 all.push(ForeignMap {

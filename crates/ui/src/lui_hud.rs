@@ -1937,6 +1937,10 @@ fn lui_hud(
         .map(button_glyph)
         // bo2mp: BO2's Global (the globe) is gone with the shell.
         .filter(|d| !(crate::shell::enabled() && d.kind == "globe"))
+        // bo2mp: BO2's scorestreak icons are not drawn under the modern
+        // HUD's own streak column (hiding its widget by its events missed
+        // some of them).
+        .filter(|d| !(hud.match_mp && crate::hud_modern::modern_hud_enabled() && d.material.as_deref().is_some_and(|m| m.starts_with("hud_ks_"))))
         .filter(|d| {
             d.alpha > 0.004
                 && (d.material.is_some()

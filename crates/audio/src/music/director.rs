@@ -374,7 +374,8 @@ fn build_director(identity: Option<&LaunchIdentity>) -> MusicDirector {
     let match_files = folder(&mut director, "match", "ambience");
     let menu_default: Vec<TrackId> = game.iter().chain(&menu_files).copied().collect();
     let lobby_default = if lobby_files.is_empty() { menu_default.clone() } else { lobby_files };
-    let match_default = if match_files.is_empty() { game.clone() } else { match_files };
+    // (No menu tracks in a match: only his own match music, if any.)
+    let match_default = match_files;
     let defaults = [menu_default, lobby_default, match_default];
 
     let mut lists: [Vec<TrackId>; 3] = Default::default();
