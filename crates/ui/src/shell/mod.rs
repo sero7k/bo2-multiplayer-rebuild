@@ -131,7 +131,7 @@ impl Row {
 
 pub(crate) const DIFFICULTY: [&str; 4] = ["RECRUIT", "REGULAR", "HARDENED", "VETERAN"];
 /// Maps a picker page holds (6 by 4).
-pub(crate) const PAGE: usize = 24;
+pub(crate) const PAGE: usize = 48;
 pub(crate) const COLUMNS: usize = 6;
 /// The columns the map / item grid has on this screen, and its first row
 /// in view (the view sets them; moving uses them).
@@ -776,6 +776,22 @@ pub(crate) fn window_scale(windows: &Query<&Window, With<PrimaryWindow>>) -> (Ve
     })
 }
 
+/// The map picker's pictures, asked for a few a frame from the moment the
+/// front end is up (they are slow to read from the games' archives).
+fn prefetch_pictures(
+    mut pics: ResMut<pics::ShellPics>,
+    icons: Option<Res<assets::T6HudIcons>>,
+    mut images: ResMut<Assets<Image>>,
+    mut cursor: Local<usize>,
+) {
+    if !bridge::covers_lui() {
+        return;
+    }
+    let Some(c) = bridge::catalog() else { return };
+    crate::foreign_maps::warm_map_pictures();
+    pics.prefetch(&mut cursor, &c, icons.as_deref(), &mut images);
+}
+
 pub(crate) fn register_shell(app: &mut App) {
     app.init_resource::<Shell>()
         .init_resource::<pics::ShellPics>()
@@ -788,6 +804,7 @@ pub(crate) fn register_shell(app: &mut App) {
                 shell_input,
                 options::sync_settings,
                 background::shell_background,
+                prefetch_pictures,
                 view::shell_view,
                 loading::shell_loading,
                 ingame::ingame_input,

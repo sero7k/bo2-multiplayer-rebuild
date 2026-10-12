@@ -214,7 +214,7 @@ fn build_catalog(host: &Host, mp: Option<&Mp>) -> Catalog {
         let sort = cell(row, 5).parse::<i32>().unwrap_or(999);
         let (group, origin) = foreign
             .iter()
-            .find_map(|c| c.maps.iter().find(|m| m.ui_name == name).map(|m| (c.title.clone(), m.origin.clone())))
+            .find_map(|c| c.maps.iter().find(|m| m.ui_name == name).map(|m| (m.section.clone(), m.origin.clone())))
             .unwrap_or_else(|| ("BLACK OPS II".to_owned(), "Black Ops II".to_owned()));
         // (A foreign map's row is Aftermath's, renamed: its icon column is
         // Aftermath's picture, so only BO2's own maps use it.)
@@ -240,7 +240,23 @@ fn build_catalog(host: &Host, mp: Option<&Mp>) -> Catalog {
             },
         ));
     }
-    maps.sort_by_key(|(s, _)| *s);
+    // BO2's own maps in its order, then each game's (newest first), its maps
+    // by name; custom maps last.
+    let rank = |g: &str| match g {
+        "BLACK OPS II" => 0,
+        "MODERN WARFARE 3" => 1,
+        "BLACK OPS" => 2,
+        "MODERN WARFARE 2" => 3,
+        "WORLD AT WAR" => 4,
+        "CALL OF DUTY 4" => 5,
+        "CUSTOM MAPS" => 7,
+        _ => 6,
+    };
+    maps.sort_by(|(sa, a), (sb, b)| {
+        rank(&a.group).cmp(&rank(&b.group)).then_with(|| {
+            if a.group == "BLACK OPS II" { sa.cmp(sb) } else { a.title.cmp(&b.title) }
+        })
+    });
     // Modes: gametypestable's multiplayer rows with a name.
     let mut modes: Vec<ModeEntry> = Vec::new();
     let mut rows: Vec<&Vec<String>> = hks_t6::mp::table_rows(&v, "mp/gametypestable.csv").iter().filter(|r| cell(r, 0) == "0").collect();

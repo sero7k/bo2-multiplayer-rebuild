@@ -22,7 +22,7 @@ struct Plan {
 
 fn stand_in_catalog() -> Catalog {
     let bo2 = ["Aftermath", "Cargo", "Carrier", "Drone", "Express", "Hijacked", "Meltdown", "Overflow", "Plaza", "Raid", "Slums", "Standoff", "Turbine", "Yemen", "Nuketown 2025"];
-    let classic = [("mp_terminal", "Terminal", "Modern Warfare 2"), ("mp_highrise", "Highrise", "Modern Warfare 2"), ("mp_rust", "Rust", "Modern Warfare 2"), ("mp_paris", "Resistance", "Modern Warfare 3"), ("mp_seatown", "Seatown", "Modern Warfare 3"), ("mp_array", "Array", "Black Ops"), ("mp_crash", "Crash", "Call of Duty 4")];
+    let classic = [("mp_paris", "Resistance", "Modern Warfare 3"), ("mp_seatown", "Seatown", "Modern Warfare 3"), ("mp_array", "Array", "Black Ops"), ("mp_highrise", "Highrise", "Modern Warfare 2"), ("mp_rust", "Rust", "Modern Warfare 2"), ("mp_terminal", "Terminal", "Modern Warfare 2"), ("mp_crash", "Crash", "Call of Duty 4")];
     let mut maps: Vec<MapEntry> = bo2
         .iter()
         .map(|t| MapEntry {
@@ -37,7 +37,7 @@ fn stand_in_catalog() -> Catalog {
         maps.push(MapEntry {
             ui_name: (*n).to_owned(),
             title: t.to_uppercase(),
-            group: "CLASSIC MAPS".to_owned(),
+            group: g.to_uppercase(),
             origin: (*g).to_owned(),
             pictures: vec![if k == 0 { "stand_in_a" } else { "stand_in_b" }.to_owned()],
         });

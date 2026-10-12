@@ -534,10 +534,12 @@ pub(crate) fn grid_more(c: &mut Kids, cx: &Ctx, first: usize, last: usize, n: us
 }
 
 fn map_picker(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog) {
-    header(c, cx, &["CUSTOM GAME", "SELECT MAP"]);
     let p = pages(cat);
-    let labels: Vec<String> = p.iter().map(|(t, _)| t.clone()).collect();
     let page = shell.page.min(p.len().saturating_sub(1));
+    let section = p.get(page).map_or(String::new(), |(t, _)| t.clone());
+    header(c, cx, &["CUSTOM GAME", "SELECT MAP", section.as_str()]);
+    // (Short names, so every game's tab fits on one line.)
+    let labels: Vec<String> = p.iter().map(|(t, _)| short_section(t)).collect();
     tabs(c, cx, &labels, page, Hit::Page);
     let Some((_, maps)) = p.get(page) else { return };
     let (tw, th, gap) = (280.0, 158.0, 14.0);
@@ -599,6 +601,23 @@ fn map_picker(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog) {
             t.spawn((Text::new(m.origin.to_uppercase()), cx.bold(22.0), TextColor(ACCENT)));
         });
     }
+}
+
+/// A map section's tab name (`MODERN WARFARE 3 2` -> `MW3 2`).
+fn short_section(title: &str) -> String {
+    const SHORT: [(&str, &str); 7] = [
+        ("BLACK OPS II", "BO2"),
+        ("BLACK OPS", "BO1"),
+        ("MODERN WARFARE 3", "MW3"),
+        ("MODERN WARFARE 2", "MW2"),
+        ("WORLD AT WAR", "WAW"),
+        ("CALL OF DUTY 4", "COD4"),
+        ("CUSTOM MAPS", "CUSTOM"),
+    ];
+    SHORT
+        .iter()
+        .find_map(|(long, short)| title.strip_prefix(long).map(|rest| format!("{short}{rest}")))
+        .unwrap_or_else(|| title.to_owned())
 }
 
 fn mode_picker(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row]) {

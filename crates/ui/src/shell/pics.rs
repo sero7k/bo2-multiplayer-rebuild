@@ -47,13 +47,30 @@ impl ShellPics {
             self.found.insert(name.to_owned(), h.clone());
             return Some(h);
         }
-        let img = icons
-            .and_then(|i| i.0.iter().find(|(k, _)| k == name).map(|(_, i)| i.clone()))
+        let own = icons.and_then(|i| i.0.iter().find(|(k, _)| k == name).map(|(_, i)| i.clone()));
+        // (A small map shot of BO2's own is made bigger off the main thread
+        // too; the original stands in should that fail.)
+        let own = match own {
+            Some(img) => match upscale_job(&img) {
+                Some((srgb, raw)) => match crate::foreign_maps::picture_async(&format!("up:{name}"), srgb, move || {
+                    Some(crate::foreign_maps::upscale_map_shot(raw))
+                }) {
+                    Some(big) => Some(big),
+                    None => {
+                        self.tried.entry(name.to_owned()).or_insert(1);
+                        return None;
+                    }
+                },
+                None => Some(img),
+            },
+            None => None,
+        };
+        let img = own
             .or_else(|| crate::foreign_maps::map_picture(name))
             .or_else(|| crate::foreign_maps::prestige_picture(name));
         match img {
             Some(img) => {
-                let mut img = upscaled(&img).unwrap_or_else(|| (*img).clone());
+                let mut img = (*img).clone();
                 img.sampler = bevy::image::ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
                     address_mode_u: bevy::image::ImageAddressMode::ClampToEdge,
                     address_mode_v: bevy::image::ImageAddressMode::ClampToEdge,
@@ -101,13 +118,12 @@ impl ShellPics {
 }
 
 /// A small map picture (the games' map-select and loading pictures are
-/// often 256-512 px) made bigger with a Lanczos filter and a light unsharp
-/// mask, so it stays clean full-screen and in the big map card; other
+/// often 256-512 px) to make bigger: its colour space and pixels; other
 /// pictures (and compressed ones) are left as they are.
-fn upscaled(img: &Image) -> Option<Image> {
+fn upscale_job(img: &Image) -> Option<(bool, (u32, u32, Vec<u8>))> {
     use bevy::render::render_resource::TextureFormat;
     let size = img.size();
-    if size.x == 0 || size.x >= 1024 || size.y >= 1024 || size.x < 128 {
+    if size.x == 0 || size.x >= 1024 || size.y >= 1024 || size.x < 128 || (size.x as f32) < size.y as f32 * 1.3 {
         return None;
     }
     let srgb = match img.texture_descriptor.format {
@@ -115,17 +131,20 @@ fn upscaled(img: &Image) -> Option<Image> {
         TextureFormat::Rgba8Unorm => false,
         _ => return None,
     };
-    // (Only a picture shaped like a map shot: wider than tall.)
-    if (size.x as f32) < size.y as f32 * 1.3 {
-        return None;
+    Some((srgb, (size.x, size.y, img.data.as_ref()?.clone())))
+}
+
+impl ShellPics {
+    /// Asks for a few of the map picker's pictures each frame, so they are
+    /// in (read and made bigger off the main thread) before it opens.
+    pub fn prefetch(&mut self, cursor: &mut usize, cat: &super::bridge::Catalog, icons: Option<&assets::T6HudIcons>, images: &mut Assets<Image>) {
+        if cat.maps.is_empty() || *cursor >= cat.maps.len() * 4 {
+            return;
+        }
+        for _ in 0..3 {
+            let m = &cat.maps[*cursor % cat.maps.len()];
+            self.first(&m.pictures, icons, images);
+            *cursor += 1;
+        }
     }
-    let data = img.data.as_ref()?;
-    let buf = image::RgbaImage::from_raw(size.x, size.y, data.clone())?;
-    let scale = (1600.0 / size.x as f32).clamp(1.0, 4.0);
-    let (w, h) = ((size.x as f32 * scale) as u32, (size.y as f32 * scale) as u32);
-    let big = image::imageops::resize(&buf, w, h, image::imageops::FilterType::Lanczos3);
-    let sharp = image::imageops::unsharpen(&big, 1.2, 4);
-    let mut out = Image::from_dynamic(image::DynamicImage::ImageRgba8(sharp), srgb, bevy::asset::RenderAssetUsages::default());
-    out.sampler = img.sampler.clone();
-    Some(out)
 }

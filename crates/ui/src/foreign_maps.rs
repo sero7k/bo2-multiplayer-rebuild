@@ -222,6 +222,9 @@ pub(crate) struct ForeignMap {
     pub title: String,
     /// The game it comes from (`Modern Warfare 2 (DLC)`).
     pub origin: String,
+    /// The map picker's section: the game it was made for (`MODERN
+    /// WARFARE 3` for MW3's maps ported into MW2), or `CUSTOM MAPS`.
+    pub section: String,
 }
 
 /// A category in the Change Map popup.
@@ -408,6 +411,7 @@ fn discover() -> Vec<Category> {
                 stem,
                 title,
                 origin: format!("{origin} (in {})", game.title),
+                section: origin.to_uppercase(),
             });
         }
         for (maps, suffix) in [(base, ""), (dlc, " (DLC)"), (custom_maps, " (Custom)")] {
@@ -418,6 +422,7 @@ fn discover() -> Vec<Category> {
                     stem,
                     title,
                     origin: format!("{}{suffix}", game.title),
+                    section: if suffix == " (Custom)" { "CUSTOM MAPS".to_owned() } else { game.title.to_uppercase() },
                 });
             }
         }
@@ -507,6 +512,37 @@ pub(crate) fn inject(values: &mut hks_t6::host::EngineValues) {
     }
 }
 
+type PictureMap = std::collections::HashMap<String, Option<std::sync::Arc<bevy::prelude::Image>>>;
+static PICTURES: std::sync::Mutex<Option<PictureMap>> = std::sync::Mutex::new(None);
+
+/// Marks `key` as being read; false when it is read or being read already.
+fn claim_picture(key: &str) -> bool {
+    let Ok(mut guard) = PICTURES.lock() else { return false };
+    let done = guard.get_or_insert_with(Default::default);
+    if done.contains_key(key) {
+        return false;
+    }
+    done.insert(key.to_owned(), None);
+    true
+}
+
+fn store_picture(key: String, image: Option<std::sync::Arc<bevy::prelude::Image>>) {
+    if let Ok(mut guard) = PICTURES.lock() {
+        guard.get_or_insert_with(Default::default).insert(key, image);
+    }
+}
+
+fn picture_image((w, h, rgba): (u32, u32, Vec<u8>), srgb: bool) -> std::sync::Arc<bevy::prelude::Image> {
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    std::sync::Arc::new(bevy::prelude::Image::new(
+        Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        rgba,
+        if srgb { TextureFormat::Rgba8UnormSrgb } else { TextureFormat::Rgba8Unorm },
+        bevy::asset::RenderAssetUsages::default(),
+    ))
+}
+
 /// A picture read off the main thread once and kept by `key`: `None` while
 /// it is being read (and for good when nothing was found).
 pub(crate) fn picture_async(
@@ -514,36 +550,22 @@ pub(crate) fn picture_async(
     srgb: bool,
     read: impl FnOnce() -> Option<(u32, u32, Vec<u8>)> + Send + 'static,
 ) -> Option<std::sync::Arc<bevy::prelude::Image>> {
-    use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
-    type Read = HashMap<String, Option<Arc<bevy::prelude::Image>>>;
-    static READ: Mutex<Option<Read>> = Mutex::new(None);
-    let mut guard = READ.lock().ok()?;
-    let done = guard.get_or_insert_with(HashMap::new);
-    if let Some(found) = done.get(key) {
-        return found.clone();
+    {
+        let guard = PICTURES.lock().ok()?;
+        if let Some(found) = guard.as_ref().and_then(|d| d.get(key)) {
+            return found.clone();
+        }
     }
-    done.insert(key.to_owned(), None);
+    if !claim_picture(key) {
+        return None;
+    }
     let key = key.to_owned();
     std::thread::Builder::new()
         .name("ui-picture".into())
         .spawn(move || {
-            let image = read().map(|(w, h, rgba)| {
-                use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-                Arc::new(bevy::prelude::Image::new(
-                    Extent3d { width: w, height: h, depth_or_array_layers: 1 },
-                    TextureDimension::D2,
-                    rgba,
-                    if srgb { TextureFormat::Rgba8UnormSrgb } else { TextureFormat::Rgba8Unorm },
-                    bevy::asset::RenderAssetUsages::default(),
-                ))
-            });
+            let image = read().map(|p| picture_image(p, srgb));
             diag::info!(Ui, "picture `{key}`: {}", if image.is_some() { "read from its game" } else { "not found" });
-            if let Ok(mut guard) = READ.lock()
-                && let Some(done) = guard.as_mut()
-            {
-                done.insert(key, image);
-            }
+            store_picture(key, image);
         })
         .ok();
     None
@@ -598,7 +620,8 @@ pub(crate) fn prestige_picture(name: &str) -> Option<std::sync::Arc<bevy::prelud
 /// A foreign map's picture where BO2's menus ask for one: its map-select
 /// picture (`menu_<map>_map_select_final`), its loading picture
 /// (`loadscreen_<map>`) or its preview, read from the map's own game (its
-/// loading screen, else its preview).
+/// loading screen, else its preview). All of a map's names share one read,
+/// which `warm_map_pictures` has usually done already.
 pub(crate) fn map_picture(material: &str) -> Option<std::sync::Arc<bevy::prelude::Image>> {
     let ui_name = material
         .strip_prefix("menu_")
@@ -606,14 +629,87 @@ pub(crate) fn map_picture(material: &str) -> Option<std::sync::Arc<bevy::prelude
         .or_else(|| material.strip_prefix("loadscreen_"))
         .or_else(|| material.strip_prefix("menu_mp_map_select_").and_then(|m| m.strip_suffix("_big")))?;
     let map = categories().iter().flat_map(|c| c.maps.iter()).find(|m| m.ui_name == ui_name)?.clone();
-    picture_async(material, true, move || {
-        read_game_image(
+    picture_async(&map_key(&map), true, move || read_map_picture(&map))
+}
+
+fn map_key(map: &ForeignMap) -> String {
+    format!("map:{}", map.ui_name)
+}
+
+/// Where a map's picture is kept once read (the games' archives are slow to
+/// search; this is read in a few milliseconds).
+fn map_picture_cache(map: &ForeignMap) -> std::path::PathBuf {
+    std::path::Path::new("iw4l-artifacts/cache/map-pictures").join(format!("{}_{}.png", map.game, map.stem))
+}
+
+/// A map's picture: from the cache, else from its game (then cached), made
+/// bigger off the main thread.
+fn read_map_picture(map: &ForeignMap) -> Option<(u32, u32, Vec<u8>)> {
+    let cache = map_picture_cache(map);
+    let small = image::open(&cache).ok().map(|i| i.to_rgba8()).map(|i| (i.width(), i.height(), i.into_raw())).or_else(|| {
+        let found = read_game_image(
             map.game,
-            &[
-                format!("loadscreen_{}", map.stem),
-                format!("preview_{}", map.stem),
-                format!("{}_load", map.stem),
-            ],
-        )
-    })
+            &[format!("loadscreen_{}", map.stem), format!("preview_{}", map.stem), format!("{}_load", map.stem)],
+        )?;
+        if let Some(img) = image::RgbaImage::from_raw(found.0, found.1, found.2.clone()) {
+            let _ = std::fs::create_dir_all(cache.parent()?);
+            if let Err(e) = img.save(&cache) {
+                diag::warn!(Ui, "map picture cache: {}: {e}", cache.display());
+            }
+        }
+        Some(found)
+    })?;
+    Some(upscale_map_shot(small))
+}
+
+/// A small map shot (256-1023 px wide, wider than tall) made about 1600 px
+/// wide with a Lanczos filter and a light unsharp mask, so it stays clean
+/// full-screen and in the big map card.
+pub(crate) fn upscale_map_shot((w, h, rgba): (u32, u32, Vec<u8>)) -> (u32, u32, Vec<u8>) {
+    if !(128..1024).contains(&w) || h >= 1024 || (w as f32) < h as f32 * 1.3 {
+        return (w, h, rgba);
+    }
+    let Some(buf) = image::RgbaImage::from_raw(w, h, rgba.clone()) else {
+        return (w, h, rgba);
+    };
+    let scale = (1600.0 / w as f32).clamp(1.0, 4.0);
+    let (bw, bh) = ((w as f32 * scale) as u32, (h as f32 * scale) as u32);
+    let big = image::imageops::resize(&buf, bw, bh, image::imageops::FilterType::Lanczos3);
+    let sharp = image::imageops::unsharpen(&big, 1.2, 4);
+    (bw, bh, sharp.into_raw())
+}
+
+/// Reads every foreign map's picture in the background, one after another,
+/// so the map picker's tiles are in by the time it opens (once a run).
+pub(crate) fn warm_map_pictures() {
+    static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    std::thread::Builder::new()
+        .name("ui-map-pictures".into())
+        .spawn(|| {
+            let started = std::time::Instant::now();
+            let maps: Vec<ForeignMap> = categories().iter().flat_map(|c| c.maps.iter().cloned()).collect();
+            let (mut found, mut cached) = (0, 0);
+            for map in &maps {
+                let key = map_key(map);
+                if map_picture_cache(map).is_file() {
+                    cached += 1;
+                }
+                if !claim_picture(&key) {
+                    continue;
+                }
+                let image = read_map_picture(map).map(|p| picture_image(p, true));
+                found += usize::from(image.is_some());
+                store_picture(key, image);
+            }
+            diag::info!(
+                Ui,
+                "bo2mp shell: map pictures warmed: {found} read of {} maps ({cached} from the cache) in {:.1}s",
+                maps.len(),
+                started.elapsed().as_secs_f32()
+            );
+        })
+        .ok();
 }

@@ -6,7 +6,7 @@ license.workspace = true
 description = "Client UI state, settings and loading overlays."
 
 [dependencies]
-image = { version = "0.25", default-features = false } # bo2mp shell: map pictures upscaled
+image = { version = "0.25", default-features = false, features = ["png"] } # bo2mp shell: map pictures upscaled
 diag.workspace = true
 bevy.workspace = true
 asset_core.workspace = true
