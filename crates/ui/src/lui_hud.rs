@@ -752,6 +752,8 @@ fn build(ui: &assets::T6Ui, front: Option<&crate::lui_frontend::Bo2mpFrontend>, 
             "bo2zm lui: string tables {}",
             ui.tables.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" ")
         );
+        // bo2mp: other games' guns as extra weapons (listed when installed).
+        crate::foreign_maps::guest_guns_available();
         for (name, cols, rows, cells) in ui.tables.iter() {
             // bo2mp: the rank tables carried on to the combined levels and
             // prestiges (bo2_profile's progression): CoD.MAX_RANK,
@@ -761,7 +763,7 @@ fn build(ui: &assets::T6Ui, front: Option<&crate::lui_frontend::Bo2mpFrontend>, 
             if bo2_profile::progression::is_rank_table(name) {
                 let mut c = cells.clone();
                 if bo2_profile::progression::extend_table(name, &mut cols, &mut n, &mut c) {
-                    diag::info!(Ui, "bo2mp progression: {name} extended to {n} rows");
+                    diag::info!(Ui, "bo2mp progression: {name} extended to {n} rows (levels, prestiges, guest guns)");
                 }
                 extended = Some(c);
             }
@@ -771,6 +773,9 @@ fn build(ui: &assets::T6Ui, front: Option<&crate::lui_frontend::Bo2mpFrontend>, 
         }
         // bo2mp: the other games' maps, in BO2's map table and text.
         crate::foreign_maps::inject(&mut v);
+        for (key, text) in bo2_profile::guest::localize() {
+            v.localize.entry(key).or_insert(text);
+        }
         v.configs = ui.configs.iter().map(|(k, t)| (k.to_ascii_lowercase(), t.clone())).collect();
     }
     host.load_base();
@@ -1558,7 +1563,7 @@ fn lui_hud(
     }
     // bo2mp: the weapons' kill icons for the kill feed, once.
     if let (Some(state), Some(icons)) = (hud.mp.as_ref().filter(|_| hud.match_mp), icons.as_deref())
-        && !state.borrow().kill_icons_loaded
+        && (!state.borrow().kill_icons_loaded || state.borrow().kill_icons_from != icons.0.len())
     {
         let mut m = state.borrow_mut();
         for (name, _) in &icons.0 {
@@ -1572,6 +1577,7 @@ fn lui_hud(
             m.kill_icons.insert(weapon.to_owned(), (name.clone(), wide));
         }
         m.kill_icons_loaded = true;
+        m.kill_icons_from = icons.0.len();
     }
     if let Some(m) = values.mp.as_ref().filter(|_| hud.match_mp) {
         let old = hud.sent.as_ref().and_then(|v| v.mp.as_ref());

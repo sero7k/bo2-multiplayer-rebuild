@@ -5214,6 +5214,15 @@ pub struct WeaponRegistry {
     vehicle_compass: HashMap<String, ([String; 2], [i32; 2])>,
 
     revision: u64,
+
+    /// bo2mp: a Black Ops II match with other games' guns as extra weapons:
+    /// BO2's rows win every plain name, and another game's row is named
+    /// `bo1_ak74u_mp+reflex` (its game's prefix, its base gun, its
+    /// attachments as BO2 writes them) for the scripts.
+    guest_names: bool,
+    /// The guest script name of each row (empty for BO2's own, or when
+    /// `guest_names` is off).
+    guest_script: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -5251,6 +5260,11 @@ impl std::ops::Deref for WeaponBuild {
 }
 
 impl WeaponBuild {
+    /// bo2mp: see `WeaponRegistry::set_guest_names`.
+    pub fn set_guest_names(&mut self, on: bool) {
+        self.registry.set_guest_names(on);
+    }
+
     pub fn publish(self) -> WeaponRegistry {
         let mut registry = self.registry;
         registry.families = crate::WeaponFamilies::build(&self.family_tables, &registry);
@@ -5637,6 +5651,16 @@ impl WeaponBuild {
         bodies: &asset_model::BodyMeshCatalog,
     ) -> FpvHandsCensus {
         let mut census = FpvHandsCensus::default();
+        // bo2mp: a match with Black Ops II's guns plays by Black Ops II's
+        // rules (no other match loads them), where Black Ops' and Modern
+        // Warfare's guns are extra BO2 weapons: every gun is held in Black
+        // Ops II's arms, as BO2's own are. (MW2's or BO1's own arms were
+        // never loaded in such a match, and would not match the player.)
+        let bo2_rules = self
+            .registry
+            .rows
+            .iter()
+            .any(|row| row.namespace == crate::AssetNamespace::T6);
         for row in &mut self.registry.rows {
             // bo2mp: a Black Ops II gun takes Black Ops II's arms on every
             // map, as on a BO2 map. Keyed off the map's game, a T6 gun on an
@@ -5645,7 +5669,7 @@ impl WeaponBuild {
             // which the BO2-rules match never loads: every side came out
             // unresolved and no first-person gun was built at all (on MW2
             // maps it found MW2's arms and drew MW2 hands on BO2 guns).
-            let map_ns = if row.namespace == crate::AssetNamespace::T6 {
+            let map_ns = if row.namespace == crate::AssetNamespace::T6 || bo2_rules {
                 crate::AssetNamespace::T6
             } else {
                 fpv.map_namespace.unwrap_or(row.namespace)
@@ -6253,6 +6277,8 @@ impl WeaponBuild {
             vehicle_turrets: HashMap::new(),
             vehicle_compass: HashMap::new(),
             revision: mint_weapon_revision(),
+            guest_names: false,
+            guest_script: Vec::new(),
         };
         registry.rebuild_name_maps();
         Self {
@@ -6712,13 +6738,33 @@ impl WeaponRegistry {
     fn rebuild_name_maps(&mut self) {
         self.by_name.clear();
         self.by_namespaced.clear();
-        for (id, row) in self.rows.iter().enumerate().skip(1) {
+        // (bo2mp: with guest guns, BO2's own rows take their names first.)
+        let guest = self.guest_names;
+        let order: Vec<usize> = if guest {
+            let t6 = (1..self.rows.len()).filter(|&i| self.rows[i].namespace == crate::AssetNamespace::T6);
+            let rest = (1..self.rows.len()).filter(|&i| self.rows[i].namespace != crate::AssetNamespace::T6);
+            t6.chain(rest).collect()
+        } else {
+            (1..self.rows.len()).collect()
+        };
+        for id in order {
+            let row = &self.rows[id];
             if row.iw5_configuration.is_some() {
                 continue;
             }
             self.by_namespaced
                 .insert((row.namespace, row.name.clone()), id as u32);
             self.by_name.entry(row.name.clone()).or_insert(id as u32);
+        }
+        self.guest_script = if guest {
+            (0..self.rows.len()).map(|id| self.guest_script_for(id)).collect()
+        } else {
+            Vec::new()
+        };
+        for (id, name) in self.guest_script.iter().enumerate() {
+            if !name.is_empty() {
+                self.by_name.entry(normalize_weapon_name(name)).or_insert(id as u32);
+            }
         }
         for row in &mut self.rows {
             if let Some(name) = row.alternate_weapon.as_deref() {
@@ -6745,6 +6791,45 @@ impl WeaponRegistry {
                 self.rows[row].facts.clip_index = key;
             }
         }
+    }
+
+    /// bo2mp: another game's row named for a BO2 match: `ak74u_reflex_rf`
+    /// (BO1) is `bo1_ak74u_mp+reflex+rf` when `ak74u` is a BO1 gun too and
+    /// the rest are BO1 attachment words; anything else is
+    /// `bo1_<name>_mp`. Empty for BO2's own rows.
+    fn guest_script_for(&self, id: usize) -> String {
+        let Some(row) = self.rows.get(id) else { return String::new() };
+        let ns = row.namespace;
+        if id == 0 || ns == crate::AssetNamespace::T6 || row.name.is_empty() {
+            return String::new();
+        }
+        let prefix = ns.guest_prefix();
+        let tokens: Vec<&str> = row.name.split('_').collect();
+        let words = ns.guest_attachment_tokens();
+        for k in 1..tokens.len() {
+            let rest = &tokens[k..];
+            if !rest.iter().all(|t| words.contains(t)) {
+                continue;
+            }
+            let base = tokens[..k].join("_");
+            if self.by_namespaced.contains_key(&(ns, base.clone())) {
+                return format!("{prefix}{base}_mp+{}", rest.join("+"));
+            }
+        }
+        format!("{prefix}{}_mp", row.name)
+    }
+
+    /// bo2mp: other games' guns join a Black Ops II match under their guest
+    /// names (`bo1_ak74u_mp`); BO2's own rows win every plain name.
+    pub fn set_guest_names(&mut self, on: bool) {
+        if self.guest_names != on {
+            self.guest_names = on;
+            self.rebuild_name_maps();
+        }
+    }
+
+    pub fn guest_names(&self) -> bool {
+        self.guest_names
     }
 
     pub fn reticle_of(&self, index: u32) -> Option<&WeaponReticleAssets> {
@@ -7288,6 +7373,9 @@ impl WeaponRegistry {
     }
 
     pub fn script_name_of(&self, index: u32) -> String {
+        if let Some(name) = self.guest_script.get(index as usize).filter(|n| !n.is_empty()) {
+            return name.clone();
+        }
         gsc_weapon_script_name(self.name_of(index))
     }
 

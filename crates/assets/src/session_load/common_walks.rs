@@ -764,6 +764,42 @@ pub(super) fn t5_weapon_common_prep(
     }
 }
 
+/// bo2mp: Modern Warfare 2's guns as extra weapons in a Black Ops II
+/// match whose map is not one that already loads MW2's common zone (a BO2,
+/// CoD4 or WaW map): its common_mp walked for its guns as Black Ops' is.
+pub(super) fn iw4_guest_common_prep(runtime_common: Option<&Path>, progress: &LoadProgress) -> T5CommonPrep {
+    let mut report = Vec::new();
+    let root = match games_root_from_env() {
+        Ok(root) => root,
+        Err(error) => {
+            report.push(format!("iw4 guest guns: {error}"));
+            return T5CommonPrep::Skip(report);
+        }
+    };
+    let donor = match find_common_mp_for_envelope(&root, fastfile_iw4::ZONE_VERSION_PC) {
+        Ok(donor) => donor,
+        Err(error) => {
+            report.push(format!("iw4 guest guns: {error}"));
+            return T5CommonPrep::Skip(report);
+        }
+    };
+    if runtime_common.is_some_and(|path| path == donor.path.as_path()) {
+        report.push(format!("iw4 guest guns: runtime common is already MW2's ({}), its guns are in", donor.path.display()));
+        return T5CommonPrep::Skip(report);
+    }
+    let stage = progress.begin_scoped(StageId::CommonAssets, "iw4_guest_weapons", None);
+    let opened = open_zone_shared(&donor.path).map_err(|error| error.to_string());
+    stage.finish_from(&opened);
+    report.push(format!("iw4 guest guns: walking {}", donor.path.display()));
+    T5CommonPrep::Ready {
+        donor: donor.path,
+        opened,
+        leftover_startup: MaterialCatalog::default(),
+        leftover_stats: Vec::new(),
+        report,
+    }
+}
+
 pub(super) struct T5WeaponCommon {
     pub(super) weapons: WeaponBuild,
     pub(super) fpv: FpvMeshBuild,
@@ -1111,4 +1147,110 @@ mod same_game_common_tests {
         assert!(found.path.ends_with("zone/english/common_mp.ff"));
         let _ = std::fs::remove_dir_all(&root);
     }
+}
+
+/// bo2mp `iw4l check-guns`: reads Black Ops' guns the way a match does and
+/// says, for each guest gun Create-a-Class lists, whether it loaded and
+/// what it brings (variants, first-person and world models, animations,
+/// missing pieces). One line each, then a summary.
+pub fn check_guest_guns() -> Vec<String> {
+    let mut out = Vec::new();
+    for (game, ns) in [("t5", asset_core::AssetNamespace::T5), ("iw4", asset_core::AssetNamespace::Iw4)] {
+        out.extend(check_guest_game(game, ns));
+    }
+    out
+}
+
+fn check_guest_game(game: &str, ns: asset_core::AssetNamespace) -> Vec<String> {
+    let progress = LoadProgress::default();
+    let prep = if game == "t5" { t5_weapon_common_prep(None, &progress) } else { iw4_guest_common_prep(None, &progress) };
+    let job = load_jobs::open(JobKind::ImageDecode).namespace(ns.as_str());
+    let common = walk_t5_weapon_common(prep, &progress, MaterialCatalog::default(), job);
+    let mut out: Vec<String> = common.report.iter().map(|l| format!("  {l}")).collect();
+    let mut weapons = common.weapons;
+    weapons.set_guest_names(true);
+    let fpv_names: std::collections::HashSet<String> = (0..common.fpv.len())
+        .filter_map(|i| common.fpv.name_at(i).map(str::to_owned))
+        .collect();
+    let (mut ok, mut bad) = (0, 0);
+    let listed: Vec<&bo2_profile::guest::GuestGun> = bo2_profile::guest::all().filter(|g| g.game == game).collect();
+    for gun in &listed {
+        let key = asset_core::AssetKey::new(ns, asset_core::AssetKind::Weapon, format!("{}_mp", gun.gun));
+        let Some(id) = key.ok().and_then(|k| weapons.resolve_key(&k).ok().flatten()) else {
+            bad += 1;
+            let near: Vec<String> = (1..weapons.len() as u32)
+                .filter(|&i| weapons.name_of(i).starts_with(gun.gun))
+                .take(3)
+                .map(|i| format!("{}:{:?}", weapons.name_of(i), weapons.namespace_of(i)))
+                .collect();
+            out.push(format!("{:<22} MISSING: no `{}_mp` in its game's common_mp (near: {})", gun.reference(), gun.gun, near.join(", ")));
+            continue;
+        };
+        let script = weapons.script_name_of(id);
+        let base = script.split('+').next().unwrap_or(&script).to_owned();
+        let variant_names: Vec<String> = (1..weapons.len() as u32)
+            .map(|i| weapons.script_name_of(i))
+            .filter(|n| n.starts_with(&format!("{base}+")))
+            .collect();
+        let variants = variant_names.len();
+        let gun_model = weapons.gun_xmodel_of(id).unwrap_or("").to_owned();
+        let fpv = !gun_model.is_empty() && fpv_names.contains(&gun_model);
+        let world = weapons.world_model_of(id).unwrap_or("").to_owned();
+        let anims = weapons.sz_xanims_of(id).map_or(0, |a| a.iter().filter(|x| x.is_some()).count());
+        // (Arms are BO2's in a match: `resolve_fpv_hands` gives every gun
+        // BO2's when BO2's guns are there, so no hands gap counts here.)
+        let gaps: Vec<String> = weapons
+            .dependency_gaps_of(id)
+            .into_iter()
+            .filter(|g| !g.kind.contains("hands"))
+            .map(|g| format!("{} `{}`", g.kind, g.name))
+            .collect();
+        let admission = if !weapons.configuration_supported(id) {
+            "REFUSED (dual-wield model)".to_owned()
+        } else if gaps.is_empty() {
+            "ok".to_owned()
+        } else {
+            format!("MISSING {}", gaps.join(", "))
+        };
+        let fine = fpv && !world.is_empty() && anims > 0 && admission == "ok";
+        if fine {
+            ok += 1;
+        } else {
+            bad += 1;
+        }
+        out.push(format!(
+            "{:<22} {} script={script} variants={variants}{} view={gun_model}{} world={} anims={anims} admission={admission}",
+            gun.reference(),
+            if fine { "OK  " } else { "GAPS" },
+            variant_names.first().map_or(String::new(), |v| format!(" (e.g. {v})")),
+            if fpv { "" } else { " (NO FIRST-PERSON MESH)" },
+            if world.is_empty() { "-" } else { world.as_str() },
+        ));
+    }
+    out.push(format!("{game}: {ok} guest guns OK, {bad} with gaps"));
+    // The game's other guns with their attachment words (what could be
+    // listed next).
+    let mut others: Vec<String> = (1..weapons.len() as u32)
+        .filter(|&i| weapons.namespace_of(i) == Some(ns))
+        .map(|i| weapons.script_name_of(i))
+        .filter(|n| !n.contains('+'))
+        .filter(|n| !listed.iter().any(|g| format!("{}_mp", g.reference()) == *n))
+        .filter(|n| {
+            (1..weapons.len() as u32).any(|i| weapons.script_name_of(i).starts_with(&format!("{n}+")))
+                || weapons.resolve_index(n.trim_start_matches(ns.guest_prefix())).ok().flatten().and_then(|i| weapons.facts_of(i)).is_some_and(|f| f.weap_class <= 5)
+        })
+        .map(|n| {
+            let mut words: Vec<String> = (1..weapons.len() as u32)
+                .map(|i| weapons.script_name_of(i))
+                .filter(|v| v.starts_with(&format!("{n}+")))
+                .flat_map(|v| v.split('+').skip(1).map(str::to_owned).collect::<Vec<_>>())
+                .collect();
+            words.sort();
+            words.dedup();
+            format!("{n} [{}]", words.join(" "))
+        })
+        .collect();
+    others.sort();
+    out.push(format!("{game}: other guns: {}", others.join("; ")));
+    out
 }

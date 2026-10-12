@@ -569,3 +569,113 @@ pub(crate) fn update_killfeed(
     }
     pass.killfeed = TessJob::Quads(quads);
 }
+
+/// bo2mp: kill feed pictures for other games' guns in a Black Ops II-rules
+/// match (BO1 and MW2 rows as extra BO2 weapons). Black Ops II's own come
+/// from its zones (`assets::lane::t6_m2::hud_icons`) as
+/// `killicon:<base>:<ratio>`; the BO2 HUD finds a line's picture by the
+/// weapon's script name less any `+attachments` and its `_mp`
+/// (`lui_frontend::feed_line`). A foreign row's script name is
+/// `bo1_<name>_mp` / `mw2_<name>_mp` (`mw3_` for MW3), so its key is
+/// `killicon:bo1_<name>:<ratio>`; the picture is its WeaponDef kill icon,
+/// read from that game's own IWDs. Once per weapon catalog.
+pub(crate) fn foreign_kill_icons(
+    weapons: Option<Res<PreparedWeapons>>,
+    icons: Option<ResMut<assets::T6HudIcons>>,
+    mut hud_images: ResMut<HudImages>,
+    mut done: Local<usize>,
+) {
+    let (Some(weapons), Some(mut icons)) = (weapons, icons) else {
+        return;
+    };
+    let key = std::sync::Arc::as_ptr(&weapons.0) as usize;
+    if *done == key || !assets::t6_rules() || !hud_images.has_games_root() {
+        return;
+    }
+    *done = key;
+    let reg = &weapons.0;
+    let (mut added, mut missing) = (0usize, Vec::new());
+    for id in 1..=reg.len() as u32 {
+        let Some(ns) = reg.namespace_of(id) else { continue };
+        let Some(base) = foreign_kill_icon_base(ns, reg.name_of(id)) else {
+            continue;
+        };
+        let ratio = reg.facts_of(id).map_or(0, |f| f.kill_icon_ratio);
+        let prefix = format!("killicon:{base}:");
+        if icons.0.iter().any(|(k, _)| k.starts_with(&prefix)) {
+            continue;
+        }
+        let stems: Vec<String> = [reg.kill_icon_image_of(id), reg.kill_icon_of(id)]
+            .into_iter()
+            .flatten()
+            .map(str::to_owned)
+            .collect();
+        let found = stems.iter().find_map(|stem| {
+            hud_images.ensure_rgba(ns, stem);
+            hud_images.rgba(ns, stem).cloned()
+        });
+        let Some((w, h, rgba)) = found.filter(|(w, h, rgba)| *w > 0 && *h > 0 && rgba.len() == (*w * *h * 4) as usize)
+        else {
+            if missing.len() < 12 {
+                missing.push(format!("{base} ({})", stems.join("|")));
+            }
+            continue;
+        };
+        let image = Image::new(
+            bevy::render::render_resource::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            bevy::render::render_resource::TextureDimension::D2,
+            rgba,
+            bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+            bevy::asset::RenderAssetUsages::default(),
+        );
+        icons.0.push((format!("{prefix}{ratio}"), std::sync::Arc::new(image)));
+        added += 1;
+    }
+    if added > 0 || !missing.is_empty() {
+        diag::info!(
+            Ui,
+            "bo2 foreign kill icons: {added} added (keys killicon:<bo1_|mw2_|mw3_><name>:<ratio>); no picture for {}: {missing:?}",
+            missing.len()
+        );
+    }
+}
+
+/// The kill feed's key for another game's gun (see `foreign_kill_icons`):
+/// `bo1_ak74u` for BO1's `ak74u_mp`, `mw2_m4` for MW2's `m4_mp`; a name
+/// that already carries its prefix keeps it. `None` for BO2's own.
+pub fn foreign_kill_icon_base(ns: asset_core::AssetNamespace, name: &str) -> Option<String> {
+    let prefix = match ns {
+        asset_core::AssetNamespace::T5 => "bo1_",
+        asset_core::AssetNamespace::Iw4 => "mw2_",
+        asset_core::AssetNamespace::Iw5 => "mw3_",
+        asset_core::AssetNamespace::T6 => return None,
+    };
+    let base = name.split('+').next().unwrap_or(name).trim_end_matches("_mp");
+    if base.is_empty() || base == "none" {
+        return None;
+    }
+    Some(if base.starts_with(prefix) {
+        base.to_owned()
+    } else {
+        format!("{prefix}{base}")
+    })
+}
+
+#[cfg(test)]
+mod foreign_kill_icon_tests {
+    use super::foreign_kill_icon_base;
+    use asset_core::AssetNamespace;
+
+    #[test]
+    fn keys_match_the_feed_rule() {
+        assert_eq!(foreign_kill_icon_base(AssetNamespace::T5, "ak74u_mp").as_deref(), Some("bo1_ak74u"));
+        assert_eq!(foreign_kill_icon_base(AssetNamespace::Iw4, "m4_mp").as_deref(), Some("mw2_m4"));
+        assert_eq!(foreign_kill_icon_base(AssetNamespace::T5, "bo1_ak74u_mp").as_deref(), Some("bo1_ak74u"));
+        assert_eq!(foreign_kill_icon_base(AssetNamespace::Iw4, "m4_reflex_mp").as_deref(), Some("mw2_m4_reflex"));
+        assert_eq!(foreign_kill_icon_base(AssetNamespace::T6, "an94_mp"), None);
+    }
+}

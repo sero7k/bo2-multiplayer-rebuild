@@ -207,7 +207,28 @@ fn sound_sources(games: &GamesRoot, map: &Path) -> (Vec<SoundSource>, Vec<SoundS
         runtime("common_mp", Merge::Override, Absent::Gap),
         runtime("localized_common_mp", Merge::Override, Absent::Gap),
     ];
-    let after_map = vec![
+    // bo2mp: MW2's guns as extra weapons in a Black Ops II match: its
+    // common sounds too, when the map did not already bring MW2's common.
+    let runtime_common = before_map
+        .iter()
+        .find(|s| s.name == "common_mp")
+        .and_then(|s| s.found.as_ref().ok().cloned());
+    let mw2_guest = |name: &'static str| {
+        let found = find_zone_file_version(games, name, fastfile_iw4::ZONE_VERSION_PC).map(|zone| zone.path);
+        let already = found.as_ref().ok().zip(runtime_common.as_ref()).is_some_and(|(f, r)| f == r)
+            || (name == "localized_common_mp" && runtime_common.as_ref().is_some_and(|r| {
+                found.as_ref().is_ok_and(|f| f.parent() == r.parent())
+            }));
+        SoundSource {
+            namespace: AssetNamespace::Iw4,
+            name,
+            found: if already { Err("MW2's common sounds are already the runtime's".to_owned()) } else { found },
+            merge: Merge::Missing,
+            absent: Absent::Skip,
+        }
+    };
+    let mut after_map = vec![mw2_guest("common_mp"), mw2_guest("localized_common_mp")];
+    after_map.extend([
         donor(
             AssetNamespace::Iw5,
             "common_mp",
@@ -236,7 +257,7 @@ fn sound_sources(games: &GamesRoot, map: &Path) -> (Vec<SoundSource>, Vec<SoundS
         bo1_announcer_source(games),
         mw3_voice_source("localized_common_mp", "localized_common_mp (MW3 announcer)"),
         mw3_voice_source("localized_code_post_gfx_mp", "localized_code_post_gfx_mp (MW3 UI sounds)"),
-    ];
+    ]);
     (before_map, after_map)
 }
 

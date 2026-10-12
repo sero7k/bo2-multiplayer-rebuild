@@ -1159,6 +1159,34 @@ impl SimState {
         self.weapon_index_by_script_name(path.rsplit('/').next().unwrap_or(path))
     }
 
+    /// bo2mp: another game's gun by its guest name (`bo1_ak74u_mp+grip+reflex`):
+    /// the variant with exactly those attachments (any order), else the one
+    /// with the most of them and nothing else (the base gun at worst).
+    pub fn guest_weapon_index(&self, name: &str) -> Option<u32> {
+        if let Some(w) = self.weapon_index_by_script_name(name) {
+            return Some(w);
+        }
+        let mut parts = name.split('+');
+        let base = parts.next()?;
+        let base = if base.ends_with("_mp") { base.to_owned() } else { format!("{base}_mp") };
+        let wanted: Vec<&str> = parts.filter(|p| !p.is_empty()).collect();
+        let mut best: Option<(usize, u32)> = None;
+        for (i, n) in self.content.data.weapon_script_names.iter().enumerate().skip(1) {
+            let mut p = n.split('+');
+            if p.next() != Some(base.as_str()) {
+                continue;
+            }
+            let have: Vec<&str> = p.collect();
+            if !have.iter().all(|h| wanted.contains(h)) {
+                continue;
+            }
+            if best.is_none_or(|(k, _)| have.len() > k) {
+                best = Some((have.len(), i as u32));
+            }
+        }
+        best.map(|(_, i)| i)
+    }
+
     pub fn weapon_index_by_script_name(&self, name: &str) -> Option<u32> {
         if let Some(&weapon) = self.content.data.weapon_script_aliases.get(name) {
             return Some(weapon);

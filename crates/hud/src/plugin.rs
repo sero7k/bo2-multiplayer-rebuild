@@ -83,6 +83,7 @@ impl Plugin for HudPlugin {
                     sync_map_zone_tree,
                     sync_zone_atlases,
                     warm_hud_images,
+                    crate::killfeed::foreign_kill_icons,
                     ensure_hud_root,
                     retarget_iris_root,
                     sync_frontend_camera,

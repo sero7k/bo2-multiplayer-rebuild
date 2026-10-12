@@ -39,7 +39,7 @@ use match_walk::*;
 
 pub use common_cache::{CommonKey, CommonSet, ShellCommon, load_shell_common};
 pub use common_walks::{
-    MatchMaterialSeed, apply_match_material_map, load_match_material_catalog,
+    MatchMaterialSeed, check_guest_guns, apply_match_material_map, load_match_material_catalog,
     load_match_material_seed,
 };
 pub use resident_map::{load_prepared_match, note_gpu_resident, release_resident_cpu_images};

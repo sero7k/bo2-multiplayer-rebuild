@@ -16,6 +16,7 @@ asset_game.workspace = true
 asset_material.workspace = true
 asset_model.workspace = true
 asset_transport.workspace = true
+bo2_profile.workspace = true # bo2mp guest guns
 asset_world.workspace = true
 iw3 = { path = "../iw3" } # bo2mp: Call of Duty 4 maps
 t4 = { path = "../t4" } # bo2mp: World at War maps

@@ -336,22 +336,37 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
         })
     };
 
-    // bo2mp: under Black Ops II's rules Black Ops' guns are not wanted; its
-    // common zone is walked only for a Black Ops map.
+    // bo2mp: Black Ops' guns join Black Ops II's as extra weapons (listed
+    // as `bo1_<gun>` in Create-a-Class), so its common zone is walked for
+    // every match; `BO2MP_GUEST_GUNS=0` leaves them out (then only a Black
+    // Ops map walks it, for its own materials).
     let t5_map = key
         .foreign
         .as_deref()
         .and_then(peek_zone_version)
         .is_some_and(|v| v == fastfile_t5::ZONE_VERSION_PC);
-    let skip_t5 = crate::t6_rules() && !t5_map;
+    let skip_t5 = crate::t6_rules() && !t5_map && !crate::guest_guns();
     let t5_common_prep = {
         let anchor = anchor.clone();
         let progress = progress.clone();
         pool.spawn(async move {
             if skip_t5 {
-                return T5CommonPrep::Skip(vec!["t5 weapon common: skip, Black Ops II rules (its own guns)".into()]);
+                return T5CommonPrep::Skip(vec!["t5 weapon common: skip, Black Ops II rules and BO2MP_GUEST_GUNS=0".into()]);
             }
             t5_weapon_common_prep(anchor.as_deref(), &progress)
+        })
+    };
+    // bo2mp: MW2's guns as extra weapons, when the map does not already
+    // bring MW2's common zone.
+    let iw4_guest_prep = {
+        let anchor = anchor.clone();
+        let progress = progress.clone();
+        let wanted = crate::t6_rules() && crate::guest_guns();
+        pool.spawn(async move {
+            if !wanted {
+                return T5CommonPrep::Skip(vec!["iw4 guest guns: off".into()]);
+            }
+            iw4_guest_common_prep(anchor.as_deref(), &progress)
         })
     };
     let localize_walk = {
@@ -405,6 +420,30 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
         stats_tables: t5_stats,
         report: t5_report,
     } = t5_weapon_walk.await;
+    // (MW2's guest guns walk after Black Ops', on the same material pool.)
+    let T5WeaponCommon {
+        weapons: iw4_guest_weapons,
+        fpv: iw4_guest_fpv,
+        world_guns: iw4_guest_world_guns,
+        mut material_seed,
+        xanims: iw4_guest_xanims,
+        fx: iw4_guest_fx,
+        projectiles: iw4_guest_projectiles,
+        images: iw4_guest_images,
+        stats_tables: (_, iw4_guest_stats),
+        report: iw4_guest_report,
+        ..
+    } = {
+        let progress = progress.clone();
+        let job = load_jobs::open(JobKind::ImageDecode).namespace("iw4");
+        let prep = iw4_guest_prep.await;
+        pool.spawn(async move { walk_t5_weapon_common(prep, &progress, material_seed, job) }).await
+    };
+    common_report.extend(iw4_guest_report.into_iter().map(|l| l.replacen("t5 weapon common", "iw4 guest guns", 1)));
+    let mut t5_xanims = t5_xanims;
+    let mut t5_fx = t5_fx;
+    let iw4_guest_xanim_n = t5_xanims.absorb(iw4_guest_xanims);
+    t5_fx.absorb_missing(iw4_guest_fx);
     let t5_ids = t5_weapons.len();
     let t5_fpv_n = t5_fpv.len();
     let t5_xanim_n = t5_xanims.len();
@@ -620,6 +659,20 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
     t5_weapons.apply_stats_tables(&t5_code_stats);
     let t5_absorbed = t5_weapons.len();
     weapons.absorb(t5_weapons);
+    if !iw4_guest_weapons.is_empty() {
+        let mut guests = iw4_guest_weapons;
+        guests.apply_stats_tables(&iw4_guest_stats);
+        let n = guests.len();
+        weapons.absorb(guests);
+        projectile_meshes.absorb(iw4_guest_projectiles);
+        let fpv = fpv_meshes.absorb(iw4_guest_fpv);
+        let world = world_weapons.absorb(iw4_guest_world_guns);
+        common_report.push(format!(
+            "iw4 guest guns absorbed: {n} weapons, fpv=+{fpv} world_guns=+{world} xanims=+{iw4_guest_xanim_n}; registry now {} (iw4={})",
+            weapons.len(),
+            weapons.namespace_count(asset_core::AssetNamespace::Iw4)
+        ));
+    }
     projectile_meshes.absorb(t5_projectiles);
     let t5_fpv_added = fpv_meshes.absorb(t5_fpv);
     let t5_world_added = world_weapons.absorb(t5_world_guns);
@@ -748,6 +801,7 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
             let mut kept = Vec::new();
             for (namespace, pending) in [
                 ("t5", t5_images),
+                ("iw4", iw4_guest_images),
                 ("iw5", foreign_images),
                 ("iw5", bundle_images),
             ] {

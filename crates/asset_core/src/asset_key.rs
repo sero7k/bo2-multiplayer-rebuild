@@ -20,6 +20,39 @@ impl AssetNamespace {
         }
     }
 
+    /// bo2mp: the prefix another game's guns carry in a Black Ops II match
+    /// (`bo1_ak74u_mp`, `mw2_m4_mp`), so they never take a BO2 gun's name;
+    /// empty for BO2's own.
+    pub const fn guest_prefix(self) -> &'static str {
+        match self {
+            Self::Iw4 => "mw2_",
+            Self::T5 => "bo1_",
+            Self::Iw5 => "mw3_",
+            Self::T6 => "",
+        }
+    }
+
+    /// bo2mp: the game a guest gun's script name says it is from.
+    pub fn from_guest_name(name: &str) -> Option<Self> {
+        [Self::T5, Self::Iw4, Self::Iw5].into_iter().find(|ns| name.starts_with(ns.guest_prefix()))
+    }
+
+    /// bo2mp: the attachment words of this game's gun variants
+    /// (`ak74u_reflex_extclip`: `reflex`, `extclip`).
+    pub const fn guest_attachment_tokens(self) -> &'static [&'static str] {
+        match self {
+            Self::T5 => &[
+                "acog", "auto", "dualclip", "elbit", "extclip", "ft", "gl", "grip", "ir", "lps", "mk", "reflex", "rf",
+                "silencer", "snub", "speed", "upgradesight", "vzoom",
+            ],
+            Self::Iw4 => &[
+                "acog", "akimbo", "eotech", "fmj", "gl", "grip", "heartbeat", "reflex", "rof", "shotgun", "silencer",
+                "tactical", "thermal", "xmags",
+            ],
+            Self::Iw5 | Self::T6 => &[],
+        }
+    }
+
     pub fn from_zone_game(game: ZoneGame) -> Self {
         match game {
             ZoneGame::Iw4 => Self::Iw4,

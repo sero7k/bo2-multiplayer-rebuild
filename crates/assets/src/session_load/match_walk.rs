@@ -337,6 +337,41 @@ pub(super) async fn walk_prepared_match(
             map_namespace.map_or("?", |ns| ns.as_str())
         ));
     }
+    // bo2mp: other games' guns as extra weapons in a Black Ops II match:
+    // BO2's own rows keep every plain name, the guests are `bo1_<gun>_mp`.
+    if crate::t6_rules() {
+        weapons.set_guest_names(true);
+        let guests: Vec<String> = (1..weapons.len() as u32)
+            .filter(|&i| weapons.namespace_of(i).is_some_and(|ns| ns != asset_core::AssetNamespace::T6))
+            .map(|i| weapons.script_name_of(i))
+            .filter(|n| !n.contains('+'))
+            .collect();
+        // (A game's guns are listed in Create-a-Class only when they loaded.)
+        for (game, ns) in [("t5", asset_core::AssetNamespace::T5), ("iw4", asset_core::AssetNamespace::Iw4), ("iw5", asset_core::AssetNamespace::Iw5)] {
+            let wanted = bo2_profile::guest::all().filter(|g| g.game == game).count();
+            let loaded = bo2_profile::guest::all()
+                .filter(|g| g.game == game)
+                .filter(|g| {
+                    asset_core::AssetKey::new(ns, asset_core::AssetKind::Weapon, format!("{}_mp", g.gun))
+                        .ok()
+                        .and_then(|k| weapons.resolve_key(&k).ok().flatten())
+                        .is_some()
+                })
+                .count();
+            if wanted > 0 {
+                bo2_profile::guest::set_available(game, crate::guest_guns() && loaded > 0);
+                report.push(format!("bo2mp guest guns: {game}: {loaded} of {wanted} listed guns loaded"));
+            }
+        }
+        report.push(format!(
+            "bo2mp guest guns: {} other games' weapons named for BO2's scripts ({} base guns): {}",
+            (1..weapons.len() as u32)
+                .filter(|&i| weapons.namespace_of(i).is_some_and(|ns| ns != asset_core::AssetNamespace::T6))
+                .count(),
+            guests.len(),
+            guests.iter().take(80).cloned().collect::<Vec<_>>().join(" ")
+        ));
+    }
     let common_xanim_count = xanims.len();
     let map_xanim_count = map_xanims.len();
     let t5_xanim_added = xanims.absorb(t5_xanims);

@@ -571,6 +571,21 @@ pub(crate) fn picture_async(
     None
 }
 
+/// bo2mp: which other games' guns Create-a-Class lists (an installed game
+/// with its multiplayer common zone; off with `BO2MP_GUEST_GUNS=0`).
+pub(crate) fn guest_guns_available() {
+    let on = std::env::var("BO2MP_GUEST_GUNS").map_or(true, |v| v.trim() != "0");
+    let root = asset_transport::games_root_from_env().ok();
+    // (Black Ops' zone version, as its common_mp carries it.)
+    let t5 = on && root.as_ref().is_some_and(|r| asset_transport::find_common_mp_for_envelope(r, 0x1D9).is_ok());
+    // (Modern Warfare 2's zone version.)
+    let iw4 = on && root.as_ref().is_some_and(|r| asset_transport::find_common_mp_for_envelope(r, 0x114).is_ok());
+    bo2_profile::guest::set_available("t5", t5);
+    bo2_profile::guest::set_available("iw4", iw4);
+    let say = |listed: bool| if listed { "guns listed" } else if on { "not installed" } else { "off (BO2MP_GUEST_GUNS=0)" };
+    diag::info!(Ui, "bo2mp guest guns: Black Ops {}, Modern Warfare 2 {}", say(t5), say(iw4));
+}
+
 /// The namespace of a game prefix (`iw4` -> MW2).
 fn namespace_of(prefix: &str) -> Option<asset_core::AssetNamespace> {
     Some(match prefix {

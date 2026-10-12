@@ -1805,6 +1805,13 @@ pub(crate) fn rebuild_xmodel_draw_lane(
             lane.skipped_no_lighting = lane.skipped_no_lighting.saturating_add(1);
             continue;
         }
+        // bo2mp: a surface Black Ops II's pass draws (a BO2 gun, or under
+        // BO2's rules another game's gun given a BO2 draw) is not drawn
+        // here as well.
+        if mat.t6_material.is_some() {
+            lane.skipped_no_ordinal = lane.skipped_no_ordinal.saturating_add(1);
+            continue;
+        }
         let Some(material_sorted_index) = mat.material_sorted_index else {
             lane.skipped_no_ordinal = lane.skipped_no_ordinal.saturating_add(1);
             continue;

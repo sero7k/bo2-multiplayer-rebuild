@@ -229,10 +229,15 @@ pub fn rank_picture(level: i32, prestige: i32) -> String {
 pub fn foreign_picture(name: &str) -> Option<(&'static str, Vec<String>)> {
     let (game, material) = name.split_once(':')?;
     let game = ["t5", "iw4", "iw5"].into_iter().find(|g| *g == game)?;
+    // (`t5:menu_mp_weapons_ak74u|hud_icon_ak74u`: the names to try, in order.)
+    let mut parts = material.split('|');
+    let material = parts.next().unwrap_or(material);
     let mut names = vec![material.to_owned()];
+    names.extend(parts.filter(|p| !p.is_empty()).map(str::to_owned));
+    let ranked = material.contains("rank") || material.contains("prestige");
     let n = material.trim_start_matches(|c: char| !c.is_ascii_digit());
     let n = n.split(|c: char| !c.is_ascii_digit()).next().and_then(|d| d.parse::<i32>().ok());
-    if let Some(n) = n {
+    if let Some(n) = n.filter(|_| ranked) {
         for c in icon_candidates(game, n) {
             if !names.contains(&c) {
                 names.push(c);
@@ -245,7 +250,9 @@ pub fn foreign_picture(name: &str) -> Option<(&'static str, Vec<String>)> {
 /// Whether `extend_table` changes this table (name any case).
 #[must_use]
 pub fn is_rank_table(name: &str) -> bool {
-    name.eq_ignore_ascii_case("mp/rankTable.csv") || name.eq_ignore_ascii_case("mp/rankIconTable.csv")
+    name.eq_ignore_ascii_case("mp/rankTable.csv")
+        || name.eq_ignore_ascii_case("mp/rankIconTable.csv")
+        || crate::guest::is_guest_table(name)
 }
 
 /// Extend a BO2 string table as it loads (name any case; row-major cells):
@@ -258,6 +265,10 @@ pub fn extend_table(name: &str, columns: &mut usize, rows: &mut usize, cells: &m
         extend_rank_rows(&mut grid)
     } else if name.eq_ignore_ascii_case("mp/rankIconTable.csv") {
         extend_rank_icon_rows(&mut grid)
+    } else if name.eq_ignore_ascii_case("mp/statsTable.csv") {
+        crate::guest::extend_stats_rows(&mut grid)
+    } else if name.eq_ignore_ascii_case("mp/attachmentTable.csv") {
+        crate::guest::extend_attachment_rows(&mut grid)
     } else {
         return false;
     };
@@ -520,6 +531,6 @@ mod tests {
         let again = cells.clone();
         assert!(!extend_table("mp/rankIconTable.csv", &mut cols, &mut n, &mut cells));
         assert_eq!(cells, again);
-        assert!(!extend_table("mp/statsTable.csv", &mut cols, &mut n, &mut cells));
+        assert!(!extend_table("mp/gametypesTable.csv", &mut cols, &mut n, &mut cells));
     }
 }

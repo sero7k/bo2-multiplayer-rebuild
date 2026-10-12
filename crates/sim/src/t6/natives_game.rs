@@ -495,20 +495,8 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let class = super::frame(world)
             .combat_facts_for(w)
             .map_or(-1, |f| f.weap_class);
-        let name = match class {
-            0 => "rifle",
-            1 => "mg",
-            2 => "smg",
-            3 => "spread",
-            4 => "spread",
-            5 => "pistol",
-            6 => "grenade",
-            7 => "rocketlauncher",
-            8 => "turret",
-            9 => "non-player",
-            10 => "item",
-            _ => "none",
-        };
+        // (The class is IW4-numbered, as the catalog keeps every game's.)
+        let name = if class < 0 { "none" } else { crate::t6_playeranim::t6_weapon_class_name(class) };
         Ok(vm.string(name))
     });
     // A weapon's world model (the box's floating gun, a wall buy's).

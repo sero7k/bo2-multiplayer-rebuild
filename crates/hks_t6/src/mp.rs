@@ -162,6 +162,9 @@ pub struct MpState {
     /// (its picture's name, width per height); and whether they are in.
     pub kill_icons: HashMap<String, (String, f32)>,
     pub kill_icons_loaded: bool,
+    /// bo2mp: how many HUD icons there were when the kill icons were read
+    /// (other games' guns add theirs once their pictures are in).
+    pub kill_icons_from: usize,
     /// The player the killcam (or the Killed By card) shows: the killer
     /// (`Engine.GetPredictedClientNum`).
     pub callout: Option<i32>,

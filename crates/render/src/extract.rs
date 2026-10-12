@@ -1327,8 +1327,8 @@ fn t6_model_surfaces(
             refused.push((surface, "material not in the scene catalog", format!("#{material}")));
             continue;
         };
-        let Some(draw) = m.t6_draw else {
-            refused.push((surface, "material has no BO2 draw (not linked by a T6 lane)", m.name.to_string()));
+        let Some(draw) = m.t6_model_draw(assets::t6_rules()) else {
+            refused.push((surface, "material has no BO2 draw (not linked by a T6 lane, not an mc_ model material)", m.name.to_string()));
             continue;
         };
         if vbase + vn > skel.positions.len() || ibase + icount > skel.indices.len() {
@@ -1590,12 +1590,17 @@ pub fn extract_t6_dynamic(
         }
         None => render_gpu::ExtractedT6Dynamic::default(),
     };
+    // bo2mp: other games' guns are extra BO2 weapons under BO2's rules.
+    let foreign = assets::t6_rules();
     if out.generation != catalog.generation_id || out.materials.is_empty() {
         let materials: Vec<(u32, u32)> = catalog
             .materials
             .iter()
             .filter_map(|m| {
-                let draw = m.t6_draw?;
+                // bo2mp: and other games' model materials under BO2's rules
+                // (their guns), for their colour maps' bind groups and
+                // their draw codes' pipelines.
+                let draw = m.t6_model_draw(foreign)?;
                 let slot = m.texture_semantic(asset_material::TS_COLOR_MAP)?.0;
                 Some((slot, draw.code()))
             })
@@ -1647,16 +1652,22 @@ pub fn extract_t6_dynamic(
                 .iter()
                 .filter_map(|&(start, count, material)| {
                     let m = catalog.derived(assets::MaterialIndex::from_order(material? as usize))?;
-                    let draw = m.t6_draw?;
+                    let draw = m.t6_model_draw(foreign)?;
                     let slot_of = |semantic| m.texture_semantic(semantic).map_or(u32::MAX, |id| id.0);
+                    // bo2mp: another game's gun draws without shine: its
+                    // normal maps (two-channel, 2x-1) and specular maps
+                    // are not Black Ops II's encoding, which the shine
+                    // shader reads; grid light and the sun light it.
+                    let own = m.t6_draw.is_some();
+                    let shine_of = |semantic| if own { slot_of(semantic) } else { u32::MAX };
                     Some([
                         start,
                         count,
                         slot_of(asset_material::TS_COLOR_MAP),
                         draw.code(),
                         0,
-                        slot_of(asset_material::TS_NORMAL_MAP),
-                        slot_of(asset_material::TS_SPECULAR_MAP),
+                        shine_of(asset_material::TS_NORMAL_MAP),
+                        shine_of(asset_material::TS_SPECULAR_MAP),
                     ])
                 })
                 .collect();

@@ -2184,6 +2184,14 @@ pub(crate) fn weapon(world: &mut World, name: &str) -> Result<u32, String> {
     // with its sight, if it has one (`mk48_mp+reflex`, the scope lane's
     // catalog weapon: sight model, ADS, zoom, overlay); its other
     // attachments are not drawn or modelled yet.
+    // bo2mp: another game's gun (`bo1_ak74u_mp+reflex+grip`): its own
+    // variant with those attachments, in any order, else the nearest one.
+    if ["bo1_", "mw2_", "mw3_"].iter().any(|p| name.starts_with(p)) {
+        let f = frame(world);
+        if let Some(w) = f.guest_weapon_index(name) {
+            return Ok(w);
+        }
+    }
     let mut parts = name.split('+');
     let name = parts.next().unwrap_or(name);
     let f = frame(world);

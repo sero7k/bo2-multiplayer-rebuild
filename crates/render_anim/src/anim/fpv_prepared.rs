@@ -386,8 +386,12 @@ fn admit_surface(
         ],
         sort_key: authored.sort_key,
         material_sorted_index: ordinal.map(|o| o.get()),
-        // bo2zm: see `SmodelPassMaterial::t6_material`.
-        t6_material: authored.t6_draw.map(|_| bound as u32),
+        // bo2zm: see `SmodelPassMaterial::t6_material`. bo2mp: also another
+        // game's gun material under BO2's rules (`t6_model_draw`): it draws
+        // in BO2's pass, lit by the same light as BO2's guns.
+        t6_material: authored
+            .t6_model_draw(assets::t6_rules())
+            .map(|_| bound as u32),
     };
     let row = admission.materials.len() as u32;
     admission.materials.push(material);
@@ -878,6 +882,9 @@ impl FpvPreparationJob {
                 census: census.clone(),
             }))
         });
+        if parent == 0 && namespace != AssetNamespace::T6 && assets::t6_rules() {
+            self.note_foreign_gun(fpv, xanims, id, gun_index, &sides);
+        }
         for (axis, side) in sides.iter().enumerate() {
             if let FpvWeaponSlot::Refused(cause) = side
                 && self.refused.len() < 16
@@ -895,6 +902,111 @@ impl FpvPreparationJob {
             self.alternate_slots.insert((id, parent), sides);
         }
         self.tick();
+    }
+
+    /// bo2mp diag: another game's gun (a BO1 or MW2 row under Black Ops
+    /// II's rules), once as its first-person view is prepared: each
+    /// surface of the gun and its attachments (drawn by BO2's pass, or why
+    /// not), the arms it is held in, and the bones its idle animation
+    /// moves that the arms + gun skeleton lacks (those tracks do nothing).
+    fn note_foreign_gun(
+        &self,
+        fpv: &FpvMeshCatalog,
+        xanims: &XAnimCatalog,
+        id: u32,
+        gun: FpvMeshIndex,
+        sides: &[FpvWeaponSlot; 2],
+    ) {
+        let registry = &self.owner.weapons;
+        let assembly = registry.fpv_assemblies_for(id, 0, false).map(|s| Arc::clone(&s.bare));
+        let models: Vec<usize> = match &assembly {
+            Some(a) => a
+                .parts
+                .iter()
+                .filter(|p| !matches!(p.role, asset_game::FpvPartRole::Hands))
+                .map(|p| p.model.order())
+                .collect(),
+            None => vec![gun.order()],
+        };
+        let (mut drawn, mut no_draw, mut refused) = (0usize, Vec::new(), Vec::new());
+        for order in models {
+            let Some(entry) = fpv.get_at(order) else { continue };
+            for (surface, verdict) in self.admission.verdicts_of(order) {
+                let name = entry
+                    .material_keys
+                    .get(*surface)
+                    .and_then(|k| Some(k.as_ref()?.name.clone()))
+                    .unwrap_or_else(|| "-".to_owned());
+                match verdict {
+                    FpvSurfaceVerdict::Admitted(row) => {
+                        if self
+                            .admission
+                            .materials
+                            .get(*row as usize)
+                            .is_some_and(|m| m.t6_material.is_some())
+                        {
+                            drawn += 1;
+                        } else if no_draw.len() < 8 {
+                            no_draw.push(format!("{}#{surface} {name} (not an mc_ model technique set)", entry.skel.name));
+                        }
+                    }
+                    FpvSurfaceVerdict::Refused { material, cause } => {
+                        if refused.len() < 8 {
+                            refused.push(format!("{}#{surface} {material}: {cause}", entry.skel.name));
+                        }
+                    }
+                    FpvSurfaceVerdict::Inapplicable(why) => {
+                        if refused.len() < 8 {
+                            refused.push(format!("{}#{surface} {name}: {why}", entry.skel.name));
+                        }
+                    }
+                }
+            }
+        }
+        let arms = [false, true].map(|axis| {
+            registry
+                .fpv_hands_of(id, axis)
+                .and_then(|(hands, _)| hands.key().map(|(ns, name)| format!("{}:{name}", ns.as_str())))
+                .unwrap_or_else(|| "UNRESOLVED".to_owned())
+        });
+        let idle = registry
+            .sz_xanim_edges_of(id)
+            .and_then(|row| row[asset_iw4::size::weap_anim::IDLE].bound_index())
+            .and_then(|order| xanims.clip_at(order));
+        let missing: Vec<&str> = match (&assembly, idle.as_deref()) {
+            (Some(a), Some(clip)) => clip
+                .tracks
+                .iter()
+                .map(|t| t.name.as_str())
+                .filter(|n| !a.dobj.bones.iter().any(|b| b.name.eq_ignore_ascii_case(n)))
+                .collect(),
+            _ => Vec::new(),
+        };
+        let status: Vec<String> = sides
+            .iter()
+            .map(|s| match s {
+                FpvWeaponSlot::Ready(_) => "ready".to_owned(),
+                FpvWeaponSlot::Refused(cause) => format!("refused ({cause})"),
+                FpvWeaponSlot::Absent => "absent".to_owned(),
+            })
+            .collect();
+        diag::info!(
+            Fpv,
+            "bo2 foreign gun {} ({}): view {} | surfaces drawn by BO2's pass {drawn}, without a BO2 draw {} {:?}, refused {} {:?} | arms allies={} axis={} | idle `{}` tracks {} missing from arms+gun {} {:?}",
+            registry.name_of(id),
+            registry.namespace_of(id).map_or("?", |ns| ns.as_str()),
+            status.join(" / "),
+            no_draw.len(),
+            no_draw,
+            refused.len(),
+            refused,
+            arms[0],
+            arms[1],
+            idle.as_deref().map_or("-", |c| c.name.as_str()),
+            idle.as_deref().map_or(0, |c| c.tracks.len()),
+            missing.len(),
+            missing.iter().take(24).collect::<Vec<_>>(),
+        );
     }
 
     fn finish(self) -> (FpvPreparationOwner, FpvWeaponTable) {

@@ -46,7 +46,7 @@ pub use prepared::{
     PreparedXModelWalkCensus, SessionCompass, T6HudFont, T6HudFonts, T6HudIcons, T6Ui,
 };
 pub use session_load::{
-    MatchLoadOutcome, MatchMaterialSeed, PreparedMatch, PreparedWorld, ShellCommon,
+    check_guest_guns, MatchLoadOutcome, MatchMaterialSeed, PreparedMatch, PreparedWorld, ShellCommon,
     apply_match_material_map, load_match_material_catalog, load_match_material_seed, load_pool,
     load_prepared_match, load_shell_common, load_workers, note_gpu_resident, publish_process_cpus,
     release_resident_cpu_images,
@@ -66,6 +66,12 @@ pub fn set_t6_rules(on: bool) {
 
 pub fn t6_rules() -> bool {
     T6_RULES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// bo2mp: other games' guns join Black Ops II's as extra weapons (off with
+/// `BO2MP_GUEST_GUNS=0`).
+pub fn guest_guns() -> bool {
+    std::env::var("BO2MP_GUEST_GUNS").map_or(true, |v| v.trim() != "0")
 }
 
 mod script_sources;

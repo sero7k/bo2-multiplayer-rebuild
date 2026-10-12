@@ -411,6 +411,91 @@ impl RuntimeMaterial {
                 .map(|binding| binding.image)
         })
     }
+
+    /// bo2mp: how this material draws on a model in Black Ops II's
+    /// fallback pass (the first-person gun and arms, players and the guns
+    /// they hold). A Black Ops II material has its own `t6_draw`. With
+    /// `foreign` (a Black Ops II-rules match, where Black Ops' and Modern
+    /// Warfare's guns are extra BO2 weapons), another game's model material
+    /// (`mc_*` technique sets: BO1 `mc_l_sm_r0c0n0s0_wpn_clrdtl_hero`, MW2
+    /// `mc_l_sm_r0c0n0s0p0`, ...) is read the same way a CoD4 world
+    /// material is: its technique set's name (`r0c0` replaces, `t0c0`
+    /// alpha tests, `b0c0` blends, `unlit`, `effect`) and the draw state
+    /// of a technique that writes colour. Drawn double-sided (the cull
+    /// bits are read per game). World materials (`wc_*`) never: their
+    /// map is drawn by its own game's path.
+    pub fn t6_model_draw(&self, foreign: bool) -> Option<asset_core::T6Draw> {
+        if self.t6_draw.is_some() {
+            return self.t6_draw;
+        }
+        if !foreign || self.namespace == AssetNamespace::T6 {
+            return None;
+        }
+        foreign_model_draw(
+            &self.technique_set,
+            self.sort_key,
+            &self.state_bits_table,
+            self.shadow_only,
+        )
+    }
+}
+
+/// bo2mp: see `RuntimeMaterial::t6_model_draw` (another game's model
+/// material, by its technique set's name and draw states).
+pub fn foreign_model_draw(
+    technique_set: &str,
+    sort_key: u8,
+    state_bits_table: &[[u32; 2]],
+    shadow_only: bool,
+) -> Option<asset_core::T6Draw> {
+    let name = foreign_model_technique(technique_set)?;
+    // A colour-writing technique's state: a blended one when the
+    // material blends anywhere (its lit techniques), else the first
+    // (depth-only ones write no colour).
+    let decoded: Vec<([u32; 2], asset_core::T6StateBits)> = state_bits_table
+        .iter()
+        .map(|bits| (*bits, asset_core::T6StateBits::decode(*bits)))
+        .filter(|(_, st)| st.color_write_rgb)
+        .collect();
+    let state = decoded
+        .iter()
+        .find(|(_, st)| st.blend_op != 0)
+        .or_else(|| decoded.first())
+        .map(|(bits, _)| *bits);
+    let mut draw = asset_core::T6Draw::from_technique_set(name, sort_key, state);
+    // The reflex and holo sights' reticle: a glowing dot on black,
+    // added on unlit (the game's own shader projects it to infinity).
+    if name.split('_').any(|t| t == "reflexsight" || t == "holosight") {
+        draw.unlit = true;
+        draw.blend = asset_core::T6Blend::Add;
+        draw.alpha_test = false;
+    }
+    if shadow_only {
+        draw.blend = asset_core::T6Blend::ShadowOnly;
+    }
+    draw.cull = asset_core::T6Cull::None;
+    // Never the BO2-only kinds (water, flow, tiles, flags, sky...).
+    draw.water = false;
+    draw.flow = false;
+    draw.tile = false;
+    draw.flag = false;
+    draw.tile_blend = false;
+    draw.foliage = false;
+    draw.objective = false;
+    draw.layered = false;
+    draw.layers = [0, 0];
+    if draw.blend == asset_core::T6Blend::Sky {
+        draw.blend = asset_core::T6Blend::Opaque;
+    }
+    Some(draw)
+}
+
+/// bo2mp: another game's model technique set's own name (`mc_*`), less a
+/// leading `,` (a reference) or folder; `None` for anything else.
+fn foreign_model_technique(technique_set: &str) -> Option<&str> {
+    let name = technique_set.trim_start_matches(',');
+    let name = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    name.starts_with("mc_").then_some(name)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -661,4 +746,32 @@ pub enum CatalogBuildError {
         material: MaterialAssetId,
         slot: u8,
     },
+}
+
+#[cfg(test)]
+mod foreign_model_draw_tests {
+    use super::foreign_model_draw;
+    use asset_core::{T6Blend, T6Cull};
+
+    #[test]
+    fn bo1_and_mw2_gun_technique_sets() {
+        let d = foreign_model_draw("mc_l_sm_r0c0n0s0_wpn_clrdtl_hero", 4, &[], false).unwrap();
+        assert_eq!((d.blend, d.unlit, d.alpha_test, d.cull), (T6Blend::Opaque, false, false, T6Cull::None));
+        let d = foreign_model_draw("mc_l_sm_t0c0n0s0", 4, &[], false).unwrap();
+        assert!(d.alpha_test);
+        let d = foreign_model_draw(",mc_l_sm_b0c0n0s0p0", 9, &[], false).unwrap();
+        assert_eq!(d.blend, T6Blend::Blend);
+        let d = foreign_model_draw("mc_reflexsight", 9, &[], false).unwrap();
+        assert_eq!((d.blend, d.unlit), (T6Blend::Add, true));
+        let d = foreign_model_draw("mc_unlit_replace", 4, &[], false).unwrap();
+        assert!(d.unlit);
+        assert_eq!(foreign_model_draw("mc_l_sm_r0c0", 4, &[], true).unwrap().blend, T6Blend::ShadowOnly);
+        // World materials are drawn by their map's own path.
+        assert!(foreign_model_draw("wc_l_sm_r0c0n0s0", 4, &[], false).is_none());
+        // A blended lit technique's state wins over a depth-only one.
+        let depth = [0u32, 0];
+        let blended = [(5 | (6 << 4) | (1 << 8) | (1 << 27)) as u32, 0];
+        let d = foreign_model_draw("mc_l_sm_r0c0", 4, &[depth, blended], false).unwrap();
+        assert_eq!(d.blend, T6Blend::Blend);
+    }
 }

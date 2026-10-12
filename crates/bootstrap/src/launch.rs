@@ -154,6 +154,18 @@ pub fn launch(
             run_frontend_t6mp(games, artifacts);
         }
         LaunchMode::CheckMaps => run_check_maps(&games, &artifacts),
+        LaunchMode::CheckGuns => {
+            let lines = assets::check_guest_guns();
+            for line in &lines {
+                println!("{line}");
+            }
+            let out = artifacts.join("gun-check.txt");
+            let _ = std::fs::create_dir_all(&artifacts);
+            match std::fs::write(&out, lines.join("\r\n")) {
+                Ok(()) => println!("report: {}", out.display()),
+                Err(e) => println!("report not written ({}): {e}", out.display()),
+            }
+        }
         LaunchMode::Map(zone) => run_map(games, artifacts, zone, acceptance, Role::Listen, None),
         LaunchMode::Serve(zone) => run_map(games, artifacts, zone, None, Role::Dedicated, None),
         LaunchMode::ExportGltf(zone) => {
