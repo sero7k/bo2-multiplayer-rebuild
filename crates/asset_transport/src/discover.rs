@@ -163,6 +163,30 @@ fn usermaps_in(files: impl Iterator<Item = Result<PathBuf, String>>) -> Vec<User
 
 /// bo2mp: the archives of every usermap of the game tree whose `main` is
 /// `main` (`<main>/../usermaps/*/*.iwd`), searched after `main`'s own.
+/// bo2mp: IW4x's own archives for a MW2 `main` folder - its DLC map packs
+/// (`iw_dlc*_00.iwd`: Shipment, Dome, the CoD4 and MW3 packs) and
+/// `iw4x_*.iwd` - in any of the places IW4x keeps them: `main/iw4x/x86`,
+/// `main/iw4x`, `<game>/iw4x`. Sorted by name; none when the folders are
+/// absent.
+pub fn iw4x_iwds_for_main(main: &Path) -> Vec<PathBuf> {
+    let mut dirs = vec![main.join("iw4x").join("x86"), main.join("iw4x")];
+    if let Some(tree) = main.parent() {
+        dirs.push(tree.join("iw4x"));
+    }
+    let mut out = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let mut found: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("iwd")))
+            .collect();
+        found.sort();
+        out.extend(found);
+    }
+    out
+}
+
 pub fn usermap_iwds_for_main(main: &Path) -> Vec<PathBuf> {
     if !main
         .file_name()

@@ -137,6 +137,8 @@ impl IwdIndex {
         // come after the game's own, so a stock image keeps its stock file;
         // one that does not index is left out instead of failing the game.
         let stock = archives.len();
+        // (bo2mp: IW4x's DLC map packs beside MW2's own archives.)
+        archives.extend(crate::discover::iw4x_iwds_for_main(directory));
         archives.extend(crate::discover::usermap_iwds_for_main(directory));
 
         type IndexedArchive = (usize, Result<Vec<(String, IwdFile)>, String>);
@@ -505,6 +507,8 @@ impl IwdSoundIndex {
         // bo2mp: the usermaps' archives after the game's own (a stock sound
         // keeps its stock file); one that does not open is left out.
         let stock = archives.len();
+        // (bo2mp: IW4x's DLC map packs beside MW2's own archives.)
+        archives.extend(crate::discover::iw4x_iwds_for_main(directory));
         archives.extend(crate::discover::usermap_iwds_for_main(directory));
 
         let mut sounds = HashMap::new();
