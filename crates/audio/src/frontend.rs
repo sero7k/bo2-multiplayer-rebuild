@@ -240,14 +240,18 @@ fn play_ui_sound_messages(
         if event.alias.is_empty() {
             continue;
         }
+        let (namespace, alias) = match crate::ui_sounds::mw3_ui_sound(&bank.0, &event.alias) {
+            Some(mw3) => (asset_core::AssetNamespace::Iw5, mw3),
+            None => (alias_namespace(&bank.0, &event.alias), event.alias.as_str()),
+        };
         let outcome = play_alias_oneshot(
             &mut commands,
             &mut pcm_assets,
             &mut shared,
             &bank.0,
             iwd.map(|a| a.as_ref()),
-            alias_namespace(&bank.0, &event.alias),
-            &event.alias,
+            namespace,
+            alias,
             None,
             None,
             &mut pick,

@@ -166,7 +166,13 @@ fn entity_event_sound(
 ) {
     let event = sound.event.event;
     if event == EntityEventKind::SOUND_ALIAS {
-        play_cs_sound_alias(&sound.event, adopted.as_deref(), announcer.as_deref(), &mut play);
+        play_cs_sound_alias(
+            &sound.event,
+            adopted.as_deref(),
+            announcer.as_deref(),
+            bank.as_deref().map(|bank| &*bank.0),
+            &mut play,
+        );
         return;
     }
     if event == EntityEventKind::SOUND_ALIAS_AS_MASTER {
@@ -278,6 +284,7 @@ fn play_cs_sound_alias(
     payload: &net::DispatchedEntityEvent,
     adopted: Option<&net::LastAdoptedSnapshot>,
     announcer: Option<&crate::match_voices::AnnouncerRoutes>,
+    bank: Option<&asset_audio::SoundCatalog>,
     play: &mut MessageWriter<crate::AliasCommand>,
 ) {
     let index = u8::try_from(payload.payload.event_parm).unwrap_or(0);
@@ -304,6 +311,13 @@ fn play_cs_sound_alias(
         .unwrap_or((asset_core::AssetNamespace::Iw4, alias));
     let (namespace, alias) = match announcer.and_then(|routes| routes.routed(namespace, &alias)) {
         Some((namespace, routed)) => (namespace, routed.to_owned()),
+        None => (namespace, alias),
+    };
+    let (namespace, alias) = match bank
+        .filter(|_| namespace == asset_core::AssetNamespace::T6)
+        .and_then(|bank| crate::ui_sounds::mw3_ui_sound(bank, &alias))
+    {
+        Some(mw3) => (asset_core::AssetNamespace::Iw5, mw3.to_owned()),
         None => (namespace, alias),
     };
     play.write(crate::AliasCommand::Play(PlayAlias {

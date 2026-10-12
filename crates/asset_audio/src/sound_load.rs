@@ -234,7 +234,8 @@ fn sound_sources(games: &GamesRoot, map: &Path) -> (Vec<SoundSource>, Vec<SoundS
             fastfile_t5::ZONE_VERSION_PC,
         ),
         bo1_announcer_source(games),
-        mw3_announcer_source(),
+        mw3_voice_source("localized_common_mp", "localized_common_mp (MW3 announcer)"),
+        mw3_voice_source("localized_code_post_gfx_mp", "localized_code_post_gfx_mp (MW3 UI sounds)"),
     ];
     (before_map, after_map)
 }
@@ -253,16 +254,17 @@ pub fn voice_games_root() -> Option<GamesRoot> {
         .map(|root| GamesRoot(std::path::PathBuf::from(root)))
 }
 
-fn mw3_announcer_source() -> SoundSource {
+/// An MW3 zone from the voice-only folder: its announcer
+/// (`localized_common_mp`) or its interface sounds
+/// (`localized_code_post_gfx_mp`).
+fn mw3_voice_source(zone: &'static str, name: &'static str) -> SoundSource {
     let found = voice_games_root()
         .ok_or_else(|| "IW4L_VOICE_GAMES is not set".to_owned())
-        .and_then(|root| {
-            find_zone_file_version(&root, "localized_common_mp", fastfile_iw5::ZONE_VERSION_PC)
-        })
+        .and_then(|root| find_zone_file_version(&root, zone, fastfile_iw5::ZONE_VERSION_PC))
         .map(|zone| zone.path);
     SoundSource {
         namespace: AssetNamespace::Iw5,
-        name: "localized_common_mp (MW3 announcer)",
+        name,
         found,
         merge: Merge::Missing,
         absent: Absent::Skip,

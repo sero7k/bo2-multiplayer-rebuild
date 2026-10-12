@@ -51,6 +51,7 @@ mod zm_music;
 mod match_set;
 mod match_voices;
 mod menu_music;
+mod ui_sounds;
 
 mod ads_sounds;
 mod weapon_lock;

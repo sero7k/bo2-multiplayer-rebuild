@@ -294,6 +294,13 @@ fn queue_match_clips(
             "audio: announcer: {} Black Ops II team voice lines queued ({voice:?} voice)",
             announcer_lines.len()
         );
+        // MW3's interface sounds stand in for BO2's (the pre-match countdown).
+        for (_, mw3) in crate::ui_sounds::MW3_UI {
+            if bank.0.index_in(AssetNamespace::Iw5, mw3).is_some() {
+                aliases += 1;
+                request_named(clips, &bank.0, AssetNamespace::Iw5, mw3, &mut set);
+            }
+        }
         for alias in &announcer_lines {
             aliases += 1;
             let lower = alias.to_ascii_lowercase();

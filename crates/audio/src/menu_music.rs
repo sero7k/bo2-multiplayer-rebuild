@@ -1,8 +1,8 @@
 //! The multiplayer front end's music: one main-menu track at a time, picked
 //! at random from Black Ops II's, Black Ops', Modern Warfare 2's and Modern
-//! Warfare 3's own, and a different one when it ends. It plays only while the
-//! front end's sound bank is the one in use (a match brings its own), and a
-//! game whose track is not installed is left out of the rotation.
+//! Warfare 3's own, and a different one when it ends. It stops the moment a
+//! match starts loading and comes back only once the game is back at the
+//! menu; a game whose track is not installed is left out of the rotation.
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -15,6 +15,7 @@ use crate::clip_store::{ClipStore, clip_keys_for_alias};
 use crate::frontend::FrontendAudio;
 use crate::pcm::PcmAudio;
 use crate::playback::SoundBank;
+use frame::ReturnedToMenu;
 
 /// Each game's main-menu track: its namespace, alias and name for the log.
 const TRACKS: [(AssetNamespace, &str, &str); 4] = [
@@ -34,6 +35,8 @@ pub(crate) struct MenuMusic {
     last: Option<usize>,
     unavailable: [bool; TRACKS.len()],
     rng: u64,
+    /// A match load was asked for; silent until the game is back at the menu.
+    loading: bool,
 }
 
 struct Playing {
@@ -53,6 +56,7 @@ impl Default for MenuMusic {
             last: None,
             unavailable: [false; TRACKS.len()],
             rng: seed | 1,
+            loading: false,
         }
     }
 }
@@ -93,11 +97,21 @@ pub(crate) fn update(
     mut clips: Option<ResMut<ClipStore>>,
     mut assets: ResMut<Assets<PcmAudio>>,
     mut music: ResMut<MenuMusic>,
+    request: Option<Res<assets::MatchLoadRequest>>,
+    accepted: Option<Res<assets::MatchLoadAccepted>>,
+    mut returned: MessageReader<ReturnedToMenu>,
 ) {
-    let in_menu = match (&frontend, &bank) {
-        (Some(frontend), Some(bank)) => std::sync::Arc::ptr_eq(&frontend.bank, &bank.0),
-        _ => false,
-    };
+    if returned.read().count() > 0 {
+        music.loading = false;
+    }
+    if request.is_some() || accepted.is_some() {
+        music.loading = true;
+    }
+    let in_menu = !music.loading
+        && match (&frontend, &bank) {
+            (Some(frontend), Some(bank)) => std::sync::Arc::ptr_eq(&frontend.bank, &bank.0),
+            _ => false,
+        };
     if !in_menu {
         music.stop(&mut commands);
         return;
