@@ -310,7 +310,10 @@ impl Host {
                     }
                     // (The engine's boolean dvars answer true/false; the
                     // scripts compare them with `== true`.)
-                    let boolean = matches!(n1.as_str(), "ui_inGameStoreVisible" | "demo_recordPrivateMatch" | "tu7_scoreboardPingAsNumbers");
+                    let boolean = matches!(
+                        n1.as_str(),
+                        "ui_inGameStoreVisible" | "demo_recordPrivateMatch" | "tu7_scoreboardPingAsNumbers" | "party_isPreviousMapVoted"
+                    );
                     Ok(v.map(|s| match s.parse::<f32>() {
                         Ok(n) if boolean => Value::Bool(n != 0.0),
                         Ok(n) => Value::Num(n),

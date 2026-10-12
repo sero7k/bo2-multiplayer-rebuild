@@ -34,6 +34,8 @@ pub struct LobbyReturn {
     /// After Action Report's "before", BO2's STATS_LOCATION_STABLE).
     pub playlist: Option<i32>,
     pub stats_before: Option<String>,
+    /// Combat Training's map rotation, the match's map played.
+    pub rotation: Option<hks_t6::mapvote::Rotation>,
     /// End Game ran BO2's `xpartydisbandafterround`: in a public online game
     /// (Combat Training) the engine marks the public party to disband at the
     /// round's end, so there is no public lobby to come back to.
@@ -130,6 +132,7 @@ pub(crate) fn open(host: &mut Host, mp: Option<&Mp>, back: Option<&LobbyReturn>)
             let mut m = mp.borrow_mut();
             m.game_modes.extend(back.game_modes.iter().copied());
             m.playlist = back.playlist;
+            m.rotation.clone_from(&back.rotation);
             // Combat Training's lobby counts down to the next match.
             if back.playlist.is_some() && !back.disbanded {
                 m.public_start_in = Some(hks_t6::playlists::NEXT_MATCH_MS);
@@ -242,12 +245,126 @@ pub(crate) fn is_3d(d: &hks_t6::host::Drawn) -> bool {
     d.kind == "globe" || d.x_rot.abs() > 0.01 || d.y_rot.abs() > 0.01
 }
 
+/// Combat Training's rotation: Custom Games' Change Map list (BO2's
+/// mp/mapsTable.csv, `Engine.GetMaps`) less the maps whose zone is not in
+/// the player's install, the clock rolling its draws.
+fn new_rotation(host: &Host, identity: Option<&frame::LaunchIdentity>) -> hks_t6::mapvote::Rotation {
+    let installed: std::collections::HashSet<String> = identity
+        .map_or_else(Vec::new, |id| asset_transport::list_mp_maps(&asset_transport::GamesRoot(id.games_root.clone())))
+        .into_iter()
+        .collect();
+    let maps = {
+        let v = host.values.borrow();
+        hks_t6::mapvote::offered(hks_t6::mp::table_rows(&v, "mp/mapstable.csv"), |m| installed.contains(&format!("t6:{m}")))
+    };
+    let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+    diag::info!(Ui, "bo2mp front end: Combat Training rotation {maps:?} ({} zones installed)", installed.len());
+    hks_t6::mapvote::Rotation::new(maps, seed)
+}
+
+/// The public lobby's map vote closes as BO2's start timer starts (ms
+/// before the match).
+const VOTE_CLOSES_BEFORE_START_MS: f64 = hks_t6::playlists::START_TIMER_MS;
+
+/// The public lobby's countdown started: the next match's map, from the
+/// rotation, and the playlist's game type go to `ui_mapname` /
+/// `ui_gametype`, and BO2's map vote opens on it.
+fn public_lobby_opened(host: &mut Host, mp: &Mp, identity: Option<&frame::LaunchIdentity>) {
+    let Some(p) = mp.borrow().playlist.and_then(hks_t6::playlists::by_index) else { return };
+    if mp.borrow().rotation.is_none() {
+        let r = new_rotation(host, identity);
+        mp.borrow_mut().rotation = Some(r);
+    }
+    let map = mp.borrow().rotation.as_ref().and_then(|r| r.next()).unwrap_or(hks_t6::playlists::MAP).to_owned();
+    let previous_allowed = host.values.borrow().dvars.get("party_isPreviousMapVoted").is_none_or(|x| x.trim() != "1");
+    diag::info!(Ui, "bo2mp front end: public lobby, next map `{map}` ({}), previous votable {previous_allowed}", p.gametype);
+    {
+        let mut v = host.values.borrow_mut();
+        v.dvars.insert("ui_mapname".to_owned(), map);
+        v.dvars.insert("ui_gametype".to_owned(), p.gametype.to_owned());
+        v.dvars.insert("ui_gameType".to_owned(), p.gametype.to_owned());
+    }
+    {
+        let mut m = mp.borrow_mut();
+        m.vote = m.rotation.as_ref().and_then(|r| hks_t6::mapvote::Vote::open(r, previous_allowed));
+    }
+    send_map_vote(host, mp);
+}
+
+/// BO2's map voter (the public lobby's map): an open vote's maps and votes
+/// (`map_vote_set_votes_and_maps`), or the map it closed on, already in
+/// `ui_mapname` (`map_vote_map_chosen`).
+fn send_map_vote(host: &mut Host, mp: &Mp) {
+    let Some(vote) = mp.borrow().vote.clone() else { return };
+    if vote.chosen.is_some() {
+        host.root_event("map_vote_map_chosen", &[]);
+        return;
+    }
+    // The game type goes as the name the voter shows under the map, in
+    // capitals ("TEAM DEATHMATCH"), as BO2's lobby shows it.
+    let gametype = {
+        let v = host.values.borrow();
+        let g = v.dvars.get("ui_gametype").map_or_else(String::new, Clone::clone);
+        hks_t6::playlists::gametype_name(&v, &g).to_uppercase()
+    };
+    let [next, previous, random] = vote.counts();
+    let mut fields = vec![
+        ("previousMapName", Value::str(&vote.previous)),
+        ("previousGametype", Value::str(&gametype)),
+        ("nextMapName", Value::str(&vote.next)),
+        ("nextGametype", Value::str(&gametype)),
+        ("previousMapVoteCount", Value::Num(previous as f32)),
+        ("nextMapVoteCount", Value::Num(next as f32)),
+        ("randomMapVoteCount", Value::Num(random as f32)),
+    ];
+    if let Some(c) = vote.mine {
+        fields.push(("selfVote", Value::Num(c as i32 as f32)));
+    }
+    host.root_event("map_vote_set_votes_and_maps", &fields);
+}
+
+/// His vote (`xpartyveto n`: 1 NEXT, 2 PREVIOUS, 3 RANDOM).
+pub(crate) fn map_vote(host: &mut Host, mp: &Mp, n: i32) {
+    let cast = {
+        let mut m = mp.borrow_mut();
+        let c = hks_t6::mapvote::Choice::from_number(n);
+        c.zip(m.vote.as_mut()).is_some_and(|(c, v)| v.cast(c))
+    };
+    diag::info!(Ui, "bo2mp front end: map vote {n} ({})", if cast { "counted" } else { "not open" });
+    if cast {
+        send_map_vote(host, mp);
+    }
+}
+
+/// The vote closes: its map goes to `ui_mapname` for START, PREVIOUS
+/// winning greys PREVIOUS out in the next lobby.
+fn close_map_vote(host: &mut Host, mp: &Mp) {
+    let closed = {
+        let mut m = mp.borrow_mut();
+        let m = &mut *m;
+        match (m.vote.as_mut().filter(|v| v.chosen.is_none()), m.rotation.as_mut()) {
+            (Some(v), Some(r)) => Some(v.close(r)),
+            _ => None,
+        }
+    };
+    let Some((choice, map)) = closed else { return };
+    diag::info!(Ui, "bo2mp front end: map vote closed, {choice:?} `{map}`");
+    {
+        let mut v = host.values.borrow_mut();
+        v.dvars.insert("ui_mapname".to_owned(), map);
+        let previous = if choice == hks_t6::mapvote::Choice::Previous { "1" } else { "0" };
+        v.dvars.insert("party_isPreviousMapVoted".to_owned(), previous.to_owned());
+    }
+    send_map_vote(host, mp);
+}
+
 /// Each frame: save his stats when they changed; START MATCH starts the
 /// match the lobby set up.
 pub(crate) fn tick(
-    host: &Host,
+    host: &mut Host,
     mp: &Mp,
     front: &Bo2mpFrontend,
+    identity: Option<&frame::LaunchIdentity>,
     commands: &mut Commands,
     swap: Option<&mut session::SessionSwapRequest>,
 ) {
@@ -283,6 +400,11 @@ pub(crate) fn tick(
     let wait = if host.now_ms() > 0.0 { mp.borrow_mut().public_start_in.take() } else { None };
     if let Some(wait) = wait {
         mp.borrow_mut().public_start_ms = Some(host.now_ms() + wait);
+        public_lobby_opened(host, mp, identity);
+    }
+    let closing = mp.borrow().public_start_ms.is_some_and(|at| host.now_ms() >= at - VOTE_CLOSES_BEFORE_START_MS);
+    if closing {
+        close_map_vote(host, mp);
     }
     let training = {
         let m = mp.borrow();
@@ -321,10 +443,17 @@ pub(crate) fn tick(
             bot_difficulty: count("bot_difficulty"),
         }
     };
-    // A Combat Training playlist: its game type, map and teams
-    // (`hks_t6::playlists`, ours), BO2's bot difficulty setting.
+    // A Combat Training playlist: the lobby's map (one the rotation
+    // offers), its game type and teams (`hks_t6::playlists`, ours), BO2's
+    // bot difficulty setting.
     if let Some(p) = training {
-        setup.map = hks_t6::playlists::MAP.to_owned();
+        let mut m = mp.borrow_mut();
+        let r = m.rotation.get_or_insert_with(|| new_rotation(host, identity));
+        if !r.maps().contains(&setup.map) {
+            setup.map = r.next().unwrap_or(hks_t6::playlists::MAP).to_owned();
+        }
+        r.play(&setup.map);
+        m.vote = None;
         setup.gametype = p.gametype.to_owned();
         setup.bot_friends = p.friends;
         setup.bot_enemies = p.enemies;
@@ -348,6 +477,7 @@ pub(crate) fn tick(
             settings: v.settings.iter().map(|(k, x)| (k.clone(), *x)).collect(),
             playlist: training.map(|p| p.index),
             stats_before: training.map(|_| mp.borrow().to_text()),
+            rotation: mp.borrow().rotation.clone(),
             disbanded: false,
         });
     }

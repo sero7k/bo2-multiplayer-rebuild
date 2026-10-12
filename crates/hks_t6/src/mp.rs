@@ -175,6 +175,10 @@ pub struct MpState {
     pub private_start_ms: Option<f64>,
     /// A countdown to start on the front end's first frame (ms).
     pub public_start_in: Option<f64>,
+    /// Combat Training's map rotation (made at the first FIND MATCH) and
+    /// the public lobby's map vote.
+    pub rotation: Option<crate::mapvote::Rotation>,
+    pub vote: Option<crate::mapvote::Vote>,
     /// His stats before his last ranked match (`set_stable_text`).
     stable: Option<HashMap<String, StatValue>>,
     /// The emblem the Emblem Editor is editing (the engine's `emblem*`

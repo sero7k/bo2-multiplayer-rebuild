@@ -90,6 +90,8 @@ Mechanics: each map's systems and modes work by Black Ops II's rules. Visuals: s
 - **In the match.** The class menu at spawn, the HUD with the turning minimap, compass, clock, score bars, kill feed
   and scoreboard, the pause menu, menu sounds, the killcam, dropped guns and Scavenger bags, and the end-of-match
   screen back to the main menu.
+- **Public Match.** Combat Training plays the original's map rotation, with its vote for the next map in the
+  lobby.
 - **Scorestreaks.** Score earns streaks through the game's own momentum code; bots call in Orbital VSAT,
   Counter-UAV, EMP, Death Machine, War Machine, Swarm, Escort Drone and K9 Unit.
 
@@ -190,6 +192,11 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
 
 ## Recent changes
 
+- 2026-10-11 (r132): Public Match > Combat Training plays the original's map rotation: every lobby offers a NEXT
+  map, the PREVIOUS one and RANDOM, with the original's own vote tiles, counts and "Time remaining" line; your vote
+  picks the map that loads (most votes win, ties go to NEXT), then the lobby shows "The match is about to
+  begin..." and "Game starting in N" as the original does. Maps come from a shuffled bag that never repeats the
+  last two.
 - 2026-10-11 (r131): Custom Games > Setup Game > Change Map works: the lobby shows the picked map's picture, name
   and mode, as the original does, and START MATCH loads that map (it used to stay on Aftermath).
 - 2026-10-11 (r130): the Lightning Strike can be called in: its tablet shows where the enemies are as it opens, you
@@ -305,7 +312,12 @@ only. Like upstream IW4L, much of this code was written by an LLM (Claude), dire
   and where the strikes land already match the original).
 - The UAV's sweep sound.
 - Two scorestreaks at once, and a key of your own for each scorestreak.
-- Public Match: the original's map rotation and the vote for the next map (being built, tested next).
+- Public Match map vote checked against footage of the original next: how long the first lobby's vote runs (10
+  seconds for now), whether some maps come up more often than others (all equal for now), and which tile grows
+  when the vote closes.
+- The Combat Training lobby lists its players instead of "Searching for player..." rows.
+- The Combat Training lobby's player limit as the original shows it (it says 18 Max where a 6 v 6 playlist should
+  say 12).
 - Every map started from the menus: Nuketown 2025 is played from them; the others are checked started directly.
 - Every attachment checked against the original's own numbers and behaviour.
 - FMJ: bullets go through walls and players twice as well, as the original's perk does (bullets already pass

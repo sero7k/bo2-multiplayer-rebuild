@@ -31,6 +31,7 @@ use core::fmt;
 pub mod aar;
 pub mod host;
 pub mod lui;
+pub mod mapvote;
 pub mod mp;
 pub mod pattern;
 pub mod playlists;

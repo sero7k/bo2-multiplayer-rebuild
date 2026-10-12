@@ -20,17 +20,18 @@
 //!   mp/gametypesTable.csv are TDM, hardcore TDM, FFA and hardcore FFA),
 //! - the teams: him plus 5 bots against 6 (BO2's 6 v 6), Free-for-All him
 //!   against 7,
-//! - the map: Nuketown 2025 (the map this build has),
-//! - the players-in-playlist counts (0: no online service) and the
-//!   lobby's countdowns (10 s; 30 s before the next match).
+//! - the maps: a rotation of the installed maps (`crate::mapvote`),
+//! - the players-in-playlist counts (0: no online service) and how long
+//!   a new party's lobby keeps its map vote open (10 s, see `FIRST_VOTE_MS`).
 //!
 //! BO2's own: the names, descriptions and icons (mp/gametypesTable.csv:
 //! MPUI_*_CAPS, MENU_* descriptions, playlist_* pictures), the category's
 //! name and description (MPUI_BASICTRAINING_CAPS / _DESC), the lobby's
-//! status text (MP_MATCH_STARTING_IN), the bot difficulty setting
+//! status lines (the vote's time remaining, then BO2's start timer), its
+//! map vote's and start timer's lengths, the bot difficulty setting
 //! (bot_difficulty, RECRUIT .. VETERAN) and every menu around them.
 
-use crate::host::Host;
+use crate::host::{EngineValues, Host};
 use crate::mp::Mp;
 use crate::value::{Table, Value};
 
@@ -78,17 +79,38 @@ pub fn all() -> impl Iterator<Item = Playlist> {
     })
 }
 
-/// The map every playlist plays (ours: the one this build has).
+/// The map a playlist plays when the rotation offers none.
 pub const MAP: &str = "mp_nuketown_2020";
 
-/// The public game lobby's countdown before the match (ours), and before
-/// the next one when he comes back from a match (time for the After Action
-/// Report, as BO2's lobby gives).
-pub const COUNTDOWN_MS: f64 = 10_000.0;
-pub const NEXT_MATCH_MS: f64 = 30_000.0;
+/// The public game lobby: the map vote, then BO2's start timer (the vote
+/// closed; `party_pregameStartTimerLength` 5 s, then
+/// `party_gameStartTimerLength` 10 s, "Game starting in N"). Back from a
+/// match the vote runs BO2's `party_minLobbyTime`, 45 s ("Time
+/// remaining"). A new party votes while it waits for its players.
+/// PLACEHOLDER: Combat Training's player count is in `playlists.info`, so
+/// a new party's vote is ours, 10 s.
+pub const FIRST_VOTE_MS: f64 = 10_000.0;
+pub const NEXT_VOTE_MS: f64 = 45_000.0;
+pub const START_TIMER_MS: f64 = 15_000.0;
+pub const GAME_STARTING_MS: f64 = 10_000.0;
+/// From FIND MATCH, and from the player's return to the lobby, to the match.
+pub const COUNTDOWN_MS: f64 = FIRST_VOTE_MS + START_TIMER_MS;
+pub const NEXT_MATCH_MS: f64 = NEXT_VOTE_MS + START_TIMER_MS;
 
 pub fn by_index(index: i32) -> Option<Playlist> {
     all().find(|p| p.index == index)
+}
+
+/// A game type's name as BO2's menus show it (mp/gametypesTable.csv's
+/// base row, `0,<ref>,<name>`): "Team Deathmatch".
+pub fn gametype_name(vb: &EngineValues, gametype: &str) -> String {
+    let rows = crate::mp::table_rows(vb, "mp/gametypestable.csv");
+    let key = rows
+        .iter()
+        .find(|r| r.first().map(String::as_str) == Some("0") && r.get(1).map(String::as_str) == Some(gametype))
+        .and_then(|r| r.get(2).cloned())
+        .unwrap_or_default();
+    vb.localize.get(&key.to_ascii_uppercase()).cloned().unwrap_or(key)
 }
 
 /// A category's name: its bot difficulty ("RECRUIT").
@@ -156,13 +178,7 @@ pub fn install(host: &mut Host, mp: &Mp) {
     host.bind("Engine", "GetPlaylistName", move |_, _| {
         let vb = v.borrow();
         let g = m.borrow().playlist.and_then(by_index).map_or("tdm", |p| p.gametype);
-        let rows = crate::mp::table_rows(&vb, "mp/gametypestable.csv");
-        let key = rows
-            .iter()
-            .find(|r| r.first().map(String::as_str) == Some("0") && r.get(1).map(String::as_str) == Some(g))
-            .and_then(|r| r.get(2).cloned())
-            .unwrap_or_default();
-        Ok(vec![Value::str(vb.localize.get(&key.to_ascii_uppercase()).map_or(key.as_str(), String::as_str))])
+        Ok(vec![Value::str(&gametype_name(&vb, g))])
     });
     // The public lobby's title: BO2's COMBAT TRAINING lobby.
     let v = host.values.clone();
@@ -177,8 +193,9 @@ pub fn install(host: &mut Host, mp: &Mp) {
         let t = host.vm.global("UIExpression");
         crate::host::set_field(&t, name, f);
     }
-    // GetGameLobbyStatus(): the public lobby's line and the seconds left
-    // ("MATCH BEGINS IN:  7"); nothing before FIND MATCH.
+    // GetGameLobbyStatus(): the public lobby's line, and the seconds left
+    // when the lobby adds them ("Time remaining:  17"); nothing before
+    // FIND MATCH.
     let (m, v) = (mp.clone(), host.values.clone());
     host.bind("Engine", "GetGameLobbyStatus", move |_, _| {
         // A Custom Game's START MATCH: "Game starting in N" (the number
@@ -190,9 +207,21 @@ pub fn install(host: &mut Host, mp: &Mp) {
             return Ok(vec![Value::str(&line.replace("&&1", &format!("{}", left as i64)))]);
         }
         let Some(at) = m.borrow().public_start_ms else { return Ok(vec![Value::str("")]) };
-        let left = ((at - crate::lui::now_ms()) / 1000.0).ceil().max(0.0);
+        let left = at - crate::lui::now_ms();
         let vb = v.borrow();
-        let line = vb.localize.get("MP_MATCH_STARTING_IN").cloned().unwrap_or_else(|| "MATCH BEGINS IN".to_owned());
-        Ok(vec![Value::str(&line), Value::Num(left as f32)])
+        let text = |k: &str, d: &str| vb.localize.get(k).cloned().unwrap_or_else(|| d.to_owned());
+        // The map vote: "Time remaining:  N".
+        if left > START_TIMER_MS {
+            let secs = ((left - START_TIMER_MS) / 1000.0).ceil();
+            return Ok(vec![Value::str(&text("MENU_VOTINGTIMEREMAINING", "Time remaining")), Value::Num(secs as f32)]);
+        }
+        // The start timer: its first seconds without a number, then
+        // "Game starting in N".
+        if left > GAME_STARTING_MS {
+            return Ok(vec![Value::str(&text("MENU_MATCH_WILL_BEGIN", "Match will begin"))]);
+        }
+        let secs = (left / 1000.0).ceil().max(0.0);
+        let line = text("MENU_GAME_STARTING_IN", "Game starting in &&1");
+        Ok(vec![Value::str(&line.replace("&&1", &format!("{}", secs as i64)))])
     });
 }

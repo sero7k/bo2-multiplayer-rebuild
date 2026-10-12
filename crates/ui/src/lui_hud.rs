@@ -535,14 +535,24 @@ fn engine_calls(hud: &mut LuiHud, io: &mut LuiIo<'_, '_>, local: Option<&LocalPr
                 }
                 // FIND MATCH (`xstartparty`, then the public game lobby):
                 // a Combat Training playlist's lobby counts down to its
-                // match (`lui_frontend::tick` starts it).
+                // match (`lui_frontend::tick` starts the countdown and the
+                // match).
                 if word.eq_ignore_ascii_case("xstartparty") {
                     if let Some(mp) = hud.mp.as_ref() {
                         let mut m = mp.borrow_mut();
                         if m.playlist.is_some() {
-                            m.public_start_ms = Some(hud.host.now_ms() + hks_t6::playlists::COUNTDOWN_MS);
+                            m.public_start_in = Some(hks_t6::playlists::COUNTDOWN_MS);
                             diag::info!(Ui, "bo2mp front end: FIND MATCH, Combat Training playlist {:?}", m.playlist);
                         }
+                    }
+                    continue;
+                }
+                // The public lobby's map voter: NEXT, PREVIOUS, RANDOM
+                // (`xpartyveto 1` / `2` / `3`).
+                if word.eq_ignore_ascii_case("xpartyveto") {
+                    let n = text.split_whitespace().nth(1).and_then(|n| n.parse::<i32>().ok()).unwrap_or(0);
+                    if let Some(mp) = hud.mp.clone() {
+                        crate::lui_frontend::map_vote(&mut hud.host, &mp, n);
                     }
                     continue;
                 }
@@ -1576,7 +1586,7 @@ fn lui_hud(
     io.key_events.clear();
     engine_calls(hud, &mut io, local.as_deref());
     if let (Some(f), Some(mp)) = (front.as_ref(), hud.mp.clone()) {
-        crate::lui_frontend::tick(&hud.host, &mp, f, &mut commands, io.swap.as_deref_mut());
+        crate::lui_frontend::tick(&mut hud.host, &mp, f, io.identity.as_deref(), &mut commands, io.swap.as_deref_mut());
     }
     let monitors = io.monitors.iter().count().max(1);
     {
