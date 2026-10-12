@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
-use bo2_profile::{Attachment, Item, Profile, SLOTS, StatValue};
+use bo2_profile::{Attachment, Item, Profile, SLOTS, StatValue, progression};
 
 use crate::host::{EngineValues, Host};
 use crate::value::{Table, Value};
@@ -666,20 +666,26 @@ pub fn set_gametype_defaults(v: &RefCell<EngineValues>, gametype: &str) {
     crate::host::run_command(v, &format!("exec mp/gamesettings_default.cfg; exec mp/gamesettings_{gametype}.cfg"));
 }
 
-/// mp/rankIconTable.csv's `maxprestige` (BO2's Prestige Master).
-pub fn max_prestige(v: &EngineValues) -> i32 {
-    table_rows(v, "mp/rankicontable.csv").iter().find(|r| cell(r, 0) == "maxprestige").map_or(0, |r| int(r, 1))
+/// The last prestige (BO2's Prestige Master): bo2mp's combined prestiges
+/// (`progression::MAX_PRESTIGE`, the extended mp/rankIconTable.csv's
+/// `maxprestige`), whatever the table holds.
+pub fn max_prestige(_v: &EngineValues) -> i32 {
+    progression::MAX_PRESTIGE
 }
 
-/// A rank's icon at a prestige: mp/rankIconTable.csv, the rank's row (0 =
-/// level 1), the prestige's column (1 = none, 2 = prestige 1, ...).
+/// A rank's icon at a prestige (rank 0 = level 1): bo2mp's combined table
+/// (`progression::rank_icon`) as a menu picture name, another game's as
+/// `<game>:<material>` for the picture loader. BO2's own level and master
+/// pictures come from mp/rankIconTable.csv (registered the first time
+/// here if the tables were not extended as they loaded).
 pub fn rank_icon(v: &EngineValues, rank: i32, prestige: i32) -> String {
-    table_rows(v, "mp/rankicontable.csv")
-        .iter()
-        .find(|r| cell(r, 0) == rank.to_string())
-        .and_then(|r| r.get(usize::try_from(prestige).unwrap_or(0) + 1))
-        .map(|c| c.trim().to_owned())
-        .unwrap_or_default()
+    if progression::bo2_rank_icons().is_none() {
+        progression::register_bo2_rank_icons(progression::Bo2RankIcons::from_rank_icon_table(table_rows(
+            v,
+            "mp/rankicontable.csv",
+        )));
+    }
+    progression::rank_picture(rank + 1, prestige)
 }
 
 /// Carry out the stats commands the last console lines queued

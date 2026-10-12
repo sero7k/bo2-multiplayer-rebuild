@@ -482,6 +482,23 @@ pub(crate) fn read_game_image(prefix: &str, names: &[String]) -> Option<(u32, u3
         .find_map(|n| asset_material::decode_ui_image_from_main(&main, n).ok().flatten())
 }
 
+/// A prestige icon from another game where BO2's menus ask for one: the
+/// combined prestiges' `<game>:<material>` (bo2_profile's progression),
+/// read from that game's own files, the first of its candidate names it
+/// has (logged, as the names are not all known for certain).
+pub(crate) fn prestige_picture(name: &str) -> Option<std::sync::Arc<bevy::prelude::Image>> {
+    let (game, names) = bo2_profile::progression::foreign_picture(name)?;
+    let key = name.to_owned();
+    picture_async(name, true, move || {
+        let found = names.iter().find_map(|n| read_game_image(game, std::slice::from_ref(n)).map(|img| (n, img)));
+        match &found {
+            Some((n, _)) => diag::info!(Ui, "bo2mp progression: `{key}` is {game}'s `{n}`"),
+            None => diag::warn!(Ui, "bo2mp progression: `{key}`: {game} has none of {}", names.join(", ")),
+        }
+        found.map(|(_, img)| img)
+    })
+}
+
 /// A foreign map's picture where BO2's menus ask for one: its map-select
 /// picture (`menu_<map>_map_select_final`), its loading picture
 /// (`loadscreen_<map>`) or its preview, read from the map's own game (its

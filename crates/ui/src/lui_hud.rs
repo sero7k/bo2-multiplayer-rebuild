@@ -694,8 +694,21 @@ fn build(ui: &assets::T6Ui, front: Option<&crate::lui_frontend::Bo2mpFrontend>, 
             "bo2zm lui: string tables {}",
             ui.tables.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" ")
         );
-        for (name, cols, _rows, cells) in ui.tables.iter() {
-            let rows = cells.chunks((*cols).max(1)).map(<[String]>::to_vec).collect();
+        for (name, cols, rows, cells) in ui.tables.iter() {
+            // bo2mp: the rank tables carried on to the combined levels and
+            // prestiges (bo2_profile's progression): CoD.MAX_RANK,
+            // CoD.MAX_PRESTIGE and every rank icon lookup read them.
+            let (mut cols, mut n) = (*cols, *rows);
+            let mut extended = None;
+            if bo2_profile::progression::is_rank_table(name) {
+                let mut c = cells.clone();
+                if bo2_profile::progression::extend_table(name, &mut cols, &mut n, &mut c) {
+                    diag::info!(Ui, "bo2mp progression: {name} extended to {n} rows");
+                }
+                extended = Some(c);
+            }
+            let cells = extended.as_ref().unwrap_or(cells);
+            let rows = cells.chunks(cols.max(1)).map(<[String]>::to_vec).collect();
             v.tables.insert(name.clone(), rows);
         }
         // bo2mp: the other games' maps, in BO2's map table and text.
@@ -3727,7 +3740,9 @@ fn picture(
     // bo2mp: a map from another game: its pictures from its own game.
     let found = icons
         .and_then(|i| i.0.iter().find(|(k, _)| k == name).map(|(_, i)| i.clone()))
-        .or_else(|| crate::foreign_maps::map_picture(name));
+        .or_else(|| crate::foreign_maps::map_picture(name))
+        // bo2mp: a prestige icon from another game (`t5:rank_prestige01`).
+        .or_else(|| crate::foreign_maps::prestige_picture(name));
     let Some(img) = found else {
         // (Once per name: a picture the scripts name that was not loaded.)
         static MISSING: std::sync::Mutex<std::collections::BTreeSet<String>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
