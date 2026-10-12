@@ -1477,6 +1477,105 @@ fn killed_by_card(
     st.shown = Some((killer, model, key));
 }
 
+// --- Scorestreak callouts ------------------------------------------------------
+
+/// BO2's `player_callout` notifies ("<player> called in a UAV"): with the
+/// modern HUD they come here (`lui_frontend`) instead of BO2's LUI popup,
+/// as (message key or text, client), and show as our card: the player's
+/// MW2/MW3 calling card and emblem with the message over it.
+static CALLOUTS: std::sync::Mutex<Vec<(String, i32)>> = std::sync::Mutex::new(Vec::new());
+
+pub(crate) fn push_callout(message: &str, client: i32) {
+    if let Ok(mut q) = CALLOUTS.lock() {
+        q.push((message.to_owned(), client));
+        let n = q.len();
+        q.drain(..n.saturating_sub(4));
+    }
+}
+
+#[derive(Component)]
+struct CalloutRoot;
+
+#[derive(Default)]
+struct CalloutState {
+    shown: Option<(BannerModel, f64)>,
+    waiting: std::collections::VecDeque<(String, i32)>,
+}
+
+/// A callout's message as shown: its localized text (`&KILLSTREAK_..`
+/// keys), its player's name put in for `&&1`, upper case.
+fn callout_text(raw: &str, name: &str, slot: &crate::lui_hud::LuiHudSlot) -> String {
+    let key = raw.trim().trim_start_matches('&');
+    let text = slot.localize(key).unwrap_or_else(|| key.replace('_', " "));
+    text.replace("&&1", name).to_uppercase()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn streak_callout(
+    mut commands: Commands,
+    presented: Option<Res<PresentedSnapshot>>,
+    local: Option<Res<LocalPresentClient>>,
+    icons: Option<Res<assets::T6HudIcons>>,
+    (shell_fonts, game_font, mut pics): (Option<Res<ShellFonts>>, Option<Res<GameUiFont>>, Option<ResMut<crate::shell::pics::ShellPics>>),
+    slot: NonSend<crate::lui_hud::LuiHudSlot>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    roots: Query<Entity, With<CalloutRoot>>,
+    time: Res<Time<Real>>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: Local<HashMap<String, Option<(Handle<Image>, Vec2)>>>,
+    mut st: Local<CalloutState>,
+) {
+    if let Ok(mut q) = CALLOUTS.lock() {
+        st.waiting.extend(q.drain(..));
+    }
+    let now = now_secs(&time);
+    let clear = |commands: &mut Commands| {
+        for e in &roots {
+            commands.entity(e).despawn();
+        }
+    };
+    if let Some((m, _)) = &st.shown
+        && now - m.start < (BANNER_IN + m.hold + BANNER_OUT) as f64
+    {
+        return;
+    }
+    clear(&mut commands);
+    st.shown = None;
+    let (Some(p), Some(l)) = (presented.as_deref(), local.as_deref()) else { return };
+    let Some(snap) = p.snapshot() else { return };
+    let Some((raw, client)) = st.waiting.pop_front() else { return };
+    let name = snap
+        .meta
+        .clients
+        .iter()
+        .find(|(c, _)| c.0 as i32 == client)
+        .map(|(_, m)| String::from_utf8_lossy(&m.name).trim_end_matches(char::from(0)).to_owned())
+        .unwrap_or_default();
+    if name.is_empty() {
+        return;
+    }
+    let me = snap.meta.for_client(l.0).map(|m| String::from_utf8_lossy(&m.name).trim_end_matches(char::from(0)).to_owned()).unwrap_or_default();
+    let mut model = BannerModel::new(name.clone(), 1, now);
+    model.title = Some(callout_text(&raw, &name, &slot));
+    model.hold = 2.5;
+    let cat = catalog();
+    dress_card(&mut model, &me, Some(snap), &slot, cat.as_ref(), &mut cache, pics.as_deref_mut(), icons.as_deref(), &mut images);
+    let Some(faces) = Faces::of(shell_fonts.as_deref(), game_font.as_deref()) else { return };
+    let size = window_size(&window);
+    let e = spawn_banner(&mut commands, &faces, &model, size);
+    // (Above the kill card's place: upper middle, under the score bar.)
+    commands.entity(e).insert((CalloutRoot, Node {
+        position_type: PositionType::Absolute,
+        top: Val::Percent(14.0),
+        width: Val::Percent(100.0),
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        ..default()
+    }));
+    diag::info!(Ui, "bo2mp hud: scorestreak callout: {name}: {raw}");
+    st.shown = Some((model, now));
+}
+
 // --- Scoreboard ---------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1829,7 +1928,7 @@ pub(crate) fn register_match_hud_systems(app: &mut App) {
     app.init_resource::<KilledByUntil>();
     app.add_systems(
         Update,
-        (kill_feed, hit_marker, killed_by_card, kill_banner.after(killed_by_card), scoreboard).in_set(ClientSet::Ui),
+        (kill_feed, hit_marker, killed_by_card, kill_banner.after(killed_by_card), scoreboard, streak_callout).in_set(ClientSet::Ui),
     )
     .add_systems(Update, (banner_pop, apply_fades).in_set(ClientSet::Ui).after(kill_banner).after(killed_by_card).after(kill_feed));
 }

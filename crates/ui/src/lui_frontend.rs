@@ -1404,6 +1404,15 @@ pub(crate) fn match_events(host: &mut Host, seen: &mut MatchSeen, old: Option<&M
         // (bo2mp: with the modern HUD a medal is `hud_medals`' Black Ops
         // notification; BO2's NotificationPopups never gets it, so no BO2
         // medal art or popup.)
+        // (bo2mp: a scorestreak callout is the modern HUD's own card, not
+        // BO2's popup.)
+        if name == "player_callout" && crate::hud_modern::modern_hud_enabled() {
+            let args: Vec<&str> = parts.clone().collect();
+            let client = args.get(1).and_then(|c| c.trim().parse::<f32>().ok()).map_or(-1, |c| c as i32);
+            crate::hud_match::push_callout(args.first().copied().unwrap_or_default(), client);
+            diag::info!(Ui, "bo2mp lui notify: {item} (shown by the modern HUD's callout card)");
+            continue;
+        }
         if name == "medal_received" && crate::hud_modern::modern_hud_enabled() {
             diag::info!(Ui, "bo2mp lui notify: {item} (shown by the modern HUD's medal box)");
             continue;
