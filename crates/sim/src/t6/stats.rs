@@ -311,18 +311,21 @@ fn num(world: &mut World, client: u32, path: &str) -> f32 {
 use bo2_profile::UNLOCK_TOKENS;
 const RANK_XP: &str = "playerstatslist.rankxp.statvalue";
 
-/// XP for a player in a ranked match: his rank XP (capped at the last
-/// rank's end), the weapon's XP, and a new rank: its stats, its unlock
-/// tokens, and BO2's `CodeCallback_RankUp(rank, prestige, tokens added)`
-/// (the scripts' rank-up popup).
+/// XP for a player in a ranked match: his rank XP (`XP_MULTIPLIER` times
+/// BO2's award, capped at the last rank's end), the weapon's XP (BO2's
+/// award as it is: gun levels keep their pace), and a new rank: its stats,
+/// its unlock tokens, and BO2's `CodeCallback_RankUp(rank, prestige,
+/// tokens added)` (the scripts' rank-up popup).
 fn give_xp(vm: &mut Vm<World>, world: &mut World, who: &Value, client: u32, xp: f32, weapon: Option<(&str, bool)>) {
     if xp <= 0.0 {
         return;
     }
+    // bo2mp: the one place match XP turns into rank XP.
+    let rank_xp = (xp * bo2_profile::progression::XP_MULTIPLIER).round();
     let rows = rank_rows(world);
     let cap = rows.iter().map(|r| r.max).fold(0.0f32, f32::max);
     let old = num(world, client, "playerstatslist.rankxp.statvalue");
-    let new = if cap > 0.0 { (old + xp).min(cap) } else { old + xp };
+    let new = if cap > 0.0 { (old + rank_xp).min(cap) } else { old + rank_xp };
     set(world, client, "playerstatslist.rankxp.statvalue".to_owned(), StatValue::Num(new));
     if let Some((w, true)) = weapon
         && let Some(item) = weapon_item(world, client, w)
@@ -331,14 +334,34 @@ fn give_xp(vm: &mut Vm<World>, world: &mut World, who: &Value, client: u32, xp: 
     }
     // The scripts' own count (pers["rankxp"]) stays with the stat: their
     // syncxpstat writes it back.
+    set_pers_rankxp(vm, who, new);
+    rank_up(vm, world, who, client, old, new);
+}
+
+/// The scripts' own count of his rank XP (`pers["rankxp"]`).
+fn set_pers_rankxp(vm: &mut Vm<World>, who: &Value, xp: f32) {
     if let Value::Object(o) = who {
         let pers = vm.intern("pers");
         if let Value::Array(a) = vm.raw_field(*o, pers) {
             let key = gsc_t6::Key::Str(vm.intern("rankxp"));
-            a.write().set(key, Value::Int(new as i32));
+            a.write().set(key, Value::Int(xp as i32));
         }
     }
-    rank_up(vm, world, who, client, old, new);
+}
+
+/// bo2mp: rank XP the scripts gave themselves (giverankxp's incrankxp, then
+/// syncxpstat's setdstat) counts `XP_MULTIPLIER` times too: the gain over
+/// his stat scaled, capped at the last rank's end, and their count put
+/// back to match. (What `give_xp` already gave comes back unchanged.)
+fn scale_script_xp(vm: &mut Vm<World>, world: &World, who: &Value, old: f32, written: f32) -> f32 {
+    if written <= old {
+        return written;
+    }
+    let cap = rank_rows(world).iter().map(|r| r.max).fold(0.0f32, f32::max);
+    let scaled = old + ((written - old) * bo2_profile::progression::XP_MULTIPLIER).round();
+    let scaled = if cap > 0.0 { scaled.min(cap) } else { scaled };
+    set_pers_rankxp(vm, who, scaled);
+    scaled
 }
 
 /// His rank XP went from `old` to `new` (the engine's addrankxp, or the
@@ -431,6 +454,8 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             // ranks the same way.)
             let xp = (path == RANK_XP && world.resource::<Zm>().ranked_match && is_local(world, c))
                 .then(|| (num(world, c, RANK_XP), v.as_num().unwrap_or(0.0)));
+            let xp = xp.map(|(old, new)| (old, scale_script_xp(vm, world, s, old, new)));
+            let v = xp.map_or(v, |(_, new)| StatValue::Num(new));
             set(world, c, path, v);
             if let Some((old, new)) = xp {
                 rank_up(vm, world, s, c, old, new);

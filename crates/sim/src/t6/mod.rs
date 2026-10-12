@@ -748,7 +748,19 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
         sound_lengths: inst.sound_lengths,
         retrievable_weapons: inst.retrievable_weapons,
         gamesettings: inst.gamesettings,
-        tables: Arc::new(inst.tables),
+        // bo2mp: the rank tables carried on to the combined levels and
+        // prestiges (bo2_profile's progression) before a script reads them.
+        tables: Arc::new(
+            inst.tables
+                .into_iter()
+                .map(|(name, mut t)| {
+                    if bo2_profile::progression::extend_table(&name, &mut t.columns, &mut t.rows, &mut t.cells) {
+                        diag::info!(Sim, "bo2mp progression: {name} extended to {} rows", t.rows);
+                    }
+                    (name, t)
+                })
+                .collect(),
+        ),
         next_entnum: FIRST_ENTNUM,
         nav: nav::Nav::new(nodes).with_baked(baked),
         node_of: node_objs.iter().enumerate().map(|(i, o)| (*o, i as u32)).collect(),

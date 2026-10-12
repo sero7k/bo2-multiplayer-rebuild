@@ -20,6 +20,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+pub mod progression;
+
 /// The class slots (the menus' CoD.CACUtility.loadoutSlotNames and the
 /// attachment, option and count slots beside them).
 pub const SLOTS: [&str; 24] = [
