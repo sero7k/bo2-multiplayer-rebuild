@@ -349,6 +349,10 @@ impl Host {
 
         // UIExpression: dvars and visibility bits.
         let ui = vm.global("UIExpression");
+        let pad = vm.native("IsUsingGamepad", |_, _| {
+            Ok(vec![Value::Num(if gamepad_active() { 1.0 } else { 0.0 })])
+        });
+        set_field(&ui, "IsUsingGamepad", pad);
         let dvar = |vals: &Rc<RefCell<EngineValues>>, a: &[Value]| {
             vals.borrow().dvars.get(&arg(a, 1).to_string()).cloned().unwrap_or_default()
         };
@@ -509,9 +513,11 @@ impl Host {
         for name in ["GetPlayerCount", "GetAspectRatio"] {
             set_field(&engine, name, zero.clone());
         }
-        for name in ["LastInput_Gamepad", "PartyConnectingToDedicated"] {
-            set_field(&engine, name, falsy.clone());
-        }
+        set_field(&engine, "PartyConnectingToDedicated", falsy.clone());
+        // bo2mp: whether he plays with a controller now (the menus' button
+        // glyphs and prompts follow it).
+        let pad = vm.native("LastInput_Gamepad", |_, _| Ok(vec![Value::Bool(gamepad_active())]));
+        set_field(&engine, "LastInput_Gamepad", pad);
         let nothing = vm.native("nothing", |_, _| Ok(vec![]));
         for name in ["SetDvar", "PlayMenuMusic", "SetForceMouseRootFull", "StopEditingPresetClass"] {
             set_field(&engine, name, nothing.clone());
@@ -1188,6 +1194,17 @@ fn stub_table(vm: &mut Vm, name: &'static str, asked: Rc<RefCell<BTreeMap<String
     meta.borrow_mut().set_str("__index", index);
     t.borrow_mut().meta = Some(meta);
     Value::Table(t)
+}
+
+/// bo2mp: he plays with a controller now (`Engine.LastInput_Gamepad`).
+static GAMEPAD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_gamepad_active(on: bool) {
+    GAMEPAD.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn gamepad_active() -> bool {
+    GAMEPAD.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// bo2mp: map categories the Change Map popup lists after BO2's own (Base,

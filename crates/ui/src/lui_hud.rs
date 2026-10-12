@@ -1052,7 +1052,16 @@ fn plain(text: &str) -> String {
                 "BBUTTON_CYCLE_RIGHT" | "BBUTTON_CYCLE_RIGHT_ACTIVE" => Some(1),
                 _ => None,
             };
-            if let Some(i) = arrow {
+            let pad_icon = crate::pad_glyphs::pad_active()
+                .then(|| crate::pad_glyphs::icon_for(&name))
+                .flatten();
+            if let Some(icon) = pad_icon {
+                // bo2mp: a controller's button, drawn with its Xbox icon.
+                out.push(GLYPH_OPEN);
+                out.push_str("pad:");
+                out.push_str(icon);
+                out.push(GLYPH_CLOSE);
+            } else if let Some(i) = arrow {
                 out.push(char::from_u32(0xE100 + i).unwrap_or('?'));
             } else if let Some(entry) = name.strip_prefix('B').filter(|n| !n.is_empty() && !n.contains('_')) {
                 // A FontIcon entry's own name (the Controls rows' mouse
@@ -1599,6 +1608,17 @@ fn lui_hud(
     }
     if !capturing {
         menu_input(hud, &mut io, console_open, pointer, scale);
+    }
+    // bo2mp: he switched between the controller and the keyboard: the
+    // menus redraw their prompts with the other's buttons.
+    if crate::pad_glyphs::take_change() {
+        let pad = crate::pad_glyphs::pad_active();
+        hud.host
+            .values
+            .borrow_mut()
+            .dvars
+            .insert("gpad_enabled".to_owned(), if pad { "1" } else { "0" }.to_owned());
+        hud.host.root_event("input_source_changed", &[("source", Value::Num(if pad { 1.0 } else { 0.0 }))]);
     }
     // (Presses the menus did not take are not theirs a frame later.)
     io.key_events.clear();
@@ -2928,7 +2948,10 @@ fn lui_hud(
             // pieces and pictures.
             let pieces = {
                 let values = hud.host.values.borrow();
-                icon_pieces(&text, &|n| font_icon(&values.tables, n))
+                icon_pieces(&text, &|n| match n.strip_prefix("pad:") {
+                    Some(m) => Some(IconPic { material: m.to_owned(), x_scale: 1.0, y_scale: 1.0 }),
+                    None => font_icon(&values.tables, n),
+                })
             };
             let has_icons = pieces.iter().any(|p| matches!(p, Piece::Icon(_)));
             let width = if has_icons {
@@ -3258,6 +3281,21 @@ fn icon_pieces(text: &str, glyph: &dyn Fn(&str) -> Option<IconPic>) -> Vec<Piece
 /// picture BO2 PC shows for it (CHOOSE CLASS's class set arrows, the
 /// settings tabs' arrows: ui_arrow_left / ui_arrow_right).
 fn button_glyph(mut d: Drawn) -> Drawn {
+    // bo2mp: on a controller, a lone button glyph is its Xbox icon.
+    let pad_icon = crate::pad_glyphs::pad_active()
+        .then(|| {
+            let t = d.text.as_deref()?.trim();
+            let name = t.strip_prefix('^')?.strip_suffix('^')?;
+            (!name.contains('^')).then(|| crate::pad_glyphs::icon_for(name)).flatten()
+        })
+        .flatten();
+    if let Some(icon) = pad_icon {
+        d.kind = "image";
+        d.material = Some(icon.to_owned());
+        d.text = None;
+        d.rgb = [1.0, 1.0, 1.0];
+        return d;
+    }
     let picture = match d.text.as_deref().map(str::trim) {
         Some("^BBUTTON_CYCLE_LEFT^") => "ui_arrow_left",
         Some("^BBUTTON_CYCLE_RIGHT^") => "ui_arrow_right",
@@ -3675,6 +3713,14 @@ fn picture(
     // the green shield with the BO2 mark (made here, no material holds it).
     if name == LEAGUE_EMBLEM_SOLO {
         let h = images.add(league_emblem_solo());
+        cache.insert(key.into_owned(), h.clone());
+        return Some(h);
+    }
+    // bo2mp: the controller's button icons (built into the game).
+    if name.starts_with("xenon")
+        && let Some(img) = crate::pad_glyphs::icon_image(name)
+    {
+        let h = images.add(img);
         cache.insert(key.into_owned(), h.clone());
         return Some(h);
     }

@@ -1729,8 +1729,32 @@ fn parse_iwi_header(bytes: &[u8]) -> Result<IwiHeaderInfo, String> {
                 mip0_start,
             })
         }
+        // Modern Warfare 3 (0x1b): the picmip sizes start at 32 (mip 0 ends
+        // at the first, starts at the second).
+        27 => {
+            if bytes.len() < 48 {
+                return Err("truncated IWI v27 header".into());
+            }
+            let width = u32::from(u16::from_le_bytes([bytes[6], bytes[7]]));
+            let height = u32::from(u16::from_le_bytes([bytes[8], bytes[9]]));
+            let mip0_end = u32::from_le_bytes(bytes[32..36].try_into().unwrap()) as usize;
+            let mip0_start = u32::from_le_bytes(bytes[36..40].try_into().unwrap()) as usize;
+            Ok(IwiHeaderInfo {
+                width,
+                height,
+                format: iwi_pixel_format(bytes[4])?,
+                header_len: 64,
+                mip0_end,
+                mip0_start,
+            })
+        }
         version => Err(format!("unsupported IWI version {version}")),
     }
+}
+
+/// An IWI file's top mip as RGBA8 (width, height, pixels).
+pub fn decode_iwi_rgba(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+    decode_iwi_mips(bytes)?.into_top_level_rgba8()
 }
 
 fn iwi_pixel_format(format: u8) -> Result<PixelFormat, String> {
