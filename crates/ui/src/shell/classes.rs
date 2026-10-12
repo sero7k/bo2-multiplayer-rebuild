@@ -184,7 +184,8 @@ fn build(host: &Host, mp: &Mp) -> ClassBook {
     let v = host.values.borrow();
     let m = mp.borrow();
     let p: &Profile = &m.profile;
-    let free = m.game_modes.contains(&1) || crate::shell::enabled();
+    // (Locked by level unless he turned Unlock All on.)
+    let free = p.stat_num(super::bridge::UNLOCK_ALL_STAT) != 0.0;
     let rank = p.rank();
     let mut items = Vec::new();
     for it in &p.items {

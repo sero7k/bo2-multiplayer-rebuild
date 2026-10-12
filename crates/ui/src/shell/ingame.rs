@@ -112,6 +112,7 @@ pub(crate) fn ingame_input(
     hud_keys: Option<Res<frame::HudInputView>>,
     time: Res<Time>,
     mut st: Local<InGame>,
+    mut sounds: MessageWriter<frame::UiPlaySound>,
 ) {
     if !bridge::enabled() || !in_match(front.is_some(), loading.is_some(), setup.is_some()) {
         UP.store(0, Ordering::Relaxed);
@@ -141,11 +142,15 @@ pub(crate) fn ingame_input(
             up = 1;
             st.focus = 0;
             st.confirm = false;
+            sounds.write(frame::UiPlaySound { alias: "uin_main_pause".to_owned() });
         }
         publish(&st);
         UP.store(up, Ordering::Relaxed);
         return;
     }
+    // The menu sounds: a move (focus, tab, a setting changed), a choice, a
+    // step back; the last one this frame is heard.
+    let mut sound: Option<&'static str> = None;
     let rows = rows(up, &st);
     let n = rows.len().max(1);
     st.focus = st.focus.min(n - 1);
@@ -174,8 +179,12 @@ pub(crate) fn ingame_input(
         dir = 1;
     }
     if dir != 0 {
+        let was = st.focus;
         st.focus = ((st.focus as i32 + dir).rem_euclid(n as i32)) as usize;
         st.confirm = false;
+        if st.focus != was {
+            sound = Some("uin_navigation_click");
+        }
     }
     if up == 3 {
         let tabs = super::options::TABS.len() as i32;
@@ -183,10 +192,12 @@ pub(crate) fn ingame_input(
         if keys.just_pressed(KeyCode::KeyQ) || pad(GamepadButton::LeftTrigger) {
             tab = (tab - 1).rem_euclid(tabs);
             st.focus = 0;
+            sound = Some("uin_navigation_click");
         }
         if keys.just_pressed(KeyCode::KeyE) || pad(GamepadButton::RightTrigger) {
             tab = (tab + 1).rem_euclid(tabs);
             st.focus = 0;
+            sound = Some("uin_navigation_click");
         }
         OPT_TAB.store(tab as usize, Ordering::Relaxed);
         let side = if keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::KeyA) || pad(GamepadButton::DPadLeft) {
@@ -200,6 +211,7 @@ pub(crate) fn ingame_input(
             && let Some(Act::Cycle(super::Setting::Option(k))) = rows.get(st.focus).map(|r| r.act)
         {
             super::options::queue(tab as usize, k, side);
+            sound = Some("uin_navigation_click");
         }
     }
     let mut pick = keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) || pad(GamepadButton::South);
@@ -208,6 +220,7 @@ pub(crate) fn ingame_input(
             if st.focus != hit.0 {
                 st.focus = hit.0;
                 st.confirm = false;
+                sound = Some("uin_navigation_click");
             }
             if mouse.just_pressed(MouseButton::Left) {
                 pick = true;
@@ -218,9 +231,16 @@ pub(crate) fn ingame_input(
     if pick && up == 3 {
         if let Some(Act::Cycle(super::Setting::Option(k))) = rows.get(st.focus).map(|r| r.act) {
             super::options::queue(OPT_TAB.load(Ordering::Relaxed), k, 1);
+            sound = Some("uin_navigation_select_main");
         }
     } else if pick && let Some(r) = rows.get(st.focus) {
-        let Act::Choose(k) = r.act else { return };
+        let Act::Choose(k) = r.act else {
+            if let Some(alias) = sound {
+                sounds.write(frame::UiPlaySound { alias: alias.to_owned() });
+            }
+            return;
+        };
+        sound = Some("uin_navigation_select_main");
         match up {
             1 => match k {
                 0 => up = 0,
@@ -249,6 +269,10 @@ pub(crate) fn ingame_input(
         up = if up == 1 { 0 } else { 1 };
         st.focus = if was == 3 { 2 } else if up == 1 { 1 } else { 0 };
         st.confirm = false;
+        sound = Some("cac_cmn_backout");
+    }
+    if let Some(alias) = sound {
+        sounds.write(frame::UiPlaySound { alias: alias.to_owned() });
     }
     publish(&st);
     UP.store(up, Ordering::Relaxed);
@@ -302,7 +326,7 @@ pub(crate) fn ingame_view(
         commands.entity(e).despawn();
     }
     let focus = FOCUS.load(Ordering::Relaxed) as usize;
-    let mut cx = Ctx { s, fonts: &fonts, pics: &mut pics, icons: icons.as_deref(), images: &mut images, pad };
+    let mut cx = Ctx { s, w: area.x / s, h: area.y / s, fonts: &fonts, pics: &mut pics, icons: icons.as_deref(), images: &mut images, pad };
     commands
         .spawn((
             GameRoot,

@@ -133,6 +133,10 @@ pub(crate) const DIFFICULTY: [&str; 4] = ["RECRUIT", "REGULAR", "HARDENED", "VET
 /// Maps a picker page holds (6 by 4).
 pub(crate) const PAGE: usize = 24;
 pub(crate) const COLUMNS: usize = 6;
+/// The columns the map / item grid has on this screen, and its first row
+/// in view (the view sets them; moving uses them).
+pub(crate) static GRID_COLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(COLUMNS);
+pub(crate) static GRID_FIRST_ROW: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 #[derive(Resource, Debug, Clone)]
 pub(crate) struct Shell {
@@ -156,6 +160,8 @@ pub(crate) struct Shell {
     pub cac_from: Screen,
     /// The clock (seconds) as of his last input, for notes.
     pub now: f64,
+    /// His new name while he types it (Options > ACCOUNT).
+    pub typing: Option<String>,
 }
 
 impl Default for Shell {
@@ -176,6 +182,7 @@ impl Default for Shell {
             slot: 0,
             cac_from: Screen::Multiplayer,
             now: 0.0,
+            typing: None,
         }
     }
 }
@@ -243,7 +250,15 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
             .map(|(i, m)| Row::new(&m.title, &m.desc, Act::Choose(i)))
             .collect(),
         Screen::Classes | Screen::ClassEdit | Screen::ItemPick => classes::book().map(|b| cac::rows(s, &b)).unwrap_or_default(),
-        Screen::Options => options::rows(s.page, &options::snapshot()),
+        Screen::Options => {
+            let mut r = options::rows(s.page, &options::snapshot());
+            if s.page == options::ACCOUNT_TAB
+                && let (Some(t), Some(row)) = (&s.typing, r.first_mut())
+            {
+                row.value = Some(format!("{t}_"));
+            }
+            r
+        }
         Screen::Barracks => {
             let mut r = vec![Row::new("COMBAT RECORD", "Your kills, wins and time played.", Act::Barracks)];
             if c.player.can_prestige {
@@ -418,6 +433,10 @@ impl Shell {
                 self.screen = Screen::ModePick;
                 self.focus = c.modes.iter().position(|m| m.key == self.mode).unwrap_or(0);
             }
+            // (His name is typed, not stepped.)
+            Act::Cycle(Setting::Option(0)) if self.screen == Screen::Options && self.page == options::ACCOUNT_TAB => {
+                self.typing = Some(options::snapshot().player_name);
+            }
             Act::Cycle(what) => self.cycle(what, 1, c),
             Act::Classes => {
                 self.cac_from = self.screen;
@@ -489,10 +508,76 @@ fn shell_input(
     time: Res<Time>,
     mut exit: MessageWriter<AppExit>,
     mut repeat: Local<PadRepeat>,
+    mut typed: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    mut sounds: MessageWriter<frame::UiPlaySound>,
+    mut heard: Local<Option<(Screen, usize, Tab, usize)>>,
 ) {
     if !enabled() || front.is_none() || bridge::lui_open() || crate::game_folders::is_open() {
+        typed.clear();
         return;
     }
+    // His new name, typed: letters, digits and a few marks; Enter keeps it,
+    // Esc leaves it as it was.
+    if let Some(mut t) = shell.typing.clone() {
+        use bevy::input::keyboard::Key;
+        for ev in typed.read() {
+            if !ev.state.is_pressed() {
+                continue;
+            }
+            match &ev.logical_key {
+                Key::Enter => {
+                    let name = t.trim().to_owned();
+                    if !name.is_empty() {
+                        options::set_name(name);
+                        sounds.write(frame::UiPlaySound { alias: "uin_navigation_select_main".to_owned() });
+                    }
+                    shell.typing = None;
+                    return;
+                }
+                Key::Escape => {
+                    shell.typing = None;
+                    sounds.write(frame::UiPlaySound { alias: "cac_cmn_backout".to_owned() });
+                    return;
+                }
+                Key::Backspace => {
+                    t.pop();
+                }
+                Key::Character(s) => {
+                    for ch in s.chars() {
+                        if t.chars().count() < 16 && (ch.is_ascii_alphanumeric() || " _-.[]".contains(ch)) {
+                            t.push(ch);
+                        }
+                    }
+                }
+                Key::Space if t.chars().count() < 16 => t.push(' '),
+                _ => {}
+            }
+        }
+        if shell.typing.as_ref() != Some(&t) {
+            shell.typing = Some(t);
+        }
+        return;
+    }
+    typed.clear();
+    // The menu sounds: a move, a new tab or page, a new screen.
+    let state = (shell.screen, shell.focus, shell.tab, shell.page);
+    let sound_for = |old: (Screen, usize, Tab, usize), new: (Screen, usize, Tab, usize)| -> Option<&'static str> {
+        if old.0 != new.0 {
+            None
+        } else if old.2 != new.2 || old.3 != new.3 {
+            Some("uin_main_nav")
+        } else if old.1 != new.1 {
+            Some("uin_navigation_click")
+        } else {
+            None
+        }
+    };
+    if let Some(old) = *heard
+        && let Some(alias) = sound_for(old, state)
+    {
+        sounds.write(frame::UiPlaySound { alias: alias.to_owned() });
+    }
+    *heard = Some(state);
     if hud_keys.as_deref().is_some_and(|k| k.console_open) {
         return;
     }
@@ -590,7 +675,7 @@ fn shell_input(
     if n > 0 && dir != (0, 0) {
         if matches!(shell.screen, Screen::MapPick | Screen::ItemPick) {
             let f = shell.focus as i32;
-            let cols = COLUMNS as i32;
+            let cols = GRID_COLS.load(std::sync::atomic::Ordering::Relaxed).max(1) as i32;
             let mut t = f + dir.0 + dir.1 * cols;
             if t < 0 || t >= n as i32 {
                 // Off the page's side: the next page.
@@ -626,6 +711,7 @@ fn shell_input(
                 }
                 if clicked {
                     let act = rows[i].act;
+                    sounds.write(frame::UiPlaySound { alias: "uin_navigation_select_main".to_owned() });
                     shell.activate(act, &c, now, &mut exit);
                     return;
                 }
@@ -660,10 +746,14 @@ fn shell_input(
     }
     if confirm && let Some(r) = rows.get(shell.focus) {
         let act = r.act;
+        sounds.write(frame::UiPlaySound { alias: "uin_navigation_select_main".to_owned() });
         shell.activate(act, &c, now, &mut exit);
-    } else if back {
+    } else if back && shell.screen != Screen::Main {
+        sounds.write(frame::UiPlaySound { alias: "cac_cmn_backout".to_owned() });
         shell.back();
     }
+    // (The screen changed by his choice: no move sound for it.)
+    *heard = Some((shell.screen, shell.focus, shell.tab, shell.page));
 }
 
 /// The screens are up while the front end is (`covers_lui`), and the

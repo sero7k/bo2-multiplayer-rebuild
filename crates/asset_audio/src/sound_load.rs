@@ -500,5 +500,15 @@ pub fn menu_music_guests(games: &GamesRoot) -> (Vec<SoundCatalog>, Vec<String>) 
             .map(|z| z.path);
         take(label, found, load);
     }
+    // bo2mp: Modern Warfare 3's menu sounds (`mouse_over`, `mouse_click`,
+    // `mp_ui_decline`) for the shell's menus, from its interface zones.
+    for zone in ["code_post_gfx_mp", "ui_mp"] {
+        let found = voice
+            .as_ref()
+            .ok_or_else(|| "IW4L_VOICE_GAMES is not set".to_owned())
+            .and_then(|root| find_zone_file_version(root, zone, fastfile_iw5::ZONE_VERSION_PC))
+            .map(|z| z.path);
+        take(&format!("Modern Warfare 3 {zone} (menu sounds)"), found, crate::sound_load_iw5::load_sound_catalog_iw5);
+    }
     (catalogs, lines)
 }

@@ -1282,6 +1282,7 @@ fn hide_for_bo1_hud(vm: &mut Vm) {
     if !bo1_hud_on() {
         return;
     }
+    hide_bo2_scorestreaks(vm);
     let Value::Table(lui) = vm.global("LUI") else {
         return;
     };
@@ -1351,6 +1352,64 @@ fn hide_for_bo1_hud(vm: &mut Vm) {
         Ok(out)
     });
     compass.borrow_mut().set_str("AddMinimap", wrapped);
+}
+
+/// bo2mp: the scorestreak events BO2's scorestreak column (rewardselection.lua)
+/// answers: the engine's list of his picks and his momentum.
+const SCORESTREAK_EVENTS: [&str; 2] = ["hud_update_rewards", "hud_update_momentum"];
+
+/// bo2mp: the modern HUD draws his scorestreak column itself, so BO2's is
+/// built and fed as before but never drawn: whichever element takes the
+/// column's events (`registerEventHandler("hud_update_rewards", ...)`) is
+/// marked `bo1Hidden`, whatever the script names the widget. A menu (the
+/// HUD itself, should it ever take them) is left alone; Zombies keeps its
+/// own. `LUI.UIElement.registerEventHandler` is wrapped once, as soon as
+/// LUI's element class is in.
+fn hide_bo2_scorestreaks(vm: &mut Vm) {
+    let Value::Table(lui) = vm.global("LUI") else {
+        return;
+    };
+    let class = lui.borrow().get_str("UIElement");
+    let Value::Table(class) = class else {
+        return;
+    };
+    if class.borrow().get_str("bo1WrappedHandlers").truthy() {
+        return;
+    }
+    let original = class.borrow().get_str("registerEventHandler");
+    if !matches!(original, Value::Func(_) | Value::Native(_)) {
+        return;
+    }
+    let wrapped = vm.native("registerEventHandler", move |vm, args| {
+        let event = args.get(1).and_then(Value::as_str).map(str::to_owned);
+        let out = vm.call(original.clone(), args.clone())?;
+        if let Some(event) = event.filter(|e| SCORESTREAK_EVENTS.contains(&e.as_str()))
+            && let Some(u) = args.first().and_then(lui::element)
+        {
+            let zombies = match vm.global("CoD") {
+                Value::Table(cod) => {
+                    let on = cod.borrow().get_str("isZombie").truthy();
+                    on
+                }
+                _ => false,
+            };
+            let is_menu = lui::with(&u, |e| e.fields.borrow().get_str("menuName").truthy());
+            if !zombies && !is_menu {
+                let id = lui::with(&u, |e| {
+                    let was = e.fields.borrow().get_str("bo1Hidden").truthy();
+                    e.fields.borrow_mut().set_str("bo1Hidden", Value::Bool(true));
+                    (!was).then_some(e.id)
+                });
+                if let Some(id) = id {
+                    eprintln!("bo2mp modern hud: BO2's scorestreak widget hidden (element #{id}, takes `{event}`)");
+                }
+            }
+        }
+        Ok(out)
+    });
+    let mut c = class.borrow_mut();
+    c.set_str("registerEventHandler", wrapped);
+    c.set_str("bo1WrappedHandlers", Value::Bool(true));
 }
 
 /// BO2's custom-games lobby offers Setup Bots only in its own list of game

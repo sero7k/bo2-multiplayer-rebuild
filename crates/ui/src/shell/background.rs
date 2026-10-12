@@ -22,11 +22,79 @@ pub(crate) struct BgLayer(u8);
 pub(crate) struct BgState {
     now: Option<(String, Handle<Image>, f64)>,
     old: Option<(Handle<Image>, f64)>,
-    slide: usize,
     slide_at: f64,
+    seed: u64,
+    was_main: bool,
 }
 
 const FADE: f64 = 0.9;
+
+/// The menu photographs (the main screens' backdrop while no map is
+/// chosen), shown in a random order.
+const PHOTOS: [&[u8]; 21] = [
+    include_bytes!("../../assets/menu_backgrounds/bg01.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg02.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg03.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg04.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg05.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg06.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg07.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg08.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg09.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg10.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg11.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg12.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg13.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg14.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg15.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg16.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg17.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg18.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg19.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg20.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/bg21.jpg"),
+];
+
+/// A small random number source (the order the photos come in).
+fn next_random(seed: &mut u64) -> u64 {
+    if *seed == 0 {
+        *seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0x9E37_79B9, |d| d.as_nanos() as u64) | 1;
+    }
+    *seed ^= *seed << 13;
+    *seed ^= *seed >> 7;
+    *seed ^= *seed << 17;
+    *seed
+}
+
+/// The photo `i` as a picture (decoded once).
+fn photo(i: usize, pics: &mut ShellPics, images: &mut Assets<Image>) -> Option<Handle<Image>> {
+    let name = format!("\u{1}menu photo {i}");
+    if let Some(h) = pics.get(&name, None, images) {
+        return Some(h);
+    }
+    let img = Image::from_buffer(
+        PHOTOS.get(i)?,
+        bevy::image::ImageType::Extension("jpg"),
+        bevy::image::CompressedImageFormats::NONE,
+        true,
+        bevy::image::ImageSampler::linear(),
+        bevy::asset::RenderAssetUsages::default(),
+    )
+    .map_err(|e| diag::warn!(Ui, "bo2mp shell: menu photo {i} did not decode: {e}"))
+    .ok()?;
+    let h = images.add(img);
+    pics.insert(&name, h.clone());
+    Some(h)
+}
+
+/// The screens with no map to show: the photos take turns there.
+fn photo_screen(shell: &Shell) -> bool {
+    match shell.screen {
+        Screen::Main | Screen::Multiplayer | Screen::Options | Screen::Barracks => true,
+        Screen::Classes | Screen::ClassEdit | Screen::ItemPick => shell.cac_from != Screen::Lobby,
+        _ => false,
+    }
+}
 const SLIDE_SECS: f64 = 9.0;
 
 fn spawn(commands: &mut Commands) {
@@ -104,39 +172,42 @@ pub(crate) fn shell_background(
     }
     let Some(c) = bridge::catalog() else { return };
     let now = time.elapsed_secs_f64();
-    // The map to show.
-    let target: Option<String> = match shell.screen {
-        Screen::Lobby | Screen::ModePick | Screen::Classes | Screen::ClassEdit | Screen::ItemPick | Screen::Options | Screen::Barracks => Some(shell.map.clone()),
-        Screen::MapPick => pages(&c)
-            .get(shell.page)
-            .and_then(|(_, maps)| maps.get(shell.focus))
-            .map(|&i| c.maps[i].ui_name.clone()),
-        Screen::Main | Screen::Multiplayer => {
-            if c.maps.is_empty() {
-                None
-            } else {
-                if now >= st.slide_at {
-                    st.slide = (st.slide + 1) % c.maps.len();
-                    st.slide_at = now + SLIDE_SECS;
-                }
-                Some(c.maps[st.slide % c.maps.len()].ui_name.clone())
+    // Back on the main menu: a new random photo at once.
+    let on_main = shell.screen == Screen::Main;
+    if on_main && !st.was_main {
+        st.slide_at = 0.0;
+    }
+    st.was_main = on_main;
+    if photo_screen(&shell) {
+        if now >= st.slide_at || st.now.as_ref().is_none_or(|(n, ..)| !n.starts_with("photo:")) {
+            // (Never the same photo twice in a row.)
+            let mut i = (next_random(&mut st.seed) % PHOTOS.len() as u64) as usize;
+            if st.now.as_ref().is_some_and(|(n, ..)| *n == format!("photo:{i}")) {
+                i = (i + 1) % PHOTOS.len();
+            }
+            st.slide_at = now + SLIDE_SECS;
+            if let Some(h) = photo(i, &mut pics, &mut images) {
+                st.old = st.now.take().map(|(_, h, _)| (h, now));
+                st.now = Some((format!("photo:{i}"), h, now));
             }
         }
-    };
-    if let Some(name) = target
-        && st.now.as_ref().is_none_or(|(n, ..)| *n != name)
-    {
-        let pictures = c.map(&name).map(|m| m.pictures.clone()).unwrap_or_default();
-        match pics.first(&pictures, icons.as_deref(), &mut images) {
-            Some(h) => {
+    } else {
+        // The map to show.
+        let target: Option<String> = match shell.screen {
+            Screen::MapPick => pages(&c)
+                .get(shell.page)
+                .and_then(|(_, maps)| maps.get(shell.focus))
+                .map(|&i| c.maps[i].ui_name.clone()),
+            _ => Some(shell.map.clone()),
+        };
+        if let Some(name) = target
+            && st.now.as_ref().is_none_or(|(n, ..)| *n != name)
+        {
+            let pictures = c.map(&name).map(|m| m.pictures.clone()).unwrap_or_default();
+            if let Some(h) = pics.first(&pictures, icons.as_deref(), &mut images) {
                 st.old = st.now.take().map(|(_, h, _)| (h, now));
                 st.now = Some((name, h, now));
             }
-            // (A slideshow map with no picture yet: the next one soon.)
-            None if matches!(shell.screen, Screen::Main | Screen::Multiplayer) && st.slide_at - now > 0.5 => {
-                st.slide_at = now + 0.05;
-            }
-            None => {}
         }
     }
     let (area, _) = super::window_scale(&windows);

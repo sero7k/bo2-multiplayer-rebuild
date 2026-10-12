@@ -460,18 +460,20 @@ pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, s: &Shell, book: &ClassBook, rows
             super::view::tabs(c, cx, &tabs, tab, Hit::Page);
             let have = class.get(slot);
             let (tw, th, gap) = (280.0, 168.0, 14.0);
+            let (cols, first, last) = super::view::grid_window(cx, picks.len(), s.focus, tw, th, gap, 196.0, 230.0);
+            super::view::grid_more(c, cx, first, last, picks.len(), 72.0 + cols as f32 * (tw + gap) - 220.0, 160.0);
             c.spawn(Node {
                 position_type: PositionType::Absolute,
                 left: cx.px(72.0),
                 top: cx.px(196.0),
-                width: cx.px(super::COLUMNS as f32 * (tw + gap)),
+                width: cx.px(cols as f32 * (tw + gap)),
                 flex_wrap: FlexWrap::Wrap,
                 column_gap: cx.px(gap),
                 row_gap: cx.px(gap),
                 ..default()
             })
             .with_children(|grid| {
-                for (k, p) in picks.iter().enumerate() {
+                for (k, p) in picks.iter().enumerate().take(last).skip(first) {
                     let on = k == s.focus;
                     grid.spawn((
                         Hit::Row(k),

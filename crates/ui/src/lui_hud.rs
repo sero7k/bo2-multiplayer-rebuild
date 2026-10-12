@@ -165,6 +165,25 @@ impl LuiHudSlot {
         self.0.as_ref().is_some_and(|h| h.match_mp && h.board_open)
     }
 
+    /// bo2mp: an attachment's name as BO2 shows it (`extclip` -> its
+    /// mp/attachmenttable.csv name key, localized), for the modern HUD's
+    /// list beside the ammo.
+    pub(crate) fn attachment_name(&self, reference: &str) -> Option<String> {
+        let hud = self.0.as_ref()?;
+        let key = {
+            let m = hud.mp.as_ref()?.borrow();
+            m.profile
+                .attachments
+                .iter()
+                .find(|a| a.reference.eq_ignore_ascii_case(reference))
+                .map(|a| a.name.trim_start_matches('@').to_owned())?
+        };
+        if key.is_empty() {
+            return None;
+        }
+        hud.host.values.borrow().localize.get(&key.to_ascii_uppercase()).filter(|t| !t.trim().is_empty()).cloned()
+    }
+
     /// bo2mp: his own level (1 first) and prestige, from his stats.
     pub(crate) fn his_rank(&self) -> Option<(i32, i32)> {
         let m = self.0.as_ref()?.mp.as_ref()?.borrow();

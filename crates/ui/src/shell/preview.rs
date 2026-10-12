@@ -265,6 +265,7 @@ fn step(
 /// The shell with stand-in data, saving a picture of each screen in `out`.
 /// `pictures`: stand-ins for map pictures (`stand_in_a`, `stand_in_b`).
 pub fn install(app: &mut App, pictures: Vec<(String, Image)>, out: PathBuf) {
+    app.add_message::<frame::UiPlaySound>();
     super::register_shell(app);
     bridge::set_preview_catalog(stand_in_catalog());
     classes::set_preview_book(stand_in_book());

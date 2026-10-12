@@ -7,7 +7,13 @@ use frame::{DisplayResolution, GameSettings};
 
 use super::{Act, Row, Setting};
 
-pub(crate) const TABS: [&str; 4] = ["GRAPHICS", "SOUND", "MOUSE & KEYBOARD", "CONTROLLER"];
+pub(crate) const TABS: [&str; 5] = ["GRAPHICS", "SOUND", "MOUSE & KEYBOARD", "CONTROLLER", "ACCOUNT"];
+
+/// Unlock All (every item free in Create-a-Class), as his stats hold it.
+pub(crate) static UNLOCK_ALL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// ACCOUNT's rows: his name (typed in), Unlock All.
+pub(crate) const ACCOUNT_TAB: usize = 4;
 
 const RESOLUTIONS: [(u32, u32); 8] = [(1280, 720), (1366, 768), (1600, 900), (1920, 1080), (2560, 1080), (2560, 1440), (3440, 1440), (3840, 2160)];
 
@@ -34,11 +40,24 @@ pub(crate) fn rows(tab: usize, s: &GameSettings) -> Vec<Row> {
             row("BLOOM", on_off(s.bloom), "", 7),
             row("TEXTURE QUALITY", if s.bo2_fast { "PERFORMANCE" } else { "FULL" }.to_owned(), "Performance halves texture sizes on Black Ops II maps.", 8),
         ],
-        1 => vec![row("MASTER VOLUME", format!("{:.0}", s.master_volume * 100.0), "", 0)],
+        1 => vec![
+            row("MASTER VOLUME", format!("{:.0}", s.master_volume * 100.0), "", 0),
+            row("MUSIC VOLUME", format!("{:.0}", s.music_volume * 100.0), "Menu, lobby and match music.", 1),
+            row("MUSIC IN MATCHES", on_off(s.match_music), "Quiet ambient music during matches.", 2),
+        ],
         2 => vec![
             row("MOUSE SENSITIVITY", format!("{:.1}", s.sensitivity), "", 0),
             row("INVERT MOUSE", on_off(s.invert_mouse), "", 1),
             row("OMNI MOVEMENT", on_off(s.omni_movement), "Sprint in any direction (not Black Ops II's).", 2),
+        ],
+        4 => vec![
+            row("PLAYER NAME", s.player_name.clone(), "Press Enter to type a new name (16 letters at most), Enter again to keep it.", 0),
+            row(
+                "UNLOCK ALL",
+                on_off(UNLOCK_ALL.load(std::sync::atomic::Ordering::Relaxed)),
+                "Every weapon, attachment, perk and wildcard free in Create-a-Class, whatever your level.",
+                1,
+            ),
         ],
         _ => vec![
             row("LOOK SENSITIVITY", format!("{:.0}", s.pad_sensitivity), "1 is slow, 14 is the fastest.", 0),
@@ -74,6 +93,13 @@ pub(crate) fn change(tab: usize, k: u8, by: i32, s: &mut GameSettings) {
         (0, 7) => s.bloom = !s.bloom,
         (0, 8) => s.bo2_fast = !s.bo2_fast,
         (1, 0) => s.master_volume = step(s.master_volume, by, 0.05, 0.0, 1.0),
+        (1, 1) => s.music_volume = step(s.music_volume, by, 0.05, 0.0, 1.0),
+        (1, 2) => s.match_music = !s.match_music,
+        (4, 1) => {
+            let on = !UNLOCK_ALL.load(std::sync::atomic::Ordering::Relaxed);
+            super::bridge::request(super::bridge::Request::UnlockAll(on));
+            return;
+        }
         (2, 0) => s.sensitivity = step(s.sensitivity, by, 0.5, 0.5, 30.0),
         (2, 1) => s.invert_mouse = !s.invert_mouse,
         (2, 2) => s.omni_movement = !s.omni_movement,
@@ -106,8 +132,23 @@ pub(crate) fn queue(tab: usize, k: u8, by: i32) {
     }
 }
 
+/// A new name he typed.
+static NAME: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub(crate) fn set_name(name: String) {
+    if let Ok(mut n) = NAME.lock() {
+        *n = Some(name);
+    }
+}
+
 pub(crate) fn sync_settings(settings: Option<bevy::prelude::ResMut<GameSettings>>) {
     let Some(mut s) = settings else { return };
+    if let Some(name) = NAME.lock().ok().and_then(|mut n| n.take()) {
+        s.player_name = name;
+        s.sanitize();
+        s.touch();
+        diag::info!(Ui, "bo2mp shell: player name now `{}`", s.player_name);
+    }
     let queued = QUEUED.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default();
     for (tab, k, by) in queued {
         change(tab, k, by, &mut *s);

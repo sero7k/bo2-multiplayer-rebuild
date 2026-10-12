@@ -9,7 +9,7 @@ use super::bridge::{Catalog, PlayerCard};
 use super::online::{OnlineInfo, Status};
 use super::pics::{ShellPics, cover};
 use super::theme::*;
-use super::{COLUMNS, DIFFICULTY, Hit, Row, Screen, Shell, Tab, bridge, pages, rows};
+use super::{DIFFICULTY, Hit, Row, Screen, Shell, Tab, bridge, pages, rows};
 
 #[derive(Component)]
 pub(crate) struct ViewRoot;
@@ -19,6 +19,9 @@ pub(crate) type Kids<'a> = ChildSpawnerCommands<'a>;
 /// What the drawing needs besides the shell's state.
 pub(crate) struct Ctx<'a> {
     pub s: f32,
+    /// The screen in design units (1080 high).
+    pub w: f32,
+    pub h: f32,
     pub fonts: &'a ShellFonts,
     pub pics: &'a mut ShellPics,
     pub icons: Option<&'a assets::T6HudIcons>,
@@ -369,7 +372,12 @@ pub(crate) fn picture_contain(c: &mut Kids, cx: &mut Ctx, names: &[String], w: f
             if let Some(p) = pic {
                 let size = cx.pic_size(&p);
                 let k = (w / size.x.max(1.0)).min(h / size.y.max(1.0));
-                b.spawn((ImageNode::new(p), Node { width: cx.px(size.x * k), height: cx.px(size.y * k), ..default() }));
+                // (A weapon's menu picture is drawn mirrored, barrel to the
+                // left, as Black Ops II's Create-a-Class shows it.)
+                let weapon = names.first().is_some_and(|n| n.starts_with("menu_mp_weapons") || n.contains("_weapons_"));
+                let mut img = ImageNode::new(p);
+                img.flip_x = weapon;
+                b.spawn((img, Node { width: cx.px(size.x * k), height: cx.px(size.y * k), ..default() }));
             }
         });
 }
@@ -489,6 +497,42 @@ fn title_case(s: &str) -> String {
     c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c.flat_map(char::to_lowercase)).collect())
 }
 
+/// A grid that fits the screen: how many columns fit, and which tiles
+/// (first..last) show so the one in focus is always in view. Input moves
+/// by the columns drawn (`GRID_COLS`).
+pub(crate) fn grid_window(cx: &Ctx, n: usize, focus: usize, tw: f32, th: f32, gap: f32, top: f32, bottom: f32) -> (usize, usize, usize) {
+    let cols = (((cx.w - 144.0 + gap) / (tw + gap)).floor() as usize).clamp(2, super::COLUMNS);
+    let rows = (((cx.h - top - bottom + gap) / (th + gap)).floor() as usize).max(1);
+    super::GRID_COLS.store(cols, std::sync::atomic::Ordering::Relaxed);
+    let focus_row = focus / cols;
+    let total_rows = n.div_ceil(cols).max(1);
+    let mut first_row = super::GRID_FIRST_ROW.load(std::sync::atomic::Ordering::Relaxed);
+    if focus_row < first_row {
+        first_row = focus_row;
+    }
+    if focus_row >= first_row + rows {
+        first_row = focus_row + 1 - rows;
+    }
+    first_row = first_row.min(total_rows.saturating_sub(rows));
+    super::GRID_FIRST_ROW.store(first_row, std::sync::atomic::Ordering::Relaxed);
+    (cols, first_row * cols, ((first_row + rows) * cols).min(n))
+}
+
+/// "12-24 of 30", and arrows when more lie above or below.
+pub(crate) fn grid_more(c: &mut Kids, cx: &Ctx, first: usize, last: usize, n: usize, left: f32, top: f32) {
+    if first == 0 && last >= n {
+        return;
+    }
+    let up = if first > 0 { "▲ " } else { "" };
+    let down = if last < n { " ▼" } else { "" };
+    c.spawn((
+        Node { position_type: PositionType::Absolute, left: cx.px(left), top: cx.px(top), ..default() },
+        Text::new(format!("{up}{}-{} OF {n}{down}", first + 1, last)),
+        cx.bold(19.0),
+        TextColor(DIM),
+    ));
+}
+
 fn map_picker(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog) {
     header(c, cx, &["CUSTOM GAME", "SELECT MAP"]);
     let p = pages(cat);
@@ -497,15 +541,17 @@ fn map_picker(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog) {
     tabs(c, cx, &labels, page, Hit::Page);
     let Some((_, maps)) = p.get(page) else { return };
     let (tw, th, gap) = (280.0, 158.0, 14.0);
+    let (cols, first, last) = grid_window(cx, maps.len(), shell.focus, tw, th, gap, 196.0, 190.0);
+    grid_more(c, cx, first, last, maps.len(), 72.0 + cols as f32 * (tw + gap) - 220.0, 160.0);
     c.spawn(Node {
-        width: cx.px(COLUMNS as f32 * (tw + gap)),
+        width: cx.px(cols as f32 * (tw + gap)),
         flex_wrap: FlexWrap::Wrap,
         column_gap: cx.px(gap),
         row_gap: cx.px(gap),
         ..abs(Some(72.0), Some(196.0), None, None, cx)
     })
     .with_children(|grid| {
-        for (k, &i) in maps.iter().enumerate() {
+        for (k, &i) in maps.iter().enumerate().take(last).skip(first) {
             let m = &cat.maps[i];
             let on = k == shell.focus;
             let chosen = m.ui_name == shell.map;
@@ -785,6 +831,8 @@ pub(crate) fn shell_view(
     let rows = rows(&shell, &cat);
     let mut cx = Ctx {
         s,
+        w: area.x / s,
+        h: area.y / s,
         fonts: &fonts,
         pics: &mut pics,
         icons: icons.as_deref(),

@@ -16,7 +16,7 @@ mod overhead_names; // bo2mp: names over heads in BO2's font
 mod zm_hud;
 mod foreign_maps; // bo2mp: other games' maps in the map list
 mod game_folders; // bo2mp: the Game Folders panel
-mod hud_modern;
+pub mod hud_modern;
 pub mod hud_match; // bo2mp: our kill feed, hit marker, kill banner, scoreboard
 pub mod hud_medals; // bo2mp: Black Ops' medal notification
 pub mod shell; // bo2mp: the client's own front end and loading screen

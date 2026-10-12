@@ -13,6 +13,9 @@ use std::sync::{Arc, Mutex};
 use hks_t6::host::Host;
 use hks_t6::mp::Mp;
 
+/// His Unlock All choice, kept in his stats file.
+pub(crate) const UNLOCK_ALL_STAT: &str = "bo2rb.unlockall";
+
 /// A map the lobby can pick.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct MapEntry {
@@ -99,6 +102,8 @@ pub(crate) enum Request {
     Zombies,
     /// Barracks' ENTER PRESTIGE.
     Prestige,
+    /// Options > ACCOUNT > UNLOCK ALL.
+    UnlockAll(bool),
 }
 
 #[derive(Default)]
@@ -274,6 +279,8 @@ fn build_catalog(host: &Host, mp: Option<&Mp>) -> Catalog {
         })
         .unwrap_or(0.0);
     let level = rank + 1;
+    let unlock_all = mp.is_some_and(|m| m.borrow().profile.stat_num(UNLOCK_ALL_STAT) != 0.0);
+    super::options::UNLOCK_ALL.store(unlock_all, std::sync::atomic::Ordering::Relaxed);
     let stat = |name: &str| mp.map_or(0.0, |m| m.borrow().stat(&format!("playerstatslist.{name}.statvalue")).as_num().unwrap_or(0.0));
     let (kills, deaths) = (stat("kills"), stat("deaths"));
     let minutes = (stat("time_played_total") / 60.0).round() as i64;
@@ -400,6 +407,14 @@ pub(crate) fn lui_side(host: &mut Host, mp: Option<&Mp>) {
             Request::Zombies => {
                 if let Some(m) = mp {
                     m.borrow_mut().zombies_requested = true;
+                }
+            }
+            Request::UnlockAll(on) => {
+                if let Some(m) = mp {
+                    m.borrow_mut().profile.set_stat(UNLOCK_ALL_STAT.to_owned(), bo2_profile::StatValue::Num(if on { 1.0 } else { 0.0 }));
+                    super::options::UNLOCK_ALL.store(on, std::sync::atomic::Ordering::Relaxed);
+                    diag::info!(Ui, "bo2mp shell: unlock all {}", if on { "on" } else { "off" });
+                    with(|b| b.built_at = -1.0e9);
                 }
             }
             Request::Prestige => {
