@@ -143,6 +143,7 @@ pub(super) async fn walk_prepared_match(
             drop(iw5_shared_surfaces);
             let mut loaded = match game {
                 "iw3" => crate::lane::load_iw3_world(path, &progress, material_seed),
+                "t4" => crate::lane::load_t4_world(path, &progress, material_seed),
                 _ => {
                     drop(material_seed);
                     LoadedWorld::with_gap(
@@ -384,7 +385,17 @@ pub(super) async fn walk_prepared_match(
     let map_fpv_added = fpv_meshes.absorb(map_fpv);
     fpv_meshes.set_map_namespace(map_namespace);
     weapons.resolve_fpv_mesh_edges(&fpv_meshes);
-    weapons.resolve_fpv_hands(&fpv_meshes, &bodies);
+    let hands = weapons.resolve_fpv_hands(&fpv_meshes, &bodies);
+    if hands.t6_linked + hands.t6_unresolved > 0 {
+        let line = format!(
+            "bo2 fpv hands: map_ns={map_namespace:?} t6 gun sides linked={} unresolved={} arms={}",
+            hands.t6_linked,
+            hands.t6_unresolved,
+            hands.t6_sample.as_deref().unwrap_or("<none>"),
+        );
+        diag::info!(Fpv, "{line}");
+        report.push(line);
+    }
     let assembly_started = std::time::Instant::now();
     let assemblies = weapons.resolve_fpv_assemblies(&fpv_meshes, &xanims);
     report.push(format!(

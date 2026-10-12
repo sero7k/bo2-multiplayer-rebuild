@@ -451,6 +451,7 @@ impl ZoneLane for Iw5Lane {
                     Err(e) => report.push(format!("lightmaps: {e}")),
                 }
                 report_iw5_lit_surfaces(&mut report, &draw, &map_materials);
+                report_iw5_surface_draw_classes(&mut report, &draw, &map_materials);
                 let reflection_probe_images =
                     decode_reflection_probes(&mut report, &draw, &map_materials);
                 let portal_count: usize = draw.dpvs.portals_per_cell.iter().map(|c| c.len()).sum();
@@ -807,6 +808,83 @@ impl ZoneLane for Iw5Lane {
             scripts: sink.scripts,
         }
     }
+}
+
+/// bo2mp (MW3 maps: stray boxes in the sky, decals drawn as opaque quads
+/// with black edges): the world surfaces that never draw as a solid colour
+/// surface. `left out` were skipped by the world build by name (distortion,
+/// particle cloud, shadow caster); `blended` still draw, and only right when
+/// their material's own technique runs (`routed`) — the renderer's fallback
+/// leaves the rest out (`world fallback: ... left out` on the next line set).
+/// `past pages` lists the lightmap indices beyond the decoded pages.
+fn report_iw5_surface_draw_classes(
+    report: &mut Vec<String>,
+    draw: &asset_world::WorldDraw,
+    materials: &asset_material::MaterialCatalog,
+) {
+    use std::collections::BTreeMap;
+    let mut left_out: BTreeMap<&'static str, usize> = BTreeMap::new();
+    let mut left_out_names: BTreeMap<String, usize> = BTreeMap::new();
+    let (mut blended_routed, mut blended_unrouted, mut no_colour) = (0usize, 0usize, 0usize);
+    let mut blended_names: BTreeMap<String, usize> = BTreeMap::new();
+    let pages = draw.lightmap.as_ref().map_or(0, Vec::len);
+    let mut past_pages: BTreeMap<u8, usize> = BTreeMap::new();
+    for (i, &(_, count)) in draw.surface_index_ranges.iter().enumerate() {
+        let Some(material) = draw
+            .surface_materials
+            .get(i)
+            .copied()
+            .flatten()
+            .and_then(|m| materials.materials.get(m))
+        else {
+            continue;
+        };
+        let name = material.name.as_str();
+        if count == 0 {
+            if let Some(class) =
+                asset_material::iw_no_opaque_draw_by_name(name, material.technique_set.as_str())
+            {
+                *left_out.entry(class.as_str()).or_default() += 1;
+                *left_out_names.entry(name.to_owned()).or_default() += 1;
+            }
+            continue;
+        }
+        let index = draw.surface_lightmap_indices.get(i).copied().unwrap_or(255);
+        if index != 255 && usize::from(index) >= pages {
+            *past_pages.entry(index).or_default() += 1;
+        }
+        let class = asset_material::iw_no_opaque_draw(
+            name,
+            material.technique_set.as_str(),
+            material.state_bits_entry.as_ref().map(|e| e.as_slice()),
+            &material.state_bits,
+        );
+        match class {
+            Some(asset_material::IwNoOpaqueDraw::Blended) => {
+                if material.route.is_some() {
+                    blended_routed += 1;
+                } else {
+                    blended_unrouted += 1;
+                }
+                *blended_names.entry(name.to_owned()).or_default() += 1;
+            }
+            Some(asset_material::IwNoOpaqueDraw::NoColourWrite) => no_colour += 1,
+            _ => {}
+        }
+    }
+    let top = |map: BTreeMap<String, usize>| {
+        let mut v: Vec<(String, usize)> = map.into_iter().collect();
+        v.sort_by(|a, b| b.1.cmp(&a.1));
+        v.truncate(8);
+        v
+    };
+    report.push(format!(
+        "iw5 surface draw classes: left out {left_out:?} {:?}; blended still drawn: \
+         routed={blended_routed} unrouted={blended_unrouted} no_colour_write={no_colour} {:?}; \
+         lightmap index past the {pages} pages: {past_pages:?}",
+        top(left_out_names),
+        top(blended_names),
+    ));
 }
 
 const IW5_DEFAULT_ALLIES: &str = "sas_urban";

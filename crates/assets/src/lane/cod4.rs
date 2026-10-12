@@ -8,6 +8,10 @@
 //! are; Black Ops II's rules then add everything else
 //! (`attach_t6_rules`). No ZoneGame of its own: the map walk sends a CoD4
 //! zone here by its version.
+//!
+//! World at War (`t4`) maps share everything after the zone read: the `t4`
+//! crate converts a WaW zone to an `iw3::zone::Zone` (see `super::waw`),
+//! and [`build_legacy_world`] turns either into the match's world.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -42,6 +46,7 @@ fn rgba_image(w: u32, h: u32, rgba: Vec<u8>) -> Image {
 /// Links every surface material the world uses into `catalog` with its
 /// colour map (from the game's IWDs); world surface index -> catalog index.
 fn link_world_materials(
+    tag: &str,
     zone: &iw3::zone::Zone,
     world: &iw3::zone::GfxWorld,
     main: Option<&Path>,
@@ -98,7 +103,7 @@ fn link_world_materials(
                 };
                 Some(catalog.link_image(AuthoredImage {
                     namespace: AssetNamespace::T6,
-                    name: AssetRef::Real(format!("iw3:{}", image.name)),
+                    name: AssetRef::Real(format!("{tag}:{}", image.name)),
                     map_type: 0,
                     semantic: TS_COLOR_MAP,
                     category: 0,
@@ -126,7 +131,7 @@ fn link_world_materials(
             });
         }
         let index = catalog.link_material(AuthoredMaterial {
-            name: AssetRef::Real(format!("iw3:{}", material.name)),
+            name: AssetRef::Real(format!("{tag}:{}", material.name)),
             namespace: AssetNamespace::T6,
             technique_set: AssetRef::default(),
             technique_set_edge: AssetEdge::Absent,
@@ -153,7 +158,7 @@ fn link_world_materials(
         out.push(Some(index));
     }
     report.push(format!(
-        "iw3 materials: {} linked, {decoded} colour maps decoded from the IWDs, {} not found{}",
+        "{tag} materials: {} linked, {decoded} colour maps decoded from the IWDs, {} not found{}",
         by_material.values().filter(|m| m.is_some()).count(),
         missing.len(),
         if missing.is_empty() {
@@ -186,13 +191,33 @@ fn spawns_of(entities: &[iw3::ents::Entity]) -> Vec<asset_world::SpawnPoint> {
         .collect()
 }
 
+/// Which legacy game a map comes from, for the report and the gaps.
+pub(crate) struct Legacy {
+    /// Asset and report prefix: `iw3`, `t4`.
+    pub tag: &'static str,
+    /// For messages: `CoD4`, `World at War`.
+    pub title: &'static str,
+    /// The loading screen's stage for the material links.
+    pub stage_materials: &'static str,
+    pub addr_no_world: &'static str,
+    pub addr_world_mesh: &'static str,
+}
+
+pub(crate) const COD4: Legacy = Legacy {
+    tag: "iw3",
+    title: "CoD4",
+    stage_materials: "cod4 materials",
+    addr_no_world: "assets::lane::iw3::load_world/no_world",
+    addr_world_mesh: "assets::lane::iw3::load_world/world_mesh",
+};
+
 /// Loads a Call of Duty 4 map zone into the match's world.
 pub(crate) fn load_iw3_world(
     path: &Path,
     progress: &LoadProgress,
     material_seed: MaterialCatalog,
 ) -> LoadedWorld {
-    let mut report = vec![format!("game: IW3 / Call of Duty 4 ({})", path.display())];
+    let report = vec![format!("game: IW3 / Call of Duty 4 ({})", path.display())];
     let stage = progress.begin_scoped(StageId::MapAssets, "cod4 zone", None);
     let parsed = iw3::fastfile::load(path).and_then(|bytes| {
         iw3::zone::Zone::parse(&bytes, iw3::zone::ParseOptions::default())
@@ -212,8 +237,23 @@ pub(crate) fn load_iw3_world(
             );
         }
     };
+    build_legacy_world(&COD4, path, &zone, report, progress, material_seed)
+}
+
+/// A legacy (CoD4-format) map zone, already read, into the match's world:
+/// entities and spawns, collision, materials and the world draw.
+pub(crate) fn build_legacy_world(
+    game: &Legacy,
+    path: &Path,
+    zone: &iw3::zone::Zone,
+    mut report: Vec<String>,
+    progress: &LoadProgress,
+    material_seed: MaterialCatalog,
+) -> LoadedWorld {
+    let tag = game.tag;
+    let title = game.title;
     report.push(format!(
-        "iw3 zone: {} of {} assets{}",
+        "{tag} zone: {} of {} assets{}",
         zone.stats.top_level_parsed,
         zone.stats.top_level_total,
         zone.stats.stopped_at.as_ref().map_or_else(String::new, |s| format!(", stopped at {s}"))
@@ -224,7 +264,7 @@ pub(crate) fn load_iw3_world(
     let entity_string = zone.map_ents().map(|m| m.entity_string.clone()).unwrap_or_default();
     let entities = iw3::ents::parse(&entity_string);
     let spawns = spawns_of(&entities);
-    report.push(format!("iw3 entities: {}, spawn points {}", entities.len(), spawns.len()));
+    report.push(format!("{tag} entities: {}, spawn points {}", entities.len(), spawns.len()));
     let mut scripts = crate::ScriptSources::default();
     scripts.set_entities(entity_string);
 
@@ -232,7 +272,7 @@ pub(crate) fn load_iw3_world(
     let collision = match zone.clip_map().map(asset_world::world_iw3::build_iw3_clip_collision) {
         Some(Ok(clip)) => {
             report.push(format!(
-                "iw3 clip: {} brushes, {} mesh tris, {} models",
+                "{tag} clip: {} brushes, {} mesh tris, {} models",
                 clip.brushes.len(),
                 clip.mesh.tri_indices.len() / 3,
                 clip.cmodels.len()
@@ -240,21 +280,25 @@ pub(crate) fn load_iw3_world(
             Some(clip)
         }
         Some(Err(error)) => {
-            report.push(format!("iw3 clip gap: {error}"));
+            report.push(format!("{tag} clip gap: {error}"));
             None
         }
         None => {
-            report.push("iw3 clip gap: zone has no clipMap".to_owned());
+            report.push(format!("{tag} clip gap: zone has no clipMap"));
             None
         }
     };
 
     let Some(world) = zone.gfx_world() else {
+        let reason = match &zone.stats.stopped_at {
+            Some(stop) => format!("{title} zone has no GfxWorld (reading stopped at {stop})"),
+            None => format!("{title} zone has no GfxWorld"),
+        };
         let mut loaded = LoadedWorld::with_gap(
             WorldDrawPolicy::t5(),
             PreparedCapability::PreparedWorld,
-            "CoD4 zone has no GfxWorld",
-            Some("assets::lane::iw3::load_world/no_world"),
+            reason,
+            Some(game.addr_no_world),
         );
         loaded.scripts = scripts;
         loaded.collision = collision;
@@ -264,12 +308,12 @@ pub(crate) fn load_iw3_world(
     };
 
     // Materials and their colour maps, from the game's own IWDs.
-    let stage = progress.begin_scoped(StageId::MapAssets, "cod4 materials", None);
+    let stage = progress.begin_scoped(StageId::MapAssets, game.stage_materials, None);
     let main = asset_transport::game_root_for_zone(path).ok().map(|root| root.join("main"));
     let mut materials = material_seed;
     materials.set_capture_ns(AssetNamespace::T6);
     let surface_materials =
-        link_world_materials(&zone, world, main.as_deref(), &mut materials, &map, &mut report);
+        link_world_materials(tag, zone, world, main.as_deref(), &mut materials, &map, &mut report);
     stage.done();
 
     // The sun (no lightmaps yet: the fallback pass lights by it).
@@ -291,7 +335,7 @@ pub(crate) fn load_iw3_world(
     match asset_world::world_iw3::build_iw3_world_draw(world, &surface_materials, Vec::new(), Some(lighting)) {
         Ok(draw) => {
             report.push(format!(
-                "world mesh: {} vertices, {} triangles, {} surfaces (CoD4, fallback draw with colour maps)",
+                "world mesh: {} vertices, {} triangles, {} surfaces ({title}, fallback draw with colour maps)",
                 draw.stats.vertices, draw.stats.triangles, draw.stats.surfaces
             ));
             let (min, max) = (draw.stats.min, draw.stats.max);
@@ -315,8 +359,8 @@ pub(crate) fn load_iw3_world(
             let mut loaded = LoadedWorld::with_gap(
                 WorldDrawPolicy::t5(),
                 PreparedCapability::PreparedWorld,
-                format!("CoD4 world mesh: {error}"),
-                Some("assets::lane::iw3::load_world/world_mesh"),
+                format!("{title} world mesh: {error}"),
+                Some(game.addr_world_mesh),
             );
             loaded.scripts = scripts;
             loaded.collision = collision;

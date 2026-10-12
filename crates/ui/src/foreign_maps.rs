@@ -293,12 +293,12 @@ fn discover() -> Vec<Category> {
             (game != "t6").then(|| (game.to_owned(), stem.to_owned()))
         })
         .collect();
-    // Call of Duty 4's maps (read by their own reader; World at War's join
-    // once theirs loads too).
+    // Call of Duty 4's and World at War's maps (read by their own readers:
+    // `iw3`, and `t4` through the CoD4 lane).
     installed.extend(
         asset_transport::list_legacy_mp_maps(&root)
             .into_iter()
-            .filter(|(game, _)| game == "iw3"),
+            .filter(|(game, _)| game == "iw3" || game == "t4"),
     );
     installed.sort();
     installed.dedup();

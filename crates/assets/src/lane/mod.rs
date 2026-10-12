@@ -3,6 +3,8 @@ mod iw4;
 mod iw5;
 // bo2mp: Call of Duty 4 maps (no ZoneGame of their own).
 mod cod4;
+// bo2mp: World at War maps, through the CoD4 lane's builders.
+mod waw;
 mod sink;
 mod t5;
 // bo2zm: Black Ops II.
@@ -22,6 +24,7 @@ pub(crate) use helpers::{
 pub(crate) use sink::{CommonWalkSink, MaterialPopulationSink, ZoneWalkSink};
 pub(crate) use t6::attach_t6_rules;
 pub(crate) use cod4::load_iw3_world;
+pub(crate) use waw::load_t4_world;
 
 use crate::{
     lane_capability::{LaneStatus, PreparedCapability},

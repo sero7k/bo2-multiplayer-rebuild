@@ -189,6 +189,26 @@ fn leftover_walk_t5_startup_materials(
     (seed, stats, report)
 }
 
+/// bo2mp (MW3 maps glitched: floating cards, opaque decals, black floor
+/// holes): the `common_mp` of the map zone's own game. `find_common_mp_for_zone`
+/// searches every configured game folder and prefers an IW4 (MW2)
+/// `common_mp`, so for an MW3 map it named MW2's, the runtime common, and
+/// the donor was dropped as "already walked": MW3's `common_mp`, which holds
+/// the technique sets and shared images MW3's map materials point at, was
+/// never walked (`TechniqueSetMissing` for ~1150 materials on Off Shore).
+/// An IW5 map's donor is the IW5 `common_mp`, searched from its own tree.
+pub(super) fn same_game_common_mp(zone_ff: &Path) -> Result<asset_transport::ZoneFile, String> {
+    if peek_zone_version(zone_ff) == Some(fastfile_iw5::ZONE_VERSION_PC) {
+        let tree = asset_transport::game_root_for_zone(zone_ff)?;
+        return find_zone_file_version(
+            &asset_transport::GamesRoot(tree),
+            "common_mp",
+            fastfile_iw5::ZONE_VERSION_PC,
+        );
+    }
+    find_common_mp_for_zone(zone_ff)
+}
+
 fn walk_foreign_material_population(
     zone_ff: Option<&Path>,
     runtime_common: Option<&Path>,
@@ -198,7 +218,7 @@ fn walk_foreign_material_population(
     let Some(zone_ff) = zone_ff else {
         return (MaterialCatalog::default(), report);
     };
-    let donor = match find_common_mp_for_zone(zone_ff) {
+    let donor = match same_game_common_mp(zone_ff) {
         Ok(donor) => donor,
         Err(error) => {
             report.push(format!(
@@ -244,7 +264,7 @@ pub(super) fn resolve_foreign_material_donor(
     report: &mut Vec<String>,
 ) -> Option<PathBuf> {
     let zone_ff = zone_ff?;
-    let donor = match find_common_mp_for_zone(zone_ff) {
+    let donor = match same_game_common_mp(zone_ff) {
         Ok(donor) => donor,
         Err(error) => {
             report.push(format!(
@@ -257,7 +277,14 @@ pub(super) fn resolve_foreign_material_donor(
         return None;
     }
     match peek_zone_version(&donor.path) {
-        Some(fastfile_iw5::ZONE_VERSION_PC) => Some(donor.path),
+        Some(fastfile_iw5::ZONE_VERSION_PC) => {
+            report.push(format!(
+                "foreign data common: IW5 common_mp {} for {}",
+                donor.path.display(),
+                zone_ff.display()
+            ));
+            Some(donor.path)
+        }
         Some(version) => {
             report.push(format!(
                 "foreign data common: skip envelope {version:#x} at {} (IW5 material data only)",
@@ -1046,4 +1073,42 @@ pub(super) fn finish_zone_open<E>(
         stage.set_bytes(image.bytes.len() as u64);
     }
     stage.finish_from(opened);
+}
+
+#[cfg(test)]
+mod same_game_common_tests {
+    use super::*;
+
+    fn zone(path: &Path, version: u32) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut bytes = b"IWffu100".to_vec();
+        bytes.extend_from_slice(&version.to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 32]);
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn mw3_dlc_map_takes_mw3_common_mp_not_mw2s() {
+        let root = std::env::temp_dir().join(format!(
+            "bo2mp_same_game_common_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let mw3 = root.join("mw3_game_files");
+        // An IW4 common_mp in the same tree is what the any-game search
+        // prefers; the MW3 map must still get the IW5 one.
+        zone(&mw3.join("zone/aaa_iw4/common_mp.ff"), fastfile_iw4::ZONE_VERSION_PC);
+        zone(&mw3.join("zone/english/common_mp.ff"), fastfile_iw5::ZONE_VERSION_PC);
+        let map = mw3.join("zone/dlc/mp_roughneck.ff");
+        zone(&map, fastfile_iw5::ZONE_VERSION_PC);
+        let found = same_game_common_mp(&map).expect("iw5 common_mp");
+        assert_eq!(
+            peek_zone_version(&found.path),
+            Some(fastfile_iw5::ZONE_VERSION_PC),
+            "{}",
+            found.path.display()
+        );
+        assert!(found.path.ends_with("zone/english/common_mp.ff"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

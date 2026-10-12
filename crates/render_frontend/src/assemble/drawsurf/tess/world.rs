@@ -41,6 +41,54 @@ pub struct WorldPassMaterial {
     pub falloff_begin: [f32; 4],
     pub falloff_end: [f32; 4],
     pub cull_mode: Option<Face>,
+    /// bo2mp (MW3 maps: decals drawn as opaque quads with black edges,
+    /// floating cards): an IW4/IW5 material the renderer's fallback pass
+    /// must leave out rather than draw solid (it blends, refracts, is a
+    /// particle cloud or casts shadow only). Only read for a material with
+    /// no `t6_draw`; its own technique, when it runs, still draws it.
+    pub fallback_no_draw: Option<asset_material::IwNoOpaqueDraw>,
+}
+
+/// bo2mp: the draw code that makes the fallback pass leave a world surface
+/// out: `T6Blend::ShadowOnly` in `T6Draw::code`'s blend nibble (the pass
+/// skips every code whose blend nibble is 4 or more).
+pub const FALLBACK_NO_DRAW_CODE: u32 = 4;
+
+/// bo2mp: an IW4/IW5 runtime material the fallback pass cannot draw right.
+pub fn iw_fallback_no_draw(
+    material: &render_material::RuntimeMaterial,
+) -> Option<asset_material::IwNoOpaqueDraw> {
+    if material.t6_draw.is_some()
+        || !matches!(
+            material.namespace,
+            asset_material::AssetNamespace::Iw4 | asset_material::AssetNamespace::Iw5
+        )
+    {
+        return None;
+    }
+    asset_material::iw_no_opaque_draw(
+        &material.name,
+        &material.technique_set,
+        material.state_bits_entry.as_ref().map(|e| e.as_slice()),
+        &material.state_bits_table,
+    )
+}
+
+/// bo2mp: a world surface's fallback draw code: its BO2 draw, else
+/// `FALLBACK_NO_DRAW_CODE` for an IW material the fallback cannot draw
+/// right, else none (the plain fallback).
+pub fn fallback_draw_code(material: Option<&WorldPassMaterial>) -> u32 {
+    match material {
+        Some(WorldPassMaterial {
+            t6_draw: Some(draw),
+            ..
+        }) => draw.code(),
+        Some(WorldPassMaterial {
+            fallback_no_draw: Some(_),
+            ..
+        }) => FALLBACK_NO_DRAW_CODE,
+        _ => asset_core::T6Draw::NONE_CODE,
+    }
 }
 
 pub use render_frame::WorldVertexRefusal;
@@ -101,11 +149,7 @@ impl WorldDrawGpuPlan {
         for (i, &m) in self.surface_material.iter().enumerate() {
             let material = self.materials.get(m as usize);
             colors.push(material.and_then(|mat| mat.color_slot).unwrap_or(u32::MAX));
-            draws.push(
-                material
-                    .and_then(|mat| mat.t6_draw)
-                    .map_or(asset_core::T6Draw::NONE_CODE, asset_core::T6Draw::code),
-            );
+            draws.push(fallback_draw_code(material));
             lightmaps.push(
                 self.surface_sampler_inputs
                     .get(i)
@@ -260,6 +304,7 @@ impl WorldDrawGpuPlan {
         scene.retained_texture_uvs.clear();
 
         let mut materials = Vec::new();
+        let mut fallback_names: Vec<String> = Vec::new();
         let mut batch_to_mat = vec![u32::MAX; scene.batches.len()];
 
         for (batch_i, batch) in scene.batches.iter().enumerate() {
@@ -333,8 +378,13 @@ impl WorldDrawGpuPlan {
                 falloff_begin: runtime.map(|m| m.falloff_begin()).unwrap_or([0.0; 4]),
                 falloff_end: runtime.map(|m| m.falloff_end()).unwrap_or([0.0; 4]),
                 cull_mode: runtime.and_then(|m| super::super::runtime_cull_face(m.cull_mode)),
+                fallback_no_draw: runtime.and_then(iw_fallback_no_draw),
             };
             let idx = materials.len() as u32;
+            fallback_names.push(match (mat.fallback_no_draw, runtime) {
+                (Some(_), Some(m)) => m.name.clone(),
+                _ => String::new(),
+            });
             materials.push(mat);
             if let Some(slot) = batch_to_mat.get_mut(batch_i) {
                 *slot = idx;
@@ -375,6 +425,7 @@ impl WorldDrawGpuPlan {
                 batch_to_mat.get(batch).copied().unwrap_or(u32::MAX)
             })
             .collect();
+        log_fallback_no_draw_census(&materials, &fallback_names, &surface_material);
         let surface_sampler_inputs = cull
             .surface_batch_ranges
             .iter()
@@ -412,6 +463,44 @@ impl WorldDrawGpuPlan {
         plan.publish_extract_shares();
         plan
     }
+}
+
+/// bo2mp: once per world plan, the world surfaces the fallback pass leaves
+/// out (IW materials it cannot draw right) by class, and their materials.
+fn log_fallback_no_draw_census(
+    materials: &[WorldPassMaterial],
+    material_names: &[String],
+    surface_material: &[u32],
+) {
+    let mut by_class: std::collections::BTreeMap<&'static str, usize> = Default::default();
+    let mut by_material: std::collections::BTreeMap<u32, usize> = Default::default();
+    for &m in surface_material {
+        let Some(class) = materials.get(m as usize).and_then(|mat| {
+            mat.t6_draw.is_none().then_some(mat.fallback_no_draw).flatten()
+        }) else {
+            continue;
+        };
+        *by_class.entry(class.as_str()).or_default() += 1;
+        *by_material.entry(m).or_default() += 1;
+    }
+    if by_class.is_empty() {
+        return;
+    }
+    let mut top: Vec<(u32, usize)> = by_material.into_iter().collect();
+    top.sort_by(|a, b| b.1.cmp(&a.1));
+    let names: Vec<String> = top
+        .iter()
+        .take(8)
+        .map(|&(m, n)| {
+            let name = material_names.get(m as usize).map_or("?", String::as_str);
+            format!("{name}x{n}")
+        })
+        .collect();
+    let total: usize = by_class.values().sum();
+    diag::info!(
+        World,
+        "world fallback: {total} surfaces left out of the fallback draw (IW materials it cannot draw solid) {by_class:?}; plan materials {names:?}"
+    );
 }
 
 pub(crate) fn build_world_draw_gpu_plan(
@@ -478,4 +567,19 @@ pub(crate) fn build_world_draw_gpu_plan(
         scene.retained_normals.len(),
     );
     commands.insert_resource(plan);
+}
+
+#[cfg(test)]
+mod fallback_no_draw_tests {
+    use super::*;
+
+    #[test]
+    fn no_draw_code_is_the_shadow_only_code_the_fallback_skips() {
+        let shadow = asset_core::T6Draw::from_technique_set("wpc_shadowcaster", 0, None);
+        assert_eq!(shadow.blend, asset_core::T6Blend::ShadowOnly);
+        assert_eq!(shadow.code(), FALLBACK_NO_DRAW_CODE);
+        // The fallback pass leaves out every code whose blend nibble is 4+.
+        assert!(FALLBACK_NO_DRAW_CODE != asset_core::T6Draw::NONE_CODE);
+        assert!(FALLBACK_NO_DRAW_CODE & 0x0f >= 4);
+    }
 }

@@ -190,6 +190,45 @@ const T6_STAND_INS: &[(&str, Stand)] = &[
 
 const BO1_WAGER_VOICE: &str = "vox_wm_";
 
+/// bo2mp: every Black Ops II announcer alias the BO1 voice can stand in for,
+/// whether or not BO2's own line is in the bank. On a map from another game
+/// the BO2-rules sound bank carries BO2's guns, UI and common sounds but not
+/// the faction language banks a BO2 map loads beside its zone, so the
+/// `vox_<faction>_*` lines the scripts play were never in it: deriving the
+/// routes from the bank alone left none, and the announcer went silent.
+/// Each BO1 team line (`vox_ops_*`, `vox_rus_*`) names the BO2 aliases of
+/// the factions that speak with that voice; the stand-in table adds the
+/// lines BO1 says under another name.
+pub(crate) fn t6_announcer_candidates(bank: &asset_audio::SoundCatalog) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    let mut push = |alias: String| {
+        if seen.insert(alias.clone()) {
+            out.push(alias);
+        }
+    };
+    for alias in t6_announcer_aliases(bank) {
+        push(alias.to_ascii_lowercase());
+    }
+    let bo1_lines: Vec<String> = (0..bank.sounds.len())
+        .filter(|&index| bank.namespace_of_alias(index) == AssetNamespace::T5)
+        .filter_map(|index| bank.name_at(index))
+        .map(str::to_ascii_lowercase)
+        .filter(|name| name.starts_with("vox_ops_") || name.starts_with("vox_rus_"))
+        .collect();
+    for &(t6_voice, bo1_voice, _) in &T6_VOICES {
+        for name in &bo1_lines {
+            if let Some(line) = name.strip_prefix(bo1_voice) {
+                push(format!("{t6_voice}{line}"));
+            }
+        }
+        for (from, _) in T6_STAND_INS {
+            push(format!("{t6_voice}{from}"));
+        }
+    }
+    out
+}
+
 /// Routes Black Ops II announcer aliases (`vox_<faction>_<line>`) to BO1's
 /// lines (T5 namespace), or MW3's (IW5) where BO1 has none. Only a target the
 /// bank carries is routed.

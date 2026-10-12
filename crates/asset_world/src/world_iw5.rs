@@ -119,7 +119,15 @@ pub fn build_iw5_world_draw(
         let authored = material.and_then(|index| materials.materials.get(index.get()));
         let pass = crate::world_draw::surface_pass(&materials, authored);
         let is_sky = pass.sky;
-        let is_shadowcaster = pass.shadow_only;
+        // bo2mp (MW3 maps: stray polygons and boxes in the sky): distortion
+        // cards, particle clouds (embers) and shadow-only caulk never draw
+        // as a colour surface. MW3's world materials mostly route through
+        // technique sets in MW3's own common zone, so the route alone does
+        // not say so; their names do.
+        let never_colour = authored.and_then(|m| {
+            asset_material::iw_no_opaque_draw_by_name(m.name.as_str(), m.technique_set.as_str())
+        });
+        let is_shadowcaster = pass.shadow_only || never_colour.is_some();
         if is_sky {
             skipped_sky_surfaces += 1;
         }

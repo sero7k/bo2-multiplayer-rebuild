@@ -18,6 +18,7 @@ asset_model.workspace = true
 asset_transport.workspace = true
 asset_world.workspace = true
 iw3 = { path = "../iw3" } # bo2mp: Call of Duty 4 maps
+t4 = { path = "../t4" } # bo2mp: World at War maps
 weapon_iw4.workspace = true
 fastfile_iw4.workspace = true
 fastfile_t5.workspace = true

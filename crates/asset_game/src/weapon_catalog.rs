@@ -5635,9 +5635,21 @@ impl WeaponBuild {
         &mut self,
         fpv: &crate::FpvMeshCatalog,
         bodies: &asset_model::BodyMeshCatalog,
-    ) {
+    ) -> FpvHandsCensus {
+        let mut census = FpvHandsCensus::default();
         for row in &mut self.registry.rows {
-            let map_ns = fpv.map_namespace.unwrap_or(row.namespace);
+            // bo2mp: a Black Ops II gun takes Black Ops II's arms on every
+            // map, as on a BO2 map. Keyed off the map's game, a T6 gun on an
+            // MW3 or Black Ops map looked for that game's default arms
+            // (`viewmodel_base_viewhands` under iw5, the T5 default under t5),
+            // which the BO2-rules match never loads: every side came out
+            // unresolved and no first-person gun was built at all (on MW2
+            // maps it found MW2's arms and drew MW2 hands on BO2 guns).
+            let map_ns = if row.namespace == crate::AssetNamespace::T6 {
+                crate::AssetNamespace::T6
+            } else {
+                fpv.map_namespace.unwrap_or(row.namespace)
+            };
             let hand_name = row
                 .hand_xmodel_edge
                 .bound_index()
@@ -5655,7 +5667,21 @@ impl WeaponBuild {
                 }
                 Some((choice, crate::FpvMeshIndex::from_order(index)))
             });
+            if row.namespace == crate::AssetNamespace::T6 {
+                for side in &row.fpv_hands {
+                    match side {
+                        Some((choice, _)) => {
+                            census.t6_linked += 1;
+                            if census.t6_sample.is_none() {
+                                census.t6_sample = choice.key().map(|(ns, name)| format!("{}:{name}", ns.as_str()));
+                            }
+                        }
+                        None => census.t6_unresolved += 1,
+                    }
+                }
+            }
         }
+        census
     }
 
     pub fn resolve_fpv_assemblies(
@@ -8045,6 +8071,15 @@ impl crate::weapon_families::FamilyContent for WeaponRegistry {
             .map(|id| (id, normalize_weapon_name(self.name_of(id))))
             .collect()
     }
+}
+
+/// bo2mp: how the Black Ops II guns' first-person arms resolved (sides:
+/// two per weapon), and the arms the first linked side took.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FpvHandsCensus {
+    pub t6_linked: usize,
+    pub t6_unresolved: usize,
+    pub t6_sample: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -31,13 +31,26 @@ pub fn place(
     let dyn_ent_brush_n = scene.dyn_ent_brush_n;
     // bo2zm: a Black Ops II world lights its models itself (the fallback
     // pass); the atlas only has to exist for the first-person rig to build.
-    let model_lighting_atlas = if scene.light_grid.is_some() || !scene.t6_lights.is_empty() {
-        lighting_iw4::model_lighting_atlas_dims(SMODEL_LIGHTING_MAX_CLIENT_VIEWS).map(|dims| {
-            crate::prepare::scene::model_lighting_atlas::WorldModelLightingAtlas::new(images, dims)
-        })
-    } else {
-        None
-    };
+    // bo2mp: under Black Ops II's rules the gun draws by that pass on every
+    // map, so a world with neither (a CoD4 map: no IW light grid, no T6
+    // lights) still gets the atlas; without it every first-person weapon
+    // was refused before Ready ("no model lighting atlas in this world").
+    let t6_rules = assets::t6_rules();
+    let model_lighting_atlas =
+        if scene.light_grid.is_some() || !scene.t6_lights.is_empty() || t6_rules {
+            lighting_iw4::model_lighting_atlas_dims(SMODEL_LIGHTING_MAX_CLIENT_VIEWS).map(|dims| {
+                crate::prepare::scene::model_lighting_atlas::WorldModelLightingAtlas::new(images, dims)
+            })
+        } else {
+            None
+        };
+    diag::info!(
+        Fpv,
+        "bo2 fpv atlas: model lighting atlas {} (light_grid={} t6_lights={} t6_rules={t6_rules})",
+        if model_lighting_atlas.is_some() { "READY" } else { "absent" },
+        scene.light_grid.is_some(),
+        scene.t6_lights.len(),
+    );
     if !scene.static_model_meshes.is_empty() {
         for model in &scene.static_model_meshes {
             diag::info!(

@@ -263,23 +263,52 @@ fn queue_match_clips(
         aliases += 1;
         request_named(clips, &bank.0, AssetNamespace::Iw4, alias, &mut set);
     }
-    if namespace.namespace == AssetNamespace::T6 {
+    // bo2mp: a map from another game (MW2, MW3, Black Ops, CoD4) played by
+    // Black Ops II's rules runs BO2's scripts, which play BO2's sounds
+    // (`t6:` aliases): its hit sounds, interface and announcer are set up as
+    // on a BO2 map. Keyed off the map's sound namespace alone, those
+    // matches skipped this whole block and the BO1 announcer routes were
+    // never built (the voice went silent on every foreign map).
+    let t6_match = namespace.namespace == AssetNamespace::T6 || assets::t6_rules();
+    if t6_match {
         for alias in T6_HIT_SOUNDS {
             aliases += 1;
             request_named(clips, &bank.0, AssetNamespace::T6, alias, &mut set);
         }
         // bo2mp: the team announcer (`vox_<faction>_<line>`: match ending
         // soon, lead taken/lost, ...), ready before the script plays it.
-        let announcer_lines = crate::match_voices::t6_announcer_aliases(&bank.0);
+        let mut announcer_lines = crate::match_voices::t6_announcer_aliases(&bank.0);
         let voice = crate::match_voices::T6Announcer::from_env();
         if voice == crate::match_voices::T6Announcer::Bo1 {
-            let routes = crate::match_voices::t6_bo1_routes(&bank.0, &announcer_lines);
+            let candidates = crate::match_voices::t6_announcer_candidates(&bank.0);
+            let routes = crate::match_voices::t6_bo1_routes(&bank.0, &candidates);
             diag::info!(
                 Audio,
                 "audio: announcer: Black Ops 1 voice for {} of {} Black Ops II lines (the rest keep Black Ops II's voice)",
                 routes.len(),
                 announcer_lines.len()
             );
+            diag::info!(
+                Audio,
+                "audio: announcer: BO1 routing on `{}` (sound namespace {:?}, t6 rules {}): {} BO2 lines in the bank, {} candidates, {} routed (t5 {}, iw5 {}); e.g. vox_pmc_tdm_start -> {:?}",
+                namespace.zone,
+                namespace.namespace,
+                assets::t6_rules(),
+                announcer_lines.len(),
+                candidates.len(),
+                routes.len(),
+                routes.values().filter(|(ns, _)| *ns == AssetNamespace::T5).count(),
+                routes.values().filter(|(ns, _)| *ns == AssetNamespace::Iw5).count(),
+                routes.get("vox_pmc_tdm_start"),
+            );
+            // The lines the scripts can play: the bank's own BO2 lines and
+            // every BO2 alias a BO1 line now stands in for.
+            let known: std::collections::HashSet<String> =
+                announcer_lines.iter().map(|a| a.to_ascii_lowercase()).collect();
+            let mut extra: Vec<String> =
+                routes.keys().filter(|k| !known.contains(*k)).cloned().collect();
+            extra.sort_unstable();
+            announcer_lines.extend(extra);
             if routes.is_empty() {
                 diag::warn!(
                     Audio,
