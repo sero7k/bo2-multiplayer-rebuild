@@ -906,7 +906,12 @@ displaygameend( winner, endreasontext )
             player thread [[ level.onteamoutcomenotify ]]( winner, 0, endreasontext );
         else
         {
-            player thread [[ level.onoutcomenotify ]]( winner, 0, endreasontext );
+            // bo2mp: the modern HUD draws the free-for-all result itself
+            // (bo2mp_ffaoutcome); BO2's own with BO2_HUD=1.
+            if ( getdvar( "bo2mp_bo2hud" ) != "1" )
+                bo2mp_ffaoutcome( winner, endreasontext );
+            else
+                player thread [[ level.onoutcomenotify ]]( winner, 0, endreasontext );
             if ( isdefined( winner ) && player == winner )
                 player maps/mp/gametypes/_globallogic_audio::set_music_on_player( game["music"]["victory_" + player.team] );
             else
@@ -930,6 +935,31 @@ displaygameend( winner, endreasontext )
         }
     }
     roundendwait( level.postroundtime, 1 );
+}
+
+// bo2mp: the free-for-all result for the modern HUD's end screen, as
+// `level.bo2mp_outcome` (published as the `bo2mp_outcome` dvar):
+// "<winner's entity number, -1 for none>|<game type>|<end reason>|" then
+// one "<entity number>,<score>,<name>;" per player, first place first. The
+// score is the gun reached in Gun Game, the points otherwise.
+bo2mp_ffaoutcome( winner, endreasontext )
+{
+    if ( isdefined( level.bo2mp_outcome ) )
+        return;
+    num = -1;
+    if ( isdefined( winner ) && isplayer( winner ) )
+        num = winner getentitynumber();
+    s = "" + num + "|" + level.gametype + "|" + endreasontext + "|";
+    foreach ( player in level.placement["all"] )
+    {
+        score = player.score;
+        if ( level.gametype == "gun" && isdefined( player.pointstowin ) )
+            score = player.pointstowin;
+        if ( !isdefined( score ) )
+            score = 0;
+        s = s + player getentitynumber() + "," + score + "," + player.name + ";";
+    }
+    level.bo2mp_outcome = s;
 }
 
 // Halftime, overtime or an intermission between rounds: sides switch.

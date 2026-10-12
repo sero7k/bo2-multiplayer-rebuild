@@ -2,7 +2,8 @@
 //! with stand-in data, saved as pictures:
 //! `cargo run -p ui --example hud_preview -- <out dir>`; with `streaks`
 //! after the dir, the modern HUD's bottom right corner (scorestreaks,
-//! attachments, ammo) instead. A size after that (`1366x768`) sets the
+//! attachments, ammo) instead; with `outcome`, the free-for-all end
+//! screen (a background picture after the size). A size after that (`1366x768`) sets the
 //! window's (1920x1080 without).
 
 use bevy::prelude::*;
@@ -28,7 +29,9 @@ fn main() {
     app.add_systems(Startup, |mut commands: Commands| {
         commands.spawn(Camera2d);
     });
-    if std::env::args().nth(2).as_deref() == Some("streaks") {
+    if std::env::args().nth(2).as_deref() == Some("outcome") {
+        ui::hud_outcome::preview::install(&mut app, out, std::env::args().nth(4).map(std::path::PathBuf::from));
+    } else if std::env::args().nth(2).as_deref() == Some("streaks") {
         ui::hud_modern::preview::install(&mut app, out);
     } else {
         ui::hud_match::preview::install(&mut app, out);

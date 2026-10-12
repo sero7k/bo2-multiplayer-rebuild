@@ -804,6 +804,16 @@ pub(super) fn publish_screen(world: &mut World) {
     })
     .flatten()
     .unwrap_or_default();
+    // bo2mp: the free-for-all result for the modern HUD's end screen
+    // (`level.bo2mp_outcome`, see mp_globallogic.gsc), "" until the end.
+    let outcome = super::with_vm(world, |vm, _| {
+        let f = vm.intern("bo2mp_outcome");
+        match vm.raw_field(vm.level, f) {
+            gsc_t6::Value::Undefined => String::new(),
+            v => vm.to_text(&v),
+        }
+    })
+    .unwrap_or_default();
     // The game type's settings the HUD reads (score limit, rounds), with
     // the BO2MP_SETTING_<name> test overrides the server uses.
     let settings = {
@@ -910,6 +920,7 @@ pub(super) fn publish_screen(world: &mut World) {
             ("bo2mp_minimap", minimap.clone()),
             ("bo2mp_killcam", killcams.get(&c).cloned().unwrap_or_default()),
             ("bo2mp_prematch", prematch.clone()),
+            ("bo2mp_outcome", outcome.clone()),
         ] {
             super::set_client_dvar(world, c, k, &v);
         }

@@ -49,3 +49,12 @@ pub(super) fn gametypes(world: &World) -> &'static str {
 pub(super) fn callbacks(world: &World) -> String {
     format!("{}/_callbacksetup", gametypes(world))
 }
+
+#[cfg(test)]
+mod globallogic_tests {
+    #[test]
+    fn our_globallogic_compiles() {
+        let scripts = super::engine_scripts().expect("mp_globallogic.gsc compiles");
+        assert!(!scripts.is_empty());
+    }
+}

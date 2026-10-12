@@ -21,6 +21,7 @@ pub mod hud_match; // bo2mp: our kill feed, hit marker, kill banner, scoreboard
 pub mod hud_medals; // bo2mp: Black Ops' medal notification
 pub(crate) mod hud_cards; // bo2mp: MW2/MW3 calling cards and emblems in the HUD
 pub(crate) mod hud_prematch; // bo2mp: the match's start countdown
+pub mod hud_outcome; // bo2mp: the free-for-all end screen
 pub mod shell; // bo2mp: the client's own front end and loading screen
 mod music_screen; // bo2mp: front-end music context for the audio director
 mod load_info; // bo2mp: the loading screen's info bar
