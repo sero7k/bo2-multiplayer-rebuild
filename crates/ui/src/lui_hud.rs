@@ -693,6 +693,8 @@ fn build(ui: &assets::T6Ui, front: Option<&crate::lui_frontend::Bo2mpFrontend>, 
             let rows = cells.chunks((*cols).max(1)).map(<[String]>::to_vec).collect();
             v.tables.insert(name.clone(), rows);
         }
+        // bo2mp: the other games' maps, in BO2's map table and text.
+        crate::foreign_maps::inject(&mut v);
         v.configs = ui.configs.iter().map(|(k, t)| (k.to_ascii_lowercase(), t.clone())).collect();
     }
     host.load_base();

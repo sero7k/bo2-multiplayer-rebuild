@@ -193,6 +193,13 @@ fn approve_map_load(
             .ok()
             .and_then(|path| asset_transport::zone_game_for_path(path))
             == Some(asset_transport::ZoneGame::T6);
+        // A Black Ops II map never takes MW2's common zone, even when MW2 is
+        // installed beside it (its guns, scripts and UI are BO2's own).
+        let common_mp = if t6 {
+            Err("Black Ops II map: no MW2 common zone".to_owned())
+        } else {
+            common_mp
+        };
         let error = zone_ff
             .as_ref()
             .err()

@@ -19,8 +19,36 @@ pub struct Bo2mpMatchSetup {
 }
 
 impl Bo2mpMatchSetup {
-    /// The zone the match loads (`t6:mp_nuketown_2020`).
+    /// The zone the match loads (`t6:mp_nuketown_2020`; a map from another
+    /// game by its own key, `iw4:mp_rust`).
     pub fn zone(&self) -> String {
-        format!("t6:{}", self.map)
+        match foreign_map(&self.map) {
+            Some((game, stem)) => format!("{game}:{stem}"),
+            None => format!("t6:{}", self.map),
+        }
     }
+
+    /// The map's zone name (`mp_rust`): what the loaded match is called.
+    pub fn zone_stem(&self) -> String {
+        foreign_map(&self.map).map_or_else(|| self.map.clone(), |(_, stem)| stem)
+    }
+}
+
+/// bo2mp: maps from other games the front end lists, by the name its menus
+/// know them by (`ui_mapname`): the game's zone prefix and the map's zone
+/// name. A name two games share is listed under a suffixed name.
+static FOREIGN_MAPS: std::sync::RwLock<Vec<(String, String, String)>> = std::sync::RwLock::new(Vec::new());
+
+pub fn register_foreign_maps(maps: Vec<(String, String, String)>) {
+    if let Ok(mut m) = FOREIGN_MAPS.write() {
+        *m = maps;
+    }
+}
+
+/// (game prefix, zone name) of a map the menus list under `ui_name`.
+pub fn foreign_map(ui_name: &str) -> Option<(String, String)> {
+    let m = FOREIGN_MAPS.read().ok()?;
+    m.iter()
+        .find(|(name, ..)| name.eq_ignore_ascii_case(ui_name))
+        .map(|(_, game, stem)| (game.clone(), stem.clone()))
 }

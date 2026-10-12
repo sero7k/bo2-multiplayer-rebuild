@@ -355,6 +355,9 @@ fn run_menu(games: asset_transport::GamesRoot, artifacts: PathBuf) {
 /// browser. START MATCH swaps to `t6:<map>` like the `map` command.
 fn run_frontend_t6mp(games: asset_transport::GamesRoot, artifacts: PathBuf) {
     start_perf(None, "frontend");
+    // Every match this front end starts plays by Black Ops II's rules,
+    // whichever game its map comes from.
+    assets::set_t6_rules(true);
     let patch = find_zone_file(&games, "t6:patch_mp").unwrap_or_else(|error| {
         fatal(&format!(
             "Cannot start the Black Ops II multiplayer front end: its files were not found.\n\n{error}"

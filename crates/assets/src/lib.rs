@@ -54,5 +54,19 @@ pub use session_load::{
 
 pub mod image_handles;
 
+/// bo2mp: a match the Black Ops II front end starts plays by Black Ops II's
+/// rules on any map: a Modern Warfare 2, Modern Warfare 3 or Black Ops map
+/// brings its world (drawing, collision, entities, ambience) and Black Ops
+/// II brings the rest (guns, scripts, HUD, factions, sound).
+static T6_RULES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_t6_rules(on: bool) {
+    T6_RULES.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn t6_rules() -> bool {
+    T6_RULES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 mod script_sources;
 pub use script_sources::{ScriptSources, ScriptTable, T6AnimFacts, T6ScriptSet};

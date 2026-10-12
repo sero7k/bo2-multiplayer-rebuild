@@ -766,6 +766,7 @@ impl Host {
             let r = vm.call(f, vec![])?;
             allow_bots_in_every_mode(vm);
             hide_for_bo1_hud(vm);
+            extend_map_categories(vm);
             let v = r.into_iter().next().filter(Value::truthy).unwrap_or(Value::Bool(true));
             loaded.borrow_mut().set_str(&module, v.clone());
             Ok(vec![v])
@@ -1187,6 +1188,58 @@ fn stub_table(vm: &mut Vm, name: &'static str, asked: Rc<RefCell<BTreeMap<String
     meta.borrow_mut().set_str("__index", index);
     t.borrow_mut().meta = Some(meta);
     Value::Table(t)
+}
+
+/// bo2mp: map categories the Change Map popup lists after BO2's own (Base,
+/// Revolution, ... Apocalypse): (name, mapPackTypeIndex, icon material).
+/// The popup shows `MPUI_MAP_CATEGORY_<name>_CAPS` / `_DESC` and the maps
+/// whose mapstable row carries that index.
+static EXTRA_MAP_CATEGORIES: std::sync::Mutex<Vec<(String, u32, String)>> = std::sync::Mutex::new(Vec::new());
+
+pub fn set_extra_map_categories(categories: Vec<(String, u32, String)>) {
+    if let Ok(mut c) = EXTRA_MAP_CATEGORIES.lock() {
+        *c = categories;
+    }
+}
+
+/// bo2mp: once `CoD.ChangeMap` is defined, its category tables get the
+/// extra categories (each game's maps, a page at a time).
+fn extend_map_categories(vm: &mut Vm) {
+    let extra = match EXTRA_MAP_CATEGORIES.lock() {
+        Ok(c) if !c.is_empty() => c.clone(),
+        _ => return,
+    };
+    let Value::Table(cod) = vm.global("CoD") else {
+        return;
+    };
+    let change = cod.borrow().get_str("ChangeMap");
+    let Value::Table(change) = change else {
+        return;
+    };
+    let names = change.borrow().get_str("CategoryNames");
+    let index = change.borrow().get_str("CategoryIndex");
+    let icons = change.borrow().get_str("CategoryIconNames");
+    let max = change.borrow().get_str("MaxCategories").as_num();
+    let (Value::Table(names), Value::Table(index), Some(max)) = (names, index, max) else {
+        return;
+    };
+    // Once: the first extra category already there means it was done.
+    let first = Value::str(&extra[0].0);
+    let done = (1..=names.borrow().len()).any(|i| names.borrow().get(&Value::Num(i as f32)).raw_eq(&first));
+    if done {
+        return;
+    }
+    let mut n = max as usize;
+    for (name, pack, icon) in &extra {
+        n += 1;
+        let at = Value::Num(n as f32);
+        names.borrow_mut().set(at.clone(), Value::str(name));
+        index.borrow_mut().set(at.clone(), Value::Num(*pack as f32));
+        if let Value::Table(icons) = &icons {
+            icons.borrow_mut().set(at, Value::str(icon));
+        }
+    }
+    change.borrow_mut().set_str("MaxCategories", Value::Num(n as f32));
 }
 
 /// bo2mp: Black Ops' in-game HUD is drawn in place of these BO2 widgets

@@ -18,6 +18,7 @@ pub(crate) use helpers::{
     build_iw5_static_model_draw, build_static_model_draw, build_t5_static_model_draw,
 };
 pub(crate) use sink::{CommonWalkSink, MaterialPopulationSink, ZoneWalkSink};
+pub(crate) use t6::attach_t6_rules;
 
 use crate::{
     lane_capability::{LaneStatus, PreparedCapability},

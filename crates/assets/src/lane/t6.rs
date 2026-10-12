@@ -1203,3 +1203,147 @@ impl ZoneLane for T6Lane {
         }
     }
 }
+
+/// bo2mp: the map Black Ops II's own rules borrow the faction pairing and
+/// mapstable row of, for a map from another game (Aftermath: SEALs and
+/// the PMC).
+const FOREIGN_ROW_FROM: &str = "mp_la";
+
+/// bo2mp: Black Ops II's rules on a map from another game (MW2, MW3, Black
+/// Ops). The map's own lane has walked its world, collision, entities and
+/// ambience into `loaded`; Black Ops II's guns, arms, animations, effects,
+/// sound, scripts, HUD and factions are added from the Black Ops II zones
+/// (as a BO2 map would load them), and the map's own scripts are put aside
+/// for BO2's start-up roots, as on a BO2 map.
+pub(crate) fn attach_t6_rules(loaded: &mut LoadedWorld, map: &str) {
+    let mut report = Vec::new();
+    let dir = match asset_transport::games_root_from_env()
+        .and_then(|root| asset_transport::find_zone_file(&root, "t6:patch_mp"))
+    {
+        Ok(found) => match found.path.parent() {
+            Some(dir) => dir.to_path_buf(),
+            None => {
+                loaded.report.push("bo2 rules gap: patch_mp has no folder".to_owned());
+                return;
+            }
+        },
+        Err(error) => {
+            loaded
+                .report
+                .push(format!("bo2 rules gap: no Black Ops II zones to borrow from ({error})"));
+            return;
+        }
+    };
+    // Black Ops II's combat zones load as a BO2 map's would: beside a map
+    // of this name in Black Ops II's zone folder (the map's own zone is
+    // not there; its row and factions are borrowed below).
+    let path = dir.join(format!("{map}.ff"));
+    let packs = if frame::Headless::requested() {
+        None
+    } else {
+        match asset_t6::PackSet::open_dir(&dir) {
+            Ok(packs) => Some(packs),
+            Err(error) => {
+                report.push(format!("bo2 rules: t6 image packs: {error}"));
+                None
+            }
+        }
+    };
+    let previous_ns = loaded.materials.capture_ns();
+    loaded.materials.set_capture_ns(asset_core::AssetNamespace::T6);
+    let empty = asset_t6::ZoneCapture::default();
+    let mut combat = super::t6_m2::load_t6_combat(&path, &empty, &mut loaded.materials, packs.as_ref());
+    loaded.materials.set_capture_ns(previous_ns);
+    report.append(&mut combat.report);
+
+    // The map's entities (spawns, objectives, doors) for BO2's scripts.
+    let entities = loaded.scripts.entities().unwrap_or_default().to_owned();
+    combat.scripts.entities.push(entities);
+    // Its row in BO2's map table: the borrowed map's, under its own name
+    // (BO2's scripts read the factions and the map's name from it).
+    if let Some((_, columns, rows, cells)) = combat
+        .scripts
+        .tables
+        .iter_mut()
+        .find(|(name, ..)| name.eq_ignore_ascii_case("mp/mapstable.csv"))
+    {
+        let columns = *columns;
+        let has_own = (0..*rows).any(|r| cells.get(r * columns).is_some_and(|c| c.eq_ignore_ascii_case(map)));
+        let borrowed = (0..*rows)
+            .find(|&r| cells.get(r * columns).is_some_and(|c| c.eq_ignore_ascii_case(FOREIGN_ROW_FROM)))
+            .map(|r| cells[r * columns..((r + 1) * columns).min(cells.len())].to_vec());
+        if let (false, Some(mut row)) = (has_own, borrowed) {
+            row.resize(columns, String::new());
+            row[0] = map.to_owned();
+            cells.extend(row);
+            *rows += 1;
+            report.push(format!("bo2 rules: mapstable row for {map} borrowed from {FOREIGN_ROW_FROM}"));
+        }
+    }
+
+    // The start-up roots BO2's maps run with, at the map's first spawn.
+    let (origin, yaw) = loaded
+        .spawns
+        .first()
+        .map_or(([0.0; 3], 0.0), |s| (s.origin, s.angles[1]));
+    let mut scripts = super::t6_scripts::start_scripts(origin, yaw, false);
+    scripts.insert_source(&format!("maps/mp/{map}"), "main()\n{\n}\n".to_owned());
+
+    loaded.facts.t6_footsteps = combat.footsteps;
+    loaded.facts.t6_hud_icons = combat.hud_icons;
+    loaded.facts.t6_hud_fonts = combat.hud_fonts;
+    loaded.facts.t6_ui = combat.ui;
+    loaded.facts.t6_playeranim = combat.scripts.playeranim.clone();
+    loaded.facts.t6_ragdoll = combat.scripts.ragdoll.clone();
+    loaded.facts.t6_anim_speeds = combat
+        .scripts
+        .anims
+        .iter()
+        .filter(|a| a.name.starts_with("pb_") || a.name.starts_with("pl_"))
+        .filter_map(|a| {
+            let len = f32::from(a.numframes) / a.framerate;
+            let (first, last) = (a.delta_trans.first()?.1, a.delta_trans.last()?.1);
+            let v = [last[0] - first[0], last[1] - first[1], last[2] - first[2]];
+            let d = if v[0] + v[1] <= v[2] * 0.8 {
+                (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+            } else {
+                (v[0] * v[0] + v[1] * v[1]).sqrt()
+            };
+            (len > 0.0 && d > 1.0).then(|| (a.name.to_ascii_lowercase(), d / len))
+        })
+        .collect();
+    scripts.t6 = Some(combat.scripts);
+    loaded.scripts = scripts;
+
+    loaded.weapons.absorb(combat.weapons);
+    loaded.fpv_meshes.absorb(combat.fpv);
+    loaded.world_weapons.absorb(combat.world_weapons);
+    loaded.xanims.absorb_local(combat.xanims);
+    loaded.tracers.absorb(combat.tracers);
+    loaded.world.fx.absorb_missing(combat.fx);
+    loaded.world.fx_models.absorb(combat.fx_models);
+    if loaded.world.impact_fx.is_none() {
+        loaded.world.impact_fx = combat.impact_fx;
+    } else if combat.impact_fx.is_some() {
+        // BO2's bullet impacts over the map game's own.
+        loaded.world.impact_fx = combat.impact_fx;
+    }
+    if combat.pen_table.is_some() {
+        loaded.pen_table = combat.pen_table;
+    }
+    // Sound: BO2's (guns, announcer, UI) with the map's ambience beside it.
+    loaded.sound = Some(match (combat.sound, loaded.sound.take()) {
+        (Ok(mut bo2), Some(Ok(map_sound))) => {
+            bo2.absorb_missing_aliases_unresolved(map_sound);
+            Ok(bo2)
+        }
+        (Ok(bo2), _) => Ok(bo2),
+        (Err(error), Some(Ok(map_sound))) => {
+            report.push(format!("bo2 rules: BO2 sound gap: {error}"));
+            Ok(map_sound)
+        }
+        (Err(error), other) => other.unwrap_or(Err(error)),
+    });
+    report.push(format!("bo2 rules: {map} plays by Black Ops II's rules"));
+    loaded.report.extend(report);
+}

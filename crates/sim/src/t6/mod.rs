@@ -951,9 +951,17 @@ pub(crate) fn start(world: &mut World) {
                 })
                 .map(|n| (n, "main", false))
                 .collect();
+            // bo2mp: a map from another game has no Black Ops II map script;
+            // what one does first (`maps\mp\_load::main`) still runs.
+            let map_script = format!("maps/mp/{map}");
+            let own = vm.program.scripts.iter().any(|s| s.name == map_script);
             v.extend([
                 (format!("maps/mp/gametypes/{gametype}"), "main", true),
-                (format!("maps/mp/{map}"), "main", true),
+                if own {
+                    (map_script, "main", true)
+                } else {
+                    ("maps/mp/_load".to_owned(), "main", true)
+                },
                 (
                     "maps/mp/gametypes/_callbacksetup".to_owned(),
                     "codecallback_startgametype",

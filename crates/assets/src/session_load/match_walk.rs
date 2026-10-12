@@ -134,17 +134,21 @@ pub(super) async fn walk_prepared_match(
                 asset_core::ZoneGame::Iw5 => iw5_shared_surfaces,
                 _ => shared_surfaces,
             };
-            (
-                lane(game).load_world(
-                    &path,
-                    &image,
-                    &progress,
-                    shared_surfaces,
-                    material_seed,
-                    &mut common_film_visions,
-                ),
-                Some(asset_core::AssetNamespace::from_zone_game(game)),
-            )
+            let mut loaded = lane(game).load_world(
+                &path,
+                &image,
+                &progress,
+                shared_surfaces,
+                material_seed,
+                &mut common_film_visions,
+            );
+            // bo2mp: a map from another game under Black Ops II's rules.
+            if game != asset_core::ZoneGame::T6 && crate::t6_rules() {
+                let stage = progress.begin_scoped(StageId::MapAssets, "black ops ii rules", None);
+                crate::lane::attach_t6_rules(&mut loaded, &zone_name);
+                stage.done();
+            }
+            (loaded, Some(asset_core::AssetNamespace::from_zone_game(game)))
         }
         Err(gap) => {
             drop(material_seed);
@@ -230,7 +234,7 @@ pub(super) async fn walk_prepared_match(
         ));
     }
     let map_scripts = match map_namespace {
-        Some(asset_core::AssetNamespace::T5) => {
+        Some(asset_core::AssetNamespace::T5) if !crate::t6_rules() => {
             let scripts = t5_map_under_iw4_rules(&map_scripts, &zone_name, &facts);
             report.push(format!(
                 "map script: maps/mp/{zone_name} written from the T5 map's declarations; T5 map scripts left out"

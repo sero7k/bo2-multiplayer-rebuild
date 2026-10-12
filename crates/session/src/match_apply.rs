@@ -963,7 +963,7 @@ fn preflight_match_install(
     let mp = zone.rsplit(':').next().unwrap_or(zone).starts_with("mp_");
     let mp_scripts = std::env::var("BO2MP_SCRIPTS").is_ok_and(|v| v == "1");
     // The front end's lobby choice; BO2MP_GAMETYPE overrides it (a test aid).
-    let setup = bo2mp.filter(|s| zone.rsplit(':').next() == Some(s.map.as_str()));
+    let setup = bo2mp.filter(|s| zone.rsplit(':').next() == Some(s.zone_stem().as_str()));
     let mp_gametype = if mp {
         std::env::var("BO2MP_GAMETYPE")
             .ok()

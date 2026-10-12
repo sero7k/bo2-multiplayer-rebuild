@@ -276,6 +276,17 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
     let mut donor_report = Vec::new();
     let material_donor = key.foreign.clone();
     let weapon_donor = resolve_iw5_weapon_donor(anchor.as_deref(), &mut donor_report);
+    // bo2mp: under Black Ops II's rules MW3's guns are not wanted; MW3's
+    // common zone is walked only when an MW3 map needs its materials.
+    let weapon_donor = if crate::t6_rules() {
+        let kept = weapon_donor.filter(|donor| material_donor.as_ref() == Some(donor));
+        if kept.is_none() {
+            donor_report.push("iw5 weapons: skip, Black Ops II rules (its own guns)".into());
+        }
+        kept
+    } else {
+        weapon_donor
+    };
     let iw5_startup_walk = weapon_donor.clone().map(|donor| {
         let progress = progress.clone();
         pool.spawn(async move { walk_iw5_startup(&donor, &progress) })
