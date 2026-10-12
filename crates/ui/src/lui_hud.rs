@@ -220,7 +220,9 @@ fn profile_of(s: &frame::GameSettings) -> Vec<(String, String)> {
         ("cg_fov_default".into(), format!("{}", s.fov.round())),
         ("sm_enable".into(), b(s.shadows)),
         ("snd_menu_master".into(), format!("{:.2}", s.master_volume)),
-        ("input_viewSensitivity".into(), format!("{:.2}", s.sensitivity)),
+        // The controller's Look Sensitivity (BO2's `input_viewSensitivity`:
+        // the stick's turn speed, not the mouse's).
+        ("input_viewSensitivity".into(), format!("{:.2}", s.pad_sensitivity)),
         ("input_invertpitch".into(), b(s.invert_mouse)),
         // The Controls tab's Look rows: BO2's own names for the same
         // settings (m_pitch's sign inverts the mouse; the mouse always
@@ -252,7 +254,7 @@ fn apply_profile(s: &mut frame::GameSettings, key: &str, value: &str) {
         "cg_fov_default" => s.fov = num.unwrap_or(s.fov),
         "sm_enable" => s.shadows = on,
         "snd_menu_master" => s.master_volume = num.unwrap_or(s.master_volume).clamp(0.0, 1.0),
-        "input_viewSensitivity" => s.sensitivity = num.unwrap_or(s.sensitivity),
+        "input_viewSensitivity" => s.pad_sensitivity = num.unwrap_or(s.pad_sensitivity),
         "input_invertpitch" => s.invert_mouse = on,
         "m_pitch" => s.invert_mouse = num.is_some_and(|v| v < 0.0),
         "mouseSensitivity" => s.sensitivity = num.unwrap_or(s.sensitivity),

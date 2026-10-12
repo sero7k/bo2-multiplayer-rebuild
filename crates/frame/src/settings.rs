@@ -136,7 +136,8 @@ impl GameSettings {
         self.pad_sensitivity = finite(
             self.pad_sensitivity,
             1.0,
-            10.0,
+            // BO2's Look Sensitivity runs to 14 (Ultra).
+            14.0,
             Self::PAD_SENSITIVITY_DEFAULT,
         );
         self.pad_ads_sensitivity = finite(self.pad_ads_sensitivity, 0.5, 1.5, 1.0);
