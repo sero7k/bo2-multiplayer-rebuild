@@ -33,14 +33,80 @@ use crate::session_load::PreparedWorld;
 /// with sun shadow, lit with sun, lit, emissive, unlit.
 const TECHNIQUES: [usize; 5] = [9, 8, 7, 5, 4];
 
+/// bo2mp: a colour map with its whole mip chain, so the fallback pass's
+/// trilinear, anisotropic sampler has smaller levels to read at a distance
+/// (one level shimmered and aliased across every far floor and wall).
 fn rgba_image(w: u32, h: u32, rgba: Vec<u8>) -> Image {
-    Image::new(
+    let (data, levels) = mip_chain(w, h, rgba);
+    let mut image = Image::new_uninit(
         Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         TextureDimension::D2,
-        rgba,
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
-    )
+    );
+    image.texture_descriptor.mip_level_count = levels;
+    image.data = Some(data);
+    image
+}
+
+/// The levels of an sRGB RGBA8 picture, largest first, concatenated: each a
+/// 2x2 box of the one above, averaged in linear light. Alpha keeps the top
+/// level's coverage at the 0.5 test the alpha-tested shaders make (each
+/// level's alpha scaled until as much of it passes), so leaves and fences
+/// do not thin away with distance.
+fn mip_chain(w: u32, h: u32, top: Vec<u8>) -> (Vec<u8>, u32) {
+    let levels = 32 - w.max(h).max(1).leading_zeros();
+    let to_lin: Vec<f32> = (0..256).map(|i| (i as f32 / 255.0).powf(2.2)).collect();
+    // Linear back to 8-bit sRGB through a 4096-step table.
+    let to_srgb: Vec<u8> =
+        (0..4096).map(|i| ((i as f32 / 4095.0).powf(1.0 / 2.2) * 255.0).round().clamp(0.0, 255.0) as u8).collect();
+    let coverage = |px: &[u8], scale: f32| {
+        let n = px.len() / 4;
+        let pass = px.chunks_exact(4).filter(|p| f32::from(p[3]) * scale >= 127.5).count();
+        pass as f32 / n.max(1) as f32
+    };
+    let want = coverage(&top, 1.0);
+    let cut = top.chunks_exact(4).any(|p| p[3] < 255);
+    let mut out = top.clone();
+    let (mut pw, mut ph, mut prev) = (w as usize, h as usize, top);
+    for _ in 1..levels {
+        let (nw, nh) = ((pw / 2).max(1), (ph / 2).max(1));
+        let mut next = vec![0u8; nw * nh * 4];
+        for y in 0..nh {
+            for x in 0..nw {
+                let mut acc = [0.0f32; 4];
+                let mut n = 0.0;
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let (sx, sy) = ((x * 2 + dx).min(pw - 1), (y * 2 + dy).min(ph - 1));
+                    let p = &prev[(sy * pw + sx) * 4..][..4];
+                    for c in 0..3 {
+                        acc[c] += to_lin[usize::from(p[c])];
+                    }
+                    acc[3] += f32::from(p[3]);
+                    n += 1.0;
+                }
+                let o = (y * nw + x) * 4;
+                for c in 0..3 {
+                    next[o + c] = to_srgb[((acc[c] / n) * 4095.0).round().clamp(0.0, 4095.0) as usize];
+                }
+                next[o + 3] = (acc[3] / n).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+        if cut && want > 0.0 {
+            // The alpha scale whose coverage matches the top level's.
+            let (mut lo, mut hi) = (0.0f32, 4.0f32);
+            for _ in 0..12 {
+                let mid = (lo + hi) * 0.5;
+                if coverage(&next, mid) < want { lo = mid } else { hi = mid }
+            }
+            for a in next.chunks_exact_mut(4) {
+                a[3] = (f32::from(a[3]) * hi).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+        out.extend_from_slice(&next);
+        (pw, ph, prev) = (nw, nh, next);
+    }
+    (out, levels)
 }
 
 /// Links every surface material the world uses into `catalog` with its
@@ -581,5 +647,41 @@ mod fog_tests {
         let f = super::legacy_fog(waw).expect("parses");
         assert_eq!((f.start, f.half, f.half_height, f.base_height), (0.0, 4400.0, 1400.0, 0.0));
         assert!((f.colour[0] - 0.552).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod mip_tests {
+    #[test]
+    fn a_full_chain_keeps_alpha_coverage() {
+        // 8x4: the left half opaque, the right clear (a fence's edge).
+        let mut top = Vec::new();
+        for _y in 0..4 {
+            for x in 0..8 {
+                top.extend_from_slice(&[200, 100, 50, if x < 4 { 255 } else { 0 }]);
+            }
+        }
+        let (data, levels) = super::mip_chain(8, 4, top);
+        assert_eq!(levels, 4);
+        // 8x4 + 4x2 + 2x1 + 1x1 texels.
+        assert_eq!(data.len(), (32 + 8 + 2 + 1) * 4);
+        // Level 1 (4x2): half of it still passes the 0.5 test.
+        let l1 = &data[32 * 4..40 * 4];
+        let pass = l1.chunks_exact(4).filter(|p| p[3] >= 128).count();
+        assert_eq!(pass, 4);
+        // Colour averaged in linear light stays the colour.
+        assert_eq!(l1[0], 200);
+    }
+}
+
+#[cfg(test)]
+mod mip_bench {
+    #[test]
+    #[ignore = "timing"]
+    fn a_1024_chain() {
+        let top: Vec<u8> = (0..1024 * 1024 * 4).map(|i| (i % 251) as u8).collect();
+        let t = std::time::Instant::now();
+        let (_, levels) = super::mip_chain(1024, 1024, top);
+        eprintln!("1024^2 chain: {levels} levels in {:?}", t.elapsed());
     }
 }
