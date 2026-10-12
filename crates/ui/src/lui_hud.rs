@@ -358,6 +358,11 @@ fn menu_input(hud: &mut LuiHud, io: &mut LuiIo<'_, '_>, console_open: bool, curs
     if console_open {
         return;
     }
+    // bo2mp: the Game Folders panel has the keys while it is up.
+    if crate::game_folders::is_open() {
+        let _ = io.key_events.read().count();
+        return;
+    }
     let key_events: Vec<_> = io.key_events.read().cloned().collect();
     use bevy::input::gamepad::GamepadButton as P;
     let pad_start = io.pads.iter().any(|p| p.just_pressed(P::Start));

@@ -15,6 +15,7 @@ mod scope_hint; // bo2mp scope lane
 mod overhead_names; // bo2mp: names over heads in BO2's font
 mod zm_hud;
 mod foreign_maps; // bo2mp: other games' maps in the map list
+mod game_folders; // bo2mp: the Game Folders panel
 mod hud_modern; // bo2mp: the modern in-game HUD
 mod lui_hud; // bo2zm M4
 mod lui_additive; // bo2mp scope: true additive HUD pictures
