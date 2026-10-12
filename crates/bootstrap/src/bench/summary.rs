@@ -80,10 +80,9 @@ fn audio() -> Value {
         "xwma": {
             "cache_hit": xwma.hit,
             "cache_miss": xwma.miss,
-            "ffmpeg_processes": xwma.spawned,
+            "native_decodes": xwma.native,
             "failed": xwma.failed,
-            "retried_alone": xwma.retried,
-            "pcm_bytes": xwma.pcm_bytes,
+                        "pcm_bytes": xwma.pcm_bytes,
             "decode_ms": xwma.decode_ms,
             "key_ms": xwma.key_ms,
             "cache_io_ms": xwma.io_ms,

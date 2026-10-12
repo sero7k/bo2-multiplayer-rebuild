@@ -41,7 +41,7 @@ pub enum ClipPath {
     Pcm,
     /// T5 ADPCM, decoded in process.
     Adpcm,
-    /// T5 XWMA, decoded by an external `ffmpeg` or read from the artifact cache.
+    /// T5 XWMA, decoded in-process or read from the artifact cache.
     Xwma,
     /// A clip read out of an IWD rather than out of the zone.
     Streamed,
@@ -720,51 +720,14 @@ fn note_outcome(path: ClipPath, result: Result<&PreparedPcm, &ClipError>) {
     }
 }
 
-/// One worker's drained jobs, prepared together.
-///
-/// The XWMA clips among them go to their decoder in one call, because that
-/// decoder leaves the process: one `ffmpeg` for the batch instead of one per
-/// clip. Every other path is a loop over bytes in this process and is prepared
-/// one clip at a time, exactly as before.
+/// One worker's drained jobs, prepared one clip at a time (BO1's xWMA clips
+/// decode in this process too).
 fn prepare_jobs(
     bank: &SoundCatalog,
     iwd: Option<&NamespaceSoundIwd>,
     jobs: &[ClipJob],
 ) -> Vec<Result<PreparedPcm, ClipError>> {
     let mut out: Vec<Option<Result<PreparedPcm, ClipError>>> = vec![None; jobs.len()];
-
-    let asked: Vec<(usize, &asset_audio::LoadedSoundPcm)> = jobs
-        .iter()
-        .enumerate()
-        .filter_map(|(i, job)| match job.key {
-            ClipKey::Loaded(index) => {
-                let sound = bank.pcm_at(index)?;
-                (loaded_path(sound) == Some(ClipPath::Xwma)).then_some((i, sound))
-            }
-            ClipKey::Streamed { .. } => None,
-        })
-        .collect();
-    if !asked.is_empty() {
-        let clips: Vec<asset_audio::XwmaClip<'_>> = asked
-            .iter()
-            .map(|(_, sound)| asset_audio::XwmaClip {
-                packets: sound.encoded_bytes(),
-                seek_table: &sound.seek_table,
-                channels: sound.channels().max(0) as u32,
-                rate: sound.rate,
-            })
-            .collect();
-        let decode_at = Instant::now();
-        let decoded = asset_audio::decode_t5_xwma_batch(&clips);
-        note_wall(ClipPath::Xwma, decode_at.elapsed());
-        for ((i, sound), pcm) in asked.into_iter().zip(decoded) {
-            let result = pcm
-                .map_err(|_| ClipError::Decode)
-                .and_then(|bytes| pcm_from_bytes(16, &bytes, sound.channels(), sound.rate));
-            note_outcome(ClipPath::Xwma, result.as_ref());
-            out[i] = Some(result);
-        }
-    }
 
     for (i, job) in jobs.iter().enumerate() {
         if out[i].is_some() {
@@ -833,15 +796,21 @@ fn prepare_loaded(sound: &asset_audio::LoadedSoundPcm) -> Result<PreparedPcm, Cl
             sample_rate: pcm.rate(),
         });
     }
-    let decoded;
+    let decoded: Vec<u8>;
     let (bits, bytes) = if sound.is_t5_xwma() {
-        decoded = asset_audio::decode_t5_xwma(
+        let mut samples = XwmaSamples::default();
+        asset_audio::decode_t5_xwma(
             sound.encoded_bytes(),
             &sound.seek_table,
             sound.channels().max(0) as u32,
             sound.rate,
+            &mut samples,
         )
-        .map_err(|_| ClipError::Decode)?;
+        .map_err(|error| {
+            diag::warn!(Audio, "audio: BO1 clip does not decode: {error}");
+            ClipError::Decode
+        })?;
+        decoded = samples.0.iter().flat_map(|s| s.to_le_bytes()).collect();
         (16, decoded.as_slice())
     } else if sound.format() == 1 {
         (sound.bits(), sound.encoded_bytes())
@@ -849,6 +818,34 @@ fn prepare_loaded(sound: &asset_audio::LoadedSoundPcm) -> Result<PreparedPcm, Cl
         return Err(ClipError::Decode);
     };
     pcm_from_bytes(bits, bytes, sound.channels(), sound.rate)
+}
+
+/// The signed 16-bit samples a BO1 (xWMA) clip decodes into.
+#[derive(Default)]
+struct XwmaSamples(Vec<i16>);
+
+impl asset_audio::XwmaPcmSink for XwmaSamples {
+    type Workspace = ();
+
+    fn reserve_workspace(&mut self, _bytes: usize) -> Result<(), asset_audio::XwmaDecodeError> {
+        Ok(())
+    }
+
+    fn extend(&mut self, samples: &[i16]) -> Result<(), asset_audio::XwmaDecodeError> {
+        self.0.extend_from_slice(samples);
+        Ok(())
+    }
+
+    fn sample_count(&self) -> usize {
+        self.0.len()
+    }
+
+    fn visit_samples(
+        &self,
+        visitor: &mut dyn FnMut(&[i16]) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        visitor(&self.0)
+    }
 }
 
 /// Encoded samples as the mixer wants them: interleaved `f32`, a whole number

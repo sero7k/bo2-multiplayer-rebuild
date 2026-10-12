@@ -8,6 +8,9 @@ mod sound_load_t5;
 // bo2zm: Black Ops II sound banks.
 mod sound_load_t6;
 mod sound_wma_t5;
+mod wma_profile;
+mod wma_t5;
+pub use wma_profile::T5WmaProfile;
 mod zone_sound;
 
 pub use asset_core::*;
