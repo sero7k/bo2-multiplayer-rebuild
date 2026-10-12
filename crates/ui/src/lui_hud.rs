@@ -1801,10 +1801,10 @@ fn lui_hud(
             Some(view)
         })
         .flatten();
-    // bo2mp: Black Ops' round minimap draws from the same view.
-    if crate::bo1_hud::bo1_hud_enabled() {
+    // bo2mp: the modern HUD's minimap draws from the same view.
+    if crate::hud_modern::modern_hud_enabled() {
         let scoped = hud.sent.as_ref().and_then(|v| v.mp.as_ref()).is_some_and(|m| m.scoped);
-        crate::bo1_hud::publish_minimap(minimap.as_ref(), scoped);
+        crate::hud_modern::publish_minimap(minimap.as_ref(), scoped);
     }
     hud.shots = shots;
     hud.sweep = sweep;

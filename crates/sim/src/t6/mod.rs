@@ -1001,6 +1001,13 @@ pub(crate) fn start(world: &mut World) {
                 diag::warn!(Sim, "bo2zm t6: no {script}::{func}");
             }
         }
+        // bo2mp: a map from another game: its minimap from its own corner
+        // entities (`minimap_corner`), as its map script would set it up.
+        let map_script = format!("maps/mp/{map}");
+        if mp_map && !vm.program.scripts.iter().any(|s| s.name == map_script) {
+            let material = Value::Str(vm.intern(&format!("compass_map_{map}")));
+            vm.spawn_named(world, "maps/mp/_compass", "setupminimap", level.clone(), vec![material]);
+        }
         diag::info!(
             Sim,
             "bo2zm t6: level started, {} threads",
