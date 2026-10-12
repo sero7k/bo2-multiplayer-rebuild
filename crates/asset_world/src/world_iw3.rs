@@ -152,6 +152,7 @@ pub fn build_iw3_world_draw(
         .iter()
         .map(|&i| lightmaps.get(usize::from(i)).is_some_and(Option::is_some))
         .collect();
+    let lightmaps_present = lightmaps.iter().any(Option::is_some);
     let (batches, surface_batch_ranges) = crate::world_t5::make_material_batches(
         &positions,
         &normals,
@@ -187,7 +188,7 @@ pub fn build_iw3_world_draw(
     Ok(WorldDraw {
         batches,
         sky_model: None,
-        lightmap: if lightmaps.iter().any(Option::is_some) {
+        lightmap: if lightmaps_present {
             Ok(lightmaps)
         } else {
             Err(WorldLightmapGap::Missing)
@@ -230,6 +231,7 @@ pub fn build_iw3_world_draw(
         t5_sun_parse_exposure: lighting.map(|l| l.exposure_scale),
         t5_sky_dynamic_intensity: lighting.map(|l| l.sky),
         t5_sun_light: lighting.map(|l| l.sun),
+        iw3_lightmaps: lightmaps_present,
         t5_tree_scatter_intensity: None,
         t5_tree_scatter_amount: None,
         t5_exposure_volume_count: 0,
@@ -237,6 +239,118 @@ pub fn build_iw3_world_draw(
         t6_fog_banks: Vec::new(),
         t6_probes: Vec::new(),
         t6_layer_uvs: layer_uvs,
+    })
+}
+
+/// bo2mp: D3DFMT_L8 and D3DFMT_A8R8G8B8, the formats of a CoD4 (and World
+/// at War) lightmap's primary and secondary images.
+pub const IW3_LIGHTMAP_PRIMARY_FORMAT: u32 = 50;
+pub const IW3_LIGHTMAP_SECONDARY_FORMAT: u32 = 21;
+
+/// bo2mp: one Call of Duty 4 / World at War lightmap page as the fallback
+/// pass reads a lightmap: one RGBA8 image of three stacked pages, addressed
+/// at `(u, v / 3 + page / 3)`, in the secondary slot (as Black Ops II's).
+///
+/// CoD4's own lit world shaders (`lm_*_sm3`, `lm_sm_sun_*_sm3`, read from
+/// the zone's pixel shaders) sample the secondary image (A8R8G8B8, two pages
+/// stacked: A at `(u, v / 2)`, B at `(u, v / 2 + 1/2)`) and the primary
+/// (L8 at twice the size: the sun's baked visibility) at `(u, v)`:
+/// `light = A.rgb + B.rgb * saturate(rsqrt(1 + x^2 + y^2)) + primary *
+/// saturate(N.sun) * sunDiffuse` with x, y the dominant light's tangent
+/// direction from the alphas (`A.a * 4.08 - 2.08`, `B.a * 4.064516 -
+/// 2.064516`), all in gamma space. The pages here, at the primary's size:
+/// 0 = A (alpha kept), 1 = B (alpha kept), 2 = the primary in alpha. The
+/// shader's IW3 branch reads them so (`fragment_lightmapped`).
+pub fn iw3_lightmap(
+    primary: (u16, u16, u32, &[u8]),
+    secondary: (u16, u16, u32, &[u8]),
+    names: (&str, &str),
+) -> Result<WorldLightmap, WorldLightmapGap> {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
+    use bevy::prelude::{Image, UVec2};
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+
+    let (pw, ph, pformat, pdata) = primary;
+    let (sw, sh, sformat, sdata) = secondary;
+    if sformat != IW3_LIGHTMAP_SECONDARY_FORMAT {
+        return Err(WorldLightmapGap::UnsupportedSecondaryFormat(sformat));
+    }
+    if pformat != IW3_LIGHTMAP_PRIMARY_FORMAT {
+        return Err(WorldLightmapGap::UnsupportedPrimaryFormat(pformat));
+    }
+    if sw == 0 || sh < 2 || sh % 2 != 0 || pw == 0 || ph == 0 {
+        return Err(WorldLightmapGap::InvalidDimensions { width: sw, height: sh, depth: 1 });
+    }
+    let (sw, page_h) = (usize::from(sw), usize::from(sh) / 2);
+    let (a, b) = crate::world_draw::secondary_page_payloads(sdata, sw * 4, page_h)?;
+    let mask = crate::world_draw::primary_mask_payload(pdata, pw, ph)?;
+    let (w, h) = (usize::from(pw), usize::from(ph));
+    if w * page_h != h * sw {
+        return Err(WorldLightmapGap::MismatchedAspectRatio {
+            primary: UVec2::new(w as u32, h as u32),
+            secondary: UVec2::new(sw as u32, page_h as u32),
+        });
+    }
+    // A secondary page read at the primary's texel centres, filtered as the
+    // GPU's linear sampler with clamped edges does.
+    let sample = |page: &[u8], x: usize, y: usize| -> [u8; 4] {
+        let fx = ((x as f32 + 0.5) * sw as f32 / w as f32 - 0.5).max(0.0);
+        let fy = ((y as f32 + 0.5) * page_h as f32 / h as f32 - 0.5).max(0.0);
+        let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
+        let (x1, y1) = ((x0 + 1).min(sw - 1), (y0 + 1).min(page_h - 1));
+        let (x0, y0) = (x0.min(sw - 1), y0.min(page_h - 1));
+        let (tx, ty) = (fx - fx.floor(), fy - fy.floor());
+        let at = |xx: usize, yy: usize, c: usize| f32::from(page[(yy * sw + xx) * 4 + c]);
+        [0, 1, 2, 3].map(|c| {
+            let top = at(x0, y0, c) + (at(x1, y0, c) - at(x0, y0, c)) * tx;
+            let bottom = at(x0, y1, c) + (at(x1, y1, c) - at(x0, y1, c)) * tx;
+            (top + (bottom - top) * ty).round().clamp(0.0, 255.0) as u8
+        })
+    };
+    let mut rgba = vec![0u8; w * h * 3 * 4];
+    for y in 0..h {
+        for x in 0..w {
+            let at = |page: usize| ((page * h + y) * w + x) * 4;
+            rgba[at(0)..at(0) + 4].copy_from_slice(&sample(&a, x, y));
+            rgba[at(1)..at(1) + 4].copy_from_slice(&sample(&b, x, y));
+            rgba[at(2)..at(2) + 4].copy_from_slice(&[128, 128, 255, mask[y * w + x]]);
+        }
+    }
+    let mut page = Image::new(
+        Extent3d { width: w as u32, height: (h * 3) as u32, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        rgba,
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    page.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::ClampToEdge,
+        address_mode_v: ImageAddressMode::ClampToEdge,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        ..Default::default()
+    });
+    let stand_in = || {
+        Image::new(
+            Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            TextureDimension::D2,
+            vec![255, 255, 255, 255],
+            TextureFormat::Rgba8Unorm,
+            RenderAssetUsages::RENDER_WORLD,
+        )
+    };
+    Ok(WorldLightmap {
+        primary_image: None,
+        secondary_image: Some(page),
+        secondary_b_image: None,
+        ambient_image: stand_in(),
+        directional_image: stand_in(),
+        sun_mask_image: stand_in(),
+        ambient_source_name: names.1.to_owned(),
+        sun_mask_source_name: names.0.to_owned(),
+        ambient_size: UVec2::new(w as u32, h as u32 * 3),
+        sun_mask_size: UVec2::new(w as u32, h as u32),
     })
 }
 
@@ -675,5 +789,34 @@ mod tests {
             census.to_string(),
             "3 spawns: 2 on the ground, 1 fall more than 64 units, 0 over nothing, 0 in solid"
         );
+    }
+}
+
+#[cfg(test)]
+mod iw3_lightmap_tests {
+    use super::*;
+
+    #[test]
+    fn a_page_pair_becomes_three_stacked_pages() {
+        // Secondary 2x4 (two 2x2 pages, BGRA bytes), primary 4x4 (L8).
+        let mut sec = Vec::new();
+        for _ in 0..4 {
+            sec.extend_from_slice(&[10, 20, 30, 40]); // A: B=10 G=20 R=30 A=40
+        }
+        for _ in 0..4 {
+            sec.extend_from_slice(&[50, 60, 70, 80]); // B
+        }
+        let prim: Vec<u8> = (0..16).map(|i| i as u8 * 10).collect();
+        let lm = iw3_lightmap((4, 4, 50, &prim), (2, 4, 21, &sec), ("p", "s")).expect("decodes");
+        let img = lm.secondary_image.expect("page");
+        assert_eq!((img.width(), img.height()), (4, 12));
+        let d = img.data.expect("pixels");
+        assert_eq!(&d[0..4], &[30, 20, 10, 40]);
+        let p1 = 4 * 4 * 4;
+        assert_eq!(&d[p1..p1 + 4], &[70, 60, 50, 80]);
+        let p2 = 2 * 4 * 4 * 4;
+        assert_eq!(d[p2 + 3], 0);
+        assert_eq!(d[p2 + 4 * 5 + 3], 50);
+        assert!(iw3_lightmap((4, 4, 21, &prim), (2, 4, 21, &sec), ("p", "s")).is_err());
     }
 }

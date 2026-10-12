@@ -401,6 +401,9 @@ pub struct WorldDraw {
     pub t5_sun_parse_exposure: Option<f32>,
 
     pub t5_sky_dynamic_intensity: Option<[f32; 4]>,
+    /// bo2mp: the world's lightmaps are Call of Duty 4's (or World at
+    /// War's), read by the fallback pass's IW3 branch (`world_iw3::iw3_lightmap`).
+    pub iw3_lightmaps: bool,
 
     pub t5_sun_light: Option<WorldSunLight>,
 
@@ -958,6 +961,7 @@ pub fn build_world_draw(
             outdoor_lookup: geometry.outdoor_lookup,
             sun_effects,
             t5_sun_parse_exposure: None,
+            iw3_lightmaps: false,
             t5_sky_dynamic_intensity: None,
             t5_sun_light: None,
             t5_tree_scatter_intensity: None,

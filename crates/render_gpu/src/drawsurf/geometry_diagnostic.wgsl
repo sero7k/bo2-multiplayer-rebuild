@@ -588,6 +588,25 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
     let page0 = textureSample(lightmap, lightmap_sampler, vec2(in.lightmap_uv.x, v));
     let page1 = textureSample(lightmap, lightmap_sampler, vec2(in.lightmap_uv.x, v + 1.0 / 3.0));
     let page2 = textureSample(lightmap, lightmap_sampler, vec2(in.lightmap_uv.x, v + 2.0 / 3.0));
+    // bo2mp: a Call of Duty 4 / World at War lightmap (the sun colour's
+    // alpha is 2; `world_iw3::iw3_lightmap` packs its pages): CoD4's own lit
+    // world shaders (`lm_sm_sun_*_sm3`, read from the zone's pixel shaders)
+    // light in gamma space: A + B * saturate(rsqrt(1 + x^2 + y^2)), x and y
+    // the dominant light's tangent direction from the alphas, plus the sun
+    // by N.L and its baked visibility (the primary image, page 2 alpha),
+    // times the colour map and vertex colour. Written as base * light^2 so
+    // the BO2 output's square root gives CoD4's texel * light back.
+    if (t6.sun_color.a > 1.5) {
+        let x = page0.a * 4.08 - 2.08;
+        let y = page1.a * 4.064516 - 2.064516;
+        let f = saturate(inverseSqrt(1.0 + x * x + y * y));
+        let n_iw3 = normalize(in.normal);
+        let sun_iw3 = t6.sun_color.rgb * page2.a * saturate(dot(n_iw3, t6.sun_dir_exposure.xyz))
+            * sun_shadow_at(in.world_position);
+        let lg = page0.rgb + page1.rgb * f + sun_iw3;
+        let lit_iw3 = base * (lg * lg + dyn_lights(in.world_position, n_iw3));
+        return vec4(bo2_out(bo2_fog(lit_iw3, in.world_position)), albedo.a);
+    }
     let ambient = page0.rgb / (page0.a + 0.000001);
     let directional = page1.rgb / (page1.a + 0.000001);
     let dir = page2.rgb * 2.0 - 1.0;

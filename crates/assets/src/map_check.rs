@@ -81,9 +81,10 @@ pub fn check_map(game: &str, path: &Path) -> String {
             let materials = loaded
                 .report
                 .iter()
-                .find(|l| l.starts_with(&format!("{game} materials")))
+                .filter(|l| l.starts_with(&format!("{game} materials")) || l.starts_with(&format!("{game} lightmaps")))
                 .cloned()
-                .unwrap_or_default();
+                .collect::<Vec<_>>()
+                .join("; ");
             format!("OK: {line}; {materials}")
         }
         (_, Err(why)) => format!("FAIL {why}"),

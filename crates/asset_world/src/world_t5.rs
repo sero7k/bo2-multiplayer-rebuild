@@ -517,6 +517,7 @@ pub fn build_t5_world_draw(
             outdoor_image: None,
             outdoor_lookup: [0; 16],
             sun_effects: None,
+            iw3_lightmaps: false,
             t5_sky_dynamic_intensity: geometry
                 .sky_dynamic_intensity_bits
                 .map(|v| v.map(f32::from_bits))

@@ -878,7 +878,14 @@ pub fn extract_geometry(
         return;
     }
     let sky = lighting.2.as_ref().and_then(|scene| scene.t5_sky_dynamic_intensity);
-    let full_lighting = t6_lighting(lighting.0.as_deref(), lighting.1.as_deref(), sky);
+    let mut full_lighting = t6_lighting(lighting.0.as_deref(), lighting.1.as_deref(), sky);
+    // bo2mp: a CoD4 / World at War world's lightmaps are read by the
+    // fallback pass's IW3 branch: the sun colour's alpha says so (2).
+    if lighting.2.as_ref().is_some_and(|scene| scene.iw3_lightmaps)
+        && let Some(l) = full_lighting.as_mut()
+    {
+        l[1][3] = 2.0;
+    }
     // bo2mp: BO2's bloom and final colour only where the map has its full
     // lighting (not over a MW2 world drawn by its own path).
     let t6_bloom = full_lighting.is_some();

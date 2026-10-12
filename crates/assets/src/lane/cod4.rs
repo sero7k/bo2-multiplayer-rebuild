@@ -334,7 +334,8 @@ pub(crate) fn build_legacy_world(
         link_world_materials(tag, zone, world, main.as_deref(), &mut materials, &map, &mut report);
     stage.done();
 
-    // The sun (no lightmaps yet: the fallback pass lights by it).
+    // The sun (the fallback pass's IW3 branch adds it by its baked
+    // visibility, as CoD4's lit shaders do).
     let sun = &world.sun;
     let (pitch, yaw) = (sun.angles[0].to_radians(), sun.angles[1].to_radians());
     // Toward the sun: the sun's angles as a forward vector (pitch down).
@@ -350,11 +351,44 @@ pub(crate) fn build_legacy_world(
         exposure_scale: 1.0,
         sky: [1.0, 0.0, 0.0, 1.0],
     };
-    match asset_world::world_iw3::build_iw3_world_draw(world, &surface_materials, Vec::new(), Some(lighting)) {
+    // The baked light: each lightmap page pair from the zone (the images
+    // carry their pixels), packed for the fallback pass's IW3 branch.
+    let mut lightmap_gaps = Vec::new();
+    let lightmaps: Vec<Option<asset_world::WorldLightmap>> = world
+        .lightmaps
+        .iter()
+        .enumerate()
+        .map(|(i, pair)| {
+            let raw = |id: Option<iw3::zone::AssetId>| {
+                let image = id.and_then(|id| zone.image(id))?;
+                let def = image.load_def.as_ref()?;
+                Some((def.dimensions[0], def.dimensions[1], def.format, def.data.as_slice(), image.name.as_str()))
+            };
+            let (Some(p), Some(sec)) = (raw(pair.primary), raw(pair.secondary)) else {
+                lightmap_gaps.push(format!("page {i}: images not in the zone"));
+                return None;
+            };
+            match asset_world::world_iw3::iw3_lightmap((p.0, p.1, p.2, p.3), (sec.0, sec.1, sec.2, sec.3), (p.4, sec.4)) {
+                Ok(page) => Some(page),
+                Err(e) => {
+                    lightmap_gaps.push(format!("page {i}: {e}"));
+                    None
+                }
+            }
+        })
+        .collect();
+    report.push(format!(
+        "{tag} lightmaps: {}/{} pages decoded{}",
+        lightmaps.iter().filter(|p| p.is_some()).count(),
+        lightmaps.len(),
+        if lightmap_gaps.is_empty() { String::new() } else { format!(" ({})", lightmap_gaps.join("; ")) }
+    ));
+    match asset_world::world_iw3::build_iw3_world_draw(world, &surface_materials, lightmaps, Some(lighting)) {
         Ok(draw) => {
             report.push(format!(
-                "world mesh: {} vertices, {} triangles, {} surfaces ({title}, fallback draw with colour maps)",
-                draw.stats.vertices, draw.stats.triangles, draw.stats.surfaces
+                "world mesh: {} vertices, {} triangles, {} surfaces ({title}, fallback draw with colour maps{})",
+                draw.stats.vertices, draw.stats.triangles, draw.stats.surfaces,
+                if draw.iw3_lightmaps { " and its lightmaps" } else { "" }
             ));
             let (min, max) = (draw.stats.min, draw.stats.max);
             LoadedWorld {
