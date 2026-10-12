@@ -336,10 +336,23 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
         })
     };
 
+    // bo2mp: under Black Ops II's rules Black Ops' guns are not wanted; its
+    // common zone is walked only for a Black Ops map.
+    let t5_map = key
+        .foreign
+        .as_deref()
+        .and_then(peek_zone_version)
+        .is_some_and(|v| v == fastfile_t5::ZONE_VERSION_PC);
+    let skip_t5 = crate::t6_rules() && !t5_map;
     let t5_common_prep = {
         let anchor = anchor.clone();
         let progress = progress.clone();
-        pool.spawn(async move { t5_weapon_common_prep(anchor.as_deref(), &progress) })
+        pool.spawn(async move {
+            if skip_t5 {
+                return T5CommonPrep::Skip(vec!["t5 weapon common: skip, Black Ops II rules (its own guns)".into()]);
+            }
+            t5_weapon_common_prep(anchor.as_deref(), &progress)
+        })
     };
     let localize_walk = {
         let anchor = anchor.clone();
