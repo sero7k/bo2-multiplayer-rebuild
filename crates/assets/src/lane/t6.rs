@@ -1215,7 +1215,11 @@ const FOREIGN_ROW_FROM: &str = "mp_la";
 /// sound, scripts, HUD and factions are added from the Black Ops II zones
 /// (as a BO2 map would load them), and the map's own scripts are put aside
 /// for BO2's start-up roots, as on a BO2 map.
-pub(crate) fn attach_t6_rules(loaded: &mut LoadedWorld, map: &str) {
+pub(crate) fn attach_t6_rules(
+    loaded: &mut LoadedWorld,
+    map: &str,
+    source: asset_world::ForeignEntityGame,
+) {
     let mut report = Vec::new();
     let dir = match asset_transport::games_root_from_env()
         .and_then(|root| asset_transport::find_zone_file(&root, "t6:patch_mp"))
@@ -1256,9 +1260,16 @@ pub(crate) fn attach_t6_rules(loaded: &mut LoadedWorld, map: &str) {
     loaded.materials.set_capture_ns(previous_ns);
     report.append(&mut combat.report);
 
-    // The map's entities (spawns, objectives, doors) for BO2's scripts.
-    let entities = loaded.scripts.entities().unwrap_or_default().to_owned();
-    combat.scripts.entities.push(entities);
+    // The map's entities (spawns, objectives, doors) for BO2's scripts,
+    // with BO2's names for the game types' spawn classes and objectives
+    // (block for block: the BO2 scripts' map entities are matched back to
+    // the map's own drawn models and brushes by their place in the text).
+    let foreign = asset_world::foreign_entities_for_t6_rules(
+        loaded.scripts.entities().unwrap_or_default(),
+        source,
+    );
+    report.extend(foreign.report);
+    combat.scripts.entities.push(foreign.text);
     // Its row in BO2's map table: the borrowed map's, under its own name
     // (BO2's scripts read the factions and the map's name from it).
     if let Some((_, columns, rows, cells)) = combat

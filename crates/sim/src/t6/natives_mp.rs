@@ -278,13 +278,49 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             team_kinds
         };
         // Every map entity of those kinds.
-        let points: Vec<Value> = world
-            .resource::<Zm>()
-            .ents
-            .values()
-            .filter(|e| kinds.iter().any(|k| e.classname.eq_ignore_ascii_case(k)))
-            .filter_map(|e| e.obj.map(Value::Object))
-            .collect();
+        let of_kinds = |world: &World, kinds: &[String]| -> Vec<Value> {
+            world
+                .resource::<Zm>()
+                .ents
+                .values()
+                .filter(|e| kinds.iter().any(|k| e.classname.eq_ignore_ascii_case(k)))
+                .filter_map(|e| e.obj.map(Value::Object))
+                .collect()
+        };
+        let mut points = of_kinds(world, &kinds);
+        // bo2mp: a map from another game without the game type's kinds
+        // (none of them in its entities, none copied in by the load):
+        // Team Deathmatch's points, else free-for-all's, rather than none
+        // (the scripts then spawn the player at the world origin).
+        if points.is_empty() {
+            for fallback in ["mp_tdm_spawn", "mp_dm_spawn"] {
+                points = of_kinds(world, &[fallback.to_owned()]);
+                if !points.is_empty() {
+                    static WARNED: std::sync::atomic::AtomicBool =
+                        std::sync::atomic::AtomicBool::new(false);
+                    if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        diag::warn!(
+                            Sim,
+                            "bo2mp spawn gap: no map spawn points of {kinds:?} (team {team}); \
+                             {} {fallback} points used instead",
+                            points.len()
+                        );
+                    }
+                    break;
+                }
+            }
+            if points.is_empty() {
+                static EMPTY: std::sync::atomic::AtomicBool =
+                    std::sync::atomic::AtomicBool::new(false);
+                if !EMPTY.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    diag::warn!(
+                        Sim,
+                        "bo2mp spawn gap: no map spawn points of {kinds:?} (team {team}) and none to \
+                         fall back on: the player spawns where the scripts default to"
+                    );
+                }
+            }
+        }
         let me = super::entnum(vm, &player);
         let my_team = me.and_then(|n| {
             let p = world.resource::<Zm>().players.get(&n)?.obj;

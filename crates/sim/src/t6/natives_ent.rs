@@ -61,8 +61,16 @@ pub(super) fn spawn_map_entities(vm: &mut Vm<World>, world: &mut World, texts: &
         .find(&vm.strings, "codescripts/struct", "createstruct");
     let struct_s = vm.intern("struct");
     let (mut ents, mut structs, mut nodes) = (0, 0, 0);
-    for text in texts {
+    for (text_index, text) in texts.iter().enumerate() {
+        // bo2mp: each block's place in the map's text (blocks with a key,
+        // as `asset_world` counts them for the session's own models).
+        let mut place = 0u32;
         for e in asset_t6_entities(text) {
+            let ordinal = (!e.is_empty()).then(|| {
+                place += 1;
+                place - 1
+            });
+            let ordinal = ordinal.filter(|_| text_index == 0);
             let cls = e
                 .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case("classname"))
@@ -106,9 +114,13 @@ pub(super) fn spawn_map_entities(vm: &mut Vm<World>, world: &mut World, texts: &
                 obj: Some(obj),
                 classname: cls.clone(),
                 map: true,
+                map_ordinal: ordinal,
                 solid: true,
                 ..Default::default()
             };
+            if let Some(ordinal) = ordinal {
+                super::map_natives::note(world, ordinal, &cls, &e);
+            }
             for (k, v) in &e {
                 let key = k.to_ascii_lowercase();
                 match key.as_str() {

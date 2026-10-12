@@ -155,7 +155,11 @@ pub(super) async fn walk_prepared_match(
             };
             if crate::t6_rules() {
                 let stage = progress.begin_scoped(StageId::MapAssets, "black ops ii rules", None);
-                crate::lane::attach_t6_rules(&mut loaded, &zone_name);
+                crate::lane::attach_t6_rules(
+                    &mut loaded,
+                    &zone_name,
+                    asset_world::ForeignEntityGame::InfinityWard,
+                );
                 stage.done();
             }
             (loaded, Some(asset_core::AssetNamespace::T6))
@@ -177,7 +181,11 @@ pub(super) async fn walk_prepared_match(
             // bo2mp: a map from another game under Black Ops II's rules.
             if game != asset_core::ZoneGame::T6 && crate::t6_rules() {
                 let stage = progress.begin_scoped(StageId::MapAssets, "black ops ii rules", None);
-                crate::lane::attach_t6_rules(&mut loaded, &zone_name);
+                let source = match game {
+                    asset_core::ZoneGame::T5 => asset_world::ForeignEntityGame::Treyarch,
+                    _ => asset_world::ForeignEntityGame::InfinityWard,
+                };
+                crate::lane::attach_t6_rules(&mut loaded, &zone_name, source);
                 stage.done();
             }
             (loaded, Some(asset_core::AssetNamespace::from_zone_game(game)))

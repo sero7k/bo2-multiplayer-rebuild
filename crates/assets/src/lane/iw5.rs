@@ -450,6 +450,7 @@ impl ZoneLane for Iw5Lane {
                     }
                     Err(e) => report.push(format!("lightmaps: {e}")),
                 }
+                report_iw5_lit_surfaces(&mut report, &draw, &map_materials);
                 let reflection_probe_images =
                     decode_reflection_probes(&mut report, &draw, &map_materials);
                 let portal_count: usize = draw.dpvs.portals_per_cell.iter().map(|c| c.len()).sum();
@@ -810,3 +811,60 @@ impl ZoneLane for Iw5Lane {
 
 const IW5_DEFAULT_ALLIES: &str = "sas_urban";
 const IW5_DEFAULT_AXIS: &str = "opforce_henchmen";
+
+/// bo2mp (MW3 maps drawn washed out with black floor holes): which world
+/// surfaces lost their lightmap (drawn on the unlit fallback), why, and
+/// the materials most of them carry: a page that failed to decode, an
+/// index past the pages, or a material whose technique set never routed.
+fn report_iw5_lit_surfaces(
+    report: &mut Vec<String>,
+    draw: &asset_world::WorldDraw,
+    materials: &asset_material::MaterialCatalog,
+) {
+    let pages = draw.lightmap.as_ref().map_or(0, Vec::len);
+    let page_ok = |i: u8| {
+        draw.lightmap
+            .as_ref()
+            .ok()
+            .and_then(|p| p.get(usize::from(i)))
+            .is_some_and(Option::is_some)
+    };
+    let (mut lit, mut page_failed, mut past_pages, mut unlit_material, mut drawn) =
+        (0usize, 0usize, 0usize, 0usize, 0usize);
+    let mut fallback_by_material: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    for (i, &(_, count)) in draw.surface_index_ranges.iter().enumerate() {
+        if count == 0 {
+            continue;
+        }
+        drawn += 1;
+        if draw.surface_lightmapped.get(i).copied().unwrap_or(false) {
+            lit += 1;
+            continue;
+        }
+        let index = draw.surface_lightmap_indices.get(i).copied().unwrap_or(255);
+        if usize::from(index) < pages && !page_ok(index) {
+            page_failed += 1;
+        } else if index != 255 && usize::from(index) >= pages {
+            past_pages += 1;
+        } else {
+            unlit_material += 1;
+        }
+        let name = draw
+            .surface_materials
+            .get(i)
+            .copied()
+            .flatten()
+            .and_then(|m| materials.materials.get(m))
+            .map_or_else(|| "<no material>".to_owned(), |m| m.name.to_string());
+        *fallback_by_material.entry(name).or_default() += 1;
+    }
+    let mut top: Vec<(String, usize)> = fallback_by_material.into_iter().collect();
+    top.sort_by(|a, b| b.1.cmp(&a.1));
+    top.truncate(10);
+    report.push(format!(
+        "iw5 lit surfaces: {lit}/{drawn} drawn surfaces lightmapped; unlit fallback: \
+         {page_failed} on a page that failed to decode, {past_pages} past the {pages} pages, \
+         {unlit_material} by material (unlit or unrouted); fallback materials {top:?}"
+    ));
+}

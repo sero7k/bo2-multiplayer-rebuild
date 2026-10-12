@@ -159,6 +159,9 @@ impl ZoneLane for T5Lane {
             match build_t5_clip_collision(&stream, geometry).and_then(|mut clip| {
                 sink.map_xmodels
                     .attach_t5_clip_models(&stream, geometry, &mut clip)?;
+                // bo2mp: vehicle / missile / AI clips are not walls for
+                // players (the RC-XD's bounds were invisible walls).
+                report.push(asset_world::strip_nonplayer_clip_contents(&mut clip).report_line());
                 Ok(clip)
             }) {
                 Ok(clip) => {
