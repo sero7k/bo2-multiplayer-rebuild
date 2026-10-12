@@ -18,6 +18,15 @@
 //! Under BO2's rules (or whenever BO2's player animation script is loaded,
 //! which the BO2 path needs) the BO2 path is the only one; the engine's
 //! own draws only in a match by another game's rules.
+//!
+//! The engine's own path cannot draw a player under BO2's rules: it reads
+//! his state's `legs_anim` / `torso_anim` as nodes of MW2's animation tree,
+//! and BO2's sim fills them with places in BO2's `mp/playeranim.script`
+//! (another number space: his body posed by whatever MW2 node that number
+//! is, or by none), and it puts his gun (a BO2 weapon) through MW2's model
+//! lane, which has no BO2 material for it (drawn black). So the map game's
+//! soldier is worn by the BO2 path instead (`foreign_body`): his game's
+//! body, head and animations, BO2's gun and draw, one body per player.
 
 use bevy::prelude::*;
 
@@ -131,7 +140,7 @@ pub(crate) fn log_player_body_census(
             if path == PlayerBodyPath::Bo2Pass && !bo2_script {
                 " — NO BO2 PLAYER ANIM SCRIPT: no player body is drawn"
             } else if path == PlayerBodyPath::Bo2Pass && legacy_kits {
-                " (not drawn: the engine's remote bodies are off under BO2's rules)"
+                " (the engine's remote bodies are off under BO2's rules; the BO2 path wears these kits on this map, see the 'bo2mp bodies:' line)"
             } else {
                 ""
             }

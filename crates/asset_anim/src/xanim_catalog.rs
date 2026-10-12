@@ -223,6 +223,11 @@ impl XAnimCatalog {
         self.order.iter().map(|k| k.name.as_str())
     }
 
+    /// bo2mp: the names of one namespace's animations (lower case).
+    pub fn names_in(&self, ns: AssetNamespace) -> impl Iterator<Item = &str> {
+        self.order.iter().filter(move |k| k.namespace == ns).map(|k| k.name.as_str())
+    }
+
     pub fn namespace_count(&self, ns: AssetNamespace) -> usize {
         self.order.iter().filter(|k| k.namespace == ns).count()
     }

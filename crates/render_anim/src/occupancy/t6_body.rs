@@ -438,6 +438,16 @@ struct BodyTrack {
     heard: Option<Playing>,
 }
 
+/// Per surface, its material in the catalog (none = not drawn).
+macro_rules! materials_of {
+    ($edges:expr) => {
+        $edges
+            .iter()
+            .map(|edge| edge.bound_index().map(|i| i as u32))
+            .collect::<Vec<Option<u32>>>()
+    };
+}
+
 #[derive(Default)]
 struct BodyLocals {
     tracks: HashMap<u16, BodyTrack>,
@@ -461,6 +471,152 @@ struct BodyLocals {
     corpse_meta: HashMap<u16, CorpseMeta>,
     /// The live world's bodies, set aside while a killcam replays the past.
     live: Option<Box<LiveBodies>>,
+    /// bo2mp: on another game's map, its soldiers (see `foreign_body`).
+    foreign: Option<ForeignState>,
+    /// bo2mp diag: (entity, body) pairs whose first draw was logged.
+    first_drawn: std::collections::HashSet<(u16, String)>,
+}
+
+/// The match's body plan, BO2's animations as the map game's, and the
+/// soldiers' models (taken from the body catalog once each).
+struct ForeignState {
+    key: (usize, usize, usize, usize, Option<asset_core::AssetNamespace>, bool),
+    plan: crate::occupancy::foreign_body::BodyPlan,
+    /// Per BO2 animation (its index), the map game's to play.
+    anims: Vec<Option<String>>,
+    anim_ns: asset_core::AssetNamespace,
+    models: HashMap<String, Option<(Arc<asset_model::ModelSkel>, Vec<Option<u32>>)>>,
+}
+
+impl ForeignState {
+    fn foreign(&self) -> bool {
+        matches!(self.plan.style, crate::occupancy::foreign_body::BodyStyle::Foreign { .. })
+    }
+
+    /// The kit a player of this team wears (BO2's allies wear the map's
+    /// allies kit, its axis the axis kit), as a composition key.
+    fn kit_key(&self, axis: bool) -> Option<String> {
+        match &self.plan.style {
+            crate::occupancy::foreign_body::BodyStyle::Foreign { allies, axis: x, .. } => {
+                let kit = if axis { x } else { allies };
+                Some(format!("{FOREIGN_KIT}{}|{}", kit.body, kit.head.as_deref().unwrap_or("")))
+            }
+            crate::occupancy::foreign_body::BodyStyle::Bo2 => None,
+        }
+    }
+
+    /// The map game's animation for a BO2 one (a packed value), its clip.
+    fn clip(&self, xanims: &assets::PreparedXAnims, packed: i32) -> Option<Arc<xmodel_runtime::AnimClip>> {
+        let name = self.anims.get(usize::from(t6_anim_index(packed)?))?.as_deref()?;
+        xanims.0.clip(self.anim_ns, name)
+    }
+
+    fn model(
+        &mut self,
+        bodies: &asset_model::BodyMeshCatalog,
+        name: &str,
+    ) -> Option<(Arc<asset_model::ModelSkel>, Vec<Option<u32>>)> {
+        self.models
+            .entry(name.to_owned())
+            .or_insert_with(|| {
+                let e = bodies.get(name)?;
+                Some((Arc::new(e.skel.clone()), materials_of!(e.material_edges)))
+            })
+            .clone()
+    }
+}
+
+/// A composition key naming another game's soldier: `<prefix><body>|<head>`.
+const FOREIGN_KIT: &str = "foreign:";
+
+/// The plan for this match (once per loaded map): which soldiers, which
+/// animations, logged.
+fn foreign_state<'a>(
+    slot: &'a mut Option<ForeignState>,
+    bodies: Option<&assets::PreparedBodies>,
+    script: &Arc<T6PlayerAnims>,
+    xanims: &assets::PreparedXAnims,
+) -> &'a mut ForeignState {
+    use crate::occupancy::foreign_body::{BodyStyle, ForeignKit, choose_plan, map_anims};
+    let map_game = assets::map_game();
+    let rules = assets::t6_rules();
+    let key = (
+        bodies.map_or(0, |b| Arc::as_ptr(&b.0) as usize),
+        Arc::as_ptr(script) as usize,
+        std::ptr::from_ref(&xanims.0) as usize,
+        xanims.0.len(),
+        map_game,
+        rules,
+    );
+    if slot.as_ref().is_some_and(|f| f.key == key) {
+        return slot.as_mut().expect("checked");
+    }
+    let kits = bodies.map(|b| b.0.kits().clone()).unwrap_or_default();
+    let kit = |k: Option<&asset_model::SoldierKit>| {
+        k.filter(|k| bodies.is_some_and(|b| b.0.get(&k.body).is_some_and(|e| !e.skel.positions.is_empty())))
+            .map(|k| ForeignKit {
+                body: k.body.clone(),
+                head: k.head.clone().filter(|h| bodies.is_some_and(|b| b.0.get(h).is_some())),
+            })
+    };
+    let player_anims = |ns: asset_core::AssetNamespace| {
+        xanims.0.names_in(ns).filter(|n| n.starts_with("pb_")).count()
+    };
+    let force_bo2 = std::env::var("BO2MP_BODIES").is_ok_and(|v| v.trim().eq_ignore_ascii_case("bo2"));
+    let plan = choose_plan(
+        map_game,
+        rules,
+        (kit(kits.allies.as_ref()), kit(kits.axis.as_ref())),
+        player_anims,
+        force_bo2,
+    );
+    diag::info!(World, "{}", plan.line());
+    let (anims, anim_ns) = match &plan.style {
+        BodyStyle::Foreign { anim_ns, .. } if *anim_ns != asset_core::AssetNamespace::T6 => {
+            let list: Vec<(String, bool)> = script
+                .anims
+                .iter()
+                .enumerate()
+                .map(|(i, n)| {
+                    let torso = u16::try_from(i)
+                        .ok()
+                        .and_then(|i| script.command_of(i))
+                        .is_some_and(|c| c.part == sim::t6_playeranim::T6AnimPart::Torso);
+                    (n.clone(), torso)
+                })
+                .collect();
+            let candidates: Vec<&str> = xanims.0.names_in(*anim_ns).collect();
+            let map = map_anims(&list, &candidates);
+            diag::info!(
+                World,
+                "bo2mp bodies: BO2's {} player animations as {}'s: {} by the same name, {} by the nearest (stance, move, direction, weapon), {} with none (that part follows the other){}",
+                list.len(),
+                crate::occupancy::foreign_body::game_label(Some(*anim_ns)),
+                map.exact,
+                map.near,
+                map.missing.len(),
+                if map.missing.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", map.missing.iter().take(12).cloned().collect::<Vec<_>>().join(" "))
+                }
+            );
+            (map.names, *anim_ns)
+        }
+        // BO2's own (a BO2 map, or another game's soldier moved by BO2's).
+        _ => (
+            script.anims.iter().map(|n| Some(n.to_ascii_lowercase())).collect(),
+            asset_core::AssetNamespace::T6,
+        ),
+    };
+    *slot = Some(ForeignState {
+        key,
+        plan,
+        anims,
+        anim_ns,
+        models: HashMap::new(),
+    });
+    slot.as_mut().expect("just set")
 }
 
 /// BO2 lets a ragdoll live 9000 ms (ragdoll_max_life); a corpse that leaves
@@ -777,15 +933,6 @@ struct Part {
     root_bind: Option<(Quat, Vec3)>,
 }
 
-/// Per surface, its material in the catalog (none = not drawn).
-macro_rules! materials_of {
-    ($edges:expr) => {
-        $edges
-            .iter()
-            .map(|edge| edge.bound_index().map(|i| i as u32))
-            .collect::<Vec<Option<u32>>>()
-    };
-}
 
 /// A weapon's world model and its attachments (on the gun's tags), the gun
 /// itself attached to `parent` at `tag` (or the root of the composition).
@@ -835,21 +982,64 @@ fn build_body(
     registry: Option<&asset_game::WeaponRegistry>,
     catalog: Option<&asset_model::WorldWeaponCatalog>,
     script: &T6PlayerAnims,
+    bodies: Option<&asset_model::BodyMeshCatalog>,
+    foreign_state: Option<&mut ForeignState>,
 ) -> Option<Built> {
+    // bo2mp: another game's soldier (its body and head from the map's
+    // zone), no BO2 gear on him; the gun below as for any.
+    let foreign = key.body.strip_prefix(FOREIGN_KIT).map(|kit| kit.split_once('|').unwrap_or((kit, "")));
     let mut names = key.body.split(';');
     let model = names.next().unwrap_or("");
-    let Some(entry) = fpv.0.get(asset_core::AssetNamespace::T6, model) else {
-        note_once(locals, format!("bo2mp body: {model} is not in the model catalog"));
-        return None;
-    };
-    let mut parts = vec![Part {
-        skel: entry.skel.clone(),
-        materials: materials_of!(entry.material_edges),
-        attach: None,
-        root_bind: None,
-    }];
+    let mut parts: Vec<Part> = Vec::new();
+    if let Some((body, head)) = foreign {
+        let (Some(bodies), Some(state)) = (bodies, foreign_state) else {
+            return None;
+        };
+        let body_model = state.model(bodies, body);
+        let head_model = (!head.is_empty()).then(|| state.model(bodies, head));
+        let Some((skel, materials)) = body_model else {
+            note_once(locals, format!("bo2mp body: {body} is not in the map's soldier catalog"));
+            return None;
+        };
+        parts.push(Part {
+            skel,
+            materials,
+            attach: None,
+            root_bind: None,
+        });
+        match head_model {
+            Some(Some((skel, materials))) => {
+                let tag = parts[0]
+                    .skel
+                    .pose
+                    .as_ref()
+                    .zip(skel.pose.as_ref())
+                    .map(|(p, c)| xmodel_runtime::empty_tag_attach(p, c))
+                    .unwrap_or_else(|| xmodel_runtime::TP_HEAD_ATTACH_TAG.to_owned());
+                parts.push(Part {
+                    skel,
+                    materials,
+                    attach: Some(xmodel_runtime::Attach { parent_model: 0, tag }),
+                    root_bind: None,
+                });
+            }
+            Some(None) => note_once(locals, format!("bo2mp body: head {head} is not in the map's soldier catalog")),
+            None => {}
+        }
+    } else {
+        let Some(entry) = fpv.0.get(asset_core::AssetNamespace::T6, model) else {
+            note_once(locals, format!("bo2mp body: {model} is not in the model catalog"));
+            return None;
+        };
+        parts.push(Part {
+            skel: entry.skel.clone(),
+            materials: materials_of!(entry.material_edges),
+            attach: None,
+            root_bind: None,
+        });
+    }
     let mut left_hand_model = false;
-    for extra in names {
+    for extra in names.filter(|_| foreign.is_none()) {
         let Some((m, tag)) = extra.split_once('@') else { continue };
         left_hand_model |= tag == "tag_weapon_left";
         // A weapon on a tag (the stowed gun on his back): its world
@@ -1438,11 +1628,12 @@ fn collect_t6_bodies(
     local: Option<Res<LocalPresentClient>>,
     subject: Option<Res<ViewSubject>>,
     cg_clock: Option<Res<FrameClock>>,
-    (clip, ragdoll_def, cameras, mut census): (
+    (clip, ragdoll_def, cameras, mut census, soldiers): (
         Option<Res<crate::occupancy::DynEntPhysClip>>,
         Option<Res<sim::t6_ragdoll::T6RagdollRes>>,
         Query<(&GlobalTransform, &Projection, &Camera), With<FpvLens>>,
         ResMut<crate::occupancy::body_path::PlayerBodyCensus>,
+        Option<Res<assets::PreparedBodies>>,
     ),
     mut shapes: ResMut<T6ItemShapes>,
     ents: Query<(Entity, &CEntity, &CEntityRuntime)>,
@@ -1471,6 +1662,14 @@ fn collect_t6_bodies(
     let Some(snapshot) = presented.snapshot() else {
         return;
     };
+    // bo2mp: on another game's map, that game's soldiers (the plan is made
+    // and logged once per match).
+    let mut foreign = {
+        foreign_state(&mut locals.foreign, soldiers.as_deref(), &script, &xanims);
+        locals.foreign.take()
+    };
+    let foreign_on = foreign.as_ref().is_some_and(ForeignState::foreign);
+    let soldier_catalog = soldiers.as_deref().map(|b| &*b.0);
     let now = cg_clock
         .as_ref()
         .filter(|c| c.started())
@@ -1625,12 +1824,23 @@ fn collect_t6_bodies(
             );
             corpse_since = Some(since);
         }
-        let current = snapshot
-            .meta
-            .for_client(client)
-            .and_then(|m| m.client_dvars.iter().find(|(k, _)| k == BODY_DVAR))
-            .map(|(_, v)| v.as_str())
-            .unwrap_or("");
+        let meta = snapshot.meta.for_client(client);
+        // bo2mp: on another game's map his team's soldier from that map
+        // (BO2's allies the map's allies, its axis the map's axis).
+        let foreign_kit = foreign.as_ref().and_then(|f| {
+            let axis = asset_model::kit_assignment_is_axis(
+                meta.map_or(0, |m| m.client_state_team),
+                meta.and_then(|m| m.ffa_team),
+            );
+            f.kit_key(axis)
+        });
+        let current = match foreign_kit.as_deref() {
+            Some(kit) => kit,
+            None => meta
+                .and_then(|m| m.client_dvars.iter().find(|(k, _)| k == BODY_DVAR))
+                .map(|(_, v)| v.as_str())
+                .unwrap_or(""),
+        };
         // A corpse keeps the body it fell in (he may respawn as another
         // class): the one his client had when it first showed.
         let body: String = if corpse {
@@ -1664,7 +1874,7 @@ fn collect_t6_bodies(
             Some(b) if b.key == key => Some(b),
             _ => {
                 locals.spent.builds += 1;
-                build_body(&mut locals, key, &fpv, registry, catalog, &script)
+                build_body(&mut locals, key, &fpv, registry, catalog, &script, soldier_catalog, foreign.as_mut())
             }
         };
         locals.spent.build += ms_since(started);
@@ -1696,13 +1906,18 @@ fn collect_t6_bodies(
         } else {
             presented.player(client).map_or([0.0; 3], |ps| ps.velocity)
         };
+        // (Another game's animation by its own move speed.)
+        let natural = foreign_on
+            .then(|| part_clip(foreign.as_ref(), &xanims, &script, track.legs.cur.value))
+            .flatten()
+            .map(|c| c.move_speed())
+            .filter(|v| *v > 1.0);
         let legs_rate = t6_anim_index(track.legs.cur.value)
-            .map_or(1.0, |a| t6_legs_rate(&script, a, velocity));
+            .map_or(1.0, |a| t6_legs_rate(&script, a, velocity, natural));
         // A torso animation timed to the weapon (a reload, a raise or drop)
         // plays over the weapon's time.
         let timed_rate = t6_anim_duration(torso).and_then(|secs| {
-            let name = script.name_of(torso)?;
-            let clip = xanims.0.clip(asset_core::AssetNamespace::T6, name)?;
+            let clip = part_clip(foreign.as_ref(), &xanims, &script, torso)?;
             Some((clip.duration() / secs.max(0.05)).clamp(0.2, 5.0))
         });
         let torso_rate = if let Some(rate) = timed_rate {
@@ -1757,8 +1972,12 @@ fn collect_t6_bodies(
         for (part, torso_part) in [(&track.legs, false), (&track.torso, true)].into_iter().filter(|_| !settled) {
             for (playing, w) in part.weighted(now) {
                 let Some(name) = script.name_of(playing.value) else { continue };
-                let Some(clip) = xanims.0.clip(asset_core::AssetNamespace::T6, name) else {
-                    note_once(&mut locals, format!("bo2mp body: animation {name} is not loaded"));
+                // Another game's soldier: its own game's stand-in (none: the
+                // other part's animation moves these bones too).
+                let Some(clip) = part_clip(foreign.as_ref(), &xanims, &script, playing.value) else {
+                    if !foreign_on {
+                        note_once(&mut locals, format!("bo2mp body: animation {name} is not loaded"));
+                    }
                     continue;
                 };
                 let duration = clip.duration().max(1e-3);
@@ -1771,10 +1990,7 @@ fn collect_t6_bodies(
         }
         if clips.is_empty() && !settled {
             // Never a bind pose: the script's idle.
-            if let Some(clip) = script
-                .name_of(fallback)
-                .and_then(|n| xanims.0.clip(asset_core::AssetNamespace::T6, n))
-            {
+            if let Some(clip) = part_clip(foreign.as_ref(), &xanims, &script, fallback) {
                 let tracks = built.tracks_for(&clip);
                 clips.push((clip, tracks, 0.0, 1.0, false));
             } else {
@@ -1851,7 +2067,7 @@ fn collect_t6_bodies(
                 .weighted(now)
                 .first()
                 .and_then(|(p, _)| {
-                    let clip = xanims.0.clip(asset_core::AssetNamespace::T6, script.name_of(p.value)?)?;
+                    let clip = part_clip(foreign.as_ref(), &xanims, &script, p.value)?;
                     Some((p.phase / clip.duration().max(1e-3)).clamp(0.0, 1.0))
                 })
                 .unwrap_or(1.0);
@@ -1967,6 +2183,9 @@ fn collect_t6_bodies(
                 surfaces: parts.iter().map(|p| p.materials.iter().filter(|m| m.is_some()).count()).sum(),
                 body: parts[0].skel.name.clone(),
             });
+            if locals.first_drawn.insert((number, built.key.body.clone())) {
+                log_first_draw(number, client.0, meta.map_or(0, |m| m.client_state_team), corpse, parts, foreign.as_ref());
+            }
             for (i, part) in parts.iter().enumerate() {
                 out.items.push(T6MissileModel {
                     skel: part.skel.clone(),
@@ -2012,6 +2231,7 @@ fn collect_t6_bodies(
         }
         locals.built.insert(number, built);
     }
+    locals.foreign = foreign;
     // This frame's skinning, the bodies at once.
     let skinning = std::time::Instant::now();
     let bodies_end = out.items.len();
@@ -2166,6 +2386,72 @@ fn collect_t6_bodies(
     locals.spent.items += ms_since(items_started);
 }
 
+/// A part's clip for a packed BO2 animation: BO2's own, or on another
+/// game's soldier that game's stand-in (see `foreign_body::map_anims`).
+fn part_clip(
+    foreign: Option<&ForeignState>,
+    xanims: &assets::PreparedXAnims,
+    script: &T6PlayerAnims,
+    packed: i32,
+) -> Option<Arc<xmodel_runtime::AnimClip>> {
+    match foreign {
+        Some(f) if f.foreign() => f.clip(xanims, packed),
+        _ => xanims.0.clip(asset_core::AssetNamespace::T6, script.name_of(packed)?),
+    }
+}
+
+/// bo2mp diag: a player's (or corpse's) first draw in a body: the models,
+/// how many of their surfaces have a material (a surface without one is
+/// left out of the draw; the fallback pass logs any it refuses as
+/// "bo2 model surfaces refused: <model>").
+fn log_first_draw(number: u16, client: u32, team: i32, corpse: bool, parts: &[Part], foreign: Option<&ForeignState>) {
+    let models: Vec<String> = parts
+        .iter()
+        .map(|p| {
+            let bound = p.materials.iter().filter(|m| m.is_some()).count();
+            format!("{} {bound}/{}", p.skel.name, p.materials.len())
+        })
+        .collect();
+    let unbound: Vec<String> = parts
+        .iter()
+        .filter(|p| p.materials.iter().any(Option::is_none))
+        .map(|p| {
+            let missing: Vec<String> = p
+                .materials
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| m.is_none())
+                .map(|(i, _)| format!("#{i}"))
+                .collect();
+            format!("{} [{}]", p.skel.name, missing.join(" "))
+        })
+        .collect();
+    let path = match foreign {
+        Some(f) if f.foreign() => format!(
+            "{} soldier, {} animations",
+            crate::occupancy::foreign_body::game_label(f.plan.map_game),
+            crate::occupancy::foreign_body::game_label(Some(f.anim_ns))
+        ),
+        _ => "BO2 character".to_owned(),
+    };
+    let team = match team {
+        1 => "axis",
+        2 => "allies",
+        _ => "no team",
+    };
+    diag::info!(
+        World,
+        "bo2mp body first draw: #{number} client {client} ({team}){} as {path}: {} (surfaces with a material/all){}",
+        if corpse { " corpse" } else { "" },
+        models.join(", "),
+        if unbound.is_empty() {
+            "; no surface refused here".to_owned()
+        } else {
+            format!("; REFUSED (no material): {}", unbound.join(", "))
+        }
+    );
+}
+
 /// The rate a legs animation plays at, as T5's BG_RunLerpFrameRate does it
 /// (BO2 keeps its script and data): an `animrate` plays at that rate; a
 /// moving animation at his speed over its own (a ladder climb by his
@@ -2174,14 +2460,14 @@ fn collect_t6_bodies(
 /// 3 - (its speed - 20) / 130 between 20 and 150 units/s (3 below, 2 above).
 /// Mantle clips are timed by the mantle move itself (its clip lengths), so
 /// their `animrate` is left to that.
-fn t6_legs_rate(script: &sim::t6_playeranim::T6PlayerAnims, anim: u16, velocity: [f32; 3]) -> f32 {
+fn t6_legs_rate(script: &sim::t6_playeranim::T6PlayerAnims, anim: u16, velocity: [f32; 3], natural: Option<f32>) -> f32 {
     let mantle = script.anims.get(usize::from(anim)).is_some_and(|n| n.starts_with("mp_mantle"));
     if !mantle {
         if let Some(rate) = script.command_of(anim).and_then(|c| c.anim_rate) {
             return rate;
         }
     }
-    let natural = script.speed_of(anim);
+    let natural = natural.unwrap_or_else(|| script.speed_of(anim));
     if natural <= 0.0 {
         return 1.0;
     }

@@ -167,7 +167,15 @@ pub fn launch(
                 Err(e) => println!("report not written ({}): {e}", out.display()),
             }
         }
-        LaunchMode::Map(zone) => run_map(games, artifacts, zone, acceptance, Role::Listen, None),
+        LaunchMode::Map(zone) => {
+            // bo2mp test runs: `BO2MP_T6_RULES=1 iw4l map <zone>` plays the
+            // map by Black Ops II's rules, as the BO2 front end's START
+            // MATCH does (no front end needed).
+            if std::env::var("BO2MP_T6_RULES").is_ok_and(|v| v.trim() == "1") {
+                assets::set_t6_rules(true);
+            }
+            run_map(games, artifacts, zone, acceptance, Role::Listen, None)
+        }
         LaunchMode::Serve(zone) => run_map(games, artifacts, zone, None, Role::Dedicated, None),
         LaunchMode::ExportGltf(zone) => {
             if acceptance.is_some() {

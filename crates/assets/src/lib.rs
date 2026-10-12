@@ -68,6 +68,31 @@ pub fn t6_rules() -> bool {
     T6_RULES.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// bo2mp: which game the loaded match's map comes from (its own namespace:
+/// Iw4 MW2, Iw5 MW3, T5 Black Ops, T6 Black Ops II, Iw3 CoD4, T4 World at
+/// War), set by the match load; the players' bodies follow it.
+static MAP_GAME: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+const MAP_GAMES: [asset_core::AssetNamespace; 7] = [
+    asset_core::AssetNamespace::Iw4,
+    asset_core::AssetNamespace::T5,
+    asset_core::AssetNamespace::Iw5,
+    asset_core::AssetNamespace::T6,
+    asset_core::AssetNamespace::Iw6,
+    asset_core::AssetNamespace::T4,
+    asset_core::AssetNamespace::Iw3,
+];
+
+pub fn set_map_game(game: Option<asset_core::AssetNamespace>) {
+    let code = game.and_then(|g| MAP_GAMES.iter().position(|m| *m == g)).map_or(0, |i| i as u8 + 1);
+    MAP_GAME.store(code, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn map_game() -> Option<asset_core::AssetNamespace> {
+    let code = MAP_GAME.load(std::sync::atomic::Ordering::Relaxed);
+    MAP_GAMES.get(usize::from(code).checked_sub(1)?).copied()
+}
+
 /// bo2mp: other games' guns join Black Ops II's as extra weapons (off with
 /// `BO2MP_GUEST_GUNS=0`).
 pub fn guest_guns() -> bool {
