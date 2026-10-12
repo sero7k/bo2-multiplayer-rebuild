@@ -248,6 +248,102 @@ pub(crate) fn load_iw3_world(
     loaded
 }
 
+/// bo2mp: a CoD4 / World at War map's createart fog: distance fog
+/// (CoD4's `setExpFog`) or height fog (WaW's `setVolFog`, base height and
+/// half height as Black Ops II's own fog).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LegacyFog {
+    start: f32,
+    half: f32,
+    opacity: f32,
+    colour: [f32; 3],
+    sun: Option<asset_world::SunFog>,
+    base_height: f32,
+    half_height: f32,
+}
+
+/// The fog a createart script sets: `setVolFog(start, halfway,
+/// halfwayHeight, baseHeight, r, g, b, transition)` (WaW), else
+/// `setExpFog(...)` (CoD4: no height, so a base far above every map and a
+/// vast half height).
+fn legacy_fog(script: &str) -> Option<LegacyFog> {
+    let lower = script.to_ascii_lowercase();
+    // (The usage comment after the call names it too: the first call with
+    // numbers wins.)
+    let mut from = 0;
+    while let Some(at) = lower[from..].find("setvolfog(").map(|i| from + i) {
+        from = at + 10;
+        let close = lower[from..].find(')').map(|i| from + i)?;
+        let args: Vec<f32> = script[from..close].split(',').filter_map(|a| a.trim().parse::<f32>().ok()).collect();
+        if args.len() >= 7 && args[1] > 0.0 {
+            return Some(LegacyFog {
+                start: args[0].max(0.0),
+                half: args[1],
+                opacity: 1.0,
+                colour: [args[4], args[5], args[6]].map(|c| c.clamp(0.0, 1.0)),
+                sun: None,
+                base_height: args[3],
+                half_height: args[2].max(1.0),
+            });
+        }
+    }
+    let f = asset_world::parse_set_exp_fog(script)?;
+    Some(LegacyFog {
+        start: f.start_dist,
+        half: f.halfway_dist,
+        opacity: f.max_opacity,
+        colour: f.color_rgb,
+        sun: f.sun,
+        base_height: 1.0e7,
+        half_height: 1.0e9,
+    })
+}
+
+/// bo2mp: the fallback pass's light table for a CoD4 / World at War world:
+/// no lights of its own (slots 0..29 empty), and its createart fog
+/// (`setExpFog` in `maps/createart/<map>_art.gsc`) in the fog slots (31:
+/// start, half distance, opacity, on; colour, base height; sun fog colour
+/// and opacity; its direction and half height; 30: the sun fog blend), as
+/// `lane::t6` lays them out. The IW fog is distance fog only: a base far
+/// above every map and a vast half height flatten the shader's height term
+/// to 1, leaving 1 - 2^-((d - start) / half). Its colours are gamma values,
+/// squared for the linear fallback pass.
+fn legacy_fog_table(fog: &LegacyFog) -> Vec<[f32; 16]> {
+    let lin = |c: [f32; 3]| c.map(|x| x * x);
+    let colour = lin(fog.colour);
+    let (sun_colour, sun_dir, blend) = match fog.sun {
+        Some(sun) => {
+            let n = (sun.sun_dir.iter().map(|x| x * x).sum::<f32>()).sqrt().max(1e-6);
+            let (ci, co) = (sun.begin_angle_deg.to_radians().cos(), sun.end_angle_deg.to_radians().cos());
+            let scale = if (ci - co).abs() > 1e-4 { 1.0 / (ci - co) } else { 0.0 };
+            (lin(sun.color_rgb), sun.sun_dir.map(|x| x / n), [-co * scale, scale])
+        }
+        None => (colour, [0.0, 0.0, 1.0], [0.0, 0.0]),
+    };
+    let mut table = vec![[0.0f32; 16]; 32];
+    table[31] = [
+        fog.start,
+        fog.half,
+        fog.opacity,
+        1.0,
+        colour[0],
+        colour[1],
+        colour[2],
+        fog.base_height,
+        sun_colour[0],
+        sun_colour[1],
+        sun_colour[2],
+        fog.opacity,
+        sun_dir[0],
+        sun_dir[1],
+        sun_dir[2],
+        fog.half_height,
+    ];
+    table[30][0] = blend[0];
+    table[30][1] = blend[1];
+    table
+}
+
 /// A legacy (CoD4-format) map zone, already read, into the match's world:
 /// entities and spawns, collision, materials and the world draw.
 pub(crate) fn build_legacy_world(
@@ -408,7 +504,28 @@ pub(crate) fn build_legacy_world(
         if lightmap_gaps.is_empty() { String::new() } else { format!(" ({})", lightmap_gaps.join("; ")) }
     ));
     match asset_world::world_iw3::build_iw3_world_draw(world, &surface_materials, lightmaps, Some(lighting)) {
-        Ok(draw) => {
+        Ok(mut draw) => {
+            // The createart fog (the zone's `maps/createart/<map>_art.gsc`).
+            // (CoD4: maps/createart/<map>_art.gsc; WaW: maps/mp/createart/.)
+            let lower = map.to_ascii_lowercase();
+            let art = [format!("maps/createart/{lower}_art.gsc"), format!("maps/mp/createart/{lower}_art.gsc")];
+            let fog = zone.assets.iter().find_map(|a| match a {
+                iw3::zone::Asset::RawFile(r) if art.iter().any(|n| r.name.eq_ignore_ascii_case(n)) => {
+                    legacy_fog(&String::from_utf8_lossy(&r.data))
+                }
+                _ => None,
+            });
+            let art = &art[0];
+            match &fog {
+                Some(f) => {
+                    report.push(format!(
+                        "{tag} fog: READY start={:.1} half={:.1} opacity={:.3} base={:.0} half height={:.0} sun={}",
+                        f.start, f.half, f.opacity, f.base_height, f.half_height, f.sun.is_some()
+                    ));
+                    draw.t6_lights = legacy_fog_table(f);
+                }
+                None => report.push(format!("{tag} fog: none ({art} sets none)")),
+            }
             report.push(format!(
                 "world mesh: {} vertices, {} triangles, {} surfaces ({title}, fallback draw with colour maps{})",
                 draw.stats.vertices, draw.stats.triangles, draw.stats.surfaces,
@@ -445,5 +562,24 @@ pub(crate) fn build_legacy_world(
             loaded.report.extend(report);
             loaded
         }
+    }
+}
+
+#[cfg(test)]
+mod fog_tests {
+    #[test]
+    fn exp_fog_fills_the_fog_slots() {
+        let fog = super::legacy_fog("setExpFog(800, 6000, 0.5, 0.6, 0.7, 0);").expect("parses");
+        let t = super::legacy_fog_table(&fog);
+        assert_eq!(t.len(), 32);
+        assert_eq!(&t[31][0..4], &[800.0, 6000.0, 1.0, 1.0]);
+        assert!((t[31][4] - 0.25).abs() < 1e-6);
+        assert_eq!(t[30][1], 0.0);
+        assert!(t[..30].iter().all(|r| r[3] == 0.0));
+        // WaW's height fog, past the usage comment's own mention.
+        let waw = "setVolFog(0, 4400, 1400, 0, 0.552, 0.682, 0.71, 0);\n// setVolFog(<startDist>, <halfwayDist>, ...)";
+        let f = super::legacy_fog(waw).expect("parses");
+        assert_eq!((f.start, f.half, f.half_height, f.base_height), (0.0, 4400.0, 1400.0, 0.0));
+        assert!((f.colour[0] - 0.552).abs() < 1e-6);
     }
 }

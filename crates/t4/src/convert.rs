@@ -145,6 +145,8 @@ pub fn to_iw3_map(zone: &Zone) -> MapZone {
                 | AssetType::ClipMapPvs
                 | AssetType::ComWorld
                 | AssetType::GameWorldMp
+                // bo2mp: the map's scripts as text (its createart fog).
+                | AssetType::RawFile
         )
     };
     let mut map = vec![None; zone.assets.len()];
@@ -178,6 +180,7 @@ pub fn to_iw3_map(zone: &Zone) -> MapZone {
                 }
                 AssetType::ComWorld => z3::Asset::ComWorld(com_world(&a.root)),
                 AssetType::GameWorldMp => z3::Asset::GameWorldMp(a.name.clone()),
+                AssetType::RawFile => z3::Asset::RawFile(raw_file(&a.root, &a.name)),
                 _ => z3::Asset::Image(image(&a.root)),
             }
         })
@@ -192,6 +195,20 @@ pub fn to_iw3_map(zone: &Zone) -> MapZone {
     };
     let top_level = zone.top_level.iter().map(|&(ty, id)| (ty, remap(id))).collect();
     MapZone { zone: z3::Zone { script_strings: zone.script_strings.clone(), assets, top_level, stats }, notes }
+}
+
+/// bo2mp: a rawfile (`name`, `len`, `buffer`): its text up to `len`.
+fn raw_file(r: &GNode, asset_name: &str) -> z3::RawFile {
+    let name = r.string("name").map_or_else(|| asset_name.to_owned(), str::to_owned);
+    let len = r.int("len").max(0) as usize;
+    let mut data = match r.field("buffer") {
+        Some(GVal::Str(Some(s))) => s.clone().into_bytes(),
+        _ => raw(r, "buffer"),
+    };
+    if len > 0 && data.len() > len {
+        data.truncate(len);
+    }
+    z3::RawFile { name, data }
 }
 
 pub fn map_ents(m: &GNode) -> z3::MapEnts {

@@ -81,7 +81,7 @@ pub fn check_map(game: &str, path: &Path) -> String {
             let materials = loaded
                 .report
                 .iter()
-                .filter(|l| l.starts_with(&format!("{game} materials")) || l.starts_with(&format!("{game} lightmaps")))
+                .filter(|l| l.starts_with(&format!("{game} materials")) || l.starts_with(&format!("{game} lightmaps")) || l.starts_with(&format!("{game} fog")))
                 .cloned()
                 .collect::<Vec<_>>()
                 .join("; ");
