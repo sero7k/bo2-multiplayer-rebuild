@@ -147,6 +147,33 @@ impl LuiHudSlot {
         let hud = self.0.as_ref()?;
         hud.host.values.borrow().localize.get(&key.to_ascii_uppercase()).cloned()
     }
+
+    /// bo2mp: his scoreboard is wanted (his scores key held, or the match
+    /// is over and its end board is due): `hud_match` draws its own then,
+    /// in place of BO2's LUI Scoreboard menu.
+    pub(crate) fn board_wanted(&self) -> bool {
+        self.0.as_ref().is_some_and(|h| h.match_mp && h.board_open)
+    }
+
+    /// bo2mp: his own level (1 first) and prestige, from his stats.
+    pub(crate) fn his_rank(&self) -> Option<(i32, i32)> {
+        let m = self.0.as_ref()?.mp.as_ref()?.borrow();
+        Some((m.profile.rank().max(0) + 1, m.profile.plevel().max(0)))
+    }
+
+    /// bo2mp: a game type's name as BO2's tables give it (mp/gametypestable.csv's
+    /// name key, localized), upper case.
+    pub(crate) fn gametype_title(&self, gametype: &str) -> Option<String> {
+        let hud = self.0.as_ref()?;
+        let v = hud.host.values.borrow();
+        let cell = |r: &[String], i: usize| r.get(i).map_or("", |c| c.trim()).to_owned();
+        hks_t6::mp::table_rows(&v, "mp/gametypestable.csv")
+            .iter()
+            .filter(|r| cell(r, 1).eq_ignore_ascii_case(gametype))
+            .find_map(|r| v.localize.get(&cell(r, 2).to_ascii_uppercase()).cloned())
+            .filter(|t| !t.trim().is_empty())
+            .map(|t| t.to_uppercase())
+    }
 }
 
 /// The LUI root node (true: BO2's loading screen's, on the loading layer).
@@ -1446,8 +1473,12 @@ fn lui_hud(
         let want_board = game_ended_board || actions.as_deref().is_some_and(|a| a.client.kb.scores.active);
         if want_board != hud.board_open {
             hud.board_open = want_board;
-            let event = if want_board { "open_scoreboard_menu" } else { "close_scoreboard_menu" };
-            hud.host.root_event(event, &[]);
+            // (bo2mp: with the modern HUD our own board (`hud_match`) is
+            // drawn instead; BO2's LUI Scoreboard menu is never opened.)
+            if !crate::hud_modern::modern_hud_enabled() {
+                let event = if want_board { "open_scoreboard_menu" } else { "close_scoreboard_menu" };
+                hud.host.root_event(event, &[]);
+            }
             // (bo2mp: the end scoreboard has no "Killed By" card under it:
             // real/62 shows the death view bare.)
             if want_board

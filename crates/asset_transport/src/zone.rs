@@ -53,6 +53,16 @@ pub enum ZoneOpenError {
         expected: ZoneGame,
         got: ZoneGame,
     },
+
+    /// bo2mp: an IW4x-built zone whose body is not a stock 0x114 XFile.
+    Iw4xGap {
+        iw4x_version: u32,
+        detail: String,
+    },
+    /// bo2mp: an IW4x / CoD Online zone version (layouts differ from 0x114).
+    Iw4Variant {
+        got: u32,
+    },
 }
 
 impl std::fmt::Display for ZoneOpenError {
@@ -95,6 +105,16 @@ impl std::fmt::Display for ZoneOpenError {
             ZoneOpenError::WrongGame { expected, got } => {
                 write!(f, "zone game mismatch: expected {expected:?}, got {got:?}")
             }
+            ZoneOpenError::Iw4xGap { iw4x_version, detail } => write!(
+                f,
+                "IW4x zone (IW4x header version {iw4x_version}) does not hold a stock MW2 0x114 \
+                 XFile after deobfuscation (gap: IW4x-specific zone layout; {detail})"
+            ),
+            ZoneOpenError::Iw4Variant { got } => write!(
+                f,
+                "zone version {got:#x} is an IW4x / CoD Online variant whose asset layouts differ \
+                 from stock MW2 0x114 (gap: not converted by this reader)"
+            ),
         }
     }
 }
@@ -294,6 +314,9 @@ fn parse_zone_image_with_stem(
         fastfile_t6::ZONE_VERSION_PC if fastfile_t6::is_t6_magic(bytes) => {
             parse_t6_zone_image(bytes, stem)
         }
+        other if crate::discover::is_iw4_variant_version(other) => {
+            Err(ZoneOpenError::Iw4Variant { got: other })
+        }
         other => Err(ZoneOpenError::UnsupportedVersion { got: other }),
     }
 }
@@ -320,7 +343,74 @@ fn inflate_zone(bytes: &[u8]) -> Result<Vec<u8>, ZoneOpenError> {
     }
 }
 
+/// bo2mp: undoes IW4x ZoneBuilder's byte chain over an inflated body
+/// (`FastFiles::ReadXFileStub`: XOR with the previous plain byte, rotate
+/// left 4, NOT, rotate right 6).
+pub(crate) fn iw4x_deobfuscate(body: &mut [u8]) {
+    let mut last = 0u8;
+    for byte in body.iter_mut() {
+        let plain = (!(*byte ^ last).rotate_left(4)).rotate_right(6);
+        *byte = plain;
+        last = plain;
+    }
+}
+
+/// bo2mp: an IW4x-built zone (usermaps): `IW4x` + its header version in
+/// place of `IWffu100`, the stock version and preamble, then one zlib stream
+/// of a body that starts with a random pad byte and is chained-obfuscated.
+/// The body inside is a stock 0x114 XFile; a body that does not validate as
+/// one either way fails with a gap message naming the IW4x header version.
+fn parse_iw4x_zone_image(bytes: &[u8]) -> Result<ZoneImage, ZoneOpenError> {
+    if bytes.len() < fastfile_iw4::FILE_PREAMBLE_LEN {
+        return Err(ZoneOpenError::Truncated);
+    }
+    let iw4x_version = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+    let mut stock = bytes[..fastfile_iw4::FILE_PREAMBLE_LEN].to_vec();
+    stock[..8].copy_from_slice(fastfile_iw4::MAGIC_UNSIGNED);
+    let header = parse_iw4_header(&stock).map_err(ZoneOpenError::Iw4Header)?;
+    let inflated = inflate_zone(&bytes[fastfile_iw4::FILE_PREAMBLE_LEN..])?;
+    let mut plain = inflated.clone();
+    iw4x_deobfuscate(&mut plain);
+    // ZoneBuilder's IW4x-specific build pads and obfuscates; a plain build
+    // under the IW4x magic would not, so that is tried second.
+    let candidates: [&[u8]; 2] = [plain.get(1..).unwrap_or_default(), &inflated];
+    let mut first_error = None;
+    for (i, image) in candidates.into_iter().enumerate() {
+        if image.len() < fastfile_iw4::XFILE_HEADER_LEN {
+            first_error.get_or_insert_with(|| "inflated body shorter than an XFile header".to_owned());
+            continue;
+        }
+        match select_iw4_table(image) {
+            Ok(table) => {
+                let format = table.format();
+                diag::info!(
+                    Zone,
+                    "IW4x zone (header version {iw4x_version}, {}): {} bytes",
+                    if i == 0 { "deobfuscated" } else { "plain body" },
+                    image.len()
+                );
+                return Ok(ZoneImage {
+                    game: ZoneGame::Iw4,
+                    version: header.version,
+                    bytes: image.to_vec(),
+                    iw4_wire_format: Some(format),
+                });
+            }
+            Err(error) => {
+                first_error.get_or_insert_with(|| error.to_string());
+            }
+        }
+    }
+    Err(ZoneOpenError::Iw4xGap {
+        iw4x_version,
+        detail: first_error.unwrap_or_default(),
+    })
+}
+
 fn parse_iw4_zone_image(bytes: &[u8]) -> Result<ZoneImage, ZoneOpenError> {
+    if bytes.get(..4) == Some(crate::discover::IW4X_MAGIC.as_slice()) {
+        return parse_iw4x_zone_image(bytes);
+    }
     let header = parse_iw4_header(bytes).map_err(ZoneOpenError::Iw4Header)?;
     let body = &bytes[fastfile_iw4::FILE_PREAMBLE_LEN..];
 
@@ -648,5 +738,51 @@ impl Iw5ZoneMemory {
             b8.as_mut_slice(),
         ];
         fastfile_iw5::ZoneStream::new(image, blocks, &mut self.insert_map)
+    }
+}
+
+#[cfg(test)]
+mod iw4x_tests {
+    use super::*;
+
+    /// ZoneBuilder's `writeZone` chain for IW4x-specific zones.
+    fn obfuscate(body: &mut [u8]) {
+        let mut last = 0u8;
+        for byte in body.iter_mut() {
+            let plain = *byte;
+            *byte = (!plain.rotate_left(6)).rotate_right(4) ^ last;
+            last = plain;
+        }
+    }
+
+    #[test]
+    fn deobfuscation_inverts_zonebuilder() {
+        let original: Vec<u8> = (0..=255u8).chain([0, 0, 7, 0xff, 0x80]).collect();
+        let mut bytes = original.clone();
+        obfuscate(&mut bytes);
+        assert_ne!(bytes, original);
+        iw4x_deobfuscate(&mut bytes);
+        assert_eq!(bytes, original);
+    }
+
+    #[test]
+    fn iw4x_zone_with_foreign_body_reports_gap() {
+        use std::io::Write;
+        let mut body = vec![0x5a; 4096];
+        obfuscate(&mut body);
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        z.write_all(&body).unwrap();
+        let mut bytes = b"IW4x\x03\x00\x00\x00".to_vec();
+        bytes.extend_from_slice(&0x114u32.to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 9]);
+        bytes.extend_from_slice(&z.finish().unwrap());
+        let error = parse_zone_image(&bytes).err().expect("not a valid XFile");
+        assert!(matches!(error, ZoneOpenError::Iw4xGap { iw4x_version: 3, .. }), "{error}");
+        // Truncated and odd envelopes fail, never panic.
+        assert!(parse_zone_image(&bytes[..15]).is_err());
+        assert!(parse_zone_image(b"IW4x").is_err());
+        let mut alpha = b"IWffu100".to_vec();
+        alpha.extend_from_slice(&316u32.to_le_bytes());
+        assert!(matches!(parse_zone_image(&alpha), Err(ZoneOpenError::Iw4Variant { got: 316 })));
     }
 }

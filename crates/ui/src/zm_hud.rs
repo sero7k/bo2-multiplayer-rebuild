@@ -658,6 +658,16 @@ fn zm_script_hud(
         }),
         _ => None,
     };
+    // bo2mp: with the modern HUD the hit marker is `hud_match`'s own (it
+    // reads BO2's `damage_feedback` element from the same value); BO2's
+    // picture is left out here.
+    let value = value.map(|v| {
+        if crate::hud_modern::modern_hud_enabled() && v.contains("#shader:damage_feedback") {
+            v.split('\u{1e}').filter(|row| !row.contains("#shader:damage_feedback")).collect::<Vec<_>>().join("\u{1e}")
+        } else {
+            v
+        }
+    });
     let Some(value) = value else {
         for e in &roots {
             commands.entity(e).despawn();

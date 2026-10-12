@@ -19,6 +19,7 @@ use super::{Zm, arg, entnum, frame, list, text};
 use crate::world::ClientId;
 
 mod craft;
+pub(super) mod gate;
 mod ride;
 mod turret;
 mod view_link;
@@ -85,6 +86,13 @@ pub(crate) struct Streaks {
     /// How many times each player was shown his enemies for a moment
     /// (`g_compassShowEnemies`); his HUD pings them all when it changes.
     pub radar_pulse: BTreeMap<u32, u32>,
+    /// A scorestreak switch the gate let start, by client: the weapon (it
+    /// is not judged again while under way).
+    pub switch_ok: BTreeMap<u32, u32>,
+    /// The last refusal logged, by client: weapon, why, when (diag).
+    pub refused_log: BTreeMap<u32, (u32, &'static str, i64)>,
+    /// Each player's d-pad slots his client may not raise (`bo2mp_streak_block`).
+    pub slot_mask: BTreeMap<u32, String>,
 }
 
 /// His radar shows his enemies once, now: BO2 turns the flag on for 0.2 s
@@ -1407,6 +1415,7 @@ pub(super) fn advance(world: &mut World) {
     craft::advance(world);
     turret::advance(world);
     publish_radar(world);
+    gate::publish_slots(world);
     hand_log(world);
 }
 

@@ -133,6 +133,11 @@ impl IwdIndex {
             })
             .collect::<Vec<_>>();
         archives.sort();
+        // bo2mp: the usermaps' archives (`<main>/../usermaps/<map>/*.iwd`)
+        // come after the game's own, so a stock image keeps its stock file;
+        // one that does not index is left out instead of failing the game.
+        let stock = archives.len();
+        archives.extend(crate::discover::usermap_iwds_for_main(directory));
 
         type IndexedArchive = (usize, Result<Vec<(String, IwdFile)>, String>);
         let next = std::sync::atomic::AtomicUsize::new(0);
@@ -158,10 +163,26 @@ impl IwdIndex {
             .into_inner()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         done.sort_by_key(|(slot, _)| *slot);
-        let per_archive = done
-            .into_iter()
-            .map(|(_, indexed)| indexed)
-            .collect::<Result<Vec<_>, String>>()?;
+        let mut per_archive = Vec::with_capacity(done.len());
+        for (slot, indexed) in done {
+            match indexed {
+                Ok(entries) => {
+                    if slot >= stock {
+                        diag::info!(
+                            Zone,
+                            "usermap IWD {}: {} images",
+                            archives[slot].display(),
+                            entries.len()
+                        );
+                    }
+                    per_archive.push(entries);
+                }
+                Err(error) if slot >= stock => {
+                    diag::warn!(Zone, "usermap IWD skipped: {error}");
+                }
+                Err(error) => return Err(error),
+            }
+        }
 
         let mut images: HashMap<String, Vec<IwdFile>> = HashMap::new();
         for entries in per_archive {
@@ -481,14 +502,27 @@ impl IwdSoundIndex {
             })
             .collect::<Vec<_>>();
         archives.sort();
+        // bo2mp: the usermaps' archives after the game's own (a stock sound
+        // keeps its stock file); one that does not open is left out.
+        let stock = archives.len();
+        archives.extend(crate::discover::usermap_iwds_for_main(directory));
 
         let mut sounds = HashMap::new();
-        for path in archives {
-            let file = std::fs::File::open(&path)
-                .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
-
-            let archive = zip::ZipArchive::new(std::io::BufReader::new(file))
-                .map_err(|e| format!("zip {}: {e}", path.display()))?;
+        for (slot, path) in archives.into_iter().enumerate() {
+            let opened = std::fs::File::open(&path)
+                .map_err(|e| format!("cannot open {}: {e}", path.display()))
+                .and_then(|file| {
+                    zip::ZipArchive::new(std::io::BufReader::new(file))
+                        .map_err(|e| format!("zip {}: {e}", path.display()))
+                });
+            let archive = match opened {
+                Ok(archive) => archive,
+                Err(error) if slot >= stock => {
+                    diag::warn!(Zone, "usermap IWD sounds skipped: {error}");
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             let language = archive_language(&path);
             for name in archive.file_names() {
                 let Some(rel) = sound_rel_from_zip_name(name, language.as_deref()) else {

@@ -959,9 +959,33 @@ pub fn sample_client_input(
         }
     }
     if let Some(ps) = ps.filter(|_| !frozen) {
+        // bo2mp: the d-pad slots whose scorestreak he may not raise now (not
+        // earned, airspace full, last stand, ...), as the game judged them:
+        // their key raises nothing, as in BO2 (the server refuses it too).
+        let streak_block: String = presented
+            .snapshot()
+            .and_then(|snapshot| snapshot.meta.for_client(local.0))
+            .and_then(|meta| {
+                meta.client_dvars
+                    .iter()
+                    .find(|(k, _)| k == "bo2mp_streak_block")
+                    .map(|(_, v)| v.clone())
+            })
+            .unwrap_or_default();
         for slot in slots {
             if !input_iw4::weapon_select::weapon_cycle_allowed(ps, clock.time(), select.time, 0, 0)
             {
+                continue;
+            }
+            if ps.action_slot_type.get(slot).copied() == Some(1)
+                && streak_block.as_bytes().get(slot) == Some(&b'1')
+            {
+                diag::info!(
+                    Net,
+                    "action_slot: slot {} streak weapon {} not available: no raise",
+                    slot + 1,
+                    ps.action_slot_param[slot]
+                );
                 continue;
             }
             let target = match ps.action_slot_type.get(slot).copied() {

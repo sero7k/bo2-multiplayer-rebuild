@@ -357,7 +357,34 @@ fn movement_sound(
         .and_then(|id| presented.player(id))
         .is_some_and(|ps| (ps.perks[0] & playerstate_iw4::PERK_QUIETER) != 0);
     let origin_inches = (!player_view).then_some(sound.event.payload.origin);
+    // bo2mp: Black Ops II's bank: its own step or landing for the surface
+    // (BO2's list, which every map's surfaces are read in under its rules),
+    // or the nearest one it has; never an odd loud default.
+    let t6_has = |name: &str| {
+        bank.as_deref()
+            .is_some_and(|b| b.0.index_in(asset_core::AssetNamespace::T6, name).is_some())
+    };
+    let bo2_bank = t6_has("fly_step_run_plr_default");
+    let snd_ent = Some(u32::from(identity.number()));
     if let Some(index) = sound.event.event.landing_surface_index() {
+        if bo2_bank
+            && let Some((alias, settled)) = crate::aliases::t6_step_alias(
+                &t6_has,
+                crate::aliases::T6StepKind::Land,
+                index as usize,
+                player_view,
+            )
+        {
+            crate::aliases::note_t6_step(index as usize, &alias, settled);
+            play.write(crate::AliasCommand::Play(PlayAlias {
+                namespace: asset_core::AssetNamespace::T6,
+                alias,
+                fallback: None,
+                origin_inches,
+                snd_ent,
+            }));
+            return;
+        }
         let surface_flags = (index as u32) << 20;
         let (alias, fallback) = land_aliases(surface_flags, player_view, quieter);
         land.write(LandSound {
@@ -410,6 +437,31 @@ fn movement_sound(
             origin_inches,
             snd_ent: Some(u32::from(identity.number())),
         }));
+    }
+    let surf_index = usize::from(sound.event.payload.surf_type);
+    if bo2_bank
+        && let Some((alias, settled)) = crate::aliases::t6_step_alias(
+            &t6_has,
+            crate::aliases::T6StepKind::Step(gait),
+            surf_index,
+            player_view,
+        )
+    {
+        crate::aliases::note_t6_step(surf_index, &alias, settled);
+        play.write(crate::AliasCommand::Play(PlayAlias {
+            namespace: asset_core::AssetNamespace::T6,
+            alias,
+            fallback: None,
+            origin_inches,
+            snd_ent,
+        }));
+        gear.write(WeaponSound {
+            namespace: asset_core::AssetNamespace::Iw4,
+            alias: gear_rattle_alias(gait, player_view).to_owned(),
+            origin_inches,
+            snd_ent,
+        });
+        return;
     }
     let surface_flags = u32::from(sound.event.payload.surf_type) << 20;
     let (alias, fallback) = footstep_aliases(gait, surface_flags, player_view, quieter);

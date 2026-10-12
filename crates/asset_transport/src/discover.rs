@@ -3,6 +3,209 @@ use std::path::{Path, PathBuf};
 
 const IW4_ZONE_VERSION: u32 = 0x114;
 
+/// bo2mp: the first four bytes of an IW4x-built zone (ZoneBuilder's
+/// `XFILE_HEADER_IW4X`, `'IW4x'`), in place of `IWff`; the next four hold
+/// IW4x's own header version, then the stock version (0x114) follows.
+pub const IW4X_MAGIC: &[u8; 4] = b"IW4x";
+
+/// bo2mp: zone versions IW4x accepts besides 0x114 (CoD Online / alpha
+/// builds, remapped by IW4x's `Zones.cpp` per-asset fixups), plus 0x10D seen
+/// in some usermap packs. Their layouts differ from stock MW2, so a usermap
+/// in one of them is listed (so he sees it) but fails to load with a clear
+/// gap message instead of being misread.
+pub fn is_iw4_variant_version(version: u32) -> bool {
+    version == 0x10D || (316..=360).contains(&version) || (423..=461).contains(&version)
+}
+
+/// bo2mp: whether a zone file starts with IW4x's own header.
+pub fn is_iw4x_envelope(path: &Path) -> bool {
+    use std::io::Read;
+    let mut magic = [0u8; 4];
+    std::fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut magic))
+        .is_ok()
+        && &magic == IW4X_MAGIC
+}
+
+/// bo2mp: a custom map in a game's `usermaps` folder (IW4x layout:
+/// `usermaps/<map>/<map>.ff`, often `<map>_load.ff`, and `<map>.iwd` with
+/// its images and sounds beside them).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Usermap {
+    /// The zone prefix it loads under (`iw4`).
+    pub game: &'static str,
+    /// Its zone name (`mp_waw_castle`).
+    pub stem: String,
+    pub zone: PathBuf,
+    pub load_zone: Option<PathBuf>,
+    /// The archives beside it (searched after the game's own).
+    pub iwds: Vec<PathBuf>,
+    /// The version its envelope carries (`None` when unreadable).
+    pub version: Option<u32>,
+    /// Built by IW4x's ZoneBuilder with its obfuscated body.
+    pub iw4x_envelope: bool,
+}
+
+impl Usermap {
+    /// Why it cannot load, when its zone is not one the readers take.
+    pub fn gap(&self) -> Option<String> {
+        usermap_gap(&self.zone, self.version, self.iw4x_envelope)
+    }
+}
+
+fn usermap_gap(zone: &Path, version: Option<u32>, iw4x: bool) -> Option<String> {
+    let kind = if iw4x { "IW4x envelope, " } else { "" };
+    match version {
+        Some(IW4_ZONE_VERSION) => None,
+        Some(v) if is_iw4_variant_version(v) => Some(format!(
+            "usermap zone {} is version {v:#x} ({kind}an IW4x / CoD Online variant): \
+             its asset layouts differ from stock MW2 0x114 and this reader does not convert \
+             them yet (gap: IW4x Zones.cpp per-version fixups). Rebuild the map with a \
+             0x114 ZoneBuilder to play it",
+            zone.display()
+        )),
+        Some(v) => Some(format!(
+            "usermap zone {} has version {v:#x} ({kind}want MW2 0x114)",
+            zone.display()
+        )),
+        None => Some(format!(
+            "usermap zone {} is not a readable IWff/IW4x envelope",
+            zone.display()
+        )),
+    }
+}
+
+/// bo2mp: (map, is its `_load` zone) when `path` is a usermap zone:
+/// `…/usermaps/<map>/<map>.ff` or `…/usermaps/<map>/<map>_load.ff`.
+pub fn usermap_zone_of(path: &Path) -> Option<(String, bool)> {
+    let is_ff = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ff"));
+    if !is_ff {
+        return None;
+    }
+    let stem = path.file_stem()?.to_str()?.to_ascii_lowercase();
+    let folder = path.parent()?;
+    let map = folder.file_name()?.to_str()?.to_ascii_lowercase();
+    let usermaps = folder.parent()?.file_name()?.to_str()?;
+    if !usermaps.eq_ignore_ascii_case("usermaps") || map.is_empty() {
+        return None;
+    }
+    if stem == map {
+        Some((map, false))
+    } else if stem.strip_suffix("_load") == Some(map.as_str()) {
+        Some((map, true))
+    } else {
+        None
+    }
+}
+
+/// bo2mp: the zone prefix a usermap loads under: its envelope's game, or
+/// MW2 for an IW4x / CoD Online variant (listed, then refused clearly).
+fn usermap_game(path: &Path) -> Option<&'static str> {
+    if let Some(game) = zone_game_for_path(path) {
+        return Some(game.prefix());
+    }
+    match peek_zone_version(path) {
+        Some(v) if is_iw4_variant_version(v) || is_iw4x_envelope(path) => Some("iw4"),
+        _ => None,
+    }
+}
+
+/// bo2mp: every usermap in the game folders, by (game, map); a folder
+/// whose zone is missing or unreadable is logged and left out.
+pub fn list_usermaps(root: &GamesRoot) -> Vec<Usermap> {
+    usermaps_in(game_files(&root.0))
+}
+
+fn usermaps_in(files: impl Iterator<Item = Result<PathBuf, String>>) -> Vec<Usermap> {
+    let mut zones: BTreeMap<String, PathBuf> = BTreeMap::new();
+    let mut loads: BTreeMap<String, PathBuf> = BTreeMap::new();
+    for path in files.flatten() {
+        let Some((map, is_load)) = usermap_zone_of(&path) else {
+            continue;
+        };
+        let slot = if is_load { &mut loads } else { &mut zones };
+        slot.entry(map).or_insert(path);
+    }
+    let mut out = Vec::new();
+    for (stem, zone) in zones {
+        let Some(game) = usermap_game(&zone) else {
+            diag::warn!(
+                Zone,
+                "usermap {stem}: {} is not a zone this rebuild reads (version {}); skipped",
+                zone.display(),
+                peek_zone_version(&zone).map_or_else(|| "unreadable".to_owned(), |v| format!("{v:#x}"))
+            );
+            continue;
+        };
+        let folder = zone.parent().map(Path::to_path_buf).unwrap_or_default();
+        let mut iwds: Vec<PathBuf> = std::fs::read_dir(&folder)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("iwd")))
+                    .collect()
+            })
+            .unwrap_or_default();
+        iwds.sort();
+        out.push(Usermap {
+            game,
+            version: peek_zone_version(&zone),
+            iw4x_envelope: is_iw4x_envelope(&zone),
+            load_zone: loads.get(&stem).cloned(),
+            stem,
+            zone,
+            iwds,
+        });
+    }
+    out
+}
+
+/// bo2mp: the archives of every usermap of the game tree whose `main` is
+/// `main` (`<main>/../usermaps/*/*.iwd`), searched after `main`'s own.
+pub fn usermap_iwds_for_main(main: &Path) -> Vec<PathBuf> {
+    if !main
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("main"))
+    {
+        return Vec::new();
+    }
+    let Some(tree) = main.parent() else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(tree) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for usermaps in entries.flatten().map(|e| e.path()) {
+        if !usermaps.is_dir()
+            || !usermaps
+                .file_name()
+                .is_some_and(|name| name.eq_ignore_ascii_case("usermaps"))
+        {
+            continue;
+        }
+        let Ok(maps) = std::fs::read_dir(&usermaps) else {
+            continue;
+        };
+        let mut folders: Vec<PathBuf> = maps.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+        folders.sort();
+        for folder in folders {
+            let Ok(files) = std::fs::read_dir(&folder) else {
+                continue;
+            };
+            let mut iwds: Vec<PathBuf> = files
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("iwd")))
+                .collect();
+            iwds.sort();
+            out.extend(iwds);
+        }
+    }
+    out
+}
+
 /// bo2mp: Call of Duty 4's fast file version (`IWffu100`, 5).
 pub const IW3_ZONE_VERSION: u32 = 5;
 /// bo2mp: World at War's fast file version (`IWffu100`, 0x183).
@@ -209,7 +412,12 @@ fn read_zone_version(path: &Path) -> Result<u32, String> {
     file.read_exact(&mut header)
         .map_err(|error| error.to_string())?;
     // bo2zm: T6 envelopes are `TAff`/`TAsv`, version at the same offset.
-    if &header[0..4] != b"IWff" && !fastfile_t6::is_t6_magic(&header[..8]) {
+    // bo2mp: IW4x usermaps (`IW4x` + its header version) keep the stock
+    // version at the same offset too.
+    if &header[0..4] != b"IWff"
+        && &header[0..4] != IW4X_MAGIC
+        && !fastfile_t6::is_t6_magic(&header[..8])
+    {
         return Err(format!("not an IWff envelope: {:02x?}", &header[..8]));
     }
     Ok(u32::from_le_bytes(header[8..12].try_into().unwrap()))
@@ -367,6 +575,7 @@ pub fn find_zone_file_version(
     let file_name = format!("{zone}.ff");
     let mut found: Option<PathBuf> = None;
     let mut rejected = Vec::new();
+    let mut usermap_gap_message: Option<String> = None;
     for entry in game_files(&root.0) {
         let path = match entry {
             Ok(path) => path,
@@ -386,11 +595,25 @@ pub fn find_zone_file_version(
             found = Some(path);
             break;
         }
+        // bo2mp: a usermap in a layout the readers do not take says why.
+        if version == IW4_ZONE_VERSION
+            && usermap_gap_message.is_none()
+            && usermap_zone_of(&path).is_some()
+        {
+            usermap_gap_message =
+                usermap_gap(&path, actual.as_ref().ok().copied(), is_iw4x_envelope(&path));
+        }
         rejected.push(format!(
             "{} ({})",
             path.display(),
             actual.map_or_else(|error| error, |v| format!("version {v:#x}"))
         ));
+    }
+    if found.is_none()
+        && let Some(gap) = usermap_gap_message
+    {
+        diag::warn!(Zone, "{gap}");
+        return Err(gap);
     }
     let path = found.ok_or_else(|| {
         format!(
@@ -403,6 +626,15 @@ pub fn find_zone_file_version(
             }
         )
     })?;
+    if let Some((map, is_load)) = usermap_zone_of(&path) {
+        diag::info!(
+            Zone,
+            "usermap {map}: {} zone {}{}",
+            if is_load { "loading" } else { "map" },
+            path.display(),
+            if is_iw4x_envelope(&path) { " (IW4x envelope)" } else { "" }
+        );
+    }
     Ok(ZoneFile {
         path,
         zone_name: zone.to_owned(),
@@ -685,8 +917,15 @@ pub fn list_mp_maps(root: &GamesRoot) -> Vec<String> {
 }
 
 pub fn list_mp_map_packs(root: &GamesRoot) -> Vec<MapPack> {
+    map_packs_in(game_files(&root.0))
+}
+
+fn map_packs_in(files: impl Iterator<Item = Result<PathBuf, String>>) -> Vec<MapPack> {
     let mut zones = Vec::new();
-    for entry in game_files(&root.0) {
+    // bo2mp: usermaps (`usermaps/<map>/<map>.ff`) are listed on their own:
+    // they need no `_load` zone and keep their own pack.
+    let mut usermap_files = Vec::new();
+    for entry in files {
         let path = match entry {
             Ok(path) => path,
             Err(error) => {
@@ -694,6 +933,10 @@ pub fn list_mp_map_packs(root: &GamesRoot) -> Vec<MapPack> {
                 continue;
             }
         };
+        if usermap_zone_of(&path).is_some() {
+            usermap_files.push(Ok(path));
+            continue;
+        }
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
@@ -725,7 +968,7 @@ pub fn list_mp_map_packs(root: &GamesRoot) -> Vec<MapPack> {
             packs.entry((game, folder)).or_default().push(map);
         }
     }
-    packs
+    let mut out: Vec<MapPack> = packs
         .into_iter()
         .map(|((game, folder), mut maps)| {
             maps.sort();
@@ -734,8 +977,30 @@ pub fn list_mp_map_packs(root: &GamesRoot) -> Vec<MapPack> {
                 maps,
             }
         })
-        .collect()
+        .collect();
+    let mut custom: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for usermap in usermaps_in(usermap_files.into_iter()) {
+        let map = format!("{}:{}", usermap.game, usermap.stem);
+        if seen.insert(map.clone()) {
+            custom.entry(usermap.game).or_default().push(map);
+        } else {
+            diag::warn!(
+                Zone,
+                "usermap {} at {} has the name of an installed map; the installed one is listed",
+                usermap.stem,
+                usermap.zone.display()
+            );
+        }
+    }
+    out.extend(custom.into_iter().map(|(game, maps)| MapPack {
+        label: format!("{} {USERMAPS_PACK}", game.to_ascii_uppercase()),
+        maps,
+    }));
+    out
 }
+
+/// bo2mp: the pack label suffix of a game's usermaps (`IW4 USERMAPS`).
+pub const USERMAPS_PACK: &str = "USERMAPS";
 
 fn map_pack_folder(zone_ff: &Path) -> String {
     game_root_for_zone(zone_ff)
@@ -829,4 +1094,147 @@ fn t5_language_archive(anchor: &Path, language: Option<&str>) -> Result<(PathBuf
         .ok_or("T5 language prefix")?;
     let dir = chosen.parent().ok_or("T5 language directory")?;
     Ok((dir.to_path_buf(), prefix.to_owned()))
+}
+
+#[cfg(test)]
+mod usermap_tests {
+    use super::*;
+    use std::io::Write;
+
+    fn zone_bytes(magic: &[u8; 8], version: u32) -> Vec<u8> {
+        let mut bytes = magic.to_vec();
+        bytes.extend_from_slice(&version.to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 9]);
+        bytes.extend_from_slice(b"body");
+        bytes
+    }
+
+    fn put(path: &Path, bytes: &[u8]) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    fn put_iwd(path: &Path, entries: &[&str]) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for entry in entries {
+            zip.start_file(*entry, options).unwrap();
+            zip.write_all(b"data").unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    /// A games root with MW2 (stock maps with `_load` zones) and usermaps:
+    /// an IW4x-built castle with its `_load` and `.iwd`, a CoD Online alpha
+    /// zone, a broken zone, a broken archive, and stray files.
+    fn games(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("bo2mp-usermaps-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mw2 = root.join("mw2");
+        put(&mw2.join("zone/english/common_mp.ff"), &zone_bytes(b"IWffu100", 0x114));
+        put(&mw2.join("zone/english/mp_rust.ff"), &zone_bytes(b"IWffu100", 0x114));
+        put(&mw2.join("zone/english/mp_rust_load.ff"), &zone_bytes(b"IWffu100", 0x114));
+        put_iwd(&mw2.join("main/iw_00.iwd"), &["images/stock.iwi", "sound/stock/a.wav"]);
+        let iw4x = *b"IW4x\x03\x00\x00\x00";
+        let castle = mw2.join("usermaps/mp_waw_castle");
+        put(&castle.join("mp_waw_castle.ff"), &zone_bytes(&iw4x, 0x114));
+        put(&castle.join("mp_waw_castle_load.ff"), &zone_bytes(&iw4x, 0x114));
+        put_iwd(
+            &castle.join("mp_waw_castle.iwd"),
+            &["images/castle_wall.iwi", "images/stock.iwi", "sound/castle/amb.wav"],
+        );
+        put(&mw2.join("usermaps/mp_alpha/mp_alpha.ff"), &zone_bytes(b"IWffu100", 316));
+        put(&mw2.join("usermaps/mp_broken/mp_broken.ff"), b"nope");
+        put(&mw2.join("usermaps/mp_broken/mp_broken.iwd"), b"not a zip");
+        put(&mw2.join("usermaps/mp_other/mp_misnamed.ff"), &zone_bytes(b"IWffu100", 0x114));
+        put(&mw2.join("usermaps/stray.ff"), &zone_bytes(b"IWffu100", 0x114));
+        std::fs::create_dir_all(mw2.join("usermaps/empty")).unwrap();
+        root
+    }
+
+    #[test]
+    fn usermap_zone_names() {
+        let p = Path::new("/g/mw2/usermaps/mp_waw_castle/mp_waw_castle.ff");
+        assert_eq!(usermap_zone_of(p), Some(("mp_waw_castle".into(), false)));
+        let p = Path::new("/g/mw2/UserMaps/mp_waw_castle/MP_WAW_CASTLE_LOAD.FF");
+        assert_eq!(usermap_zone_of(p), Some(("mp_waw_castle".into(), true)));
+        assert_eq!(usermap_zone_of(Path::new("/g/mw2/usermaps/mp_x/mp_y.ff")), None);
+        assert_eq!(usermap_zone_of(Path::new("/g/mw2/usermaps/mp_x/mp_x.iwd")), None);
+        assert_eq!(usermap_zone_of(Path::new("/g/mw2/zone/english/mp_rust.ff")), None);
+        assert_eq!(usermap_zone_of(Path::new("/g/mw2/usermaps/stray.ff")), None);
+    }
+
+    #[test]
+    fn discovery_lists_usermaps_without_load_rule() {
+        let root = games("discover");
+        let packs = map_packs_in(files_under(vec![root.clone()]));
+        let base = packs.iter().find(|p| p.label == "IW4 BASE").expect("base pack");
+        assert_eq!(base.maps, vec!["iw4:mp_rust".to_owned()]);
+        let custom = packs.iter().find(|p| p.label == "IW4 USERMAPS").expect("usermaps pack");
+        assert_eq!(custom.maps, vec!["iw4:mp_alpha".to_owned(), "iw4:mp_waw_castle".to_owned()]);
+        assert!(packs.iter().flat_map(|p| &p.maps).all(|m| !m.ends_with("_load")
+            && !m.contains("broken")
+            && !m.contains("misnamed")
+            && !m.contains("stray")));
+
+        let maps = usermaps_in(files_under(vec![root.clone()]));
+        let castle = maps.iter().find(|m| m.stem == "mp_waw_castle").unwrap();
+        assert_eq!(castle.game, "iw4");
+        assert!(castle.iw4x_envelope);
+        assert_eq!(castle.version, Some(0x114));
+        assert!(castle.gap().is_none());
+        assert!(castle.load_zone.as_ref().unwrap().ends_with("mp_waw_castle/mp_waw_castle_load.ff"));
+        assert_eq!(castle.iwds.len(), 1);
+        let alpha = maps.iter().find(|m| m.stem == "mp_alpha").unwrap();
+        assert!(alpha.gap().unwrap().contains("0x13c"));
+        assert!(!maps.iter().any(|m| m.stem == "mp_broken"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn find_zone_resolves_usermaps() {
+        let root = games("find");
+        let games = GamesRoot(root.clone());
+        let found = find_zone_file(&games, "iw4:mp_waw_castle").unwrap();
+        assert!(found.path.ends_with("usermaps/mp_waw_castle/mp_waw_castle.ff"));
+        assert_eq!(found.zone_name, "mp_waw_castle");
+        let load = find_zone_file(&games, "iw4:mp_waw_castle_load").unwrap();
+        assert!(load.path.ends_with("usermaps/mp_waw_castle/mp_waw_castle_load.ff"));
+        // Untagged lookups see the IW4x envelope as MW2's.
+        assert_eq!(zone_game_for_path(&found.path), Some(crate::ZoneGame::Iw4));
+        // Its common zones come from the MW2 tree above `usermaps`.
+        assert_eq!(game_root_for_zone(&found.path).unwrap(), root.join("mw2"));
+        assert!(find_common_mp_for_zone(&found.path).is_ok());
+        assert_eq!(crate::iwd::game_main_for_zone(&found.path).unwrap(), root.join("mw2/main"));
+        // A CoD Online layout fails with the gap, not a misread.
+        let alpha = find_zone_file(&games, "iw4:mp_alpha").unwrap_err();
+        assert!(alpha.contains("0x13c") && alpha.contains("gap"), "{alpha}");
+        assert!(find_zone_file(&games, "iw4:mp_broken").is_err());
+        // Stock maps are untouched.
+        assert!(find_zone_file(&games, "iw4:mp_rust").unwrap().path.ends_with("zone/english/mp_rust.ff"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn usermap_iwds_join_main() {
+        let root = games("iwd");
+        let main = root.join("mw2/main");
+        let iwds = usermap_iwds_for_main(&main);
+        assert_eq!(iwds.len(), 2, "{iwds:?}");
+        assert!(usermap_iwds_for_main(&root.join("mw2/zone")).is_empty());
+
+        let index = crate::IwdIndex::open(&main).expect("a broken usermap IWD does not fail main");
+        assert!(index.image_candidates("castle_wall").is_some());
+        // Stock archives come first for a name both hold.
+        let stock = index.image_candidates("stock").unwrap();
+        assert!(stock[0].read().is_ok());
+        assert_eq!(stock.len(), 2);
+        assert!(stock[1].read().is_ok());
+        let sounds = crate::IwdSoundIndex::open(&main).unwrap();
+        assert!(sounds.read_sound("castle/amb.wav").is_some());
+        assert!(sounds.read_sound("stock/a.wav").is_some());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

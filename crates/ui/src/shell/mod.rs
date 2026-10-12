@@ -22,10 +22,10 @@ pub(crate) mod ingame;
 mod loading;
 mod online;
 pub(crate) mod options;
-mod pics;
+pub(crate) mod pics; // (hud_match reuses the picture resolver)
 #[doc(hidden)]
 pub mod preview;
-mod theme;
+pub(crate) mod theme; // (hud_match reuses the colours and fonts)
 mod view;
 
 use bevy::input::gamepad::{Gamepad, GamepadAxis, GamepadButton};

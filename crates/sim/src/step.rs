@@ -409,6 +409,8 @@ fn run_players_system(ecs: &mut World) {
             crate::script::player_commands(world.ecs(), id.0, cmd.buttons, old_buttons);
             let mut cmd = *cmd;
             crate::script_player::constrain_cmd(&mut world, *id, &mut cmd, feel.zombies);
+            // bo2mp: a scorestreak switch the scripts would refuse never starts.
+            crate::t6::gate_streak_switch(world.ecs(), id.0, &mut cmd);
             crate::script::select_location(world.ecs(), id.0, &mut cmd, old_buttons);
             if world
                 .client_meta(*id)
@@ -2048,6 +2050,32 @@ impl CollisionBackend for ClipBackend<'_> {
     }
 }
 
+/// Diag: a move that started inside another player's body (the pair that
+/// used to fuse for good). Logged sparingly: the first few, then one in 256.
+fn note_body_overlap(
+    self_entnum: u16,
+    other: u16,
+    start: [f32; 3],
+    other_origin: [f32; 3],
+    blocked_deeper: bool,
+) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEEN: AtomicU64 = AtomicU64::new(0);
+    let n = SEEN.fetch_add(1, Ordering::Relaxed);
+    if n < 16 || n % 256 == 0 {
+        let d = ((start[0] - other_origin[0]).powi(2) + (start[1] - other_origin[1]).powi(2)).sqrt();
+        diag::info!(
+            Sim,
+            "player body overlap: client {self_entnum} inside {other} apart {d:.1} at [{:.0}, {:.0}, {:.0}] move {} (seen {})",
+            start[0],
+            start[1],
+            start[2],
+            if blocked_deeper { "deeper blocked" } else { "away allowed" },
+            n + 1
+        );
+    }
+}
+
 fn clip_move_to_players(
     mut hit: Trace,
     bodies: &[PlayerBodyClip],
@@ -2060,6 +2088,10 @@ fn clip_move_to_players(
     for body in bodies {
         if body.entnum == self_entnum {
             continue;
+        }
+        if hit.fraction == 0.0 && hit.hit_type == HITTYPE_ENTITY && hit.contents == crate::world::CONTENTS_BODY {
+            // Already stopped dead against a body he stands in.
+            break;
         }
         let (body_mins, body_maxs) = body.bounds.unwrap_or((PLAYER_MINS, PLAYER_MAXS));
         // bo2zm M3: an entity's box never traps him: inside one (a zombie
@@ -2110,6 +2142,47 @@ fn clip_move_to_players(
             input.tracemask,
         );
         if other.fraction >= hit.fraction && other.startsolid == 0 && other.allsolid == 0 {
+            continue;
+        }
+        // A player he already stands in (a spawn on top of him, standing up
+        // under him, a stale prediction body) never traps him: IW's
+        // PM_playerTrace retraces a move that starts inside a body without
+        // CONTENTS_BODY, and G_StuckInClient's ejection then pushes the
+        // two apart. Ours keeps the BO2 body block one way: he may move
+        // away from the other's centre (the ejection, a sidestep) but never
+        // deeper; deeper stops him on a plane facing away so the slide
+        // carries him round. Before this, the overlap traced allsolid, the
+        // slide move froze both players, and two bots stayed fused forever.
+        if body.bounds.is_none() && (other.startsolid != 0 || other.allsolid != 0) {
+            let flat =
+                |p: [f32; 3]| (p[0] - body.origin[0]).powi(2) + (p[1] - body.origin[1]).powi(2);
+            if flat(input.end) >= flat(input.start) {
+                note_body_overlap(self_entnum, body.entnum, input.start, body.origin, false);
+                continue;
+            }
+            note_body_overlap(self_entnum, body.entnum, input.start, body.origin, true);
+            let d = [
+                input.start[0] - body.origin[0],
+                input.start[1] - body.origin[1],
+            ];
+            let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+            // Same spot: split by entity number so the pair part, not tie.
+            let away = if len > 1e-3 {
+                [d[0] / len, d[1] / len, 0.0]
+            } else if self_entnum < body.entnum {
+                [-1.0, 0.0, 0.0]
+            } else {
+                [1.0, 0.0, 0.0]
+            };
+            if hit.fraction > 0.0 {
+                hit.fraction = 0.0;
+                hit.endpos = input.start;
+                hit.normal = away;
+                hit.contents = crate::world::CONTENTS_BODY;
+                hit.hit_type = HITTYPE_ENTITY;
+                hit.hit_id = body.entnum;
+                hit.walkable = 0;
+            }
             continue;
         }
         let startsolid = hit.startsolid | other.startsolid;
@@ -2434,5 +2507,80 @@ mod fall_damage_tests {
         assert_eq!(fall_damage(0, 100), 0);
         assert_eq!(fall_damage(100, 100), 110);
         assert_eq!(fall_damage(250, 150), 165);
+    }
+}
+
+#[cfg(test)]
+mod body_clip_tests {
+    use super::*;
+
+    fn open() -> Trace {
+        Trace {
+            fraction: 1.0,
+            ..Trace::default()
+        }
+    }
+
+    fn walk(start: [f32; 3], end: [f32; 3]) -> GroundTraceInput {
+        GroundTraceInput {
+            start,
+            end,
+            mins: PLAYER_MINS,
+            maxs: PLAYER_MAXS,
+            tracemask: crate::bullet_collision::MASK_PLAYER_SOLID,
+        }
+    }
+
+    fn body(entnum: u16, origin: [f32; 3]) -> PlayerBodyClip {
+        PlayerBodyClip {
+            entnum,
+            origin,
+            bounds: None,
+        }
+    }
+
+    #[test]
+    fn a_player_body_blocks_a_player_walking_into_it() {
+        let bodies = [body(2, [40.0, 0.0, 0.0])];
+        let hit = clip_move_to_players(open(), &bodies, 1, walk([0.0; 3], [30.0, 0.0, 0.0]));
+        assert!(hit.fraction < 1.0, "walked into a body: {hit:?}");
+        assert_eq!(hit.allsolid, 0);
+        assert_eq!(hit.hit_id, 2);
+    }
+
+    #[test]
+    fn two_overlapping_players_can_walk_apart() {
+        // Fused: 6 units apart (the screenshot's pair).
+        let bodies = [body(2, [6.0, 0.0, 0.0])];
+        // The root cause: the raw body trace from inside reads solid, which
+        // froze the slide move (allsolid) of both players for good.
+        let raw = clipmap_iw4::transformed_temp_capsule_trace(
+            [0.0; 3],
+            [-10.0, 0.0, 0.0],
+            PLAYER_MINS,
+            PLAYER_MAXS,
+            [6.0, 0.0, 0.0],
+            PLAYER_MINS,
+            PLAYER_MAXS,
+            crate::world::CONTENTS_BODY,
+            crate::bullet_collision::MASK_PLAYER_SOLID,
+        );
+        assert!(raw.startsolid != 0 || raw.allsolid != 0, "{raw:?}");
+        let hit = clip_move_to_players(open(), &bodies, 1, walk([0.0; 3], [-10.0, 0.0, 0.0]));
+        assert_eq!(hit.allsolid, 0, "overlap must not freeze him: {hit:?}");
+        assert_eq!(hit.fraction, 1.0, "moving away is free: {hit:?}");
+        // Straight down (the ground trace) is not deeper either.
+        let hit = clip_move_to_players(open(), &bodies, 1, walk([0.0; 3], [0.0, 0.0, -0.25]));
+        assert_eq!(hit.allsolid, 0);
+        assert_eq!(hit.fraction, 1.0);
+    }
+
+    #[test]
+    fn an_overlapping_player_cannot_push_deeper_and_slides_off() {
+        let bodies = [body(2, [6.0, 0.0, 0.0])];
+        let hit = clip_move_to_players(open(), &bodies, 1, walk([0.0; 3], [10.0, 3.0, 0.0]));
+        assert_eq!(hit.allsolid, 0);
+        assert_eq!(hit.fraction, 0.0);
+        assert!(hit.normal[0] < -0.99, "plane faces away from him: {hit:?}");
     }
 }

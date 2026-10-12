@@ -22,7 +22,7 @@ pub(crate) use helpers::{
     build_iw5_static_model_draw, build_static_model_draw, build_t5_static_model_draw,
 };
 pub(crate) use sink::{CommonWalkSink, MaterialPopulationSink, ZoneWalkSink};
-pub(crate) use t6::attach_t6_rules;
+pub(crate) use t6::{attach_t6_rules, t6_surface_list};
 pub(crate) use cod4::load_iw3_world;
 pub(crate) use waw::load_t4_world;
 

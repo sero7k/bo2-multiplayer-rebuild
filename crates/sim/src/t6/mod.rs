@@ -1391,6 +1391,14 @@ pub(crate) fn remote_control(world: &World, client: u32) -> bool {
     world.get_resource::<Zm>().is_some_and(|z| z.mp) && killstreaks::remote_control(world, client)
 }
 
+/// bo2mp: his command's switch to a scorestreak weapon BO2's scripts would
+/// refuse (not earned, airspace full, last stand, ...) never starts.
+pub(crate) fn gate_streak_switch(world: &mut World, client: u32, cmd: &mut playerstate_iw4::UserCmd) {
+    if world.get_resource::<Zm>().is_some_and(|z| z.mp) {
+        killstreaks::gate::gate_cmd(world, client, cmd);
+    }
+}
+
 /// bo2mp: he pressed a d-pad slot's key (`+actionslot`, 0-based slot).
 pub(crate) fn action_slot_pressed(world: &mut World, client: u32, slot: u8) {
     if world.get_resource::<Zm>().is_some_and(|z| z.mp) {

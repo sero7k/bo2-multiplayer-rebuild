@@ -17,6 +17,7 @@ mod zm_hud;
 mod foreign_maps; // bo2mp: other games' maps in the map list
 mod game_folders; // bo2mp: the Game Folders panel
 mod hud_modern;
+pub mod hud_match; // bo2mp: our kill feed, hit marker, kill banner, scoreboard
 pub mod shell; // bo2mp: the client's own front end and loading screen
 mod load_info; // bo2mp: the loading screen's info bar
 mod pad_glyphs; // bo2mp: Xbox button icons on a controller // bo2mp: the modern in-game HUD

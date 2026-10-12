@@ -345,6 +345,130 @@ pub fn t6_movement_alias(alias: &str) -> Option<&'static str> {
     T6_MOVEMENT.get(alias).copied()
 }
 
+/// bo2mp: Black Ops II's surface types by index. Under its rules every
+/// map's surface flags are read in this list (an Infinity Ward map's slush
+/// and riot shield are moved into it as the map loads), not in Modern
+/// Warfare 2's: its index 30 is tall grass, not slush, and 31 the riot
+/// shield.
+pub const T6_STEP_SURFACES: [&str; 32] = [
+    "default",
+    "bark",
+    "brick",
+    "carpet",
+    "cloth",
+    "concrete",
+    "dirt",
+    "flesh",
+    "foliage",
+    "glass",
+    "grass",
+    "gravel",
+    "ice",
+    "metal",
+    "mud",
+    "paper",
+    "plaster",
+    "rock",
+    "sand",
+    "snow",
+    "water",
+    "wood",
+    "asphalt",
+    "ceramic",
+    "plastic",
+    "rubber",
+    "cushion",
+    "fruit",
+    "paintedmetal",
+    "player",
+    "tallgrass",
+    "riotshield",
+];
+
+/// The surfaces nearest to `surface` underfoot, for one BO2's bank has no
+/// step of its own: what the foot would sound like on it, never a loud
+/// odd one.
+fn t6_step_substitutes(surface: &str) -> &'static [&'static str] {
+    match surface {
+        "bark" | "paper" | "plastic" => &["wood"],
+        "brick" | "plaster" | "ceramic" | "glass" | "rubber" => &["concrete"],
+        "carpet" => &["cloth"],
+        "cloth" | "cushion" => &["carpet"],
+        "flesh" | "fruit" | "water" => &["mud", "dirt"],
+        "foliage" | "tallgrass" => &["grass", "dirt"],
+        "ice" => &["snow", "concrete"],
+        "mud" | "sand" | "player" => &["dirt"],
+        "rock" => &["gravel", "concrete"],
+        "snow" => &["dirt"],
+        "slush" => &["snow", "dirt"],
+        "paintedmetal" | "riotshield" => &["metal"],
+        _ => &[],
+    }
+}
+
+/// A footstep or a landing, as BO2 names them by surface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum T6StepKind {
+    Step(StepGait),
+    Land,
+}
+
+fn t6_step_name(kind: T6StepKind, local_player: bool, surface: &str) -> String {
+    let who = if local_player { "plr" } else { "npc" };
+    match kind {
+        T6StepKind::Step(gait) => {
+            let gait = match gait {
+                StepGait::Sprint => "sprint",
+                StepGait::Run => "run",
+                StepGait::Walk => "walk",
+                StepGait::Prone => "prone",
+            };
+            format!("fly_step_{gait}_{who}_{surface}")
+        }
+        T6StepKind::Land => format!("fly_land_{who}_{surface}"),
+    }
+}
+
+/// bo2mp: the Black Ops II sound for a step or landing on surface type
+/// `index` (BO2's list): its own when `has` (BO2's bank) has it, else the
+/// nearest surface it has, else concrete, then dirt; BO2's `default` only
+/// when none of those exists. With the surface it settled on.
+pub fn t6_step_alias(
+    has: impl Fn(&str) -> bool,
+    kind: T6StepKind,
+    index: usize,
+    local_player: bool,
+) -> Option<(String, &'static str)> {
+    let surface = T6_STEP_SURFACES.get(index).copied().unwrap_or("default");
+    let own = (index != 0).then_some(surface);
+    own.into_iter()
+        .chain(t6_step_substitutes(surface).iter().copied())
+        .chain(["concrete", "dirt", "default"])
+        .map(|s| (t6_step_name(kind, local_player, s), s))
+        .find(|(name, _)| has(name))
+}
+
+/// Diag: each (surface, sound) pair once, the first time a step plays it.
+pub fn note_t6_step(index: usize, alias: &str, settled: &str) {
+    static SEEN: LazyLock<std::sync::Mutex<HashSet<(usize, String)>>> =
+        LazyLock::new(|| std::sync::Mutex::new(HashSet::new()));
+    let fresh = SEEN
+        .lock()
+        .map(|mut seen| seen.insert((index, alias.to_owned())))
+        .unwrap_or(false);
+    if fresh {
+        let surface = T6_STEP_SURFACES.get(index).copied().unwrap_or("?");
+        if surface == settled {
+            diag::info!(Audio, "bo2 footsteps: surface {surface} (#{index}) plays {alias}");
+        } else {
+            diag::info!(
+                Audio,
+                "bo2 footsteps: surface {surface} (#{index}) has no BO2 step; plays {alias} ({settled})"
+            );
+        }
+    }
+}
+
 pub fn movement_prepare_names() -> &'static [&'static str] {
     BANK.all_names.as_slice()
 }
@@ -403,5 +527,54 @@ mod t6_movement_tests {
             Some("fly_gear_sprint_plr")
         );
         assert_eq!(t6_movement_alias(gear_alias(true)), Some("fly_gear_mantle_plr"));
+    }
+}
+
+#[cfg(test)]
+mod t6_step_tests {
+    use super::*;
+
+    fn bo2_bank(name: &str) -> bool {
+        // A bank with a few surfaces, as BO2's: no plaster, no tall grass.
+        [
+            "fly_step_run_plr_default",
+            "fly_step_run_plr_concrete",
+            "fly_step_run_plr_dirt",
+            "fly_step_run_plr_grass",
+            "fly_step_run_plr_metal",
+            "fly_step_run_npc_metal",
+            "fly_land_plr_concrete",
+        ]
+        .contains(&name)
+    }
+
+    #[test]
+    fn a_surface_bo2_has_plays_its_own_step() {
+        let got = t6_step_alias(bo2_bank, T6StepKind::Step(StepGait::Run), 13, true);
+        assert_eq!(got, Some(("fly_step_run_plr_metal".to_owned(), "metal")));
+        let got = t6_step_alias(bo2_bank, T6StepKind::Step(StepGait::Run), 13, false);
+        assert_eq!(got, Some(("fly_step_run_npc_metal".to_owned(), "metal")));
+    }
+
+    #[test]
+    fn a_surface_bo2_lacks_plays_the_nearest_not_the_default() {
+        // Black Ops' tall grass (30) walks as grass, not as MW2's slush.
+        let got = t6_step_alias(bo2_bank, T6StepKind::Step(StepGait::Run), 30, true);
+        assert_eq!(got, Some(("fly_step_run_plr_grass".to_owned(), "grass")));
+        // Plaster (16) as concrete; painted metal (28) as metal.
+        let got = t6_step_alias(bo2_bank, T6StepKind::Step(StepGait::Run), 16, true);
+        assert_eq!(got.map(|g| g.1), Some("concrete"));
+        let got = t6_step_alias(bo2_bank, T6StepKind::Step(StepGait::Run), 28, true);
+        assert_eq!(got.map(|g| g.1), Some("metal"));
+        // Unknown or default ground: concrete.
+        let got = t6_step_alias(bo2_bank, T6StepKind::Step(StepGait::Run), 0, true);
+        assert_eq!(got.map(|g| g.1), Some("concrete"));
+        let got = t6_step_alias(bo2_bank, T6StepKind::Land, 40, true);
+        assert_eq!(got, Some(("fly_land_plr_concrete".to_owned(), "concrete")));
+    }
+
+    #[test]
+    fn nothing_in_the_bank_plays_nothing() {
+        assert_eq!(t6_step_alias(|_| false, T6StepKind::Land, 5, true), None);
     }
 }

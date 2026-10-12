@@ -1209,6 +1209,41 @@ impl ZoneLane for T6Lane {
 /// the PMC).
 const FOREIGN_ROW_FROM: &str = "mp_la";
 
+/// bo2mp: a foreign map's surfaces in BO2's list (footsteps, impacts and
+/// penetration read them so under BO2's rules): an Infinity Ward map's
+/// (`iw_list`: MW2, MW3, CoD4) slush and riot shield moved to BO2's own;
+/// Black Ops' and World at War's lists are BO2's already. Logs how many of
+/// each surface the map's collision has, to check footsteps by.
+pub(crate) fn t6_surface_list(loaded: &mut LoadedWorld, map: &str, iw_list: bool) {
+    let Some(clip) = loaded.collision.as_mut() else {
+        return;
+    };
+    let moved = if iw_list {
+        asset_world::remap_clip_surface_flags(clip, asset_world::iw_surface_flags_to_t6)
+    } else {
+        0
+    };
+    let census = asset_world::clip_surface_type_census(clip);
+    let names = weapon_iw4::T6_SURFACE_TYPE_NAMES;
+    let mut rows: Vec<(usize, &str)> = census
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| **n > 0)
+        .map(|(i, n)| (*n, names.get(i).copied().unwrap_or("?")))
+        .collect();
+    rows.sort_by(|a, b| b.0.cmp(&a.0));
+    let line = format!(
+        "bo2 rules: {map} surfaces in BO2's list ({moved} moved{}): {}",
+        if iw_list { " from Infinity Ward's" } else { "" },
+        rows.iter()
+            .map(|(n, name)| format!("{name}={n}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    diag::info!(World, "{line}");
+    loaded.report.push(line);
+}
+
 /// bo2mp: Black Ops II's rules on a map from another game (MW2, MW3, Black
 /// Ops). The map's own lane has walked its world, collision, entities and
 /// ambience into `loaded`; Black Ops II's guns, arms, animations, effects,

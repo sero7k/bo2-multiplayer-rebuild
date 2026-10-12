@@ -12,9 +12,10 @@
 //!   grenades above it.
 //!
 //! BO2's own ammo area, score corner and square minimap are still built but
-//! never drawn (`hks_t6::host`'s `hide_for_bo1_hud`); its scorestreaks,
-//! kill feed, scoreboard, killcam and menus stay. `BO2_HUD=bo2` brings BO2's
-//! own HUD back.
+//! never drawn (`hks_t6::host`'s `hide_for_bo1_hud`); the kill feed, hit
+//! marker, kill banner and scoreboard are `hud_match`'s own; BO2's
+//! scorestreaks, killcam and menus stay. `BO2_HUD=bo2` brings BO2's own HUD
+//! back.
 
 use std::collections::HashMap;
 use std::sync::Mutex;

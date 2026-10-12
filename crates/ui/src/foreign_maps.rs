@@ -280,12 +280,58 @@ fn title_of(stem: &str) -> String {
         .join(" ")
 }
 
+/// bo2mp: a usermap's title from its zone name, a source game tag moved to
+/// the end (`mp_waw_castle` -> `Castle (WaW)`).
+fn usermap_title(stem: &str) -> String {
+    const TAGS: &[(&str, &str)] = &[
+        ("waw", "WaW"),
+        ("t4", "WaW"),
+        ("cod4", "CoD4"),
+        ("iw3", "CoD4"),
+        ("cod2", "CoD2"),
+        ("cod1", "CoD"),
+        ("uo", "UO"),
+        ("bo1", "BO1"),
+        ("bo2", "BO2"),
+        ("bo3", "BO3"),
+        ("t5", "BO1"),
+        ("mw1", "MW1"),
+        ("mw2", "MW2"),
+        ("mw3", "MW3"),
+        ("mwr", "MWR"),
+        ("codo", "CoDO"),
+        ("ghosts", "Ghosts"),
+    ];
+    let words: Vec<&str> = stem.trim_start_matches("mp_").split('_').filter(|w| !w.is_empty()).collect();
+    let tag_of = |w: &str| TAGS.iter().find(|(t, _)| w.eq_ignore_ascii_case(t)).map(|(_, n)| *n);
+    let (tag, rest) = match (words.first().copied().and_then(tag_of), words.last().copied().and_then(tag_of)) {
+        (Some(tag), _) if words.len() > 1 => (Some(tag), &words[1..]),
+        (_, Some(tag)) if words.len() > 1 => (Some(tag), &words[..words.len() - 1]),
+        _ => (None, &words[..]),
+    };
+    let title = title_of(&rest.join("_"));
+    match tag {
+        Some(tag) => format!("{title} ({tag})"),
+        None => title,
+    }
+}
+
 fn discover() -> Vec<Category> {
     let Ok(root) = asset_transport::games_root_from_env() else {
         return Vec::new();
     };
+    let packs = asset_transport::list_mp_map_packs(&root);
+    // bo2mp: usermaps (`<game>/usermaps/<map>/<map>.ff`), by `game:map`.
+    let custom: Vec<String> = packs
+        .iter()
+        .filter(|p| p.label.ends_with(asset_transport::USERMAPS_PACK))
+        .flat_map(|p| p.maps.iter().cloned())
+        .collect();
+    if !custom.is_empty() {
+        diag::info!(Ui, "bo2mp maps: usermaps {}", custom.join(", "));
+    }
     // Every map zone of every installed game but Black Ops II's own.
-    let mut installed: Vec<(String, String)> = asset_transport::list_mp_map_packs(&root)
+    let mut installed: Vec<(String, String)> = packs
         .into_iter()
         .flat_map(|p| p.maps)
         .filter_map(|key| {
@@ -307,10 +353,12 @@ fn discover() -> Vec<Category> {
     // split into sections of at most `PAGE` so no list runs off the screen.
     let mut all: Vec<ForeignMap> = Vec::new();
     for game in GAMES {
-        let mine: Vec<&String> = installed.iter().filter(|(g, _)| g == game.prefix).map(|(_, s)| s).collect();
-        if mine.is_empty() {
+        let is_custom = |stem: &str| custom.iter().any(|c| c.split_once(':') == Some((game.prefix, stem)));
+        let all_mine: Vec<&String> = installed.iter().filter(|(g, _)| g == game.prefix).map(|(_, s)| s).collect();
+        if all_mine.is_empty() {
             continue;
         }
+        let (custom_mine, mine): (Vec<&String>, Vec<&String>) = all_mine.into_iter().partition(|s| is_custom(s));
         let known = |list: &[(&str, &str)]| -> Vec<(String, String)> {
             list.iter()
                 .filter(|(s, _)| mine.iter().any(|m| m.as_str() == *s))
@@ -326,14 +374,17 @@ fn discover() -> Vec<Category> {
                 dlc.push(((*stem).clone(), title_of(stem)));
             }
         }
-        for (maps, dlc) in [(base, false), (dlc, true)] {
+        // Usermaps last, titled from their zone names.
+        let custom_maps: Vec<(String, String)> =
+            custom_mine.iter().map(|s| ((*s).clone(), usermap_title(s))).collect();
+        for (maps, suffix) in [(base, ""), (dlc, " (DLC)"), (custom_maps, " (Custom)")] {
             for (stem, title) in maps {
                 all.push(ForeignMap {
                     ui_name: if shared(&stem) { format!("{stem}_{}", game.prefix) } else { stem.clone() },
                     game: game.prefix,
                     stem,
                     title,
-                    origin: format!("{}{}", game.title, if dlc { " (DLC)" } else { "" }),
+                    origin: format!("{}{suffix}", game.title),
                 });
             }
         }
@@ -360,6 +411,18 @@ fn discover() -> Vec<Category> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod usermap_title_tests {
+    #[test]
+    fn titles() {
+        assert_eq!(super::usermap_title("mp_waw_castle"), "Castle (WaW)");
+        assert_eq!(super::usermap_title("mp_castle_waw"), "Castle (WaW)");
+        assert_eq!(super::usermap_title("mp_cod4_crash_snow"), "Crash Snow (CoD4)");
+        assert_eq!(super::usermap_title("mp_nuketown"), "Nuketown");
+        assert_eq!(super::usermap_title("mp_waw"), "Waw");
+    }
 }
 
 /// The text key of a foreign map's name and description.

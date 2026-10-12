@@ -474,6 +474,93 @@ fn on_line(lines: &[([f32; 2], [f32; 2])], radius: f32, opt: [f32; 2]) -> Option
     Some([p[0] + t * d[0], p[1] + t * d[1]])
 }
 
+/// Body steering (any team, free-for-all too): a body closer than this
+/// (centre to centre, flat) pushes a bot off it; two players' boxes touch
+/// at 30.
+const BODY_SEP_RADIUS: f32 = 44.0;
+/// A body within this of the bot along its way, and this close sideways, is
+/// in its way: it sidesteps round it rather than walking into its back.
+const BODY_AHEAD_RANGE: f32 = 72.0;
+const BODY_AHEAD_SIDE: f32 = 34.0;
+/// Overlapping or touching: the bot counts as body-blocked.
+const BODY_TOUCH: f32 = 33.0;
+
+/// The way a bot walks (`wish`, flat) bent off the players' bodies around
+/// it (`bodies`: everyone alive but itself): pushed apart from a body it
+/// stands in or against, and round one standing in its way. None: nothing
+/// close, walk on as wished. The tie side for a body dead ahead comes from
+/// `n` (the bot's number) so two bots meeting head-on pass on opposite
+/// sides.
+fn body_steer(n: u32, origin: [f32; 3], wish: [f32; 2], bodies: &[(u32, [f32; 3])]) -> Option<[f32; 2]> {
+    let wl = wish[0].hypot(wish[1]);
+    if wl < 1e-3 {
+        return None;
+    }
+    let w = [wish[0] / wl, wish[1] / wl];
+    let mut push = [0.0f32; 2];
+    let mut any = false;
+    for &(id, p) in bodies {
+        if id == n || (p[2] - origin[2]).abs() >= 64.0 {
+            continue;
+        }
+        let to = [p[0] - origin[0], p[1] - origin[1]];
+        let d = to[0].hypot(to[1]);
+        // Apart: straight away from it, harder the deeper it is.
+        if d < BODY_SEP_RADIUS {
+            let away = if d > 1e-3 {
+                [-to[0] / d, -to[1] / d]
+            } else if n < id {
+                [-w[1], w[0]]
+            } else {
+                [w[1], -w[0]]
+            };
+            let k = 2.0 * (1.0 - d / BODY_SEP_RADIUS);
+            push[0] += away[0] * k;
+            push[1] += away[1] * k;
+            any = true;
+        }
+        // In the way: off to the side it is not on.
+        let along = dot2(to, w);
+        if along > 0.0 && along < BODY_AHEAD_RANGE {
+            let side = det2(w, to);
+            if side.abs() < BODY_AHEAD_SIDE {
+                let left = [-w[1], w[0]];
+                let s = if side.abs() < 2.0 {
+                    if (n + id) % 2 == 0 { 1.0 } else { -1.0 }
+                } else if side > 0.0 {
+                    -1.0
+                } else {
+                    1.0
+                };
+                let k = 1.2 * (1.0 - along / BODY_AHEAD_RANGE) * (1.0 - side.abs() / BODY_AHEAD_SIDE);
+                push[0] += left[0] * s * k;
+                push[1] += left[1] * s * k;
+                any = true;
+            }
+        }
+    }
+    if !any {
+        return None;
+    }
+    let out = [w[0] + push[0], w[1] + push[1]];
+    let ol = out[0].hypot(out[1]);
+    if ol < 1e-3 {
+        // Pushes cancel the wish: step sideways.
+        return Some(if n % 2 == 0 { [-w[1], w[0]] } else { [w[1], -w[0]] });
+    }
+    Some([out[0] / ol, out[1] / ol])
+}
+
+/// The nearest other body touching (or inside) the bot, if any.
+fn body_touching(n: u32, origin: [f32; 3], bodies: &[(u32, [f32; 3])]) -> Option<(u32, f32)> {
+    bodies
+        .iter()
+        .filter(|(id, p)| *id != n && (p[2] - origin[2]).abs() < 64.0)
+        .map(|(id, p)| (*id, dist2d(*p, origin)))
+        .filter(|(_, d)| *d < BODY_TOUCH)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
 /// BO2's check on a dodge: a thin line at knee height toward the bent
 /// lookahead, failing inside a clip brush or on one within 15 units of the
 /// bot (measured where the line halves).
@@ -1339,6 +1426,20 @@ pub(super) fn drive(world: &mut World, now: i64) {
     log_negotiations(world);
     let dv = BotDvars::read(world);
     let crowd = crowd(world);
+    // Every live body (bots, players, either team) for body steering.
+    let bodies: Vec<(u32, [f32; 3])> = {
+        let ids: Vec<u32> = world.resource::<Zm>().players.keys().copied().collect();
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            if !alive(world, id) {
+                continue;
+            }
+            if let Some(o) = frame(world).player(ClientId(id)).map(|ps| ps.origin) {
+                out.push((id, o));
+            }
+        }
+        out
+    };
     let throws = std::mem::take(&mut world.resource_mut::<Zm>().bot_throws);
     for n in ids {
         if !alive(world, n) {
@@ -1476,18 +1577,14 @@ pub(super) fn drive(world: &mut World, now: i64) {
             .is_some_and(|(p, b)| b && p[2] - origin[2] > 18.0 && dist2d(origin, p) < 96.0);
         // BO2MP_BOTLOG (test aid): is it standing inside the map or a prop,
         // or against another player?
-        let (in_solid, touching) = if botlog() {
+        let body = body_touching(n, origin, &bodies);
+        let touching = body.map(|(id, _)| id);
+        let in_solid = if botlog() {
             use crate::bullet_collision::{MASK_PLAYER_SOLID, PLAYER_MAXS, PLAYER_MINS};
             let t = frame(world).trace_clip(origin, origin, PLAYER_MINS, PLAYER_MAXS, MASK_PLAYER_SOLID);
-            let ids: Vec<u32> = world.resource::<Zm>().players.keys().copied().filter(|&id| id != n).collect();
-            let touching = ids.into_iter().find(|&id| {
-                frame(world).player(ClientId(id)).is_some_and(|ps| {
-                    dist2d(ps.origin, origin) < 32.0 && (ps.origin[2] - origin[2]).abs() < 72.0
-                })
-            });
-            (t.startsolid != 0, touching)
+            t.startsolid != 0
         } else {
-            (false, None)
+            false
         };
         let at_goal = goal
             .as_ref()
@@ -1722,7 +1819,19 @@ pub(super) fn drive(world: &mut World, now: i64) {
                 }
             }
         } else if !mantling && !hold && let Some(p) = walk_to {
-            let wish = [p[0] - origin[0], p[1] - origin[1]];
+            let mut wish = [p[0] - origin[0], p[1] - origin[1]];
+            // Bodies (BO2's players block each other): off one it stands in
+            // or against, round one in its way. The one it is after (what it
+            // looks at: a knife rush) it walks straight at.
+            let look = b.look;
+            let near: Vec<(u32, [f32; 3])> = bodies
+                .iter()
+                .copied()
+                .filter(|(_, q)| look.is_none_or(|l| dist2d(*q, l) > 24.0))
+                .collect();
+            if let Some(bent) = body_steer(n, origin, wish, &near) {
+                wish = bent;
+            }
             let len = (wish[0] * wish[0] + wish[1] * wish[1]).sqrt();
             if len > 1e-3 {
                 let (s, c) = want[1].to_radians().sin_cos();
@@ -1829,9 +1938,39 @@ pub(super) fn drive(world: &mut World, now: i64) {
                     }
                     // No headway: back off and step aside for a moment
                     // (a doorway corner, another player, a prop), then on.
-                    if (1200..2400).contains(&stuck) && !ladder {
+                    // Pinned against (or in) another player it reacts sooner:
+                    // a short step back and aside away from that body.
+                    let body_window = (400..1400).contains(&stuck) && touching.is_some();
+                    if ((1200..2400).contains(&stuck) || body_window) && !ladder {
                         forward = -127;
                         right = if (n + (since / 3000) as u32) % 2 == 0 { 127 } else { -127 };
+                        if let Some(other) = touching.and_then(|id| bodies.iter().find(|b| b.0 == id)) {
+                            // Aside means away from it: its side of us.
+                            let (s, c) = want[1].to_radians().sin_cos();
+                            let to = [other.1[0] - origin[0], other.1[1] - origin[1]];
+                            let its_right = to[0] * s - to[1] * c;
+                            if its_right.abs() > 1.0 {
+                                right = if its_right > 0.0 { -127 } else { 127 };
+                            }
+                        }
+                    }
+                    if touching.is_some() && stuck > 0 && stuck % 1000 == 0 {
+                        diag::info!(
+                            Sim,
+                            "bo2mp bot {n} body-blocked {stuck} ms by client {:?} apart {:.1} at {:.0} {:.0} {:.0} stick {forward} {right}",
+                            touching,
+                            body.map_or(0.0, |b| b.1),
+                            origin[0],
+                            origin[1],
+                            origin[2]
+                        );
+                    }
+                    // Pinned by a body past the sidestep: plan afresh.
+                    if touching.is_some() && stuck > 1500 {
+                        b.path.clear();
+                        b.path_to = None;
+                        b.replan_at = now + 250;
+                        b.progress = Some((origin, now));
                     }
                     if stuck % 1000 == 0 && stuck > 0 && botlog() {
                         diag::info!(
@@ -2034,4 +2173,50 @@ fn log_negotiations(world: &World) {
         *kinds.entry(format!("{kind} {:#x}", f & (NEG_JUMP | NEG_DROP | NEG_RUN))).or_default() += 1;
     }
     diag::info!(Sim, "bo2mp negotiation links: {kinds:?}");
+}
+
+#[cfg(test)]
+mod body_steer_tests {
+    use super::*;
+
+    #[test]
+    fn nothing_close_walks_on() {
+        let bodies = [(1, [0.0; 3]), (2, [500.0, 0.0, 0.0])];
+        assert_eq!(body_steer(1, [0.0; 3], [1.0, 0.0], &bodies), None);
+    }
+
+    #[test]
+    fn a_bot_inside_another_is_pushed_out() {
+        // Fused 6 units apart, wanting to walk straight through it.
+        let bodies = [(1, [0.0; 3]), (2, [6.0, 0.0, 0.0])];
+        let w = body_steer(1, [0.0; 3], [1.0, 0.0], &bodies).unwrap();
+        assert!(w[0] < 0.2, "must not keep walking into it: {w:?}");
+        let w2 = body_steer(2, [6.0, 0.0, 0.0], [-1.0, 0.0], &[(1, [0.0; 3]), (2, [6.0, 0.0, 0.0])]).unwrap();
+        // The pair part: each heads off its own way.
+        assert!(w[0] * w2[0] + w[1] * w2[1] < 0.5, "{w:?} {w2:?}");
+    }
+
+    #[test]
+    fn a_body_in_the_way_is_passed_on_its_open_side() {
+        // A player 50 ahead, a little to the left (+y): pass on the right.
+        let bodies = [(1, [0.0; 3]), (2, [50.0, 8.0, 0.0])];
+        let w = body_steer(1, [0.0; 3], [1.0, 0.0], &bodies).unwrap();
+        assert!(w[0] > 0.0 && w[1] < 0.0, "{w:?}");
+    }
+
+    #[test]
+    fn head_on_bots_pick_opposite_sides() {
+        let bodies = [(1, [0.0; 3]), (2, [50.0, 0.0, 0.0])];
+        let a = body_steer(1, [0.0; 3], [1.0, 0.0], &bodies).unwrap();
+        let b = body_steer(2, [50.0, 0.0, 0.0], [-1.0, 0.0], &bodies).unwrap();
+        // Same sign of world y would collide again; opposite passes.
+        assert!(a[1] * b[1] < 0.0, "{a:?} {b:?}");
+    }
+
+    #[test]
+    fn touching_finds_the_nearest_body_on_its_floor() {
+        let bodies = [(1, [0.0; 3]), (2, [20.0, 0.0, 0.0]), (3, [10.0, 0.0, 200.0])];
+        assert_eq!(body_touching(1, [0.0; 3], &bodies).map(|b| b.0), Some(2));
+        assert_eq!(body_touching(1, [0.0; 3], &bodies[..1]), None);
+    }
 }

@@ -156,6 +156,7 @@ pub(super) async fn walk_prepared_match(
             };
             if crate::t6_rules() {
                 let stage = progress.begin_scoped(StageId::MapAssets, "black ops ii rules", None);
+                crate::lane::t6_surface_list(&mut loaded, &zone_name, game == "iw3");
                 crate::lane::attach_t6_rules(
                     &mut loaded,
                     &zone_name,
@@ -186,6 +187,11 @@ pub(super) async fn walk_prepared_match(
                     asset_core::ZoneGame::T5 => asset_world::ForeignEntityGame::Treyarch,
                     _ => asset_world::ForeignEntityGame::InfinityWard,
                 };
+                crate::lane::t6_surface_list(
+                    &mut loaded,
+                    &zone_name,
+                    matches!(game, asset_core::ZoneGame::Iw4 | asset_core::ZoneGame::Iw5),
+                );
                 crate::lane::attach_t6_rules(&mut loaded, &zone_name, source);
                 stage.done();
             }

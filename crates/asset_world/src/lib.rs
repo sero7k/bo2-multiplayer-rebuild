@@ -12,6 +12,7 @@ mod glass_catalog;
 mod map_declarations;
 mod map_entities;
 mod nonplayer_clip; // bo2mp
+mod surface_types; // bo2mp: other games' surface types in BO2's list
 pub mod model_mesh;
 pub mod model_t6; // bo2zm
 pub mod t6_grade; // bo2mp
@@ -43,6 +44,7 @@ pub use glass_catalog::*;
 pub use map_declarations::{MapDeclarations, stack_literals as iw5_stack_literals};
 pub use map_entities::*;
 pub use nonplayer_clip::*;
+pub use surface_types::*;
 pub use model_mesh::*;
 pub use model_t6::*;
 pub use t6_grade::*;

@@ -1417,5 +1417,9 @@ pub(crate) fn match_events(host: &mut Host, seen: &mut MatchSeen, old: Option<&M
             seen.feed_lines.push_back((line, now));
         }
     }
-    draw_feed(host, mp, seen);
+    // (bo2mp: with the modern HUD the kill feed is `hud_match`'s own; BO2's
+    // obituary window stays empty.)
+    if !crate::hud_modern::modern_hud_enabled() {
+        draw_feed(host, mp, seen);
+    }
 }
