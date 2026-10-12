@@ -857,14 +857,17 @@ fn preflight_match_install(
         && let Some(namespace @ (asset_core::AssetNamespace::T5 | asset_core::AssetNamespace::Iw5)) =
             prepared_map.namespace
     {
-        let catalog = catalog.ok_or_else(|| {
-            InstallRefusal::new("IW4 menu catalog missing for objective bindings".to_owned())
-        })?;
-        let table = catalog
-            .string_table(gamemode_iw4::FACTION_TABLE)
-            .ok_or_else(|| {
-                InstallRefusal::new("IW4 faction table missing for objective bindings".to_owned())
-            })?;
+        // bo2mp: without MW2's menu catalog or faction table the map's
+        // objectives keep their own models; the map still plays.
+        'bind: {
+        let Some(catalog) = catalog else {
+            diag::warn!(World, "objective visuals: no IW4 menu catalog; the map's own objective models kept");
+            break 'bind;
+        };
+        let Some(table) = catalog.string_table(gamemode_iw4::FACTION_TABLE) else {
+            diag::warn!(World, "objective visuals: no IW4 faction table; the map's own objective models kept");
+            break 'bind;
+        };
         let (allies, axis) = iw4_charsets(catalog, identity, zone);
         let iw4 =
             asset_game::ObjectiveVisuals::from_faction_table(table, Some(&allies), Some(&axis));
@@ -926,6 +929,7 @@ fn preflight_match_install(
                 "objective assets missing from the map's game: {}",
                 missing.join(", ")
             )));
+        }
         }
     }
     let mut strings = std::mem::take(&mut prepared.strings);

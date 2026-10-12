@@ -257,7 +257,16 @@ pub fn legacy_game_for_path(path: &Path) -> Option<&'static str> {
 /// bo2mp: every Call of Duty 4 and World at War multiplayer map installed:
 /// (prefix, map), loading zones (`_load`) left out.
 pub fn list_legacy_mp_maps(root: &GamesRoot) -> Vec<(String, String)> {
-    let mut out = Vec::new();
+    let mut out: Vec<(String, String)> =
+        list_legacy_mp_map_files(root).into_iter().map(|(g, s, _)| (g, s)).collect();
+    out.dedup();
+    out
+}
+
+/// bo2mp: [`list_legacy_mp_maps`] with each map's zone file (the first
+/// found when a game has two copies).
+pub fn list_legacy_mp_map_files(root: &GamesRoot) -> Vec<(String, String, PathBuf)> {
+    let mut out: Vec<(String, String, PathBuf)> = Vec::new();
     for path in game_files(&root.0).flatten() {
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()).map(str::to_ascii_lowercase) else {
             continue;
@@ -266,11 +275,10 @@ pub fn list_legacy_mp_maps(root: &GamesRoot) -> Vec<(String, String)> {
         if !is_ff || !stem.starts_with("mp_") || stem.ends_with("_load") {
             continue;
         }
-        if let Some(game) = legacy_game_for_path(&path) {
-            let key = (game.to_owned(), stem);
-            if !out.contains(&key) {
-                out.push(key);
-            }
+        if let Some(game) = legacy_game_for_path(&path)
+            && !out.iter().any(|(g, s, _)| g == game && *s == stem)
+        {
+            out.push((game.to_owned(), stem, path));
         }
     }
     out.sort();

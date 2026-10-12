@@ -183,7 +183,8 @@ pub fn launch(
 }
 
 /// bo2mp `iw4l check-maps`: every MW2 map the front end lists (MW2's own,
-/// IW4x's packs, usermaps) read and checked (`assets::check_iw4_map`), one
+/// IW4x's packs, usermaps) read and checked (`assets::check_iw4_map`), then
+/// Call of Duty 4's and World at War's (`assets::check_map`), one
 /// line each, to the console and `<artifacts>/map-check.txt`.
 fn run_check_maps(games: &asset_transport::GamesRoot, artifacts: &std::path::Path) {
     let mut maps: Vec<String> = asset_transport::list_mp_map_packs(games)
@@ -193,7 +194,7 @@ fn run_check_maps(games: &asset_transport::GamesRoot, artifacts: &std::path::Pat
         .collect();
     maps.sort();
     maps.dedup();
-    let mut lines = vec![format!("MW2 map check: {} maps under {}", maps.len(), games.0.display())];
+    let mut lines = vec![format!("MW2 map check (with usermaps): {} maps under {}", maps.len(), games.0.display())];
     println!("{}", lines[0]);
     let (mut ok, mut bad) = (0, 0);
     for key in &maps {
@@ -207,6 +208,27 @@ fn run_check_maps(games: &asset_transport::GamesRoot, artifacts: &std::path::Pat
             }
             Err(e) => format!("{key:<28} FAIL not found: {e}"),
         };
+        if line.contains(" OK:") {
+            ok += 1;
+        } else {
+            bad += 1;
+        }
+        println!("{line}");
+        lines.push(line);
+    }
+    // bo2mp: Call of Duty 4's and World at War's maps, read by their own
+    // readers (`assets::check_map`).
+    let legacy = asset_transport::list_legacy_mp_map_files(games);
+    let head = format!("CoD4 and World at War map check: {} maps", legacy.len());
+    println!("{head}");
+    lines.push(head);
+    for (game, stem, path) in legacy {
+        let started = std::time::Instant::now();
+        let key = format!("{game}:{stem}");
+        let at = path.clone();
+        let result = std::panic::catch_unwind(move || assets::check_map(&game, &at))
+            .unwrap_or_else(|_| "FAIL the reader panicked".to_owned());
+        let line = format!("{key:<28} {result} [{:.1}s] {}", started.elapsed().as_secs_f32(), path.display());
         if line.contains(" OK:") {
             ok += 1;
         } else {

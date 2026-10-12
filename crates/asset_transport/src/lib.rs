@@ -25,7 +25,7 @@ pub use discover::{
     usermap_iwds_for_main, usermap_zone_of,
 };
 pub use discover::{
-    IW3_ZONE_VERSION, T4_ZONE_VERSION, legacy_game_for_path, legacy_version, list_legacy_mp_maps,
+    IW3_ZONE_VERSION, T4_ZONE_VERSION, legacy_game_for_path, legacy_version, list_legacy_mp_map_files, list_legacy_mp_maps,
 };
 pub use iwd::{
     IwdFile, IwdIndex, IwdSoundIndex, cached_iwd_dirs, game_main_for_zone, game_mains_under,
