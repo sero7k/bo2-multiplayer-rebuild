@@ -64,6 +64,11 @@ pub struct GameSettings {
     /// bo2mp: Graphics > "Player Models": on another game's map, its own
     /// soldiers and animations (true), or Black Ops II's characters.
     pub map_game_bodies: bool,
+    /// bo2mp: his friend code (8 digits, made once on this PC; 0 until
+    /// then), which others add him by.
+    pub friend_code: u32,
+    /// bo2mp: the friend codes he added.
+    pub friends: Vec<u32>,
 
     pub revision: u64,
 }
@@ -99,6 +104,8 @@ impl Default for GameSettings {
             bo2_fast: false,
             omni_movement: false,
             map_game_bodies: true,
+            friend_code: 0,
+            friends: Vec::new(),
             revision: 0,
         }
     }
@@ -111,6 +118,20 @@ impl GameSettings {
     pub const PAD_SENSITIVITY_DEFAULT: f32 = 3.0;
     pub const PAD_LAYOUT_CUSTOM: u8 = 255;
     pub const MUSIC_VOLUME_DEFAULT: f32 = 0.8;
+
+    /// bo2mp: an 8-digit friend code.
+    pub const fn is_friend_code(code: u32) -> bool {
+        code >= 10_000_000 && code <= 99_999_999
+    }
+
+    /// bo2mp: a code as shown, `1234 5678`.
+    pub fn friend_code_text(code: u32) -> String {
+        if Self::is_friend_code(code) {
+            format!("{} {:04}", code / 10_000, code % 10_000)
+        } else {
+            "-".to_owned()
+        }
+    }
 
     pub fn touch(&mut self) {
         self.revision = self.revision.wrapping_add(1);
@@ -160,9 +181,36 @@ impl GameSettings {
         self.pad_ads_sensitivity = finite(self.pad_ads_sensitivity, 0.5, 1.5, 1.0);
         self.pad_deadzone_left = finite(self.pad_deadzone_left, 0.0, 0.4, 0.12);
         self.pad_deadzone_right = finite(self.pad_deadzone_right, 0.0, 0.4, 0.12);
+        if !Self::is_friend_code(self.friend_code) {
+            self.friend_code = 0;
+        }
+        let mine = self.friend_code;
+        let mut seen = Vec::new();
+        self.friends.retain(|&c| Self::is_friend_code(c) && c != mine && !seen.contains(&c) && {
+            seen.push(c);
+            true
+        });
+        self.friends.truncate(100);
         self.player_name = self.player_name.trim().chars().take(16).collect();
         if self.player_name.is_empty() {
             self.player_name = "Player".to_owned();
         }
+    }
+}
+
+#[cfg(test)]
+mod friend_tests {
+    use super::GameSettings;
+
+    #[test]
+    fn friend_codes_are_eight_digits_and_kept_tidy() {
+        let mut s = GameSettings { friend_code: 48_213_907, friends: vec![12_345_678, 12_345_678, 48_213_907, 5, 99_999_999], ..GameSettings::default() };
+        s.sanitize();
+        assert_eq!(s.friends, vec![12_345_678, 99_999_999]);
+        assert_eq!(GameSettings::friend_code_text(48_213_907), "4821 3907");
+        assert_eq!(GameSettings::friend_code_text(0), "-");
+        let mut bad = GameSettings { friend_code: 123, ..GameSettings::default() };
+        bad.sanitize();
+        assert_eq!(bad.friend_code, 0);
     }
 }

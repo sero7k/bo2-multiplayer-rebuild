@@ -410,6 +410,41 @@ pub struct MasterBrowserSnapshot {
     pub adverts: Vec<MasterAdvert>,
     pub error: Option<String>,
     pub have: ContentFlags,
+    /// bo2mp: his friends as the master last saw them (`set_friends`).
+    pub friends: Vec<master_protocol::FriendStatus>,
+}
+
+/// bo2mp: who he is to his friends (his friend code and name, sent in every
+/// hello) and whom he looks for (asked about on every browser refresh).
+static FRIEND_CODE: AtomicU64 = AtomicU64::new(0);
+static PLAYER_NAME: Mutex<String> = Mutex::new(String::new());
+static FRIEND_CODES: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+pub fn set_friend_identity(code: u32, name: &str) {
+    FRIEND_CODE.store(u64::from(code), Ordering::Relaxed);
+    if let Ok(mut n) = PLAYER_NAME.lock() {
+        n.clear();
+        n.push_str(name);
+    }
+}
+
+pub fn set_friends(codes: &[u32]) {
+    if let Ok(mut c) = FRIEND_CODES.lock() {
+        c.clear();
+        c.extend(codes.iter().copied().take(master_protocol::MAX_FRIENDS));
+    }
+}
+
+fn my_friend_code() -> u32 {
+    FRIEND_CODE.load(Ordering::Relaxed) as u32
+}
+
+fn my_name() -> String {
+    PLAYER_NAME.lock().map(|n| n.clone()).unwrap_or_default()
+}
+
+fn friend_codes() -> Vec<u32> {
+    FRIEND_CODES.lock().map(|c| c.clone()).unwrap_or_default()
 }
 
 #[derive(Resource)]
@@ -1020,7 +1055,8 @@ fn browser_worker(
                 return;
             }
             state.lock().expect("master browser state poisoned").loading = true;
-            let result: Result<(u64, Vec<master_protocol::Advert>)> = io_timeout(&cancel, async {
+            let codes = friend_codes();
+            let result: Result<(u64, Vec<master_protocol::Advert>, Vec<master_protocol::FriendStatus>)> = io_timeout(&cancel, async {
                 let (_endpoint, connection) = connect(&target, &cancel).await?;
                 let (mut send, mut recv) = io_timeout(&cancel, connection.open_bi()).await?;
                 send.set_priority(0)?;
@@ -1031,7 +1067,9 @@ fn browser_worker(
                         game_protocol: crate::PROTOCOL_VERSION,
                         role: EndpointRole::Cli,
                         build: endpoint_build(),
-                        player_name: String::new(),
+                        // (So his friends see him online while he browses.)
+                        player_name: my_name(),
+                        friend_code: my_friend_code(),
                     }),
                 )
                 .await?;
@@ -1043,7 +1081,23 @@ fn browser_worker(
                     }),
                 )
                 .await?;
+                if !codes.is_empty() {
+                    write_frame(
+                        &mut send,
+                        &ControlFrame::Request(ControlRequest {
+                            request_id: 2,
+                            body: RequestBody::Friends { codes: codes.clone() },
+                        }),
+                    )
+                    .await?;
+                }
+                let mut rooms: Option<(u64, Vec<master_protocol::Advert>)> = None;
+                let mut friends: Option<Vec<master_protocol::FriendStatus>> =
+                    if codes.is_empty() { Some(Vec::new()) } else { None };
                 loop {
+                    if let (Some((generation, adverts)), Some(friends)) = (rooms.as_ref(), friends.as_ref()) {
+                        return Result::Ok((*generation, adverts.clone(), friends.clone()));
+                    }
                     match read_frame(&mut recv).await? {
                         ControlFrame::Response(ControlResponse {
                             request_id: 1,
@@ -1052,7 +1106,11 @@ fn browser_worker(
                                     generation,
                                     adverts,
                                 },
-                        }) => return Result::Ok((generation, adverts)),
+                        }) => rooms = Some((generation, adverts)),
+                        ControlFrame::Response(ControlResponse {
+                            request_id: 2,
+                            body: ResponseBody::Friends { friends: found },
+                        }) => friends = Some(found),
                         ControlFrame::Response(ControlResponse {
                             body: ResponseBody::Error(error),
                             ..
@@ -1072,8 +1130,9 @@ fn browser_worker(
             let mut current = state.lock().expect("master browser state poisoned");
             current.loading = false;
             match result {
-                Ok((generation, adverts)) => {
+                Ok((generation, adverts, friends)) => {
                     current.generation = generation;
+                    current.friends = friends;
                     let have = current.have;
                     current.adverts = adverts
                         .into_iter()
@@ -1614,6 +1673,7 @@ async fn session_main(
             role: hello_role,
             build: endpoint_build(),
             player_name,
+            friend_code: my_friend_code(),
         }),
     )
     .await
@@ -2398,7 +2458,8 @@ fn handle_frame(
                 ResponseBody::RoomLeft
                 | ResponseBody::Ack
                 | ResponseBody::Status(_)
-                | ResponseBody::RoomList { .. } => return Ok(()),
+                | ResponseBody::RoomList { .. }
+                | ResponseBody::Friends { .. } => return Ok(()),
             };
             apply_room_view(
                 view,

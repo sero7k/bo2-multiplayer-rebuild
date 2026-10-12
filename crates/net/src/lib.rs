@@ -142,8 +142,10 @@ pub use transport::master::{
     CONTENT_IW4, CONTENT_IW5, CONTENT_T5, CONTENT_T6, MasterAdvert, MasterBridge, MasterBridgeState,
     MasterBrowser, MasterBrowserSnapshot, MasterLaunchIntent, MasterLifecycleFact,
     MasterMatchOffer, MasterMatchStart, MasterMenuAction, PendingMasterMenuAction, SessionIdentity,
-    TransportFault, content_inventory, content_names, content_required_by_map,
+    TransportFault, content_inventory, content_names, content_required_by_map, set_friend_identity,
+    set_friends,
 };
+pub use master_protocol::FriendStatus;
 pub use transport::meta_wire::{
     SnapshotMetaSectionBytes, WORLD_SYNC_PERIOD_TICKS, WorldObjectSyncDecoder,
     WorldObjectSyncEncoder, decode_world_object_sync_wire, encode_world_object_sync,

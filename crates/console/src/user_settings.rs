@@ -45,6 +45,23 @@ pub(crate) fn load_user_settings(
     }
     settings.sanitize();
     persistence.last_payload = Some(serialize_settings(&settings, &binds));
+    // bo2mp: his friend code, made the first time (saved with the next
+    // change of settings, and at once here).
+    if settings.friend_code == 0 {
+        settings.friend_code = new_friend_code();
+        settings.touch();
+        persistence.last_payload = None;
+    }
+}
+
+/// bo2mp: a fresh 8-digit friend code (from the clock, the process and the
+/// standard library's random hasher seed).
+fn new_friend_code() -> u32 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+    h.write_u32(std::process::id());
+    10_000_000 + (h.finish() % 90_000_000) as u32
 }
 
 pub(crate) fn consume_menu_binding(
@@ -379,6 +396,11 @@ fn serialize_settings(settings: &frame::GameSettings, binds: &KeyBinds) -> Strin
         ),
         format!("omni_movement={}", settings.omni_movement),
         format!("map_game_bodies={}", settings.map_game_bodies),
+        format!("friend_code={}", settings.friend_code),
+        format!(
+            "friends={}",
+            settings.friends.iter().map(u32::to_string).collect::<Vec<_>>().join(",")
+        ),
         format!("binds_layout={BINDS_LAYOUT}"),
         "unbindall".to_owned(),
     ];
@@ -509,6 +531,10 @@ fn parse_settings(source: &str, settings: &mut frame::GameSettings, binds: &mut 
             "pad_vibration" => parse_into(value, &mut settings.pad_vibration),
             "omni_movement" => parse_into(value, &mut settings.omni_movement),
             "map_game_bodies" => parse_into(value, &mut settings.map_game_bodies),
+            "friend_code" => parse_into(value, &mut settings.friend_code),
+            "friends" => {
+                settings.friends = value.split(',').filter_map(|c| c.trim().parse().ok()).collect();
+            }
             "pad_deadzone_left" => parse_into(value, &mut settings.pad_deadzone_left),
             "pad_deadzone_right" => parse_into(value, &mut settings.pad_deadzone_right),
             // bo2zm: Black Ops II quality, `full` or `fast`.

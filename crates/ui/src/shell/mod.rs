@@ -141,6 +141,8 @@ pub(crate) enum Act {
     TypeName,
     /// Barracks: open the calling card or emblem picker.
     Looks(cards::Kind),
+    /// A row that only shows something (Options > ACCOUNT's friend code).
+    Info,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -484,7 +486,7 @@ impl Shell {
                 self.cac_from = self.screen;
                 self.go(Screen::Barracks);
             }
-            Act::Barracks => {}
+            Act::Barracks | Act::Info => {}
             Act::Looks(kind) => {
                 // The page and place of the one he has.
                 let stat = if kind == cards::Kind::Card { &c.player.card } else { &c.player.emblem };

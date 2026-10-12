@@ -109,6 +109,12 @@ pub(crate) fn rows(tab: usize, s: &GameSettings) -> Vec<Row> {
                 "Every weapon, attachment, perk and wildcard free in Create-a-Class, whatever your level.",
                 1,
             ),
+            Row {
+                label: "FRIEND CODE".to_owned(),
+                sub: "Give this to a friend so they can add you (both of you on the same server).".to_owned(),
+                value: Some(GameSettings::friend_code_text(s.friend_code)),
+                act: Act::Info,
+            },
         ],
     }
 }
@@ -230,6 +236,9 @@ pub(crate) fn sync_settings(settings: Option<bevy::prelude::ResMut<GameSettings>
     }
     // (Player models: the body path reads it as it draws.)
     assets::set_map_game_bodies(s.map_game_bodies);
+    // (Who he is to his friends, and whom he looks for, for the master.)
+    net::set_friend_identity(s.friend_code, &s.player_name);
+    net::set_friends(&s.friends);
     if let Ok(mut g) = NOW.lock()
         && g.as_ref().is_none_or(|old| old.revision != s.revision || old != &*s)
     {

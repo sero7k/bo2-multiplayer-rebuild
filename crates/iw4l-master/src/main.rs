@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use master_protocol::{
     ALPN, AdmissionFailure, Advert, AdvertId, Channel, ControlFrame, ControlHello, ControlRequest,
     ControlResponse, EndpointRole, MAX_BOOTSTRAP_STREAM_BYTES, MAX_CONCURRENT_BOOTSTRAP,
-    MAX_LIST_ADVERTS, MAX_RELAY_UNI_STREAMS, MemberId, PeerEvent, RelayDatagram, RequestBody,
+    FriendStatus, MAX_FRIENDS, MAX_LIST_ADVERTS, MAX_RELAY_UNI_STREAMS, MemberId, PeerEvent, RelayDatagram, RequestBody,
     ResponseBody, RoomPhase, RoomView, SESSION_IDLE, SESSION_KEEP_ALIVE, ServiceError,
     SessionCloseReason, StatusResponse, decode_relay, decode_relay_stream, decode_stream_payload,
     encode_relay, encode_relay_stream, encode_stream_frame, stream_frame_len,
@@ -112,6 +112,8 @@ struct ClientTarget {
 
 struct Peer {
     player_name: String,
+    /// bo2mp: his friend code (0: none).
+    friend_code: u32,
     connection: quinn::Connection,
     control_tx: tokio::sync::mpsc::Sender<ControlFrame>,
 }
@@ -129,7 +131,14 @@ struct ServiceState {
     peers: HashMap<u64, Peer>,
     membership: HashMap<u64, AdvertId>,
     generation: u64,
+    /// bo2mp: friend codes seen lately (his name, when he was last
+    /// connected): a player in the menus only connects for a moment to
+    /// list the lobbies, so he counts as online for `FRIEND_SEEN_FOR` after.
+    seen: HashMap<u32, (String, std::time::Instant)>,
 }
+
+/// bo2mp: how long a friend code stays online after its last connection.
+const FRIEND_SEEN_FOR: std::time::Duration = std::time::Duration::from_secs(45);
 
 struct HandleOutcome {
     response: ControlResponse,
@@ -141,17 +150,48 @@ impl ServiceState {
         &mut self,
         connection_id: u64,
         player_name: String,
+        friend_code: u32,
         connection: quinn::Connection,
         control_tx: tokio::sync::mpsc::Sender<ControlFrame>,
     ) {
+        if friend_code != 0 {
+            self.seen.insert(friend_code, (player_name.clone(), std::time::Instant::now()));
+        }
         self.peers.insert(
             connection_id,
             Peer {
                 player_name,
+                friend_code,
                 connection,
                 control_tx,
             },
         );
+    }
+
+    /// bo2mp: where each friend code's player is: online (a connection
+    /// with that code; the most recent when he has more than one), his
+    /// name, and the lobby he is in.
+    fn friends(&mut self, codes: &[u32]) -> Vec<FriendStatus> {
+        let now = std::time::Instant::now();
+        self.seen.retain(|_, (_, at)| now.duration_since(*at) < FRIEND_SEEN_FOR);
+        let mut out = friend_statuses(
+            codes,
+            self.peers.iter().map(|(id, p)| (*id, p.friend_code, p.player_name.as_str())),
+            |connection_id| {
+                self.membership
+                    .get(&connection_id)
+                    .and_then(|room_id| self.rooms.get(room_id))
+                    .map(|room| room.view.advert())
+            },
+        );
+        // (Seen lately though not connected now: online, in no lobby.)
+        for f in out.iter_mut().filter(|f| !f.online) {
+            if let Some((name, _)) = self.seen.get(&f.code) {
+                f.online = true;
+                f.name = name.clone();
+            }
+        }
+        out
     }
 
     fn publish_view(&self, room_id: AdvertId) -> Vec<(u64, ControlFrame)> {
@@ -189,7 +229,11 @@ impl ServiceState {
     }
 
     fn disconnect(&mut self, connection_id: u64) -> Vec<(u64, ControlFrame)> {
-        self.peers.remove(&connection_id);
+        if let Some(peer) = self.peers.remove(&connection_id)
+            && peer.friend_code != 0
+        {
+            self.seen.insert(peer.friend_code, (peer.player_name, std::time::Instant::now()));
+        }
         let Some(room_id) = self.membership.get(&connection_id).copied() else {
             return Vec::new();
         };
@@ -622,6 +666,7 @@ async fn run_connection(
     state.lock().await.attach_peer(
         connection_id,
         normalize_player_name(&hello.player_name),
+        hello.friend_code,
         connection.clone(),
         control_tx,
     );
@@ -778,6 +823,9 @@ async fn handle_request(
             ),
             Err(error) => (ResponseBody::Error(error), Vec::new()),
         },
+        RequestBody::Friends { codes } => {
+            (ResponseBody::Friends { friends: state.friends(&codes) }, Vec::new())
+        }
         RequestBody::ListRooms => {
             let mut adverts: Vec<Advert> = state
                 .rooms
@@ -1379,6 +1427,7 @@ async fn rpc(
             role,
             build: "iw4l-master".into(),
             player_name: String::new(),
+            friend_code: 0,
         }),
     )
     .await?;
@@ -1457,5 +1506,62 @@ fn normalize_player_name(name: &str) -> String {
         "Player".into()
     } else {
         name
+    }
+}
+
+/// bo2mp: the statuses for `codes` (in their order) from the live
+/// connections (`(connection id, friend code, name)`) and the lobby a
+/// connection is in. Code 0 is nobody's; a code seen on more than one
+/// connection is the newest one (the highest id).
+fn friend_statuses<'a>(
+    codes: &[u32],
+    peers: impl Iterator<Item = (u64, u32, &'a str)>,
+    room_of: impl Fn(u64) -> Option<Advert>,
+) -> Vec<FriendStatus> {
+    let peers: Vec<(u64, u32, &str)> = peers.filter(|(_, code, _)| *code != 0).collect();
+    codes
+        .iter()
+        .take(MAX_FRIENDS)
+        .map(|&code| {
+            let found = peers.iter().filter(|(_, c, _)| *c == code).max_by_key(|(id, _, _)| *id);
+            match found {
+                Some((id, _, name)) => FriendStatus {
+                    code,
+                    online: true,
+                    name: (*name).to_owned(),
+                    room: room_of(*id),
+                },
+                None => FriendStatus { code, online: false, name: String::new(), room: None },
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod friends_tests {
+    use super::*;
+    use master_protocol::ContentFlags;
+
+    #[test]
+    fn friends_are_found_by_code_with_their_lobby() {
+        let advert = Advert {
+            id: AdvertId([1; 16]),
+            name: "lobby".to_owned(),
+            map: "mp_raid".to_owned(),
+            mode: "tdm".to_owned(),
+            players: 2,
+            max_players: 12,
+            locked: false,
+            in_match: false,
+            requires: ContentFlags(0),
+            generation: 1,
+        };
+        let peers = [(1u64, 11_111_111u32, "old egs"), (5, 11_111_111, "egs"), (3, 22_222_222, "jimbo"), (4, 0, "nobody")];
+        let out = friend_statuses(&[11_111_111, 33_333_333, 22_222_222, 0], peers.into_iter(), |id| (id == 3).then(|| advert.clone()));
+        assert_eq!(out.len(), 4);
+        assert!(out[0].online && out[0].name == "egs" && out[0].room.is_none());
+        assert!(!out[1].online && out[1].room.is_none());
+        assert!(out[2].online && out[2].room.as_ref().is_some_and(|r| r.map == "mp_raid"));
+        assert!(!out[3].online, "code 0 is nobody's");
     }
 }

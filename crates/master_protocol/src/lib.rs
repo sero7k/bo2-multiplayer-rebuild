@@ -2,8 +2,8 @@
 
 use core::{fmt, str::FromStr};
 
-pub const PROTOCOL_VERSION: u16 = 9;
-pub const ALPN: &[u8] = b"iw4l-master/9";
+pub const PROTOCOL_VERSION: u16 = 10;
+pub const ALPN: &[u8] = b"iw4l-master/10";
 pub const MAX_CONTROL_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_PAYLOAD: usize = 1100;
 
@@ -21,6 +21,8 @@ pub const MAX_MODE_BYTES: usize = 24;
 pub const MAX_BUILD_BYTES: usize = 64;
 pub const MAX_PLAYER_NAME_BYTES: usize = 64;
 pub const MAX_LIST_ADVERTS: usize = 128;
+/// bo2mp: the most friends one `Friends` request asks about.
+pub const MAX_FRIENDS: usize = 100;
 
 pub const SESSION_IDLE: core::time::Duration = core::time::Duration::from_secs(8);
 pub const SESSION_KEEP_ALIVE: core::time::Duration = core::time::Duration::from_secs(1);
@@ -126,6 +128,7 @@ const TAG_BOOTSTRAP_APPLIED: u8 = 12;
 const TAG_ENTER_MATCH: u8 = 13;
 const TAG_VOTE_TO_SKIP: u8 = 14;
 const TAG_ADMISSION_FAILED: u8 = 15;
+const TAG_FRIENDS: u8 = 16;
 const TAG_ERROR: u8 = 0x7f;
 
 const EVENT_HOST_WORLD_READY: u8 = 1;
@@ -289,6 +292,19 @@ pub struct ControlHello {
     pub role: EndpointRole,
     pub build: String,
     pub player_name: String,
+    /// bo2mp: the player's friend code (8 digits; 0 when he has none), by
+    /// which others find him (`RequestBody::Friends`).
+    pub friend_code: u32,
+}
+
+/// bo2mp: one friend as the master sees him: online (connected now), his
+/// name, and the lobby he is in (when he is in one).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FriendStatus {
+    pub code: u32,
+    pub online: bool,
+    pub name: String,
+    pub room: Option<Advert>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -442,6 +458,10 @@ pub enum RequestBody {
         client_id: u32,
     },
 
+    /// bo2mp: where these friend codes' players are.
+    Friends {
+        codes: Vec<u32>,
+    },
     AdmissionFailed {
         member_id: MemberId,
         epoch: u32,
@@ -552,6 +572,10 @@ pub enum ResponseBody {
     RoomLeft,
     RoomUpdated {
         view: RoomView,
+    },
+    /// bo2mp: the friends a `Friends` request asked about, in its order.
+    Friends {
+        friends: Vec<FriendStatus>,
     },
     RoomList {
         generation: u64,
@@ -737,6 +761,7 @@ pub fn encode_control_frame(frame: &ControlFrame) -> Result<Vec<u8>, ProtocolErr
             out.u8(hello.role.wire());
             out.string(&hello.build, MAX_BUILD_BYTES)?;
             out.string(&hello.player_name, MAX_PLAYER_NAME_BYTES)?;
+            out.u32(hello.friend_code);
             (KIND_HELLO, 0, out.0)
         }
         ControlFrame::Request(request) => (
@@ -778,6 +803,7 @@ pub fn decode_control_frame(bytes: &[u8]) -> Result<ControlFrame, ProtocolError>
                 role: EndpointRole::from_wire(body.u8()?)?,
                 build: body.string(MAX_BUILD_BYTES)?,
                 player_name: body.string(MAX_PLAYER_NAME_BYTES)?,
+                friend_code: body.u32()?,
             };
             body.finish()?;
             ControlFrame::Hello(hello)
@@ -936,6 +962,16 @@ fn encode_request_body(body: &RequestBody) -> Result<Vec<u8>, ProtocolError> {
             reason.encode(&mut out);
         }
         RequestBody::VoteToSkip => out.u8(TAG_VOTE_TO_SKIP),
+        RequestBody::Friends { codes } => {
+            if codes.len() > MAX_FRIENDS {
+                return Err(ProtocolError::LengthExceeded(codes.len()));
+            }
+            out.u8(TAG_FRIENDS);
+            out.u8(codes.len() as u8);
+            for code in codes {
+                out.u32(*code);
+            }
+        }
     }
     Ok(out.0)
 }
@@ -1002,6 +1038,17 @@ fn decode_request_body(body: &mut Reader<'_>) -> Result<RequestBody, ProtocolErr
             reason: AdmissionFailure::decode(body)?,
         },
         TAG_VOTE_TO_SKIP => RequestBody::VoteToSkip,
+        TAG_FRIENDS => {
+            let count = body.u8()? as usize;
+            if count > MAX_FRIENDS {
+                return Err(ProtocolError::LengthExceeded(count));
+            }
+            let mut codes = Vec::with_capacity(count);
+            for _ in 0..count {
+                codes.push(body.u32()?);
+            }
+            RequestBody::Friends { codes }
+        }
         tag => return Err(ProtocolError::UnknownTag(tag)),
     })
 }
@@ -1041,19 +1088,29 @@ fn encode_response_body(body: &ResponseBody) -> Result<Vec<u8>, ProtocolError> {
             out.u64(*generation);
             out.u16(adverts.len() as u16);
             for advert in adverts {
-                out.bytes(&advert.id.0);
-                out.string(&advert.name, MAX_ADVERT_NAME_BYTES)?;
-                out.string(&advert.map, MAX_MAP_BYTES)?;
-                out.string(&advert.mode, MAX_MODE_BYTES)?;
-                out.u8(advert.players);
-                out.u8(advert.max_players);
-                out.u8(u8::from(advert.locked));
-                out.u8(u8::from(advert.in_match));
-                out.u8(advert.requires.0);
-                out.u64(advert.generation);
+                encode_advert(&mut out, advert)?;
             }
         }
         ResponseBody::Ack => out.u8(TAG_HOST_WORLD_READY),
+        ResponseBody::Friends { friends } => {
+            if friends.len() > MAX_FRIENDS {
+                return Err(ProtocolError::LengthExceeded(friends.len()));
+            }
+            out.u8(TAG_FRIENDS);
+            out.u8(friends.len() as u8);
+            for f in friends {
+                out.u32(f.code);
+                out.u8(u8::from(f.online));
+                out.string(&f.name, MAX_PLAYER_NAME_BYTES)?;
+                match &f.room {
+                    Some(advert) => {
+                        out.u8(1);
+                        encode_advert(&mut out, advert)?;
+                    }
+                    None => out.u8(0),
+                }
+            }
+        }
         ResponseBody::Error(error) => {
             out.u8(TAG_ERROR);
             error.write(&mut out);
@@ -1089,18 +1146,7 @@ fn decode_response_body(body: &mut Reader<'_>) -> Result<ResponseBody, ProtocolE
             }
             let mut adverts = Vec::with_capacity(count);
             for _ in 0..count {
-                adverts.push(Advert {
-                    id: AdvertId(body.array()?),
-                    name: body.string(MAX_ADVERT_NAME_BYTES)?,
-                    map: body.string(MAX_MAP_BYTES)?,
-                    mode: body.string(MAX_MODE_BYTES)?,
-                    players: body.u8()?,
-                    max_players: body.u8()?,
-                    locked: bool_byte(body.u8()?)?,
-                    in_match: bool_byte(body.u8()?)?,
-                    requires: ContentFlags(body.u8()?),
-                    generation: body.u64()?,
-                });
+                adverts.push(decode_advert(body)?);
             }
             ResponseBody::RoomList {
                 generation,
@@ -1108,6 +1154,21 @@ fn decode_response_body(body: &mut Reader<'_>) -> Result<ResponseBody, ProtocolE
             }
         }
         TAG_HOST_WORLD_READY => ResponseBody::Ack,
+        TAG_FRIENDS => {
+            let count = body.u8()? as usize;
+            if count > MAX_FRIENDS {
+                return Err(ProtocolError::LengthExceeded(count));
+            }
+            let mut friends = Vec::with_capacity(count);
+            for _ in 0..count {
+                let code = body.u32()?;
+                let online = bool_byte(body.u8()?)?;
+                let name = body.string(MAX_PLAYER_NAME_BYTES)?;
+                let room = if bool_byte(body.u8()?)? { Some(decode_advert(body)?) } else { None };
+                friends.push(FriendStatus { code, online, name, room });
+            }
+            ResponseBody::Friends { friends }
+        }
         TAG_ERROR => ResponseBody::Error(ServiceError::from_reader(body)?),
         tag => return Err(ProtocolError::UnknownTag(tag)),
     })
@@ -1573,5 +1634,86 @@ impl SessionCloseReason {
             2 => Ok(Self::Overload),
             _ => Err(ProtocolError::InvalidBody),
         }
+    }
+}
+
+fn encode_advert(out: &mut Writer, advert: &Advert) -> Result<(), ProtocolError> {
+    out.bytes(&advert.id.0);
+    out.string(&advert.name, MAX_ADVERT_NAME_BYTES)?;
+    out.string(&advert.map, MAX_MAP_BYTES)?;
+    out.string(&advert.mode, MAX_MODE_BYTES)?;
+    out.u8(advert.players);
+    out.u8(advert.max_players);
+    out.u8(u8::from(advert.locked));
+    out.u8(u8::from(advert.in_match));
+    out.u8(advert.requires.0);
+    out.u64(advert.generation);
+    Ok(())
+}
+
+fn decode_advert(body: &mut Reader<'_>) -> Result<Advert, ProtocolError> {
+    Ok(Advert {
+        id: AdvertId(body.array()?),
+        name: body.string(MAX_ADVERT_NAME_BYTES)?,
+        map: body.string(MAX_MAP_BYTES)?,
+        mode: body.string(MAX_MODE_BYTES)?,
+        players: body.u8()?,
+        max_players: body.u8()?,
+        locked: bool_byte(body.u8()?)?,
+        in_match: bool_byte(body.u8()?)?,
+        requires: ContentFlags(body.u8()?),
+        generation: body.u64()?,
+    })
+}
+
+#[cfg(test)]
+mod friends_tests {
+    use super::*;
+
+    fn advert() -> Advert {
+        Advert {
+            id: AdvertId([7; 16]),
+            name: "simon's lobby".to_owned(),
+            map: "mp_nuketown_2020".to_owned(),
+            mode: "tdm".to_owned(),
+            players: 3,
+            max_players: 12,
+            locked: false,
+            in_match: true,
+            requires: ContentFlags(0),
+            generation: 42,
+        }
+    }
+
+    #[test]
+    fn hello_carries_the_friend_code() {
+        let hello = ControlHello {
+            protocol_version: PROTOCOL_VERSION,
+            game_protocol: 1,
+            role: EndpointRole::Join,
+            build: "b".to_owned(),
+            player_name: "simon".to_owned(),
+            friend_code: 48_213_907,
+        };
+        let bytes = encode_control_frame(&ControlFrame::Hello(hello.clone())).unwrap();
+        assert_eq!(decode_control_frame(&bytes).unwrap(), ControlFrame::Hello(hello));
+    }
+
+    #[test]
+    fn friends_request_and_answer_round_trip() {
+        let request = ControlRequest { request_id: 9, body: RequestBody::Friends { codes: vec![12_345_678, 87_654_321] } };
+        assert_eq!(decode_request(&encode_request(&request).unwrap()).unwrap(), request);
+        let response = ControlResponse {
+            request_id: 9,
+            body: ResponseBody::Friends {
+                friends: vec![
+                    FriendStatus { code: 12_345_678, online: true, name: "egs".to_owned(), room: Some(advert()) },
+                    FriendStatus { code: 87_654_321, online: false, name: String::new(), room: None },
+                ],
+            },
+        };
+        assert_eq!(decode_response(&encode_response(&response).unwrap()).unwrap(), response);
+        let too_many = ControlRequest { request_id: 1, body: RequestBody::Friends { codes: vec![1; MAX_FRIENDS + 1] } };
+        assert!(encode_request(&too_many).is_err());
     }
 }
