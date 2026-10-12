@@ -97,7 +97,7 @@ asset_types! {
     Vehicle = 0x32, "vehicle", 1552;
     AddonMapEnts = 0x33, "addon_map_ents", 104;
     NetConstStrings = 0x34, "netconststrings", 32;
-    ReverbPreset = 0x35, "reverbpreset", 0;
+    ReverbPreset = 0x35, "reverbpreset", 72;
     LuaFile = 0x36, "luafile", 24;
     Scriptable = 0x37, "scriptable", 64;
     Colorization = 0x38, "colorization", 48;

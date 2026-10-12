@@ -457,6 +457,8 @@ impl<'a> Walker<'a> {
             T::Colorization => misc::named_only(self, ty, h, crate::layout::Colorization::name),
             T::ToneMapping => misc::named_only(self, ty, h, crate::layout::ToneMapping::name),
             T::DopplerPreset => misc::named_only(self, ty, h, 0),
+            // { name; float[16] } (72 bytes), read on retail mp_prisonbreak.
+            T::ReverbPreset => misc::named_only(self, ty, h, 0),
             T::SoundCurve | T::LpfCurve | T::ReverbCurve => misc::named_only(self, ty, h, 8),
             T::ColorizationSet => misc::colorization_set(self, h),
             T::LightDef => misc::light_def(self, h),
@@ -479,6 +481,7 @@ impl<'a> Walker<'a> {
             T::Attachment => weapon::attachment(self, h),
             T::Weapon => weapon::weapon(self, h),
             T::ComWorld => world::com_world(self, h),
+            T::FxWorld => world::fx_world(self, h),
             T::MenuList => menu::menu_list(self, h),
             T::EquipmentSndTable => misc::equipment_snd_table(self, h),
             T::Font => misc::font(self, h),

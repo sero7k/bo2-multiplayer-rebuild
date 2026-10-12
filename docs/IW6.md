@@ -194,7 +194,7 @@ anchors), `surface_check`, `gun_*`, `image_dump`, `type_runs`.
 | common_core_mp | 3034/3034 | yes (0xaaacf50) | 0 unresolved; 739 sound lists at the scan's offsets |
 | common_mp | 8777/8777 | yes (0x22c505a) | 0 unresolved; 6296 lists; 972 name anchors ok, 0 off |
 | patch_common_core_mp, patch_common_mp, ui_mp, code_pre_gfx_mp, mp_prisonbreak_load, patch_mp_prisonbreak | all | yes | |
-| mp_prisonbreak | 1043/1741 | - | stops at ReverbPreset (then the world assets) |
+| mp_prisonbreak | 1736/1741 | - | ReverbPreset { name; float[16] } (72) read; FxWorld read 0x40 bytes short (glass sound slots unsettled), so the technique sets after it drift; stops at GfxWorld |
 | code_post_gfx_mp, techsets_mp_prisonbreak | partial | no | technique sets with shader programs drift (not needed for guns) |
 
 Layouts settled on retail data (beyond x64-zt):
@@ -275,9 +275,13 @@ ranges (FLAC).
 1. Ghosts attachments on the guns (attachment assets: view/world models,
    reticles, stat changes) instead of the base gun for every variant.
 2. **A map**: `mp_prisonbreak.ff` (+ `_load`, `_path`, `techsets_...`,
-   `patch_...`): the walk stops at ReverbPreset, before clipmap 640, comworld
-   40, glassworld 16, map_ents 256, fxworld 176, gfxworld 2608 bytes of
-   header. Technique sets with programs (code_post_gfx_mp,
+   `patch_...`): ReverbPreset now reads (72 bytes: name, 16 floats), and
+   FxWorld follows x64-zt's writer but ends 0x40 bytes early on retail data.
+   The first glass def's damaged/destroyed/destroyedQuiet sound slots hold
+   all-ones values (not the `fd`-filled follow), and defs 1..3 reference
+   them 0x5d8 bytes later. The walk then reaches GfxWorld (asset 1736)
+   with 15 unresolved technique-set references, before MapEnts, GlassWorld
+   and ClipMap. Technique sets with programs (code_post_gfx_mp,
    techsets_mp_prisonbreak) still drift: only their names are needed for
    BO2's draw path.
 3. Streamed sounds' localized paks (`<language>/..._soundfile<N>.pak`) are
