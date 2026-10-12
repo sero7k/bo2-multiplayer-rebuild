@@ -6415,6 +6415,7 @@ dependencies = [
  "diag",
  "frame",
  "hks_t6",
+ "image",
  "net",
  "session",
  "sim",

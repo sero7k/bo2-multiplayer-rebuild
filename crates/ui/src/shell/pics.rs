@@ -53,7 +53,7 @@ impl ShellPics {
             .or_else(|| crate::foreign_maps::prestige_picture(name));
         match img {
             Some(img) => {
-                let mut img = (*img).clone();
+                let mut img = upscaled(&img).unwrap_or_else(|| (*img).clone());
                 img.sampler = bevy::image::ImageSampler::Descriptor(bevy::image::ImageSamplerDescriptor {
                     address_mode_u: bevy::image::ImageAddressMode::ClampToEdge,
                     address_mode_v: bevy::image::ImageAddressMode::ClampToEdge,
@@ -98,4 +98,34 @@ impl ShellPics {
     pub fn insert(&mut self, name: &str, h: Handle<Image>) {
         self.found.insert(name.to_owned(), h);
     }
+}
+
+/// A small map picture (the games' map-select and loading pictures are
+/// often 256-512 px) made bigger with a Lanczos filter and a light unsharp
+/// mask, so it stays clean full-screen and in the big map card; other
+/// pictures (and compressed ones) are left as they are.
+fn upscaled(img: &Image) -> Option<Image> {
+    use bevy::render::render_resource::TextureFormat;
+    let size = img.size();
+    if size.x == 0 || size.x >= 1024 || size.y >= 1024 || size.x < 128 {
+        return None;
+    }
+    let srgb = match img.texture_descriptor.format {
+        TextureFormat::Rgba8UnormSrgb => true,
+        TextureFormat::Rgba8Unorm => false,
+        _ => return None,
+    };
+    // (Only a picture shaped like a map shot: wider than tall.)
+    if (size.x as f32) < size.y as f32 * 1.3 {
+        return None;
+    }
+    let data = img.data.as_ref()?;
+    let buf = image::RgbaImage::from_raw(size.x, size.y, data.clone())?;
+    let scale = (1600.0 / size.x as f32).clamp(1.0, 4.0);
+    let (w, h) = ((size.x as f32 * scale) as u32, (size.y as f32 * scale) as u32);
+    let big = image::imageops::resize(&buf, w, h, image::imageops::FilterType::Lanczos3);
+    let sharp = image::imageops::unsharpen(&big, 1.2, 4);
+    let mut out = Image::from_dynamic(image::DynamicImage::ImageRgba8(sharp), srgb, bevy::asset::RenderAssetUsages::default());
+    out.sampler = img.sampler.clone();
+    Some(out)
 }
