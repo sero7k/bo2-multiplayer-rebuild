@@ -1,0 +1,75 @@
+# Keeps this fork's main up to date with DaffyDabz/bo2-multiplayer-rebuild.
+#
+# Every 6 hours (or on demand from the Actions tab) it fetches upstream main.
+# If upstream's new commits only touch files this fork has not changed, they
+# are merged into main and pushed. If they touch any file this fork's own
+# commits changed, nothing is merged: an issue lists the overlapping files so
+# the update can be folded in by hand without overwriting our work.
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/DaffyDabz/bo2-multiplayer-rebuild.git
+          git fetch upstream main
+
+      - name: Merge when it touches nothing of ours
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already up to date with upstream."
+            exit 0
+          fi
+          base=$(git merge-base HEAD upstream/main)
+          git diff --name-only "$base" upstream/main | sort -u > upstream_files.txt
+          git diff --name-only "$base" HEAD | sort -u > our_files.txt
+          comm -12 upstream_files.txt our_files.txt > overlap.txt
+          new=$(git log --oneline "$base..upstream/main")
+          if [ -s overlap.txt ]; then
+            title="Upstream update needs a hand merge ($(git rev-parse --short upstream/main))"
+            if gh issue list --state open --search "$title in:title" --json number --jq 'length' | grep -qv '^0$'; then
+              echo "An issue for this upstream commit is already open."
+              exit 0
+            fi
+            {
+              echo "DaffyDabz published new commits that change files this fork also changed, so they were **not** merged automatically."
+              echo
+              echo "New upstream commits:"
+              echo '```'
+              echo "$new"
+              echo '```'
+              echo "Files changed on both sides:"
+              echo '```'
+              cat overlap.txt
+              echo '```'
+            } > body.md
+            gh issue create --title "$title" --body-file body.md
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --no-edit -m "Merge upstream $(git rev-parse --short upstream/main) (no overlap with this fork's changes)" upstream/main
+          git push origin HEAD:main
