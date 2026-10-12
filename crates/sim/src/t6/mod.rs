@@ -454,6 +454,9 @@ impl Zm {
 /// Install a BO2 map's scripts (before [`start`]).
 pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> {
     let mp = mp::is_mp(&inst.map);
+    // bo2mp: Black Ops II's weapon switch rules (the instaswap) for this
+    // match, multiplayer and zombies alike.
+    weapon_iw4::set_bo2_switch_rules(true);
     let mut objects = Vec::with_capacity(inst.objects.len() + 1);
     for bytes in &inst.objects {
         objects.push(ScriptObject::parse(bytes)?);

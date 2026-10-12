@@ -189,6 +189,19 @@ fn spend_offhand_inventory_round(cmd: &mut WeaponCmd, weapon: u32) {
     }
 }
 
+/// bo2mp: Black Ops II's switch rules (set while a Black Ops II match runs):
+/// an offhand started while the weapon is being put away finishes the
+/// switch under it (the "instaswap"; see [`weapon_enter_offhand`]).
+static BO2_SWITCH_RULES: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+pub fn set_bo2_switch_rules(on: bool) {
+    BO2_SWITCH_RULES.store(on, core::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn bo2_switch_rules() -> bool {
+    BO2_SWITCH_RULES.load(core::sync::atomic::Ordering::Relaxed)
+}
+
 pub fn weapon_enter_offhand(hand: &mut WeaponHandState, cmd: &mut WeaponCmd) {
     let prior = hand.weaponstate;
     let putting_away = matches!(
@@ -197,6 +210,25 @@ pub fn weapon_enter_offhand(hand: &mut WeaponHandState, cmd: &mut WeaponCmd) {
             || x == WeaponState::DroppingQuick as i32
             || x == WeaponState::DroppingAltswitch as i32
     );
+    // bo2mp: Black Ops II's instaswap. A lethal, tactical or equipment
+    // (semtex, shock charge, ...) thrown while the weapon is going down
+    // finishes the switch under it: the weapon asked for is the one in hand
+    // from here, so the offhand's own end raise brings it up, with no drop or
+    // raise of its own after. (Infinity Ward's games let the old weapon come
+    // back up and then play the whole switch.)
+    let wanted = u32::from(cmd.cmd_weapon);
+    if putting_away
+        && bo2_switch_rules()
+        && wanted != 0
+        && wanted != hand.weapon
+        && cmd.cmd_weapon_owned
+    {
+        hand.weapon = wanted;
+        hand.weapon_delay = 0;
+        hand.shot_count = 0;
+        hand.burst_latch = false;
+        hand.rechamber_pending = false;
+    }
     cmd.weap_flags &= !weap_flags::OFFHAND_VIEW;
     hand.weaponstate = WeaponState::OffhandInit as i32;
     hand.weapon_delay = 0;
@@ -451,5 +483,46 @@ pub fn weapon_check_for_offhand(
     } else {
         weapon_enter_offhand(hand, cmd);
         None
+    }
+}
+
+#[cfg(test)]
+mod instaswap_tests {
+    use super::*;
+    use crate::tick::{WeaponCmd, WeaponHandState};
+
+    fn dropping_hand() -> WeaponHandState {
+        WeaponHandState {
+            weapon: 5,
+            weaponstate: WeaponState::Dropping as i32,
+            weapon_time: 300,
+            ..WeaponHandState::default()
+        }
+    }
+
+    #[test]
+    fn an_offhand_during_a_drop_finishes_the_switch_under_bo2_rules() {
+        let cmd_for = |owned| WeaponCmd { cmd_weapon: 9, cmd_weapon_owned: owned, ..WeaponCmd::default() };
+        // Infinity Ward's rules: the old weapon stays in hand.
+        set_bo2_switch_rules(false);
+        let mut hand = dropping_hand();
+        weapon_enter_offhand(&mut hand, &mut cmd_for(true));
+        assert_eq!(hand.weapon, 5);
+        assert_eq!(hand.weaponstate, WeaponState::OffhandInit as i32);
+        // Black Ops II's: the new one is in hand under the offhand.
+        set_bo2_switch_rules(true);
+        let mut hand = dropping_hand();
+        weapon_enter_offhand(&mut hand, &mut cmd_for(true));
+        assert_eq!(hand.weapon, 9);
+        assert_eq!(hand.weaponstate, WeaponState::OffhandInit as i32);
+        // Not a weapon he owns: nothing changes.
+        let mut hand = dropping_hand();
+        weapon_enter_offhand(&mut hand, &mut cmd_for(false));
+        assert_eq!(hand.weapon, 5);
+        // Not while the weapon is up (no switch under way).
+        let mut hand = WeaponHandState { weapon: 5, weaponstate: WeaponState::Ready as i32, ..WeaponHandState::default() };
+        weapon_enter_offhand(&mut hand, &mut cmd_for(true));
+        assert_eq!(hand.weapon, 5);
+        set_bo2_switch_rules(false);
     }
 }
