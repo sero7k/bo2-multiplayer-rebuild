@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use bevy::{camera::visibility::VisibilitySystems, prelude::*, ui::UiSystems};
 
-const GAME_UI_FONT_BYTES: &[u8] = include_bytes!("../assets/Oxanium-Regular.ttf");
+const GAME_UI_FONT_BYTES: &[u8] = include_bytes!("../assets/BarlowCondensed-600.ttf");
 
 #[derive(Resource, Clone, Debug)]
 pub struct GameUiFont(pub Handle<Font>);

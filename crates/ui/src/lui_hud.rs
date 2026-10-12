@@ -359,7 +359,8 @@ fn menu_input(hud: &mut LuiHud, io: &mut LuiIo<'_, '_>, console_open: bool, curs
         return;
     }
     // bo2mp: the Game Folders panel has the keys while it is up.
-    if crate::game_folders::is_open() {
+    // bo2mp: and the shell's screens while they cover BO2's menus.
+    if crate::game_folders::is_open() || crate::shell::covers_lui() {
         let _ = io.key_events.read().count();
         return;
     }
@@ -1385,9 +1386,15 @@ fn lui_hud(
             hud.host.root_event("hud_update_refresh", &[]);
         }
     }
+    // bo2mp: the shell's screens are drawn from what BO2's scripts know,
+    // and ask things of them.
+    if front.is_some() {
+        crate::shell::lui_side(&mut hud.host, hud.mp.as_ref());
+    }
     if bo2_loading && !hud.loading_open {
         hud.loading_open = true;
-        if let Some(setup) = io.setup.as_deref() {
+        // (The shell draws its own loading screen.)
+        if let Some(setup) = io.setup.as_deref().filter(|_| !crate::shell::enabled()) {
             crate::lui_frontend::open_loading(&mut hud.host, setup);
         }
     }
@@ -1860,6 +1867,8 @@ fn lui_hud(
     let mut drawn: Vec<Drawn> = all
         .into_iter()
         .map(button_glyph)
+        // bo2mp: BO2's Global (the globe) is gone with the shell.
+        .filter(|d| !(crate::shell::enabled() && d.kind == "globe"))
         .filter(|d| {
             d.alpha > 0.004
                 && (d.material.is_some()
@@ -3882,4 +3891,21 @@ pub(crate) fn register_lui_hud_systems(app: &mut App) {
     crate::lui_scene::register(app);
     app.add_systems(Update, lui_hud.after(crate::bo2_font::load_bo2_fonts).in_set(ClientSet::Ui));
     app.add_systems(Update, crate::lui_frontend::restore_after_match.in_set(ClientSet::Ui));
+    app.add_systems(
+        PostUpdate,
+        hide_under_shell
+            .after(crate::layers::ApplyUiLayers)
+            .before(bevy::ui::UiSystems::Prepare),
+    );
+}
+
+/// bo2mp: BO2's menus are not drawn while the shell's screens cover them
+/// (front end) or its loading screen is up (the loading root).
+fn hide_under_shell(mut roots: Query<(&LuiRoot, &mut Node)>) {
+    for (root, mut node) in &mut roots {
+        let hide = if root.0 { crate::shell::covers_loading() } else { crate::shell::covers_lui() };
+        if hide && node.display != Display::None {
+            node.display = Display::None;
+        }
+    }
 }

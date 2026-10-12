@@ -68,7 +68,8 @@ fn game_folders_panel(
         OPEN.store(false, Ordering::Relaxed);
     }
     // The hint in the front end's corner.
-    let hint_wanted = in_front && !is_open();
+    // (The shell's footer says it instead.)
+    let hint_wanted = in_front && !is_open() && !crate::shell::enabled();
     if hint_wanted && hints.is_empty() {
         commands
             .spawn((

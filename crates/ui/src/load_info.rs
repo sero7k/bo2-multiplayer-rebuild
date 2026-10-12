@@ -79,13 +79,13 @@ fn load_info_bar(
         .spawn((
             InfoBarRoot,
             GlobalZIndex(20_002),
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+            // (Just over the shell loading screen's bottom band.)
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
                 right: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                padding: UiRect::axes(Val::Px(16.0), Val::Px(6.0)),
+                bottom: Val::Percent(5.6),
+                padding: UiRect::axes(Val::Px(16.0), Val::Px(4.0)),
                 ..default()
             },
         ))
@@ -93,8 +93,8 @@ fn load_info_bar(
             c.spawn((
                 InfoBar,
                 Text::new(line),
-                game_text_font(&font.0, 15.0),
-                TextColor(Color::srgba(1.0, 1.0, 1.0, 0.8)),
+                game_text_font(&font.0, 14.0),
+                TextColor(Color::srgba(1.0, 1.0, 1.0, 0.55)),
             ));
         });
 }

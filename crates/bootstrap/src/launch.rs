@@ -384,7 +384,13 @@ fn run_frontend_t6mp(games: asset_transport::GamesRoot, artifacts: PathBuf) {
         artifacts: artifacts.clone(),
     };
     let mut app = App::new();
-    app.insert_resource(net::MasterLaunchIntent::disabled());
+    // The front end's online panel counts the players on the master server
+    // (IW4L_MASTER_ADDR), when one is set.
+    let have = content_flags(&NamespaceTrees::discover(&games));
+    app.insert_resource(net::MasterLaunchIntent::browser_from_env(have).unwrap_or_else(|error| {
+        diag::warn!(Net, "front end online panel: no master server ({error})");
+        net::MasterLaunchIntent::disabled()
+    }));
     app.add_plugins(crate::plugins::default_plugins_with_quiet_log(
         WindowPlugin {
             primary_window: Some(Window {
