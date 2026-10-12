@@ -223,6 +223,23 @@ impl DpvsWorldData {
 
     pub(crate) fn checked(mut self) -> Result<Self, WorldMeshError> {
         let mut cleared = 0usize;
+        // bo2mp: a converted map (IW4x's usermaps, ported from World at
+        // War) can carry tree nodes whose box was never filled - infinite or
+        // NaN halves from an empty mins/maxs. Such a node culls nothing: it
+        // is opened up to a box around everything (its children and
+        // surfaces still cull by their own boxes), instead of refusing the
+        // whole world.
+        let mut opened = 0usize;
+        for nodes in &mut self.aabb_trees {
+            for node in nodes.iter_mut() {
+                if !node.bounds.is_cleared() && !bounds_usable(node.bounds) {
+                    node.bounds = Bounds::from_mid_half([0.0; 3], [1.0e9; 3]);
+                    opened += 1;
+                }
+            }
+        }
+        // (Counted with the cleared boxes in the world report.)
+        cleared += opened;
         for (cell, nodes) in self.aabb_trees.iter().enumerate() {
             let table = BoundsTable::AabbNode { cell };
             cleared += reject_negative_half(table, nodes.iter().map(|node| node.bounds))?;
@@ -233,6 +250,11 @@ impl DpvsWorldData {
         self.cleared_boxes = cleared;
         Ok(self)
     }
+}
+
+/// A box the culling can use: finite, halves not negative.
+fn bounds_usable(b: Bounds) -> bool {
+    b.mid().iter().chain(b.half().iter()).all(|v| v.is_finite()) && b.negative_half_axis().is_none()
 }
 
 fn reject_negative_half(
