@@ -144,7 +144,11 @@ pub struct WorldSmodelLightingSample {
     pub packed_lighting: [u8; 4],
 }
 
-pub const SMODEL_LIGHTING_MAX_CLIENT_VIEWS: u32 = 1;
+/// bo2mp: 4, not 1: a map from another game under Black Ops II's rules
+/// (MW2's Highrise: 2412 dynamic entities) filled the 1024 model lighting
+/// slots, and players' bodies and guns found none and were not drawn. Four
+/// views' worth is 4096 slots (handles stay under 8192).
+pub const SMODEL_LIGHTING_MAX_CLIENT_VIEWS: u32 = 4;
 
 #[derive(Resource, Default)]
 pub struct WorldScene {
