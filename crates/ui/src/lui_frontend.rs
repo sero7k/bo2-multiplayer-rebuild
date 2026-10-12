@@ -464,7 +464,9 @@ pub(crate) fn tick(
     // The match's server reads and writes his stats file (his classes, XP);
     // XP counts in Combat Training, not in Custom Games.
     sim::set_local_stats_path(front.stats_path.clone());
-    sim::set_local_match_ranked(training.is_some());
+    // (bo2mp: the shell has no Combat Training, so its Custom Games earn
+    // XP too - or the levels and prestiges could never be reached.)
+    sim::set_local_match_ranked(training.is_some() || crate::shell::enabled());
     // Where to come back to (Custom Games' lobby, or Combat Training's
     // public lobby, as it is now).
     {
