@@ -249,6 +249,7 @@ impl AssetLinkSink for Iw5SoundCapture {
             aliases,
             game: ZoneGame::Iw5,
             zone: self.catalog.capture_zone_for_ingest(),
+            namespace: None,
         });
         Ok(())
     }

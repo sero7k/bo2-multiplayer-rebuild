@@ -82,8 +82,8 @@ asset_types! {
     Weapon = 0x23, "weapon", 296;
     SndDriverGlobals = 0x24, "snddriverglobals", 0;
     Fx = 0x25, "fx", 64;
-    ImpactFx = 0x26, "impactfx", 0;
-    SurfaceFx = 0x27, "surfacefx", 0;
+    ImpactFx = 0x26, "impactfx", 16;
+    SurfaceFx = 0x27, "surfacefx", 16;
     AiType = 0x28, "aitype", 0;
     MpType = 0x29, "mptype", 0;
     Character = 0x2A, "character", 0;
@@ -103,7 +103,7 @@ asset_types! {
     Colorization = 0x38, "colorization", 48;
     ColorizationSet = 0x39, "colorizationset", 104;
     ToneMapping = 0x3A, "tonemapping", 112;
-    EquipmentSndTable = 0x3B, "equipsndtable", 0;
+    EquipmentSndTable = 0x3B, "equipsndtable", 88;
     VectorField = 0x3C, "vectorfield", 80;
     DopplerPreset = 0x3D, "dopplerpreset", 32;
     ParticleSimAnimation = 0x3E, "particlesimanimation", 96;

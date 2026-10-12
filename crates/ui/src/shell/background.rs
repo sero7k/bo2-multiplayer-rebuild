@@ -3,13 +3,16 @@
 //! at the bottom, so the map shows without fighting the text. In the lobby
 //! it is the lobby's map, in the map picker the map in focus; on the main
 //! and Multiplayer screens the maps take turns. A new picture fades in over
-//! the old, and each drifts slowly closer while it is up.
+//! the old, and each drifts slowly closer while it is up. The Zombies
+//! screens show the Zombies map (and start) in the same way, faded into a
+//! dark red (`theme::palette`).
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
 use super::pics::{ShellPics, cover};
-use super::{Screen, Shell, bridge, pages};
+use super::theme::{Palette, palette};
+use super::{Screen, Shell, bridge, pages, zombies};
 
 #[derive(Component)]
 pub(crate) struct BgRoot;
@@ -25,6 +28,8 @@ pub(crate) struct BgState {
     slide_at: f64,
     seed: u64,
     was_main: bool,
+    /// The colours the fades were made in.
+    pal: Option<Palette>,
 }
 
 const FADE: f64 = 0.9;
@@ -97,7 +102,9 @@ fn photo_screen(shell: &Shell) -> bool {
 }
 const SLIDE_SECS: f64 = 9.0;
 
-fn spawn(commands: &mut Commands) {
+fn spawn(commands: &mut Commands, pal: Palette) {
+    let [r, g, b] = pal.shade;
+    let shade = |a: f32| Color::srgba(r, g, b, a);
     let full = || Node {
         position_type: PositionType::Absolute,
         left: Val::Px(0.0),
@@ -110,7 +117,7 @@ fn spawn(commands: &mut Commands) {
         .spawn((
             BgRoot,
             GlobalZIndex(5),
-            BackgroundColor(Color::srgb(0.012, 0.02, 0.04)),
+            BackgroundColor(Color::srgb(r * 1.5, g * 1.25, b * 1.15)),
             Node {
                 overflow: Overflow::clip(),
                 ..full()
@@ -128,21 +135,21 @@ fn spawn(commands: &mut Commands) {
             c.spawn((
                 full(),
                 BackgroundGradient::from(LinearGradient::to_right(vec![
-                    ColorStop::new(Color::srgba(0.008, 0.016, 0.035, 0.97), Val::Percent(0.0)),
-                    ColorStop::new(Color::srgba(0.008, 0.016, 0.035, 0.78), Val::Percent(42.0)),
-                    ColorStop::new(Color::srgba(0.008, 0.016, 0.035, 0.30), Val::Percent(100.0)),
+                    ColorStop::new(shade(0.97), Val::Percent(0.0)),
+                    ColorStop::new(shade(0.78), Val::Percent(42.0)),
+                    ColorStop::new(shade(0.30), Val::Percent(100.0)),
                 ])),
             ));
             c.spawn((
                 full(),
                 BackgroundGradient::from(LinearGradient::to_bottom(vec![
-                    ColorStop::new(Color::srgba(0.008, 0.016, 0.035, 0.80), Val::Percent(0.0)),
-                    ColorStop::new(Color::srgba(0.008, 0.016, 0.035, 0.0), Val::Percent(24.0)),
-                    ColorStop::new(Color::srgba(0.008, 0.016, 0.035, 0.0), Val::Percent(62.0)),
-                    ColorStop::new(Color::srgba(0.008, 0.016, 0.035, 0.92), Val::Percent(100.0)),
+                    ColorStop::new(shade(0.80), Val::Percent(0.0)),
+                    ColorStop::new(shade(0.0), Val::Percent(24.0)),
+                    ColorStop::new(shade(0.0), Val::Percent(62.0)),
+                    ColorStop::new(shade(0.92), Val::Percent(100.0)),
                 ])),
             ));
-            c.spawn((full(), BackgroundColor(Color::srgba(0.02, 0.06, 0.14, 0.30))));
+            c.spawn((full(), BackgroundColor(pal.tint)));
         });
 }
 
@@ -166,8 +173,14 @@ pub(crate) fn shell_background(
         }
         return;
     }
-    if roots.is_empty() {
-        spawn(&mut commands);
+    // (New colours: the backdrop is made again; its pictures stay.)
+    let pal = palette(shell.screen);
+    if roots.is_empty() || st.pal != Some(pal) {
+        for e in &roots {
+            commands.entity(e).despawn();
+        }
+        spawn(&mut commands, pal);
+        st.pal = Some(pal);
         return;
     }
     let Some(c) = bridge::catalog() else { return };
@@ -193,17 +206,28 @@ pub(crate) fn shell_background(
         }
     } else {
         // The map to show.
+        // (A Zombies map and start is `zm:<map>:<start>`.)
+        let zm = |map: &str, start: usize| Some(format!("zm:{map}:{start}"));
         let target: Option<String> = match shell.screen {
             Screen::MapPick => pages(&c)
                 .get(shell.page)
                 .and_then(|(_, maps)| maps.get(shell.focus))
                 .map(|&i| c.maps[i].ui_name.clone()),
+            Screen::ZmMapPick => zombies::pages(zombies::state().bo1())
+                .get(shell.page)
+                .and_then(|(_, maps)| maps.get(shell.focus))
+                .and_then(|&i| zm(zombies::MAPS[i].map, 0)),
+            Screen::ZmStartPick => zm(&shell.zm_map, shell.focus),
+            Screen::Zombies => zm(&shell.zm_map, shell.zm_start),
             _ => Some(shell.map.clone()),
         };
         if let Some(name) = target
             && st.now.as_ref().is_none_or(|(n, ..)| *n != name)
         {
-            let pictures = c.map(&name).map(|m| m.pictures.clone()).unwrap_or_default();
+            let pictures = match name.strip_prefix("zm:").and_then(|r| r.rsplit_once(':')) {
+                Some((map, start)) => zombies::pictures(zombies::map(map), start.parse().unwrap_or(0)),
+                None => c.map(&name).map(|m| m.pictures.clone()).unwrap_or_default(),
+            };
             if let Some(h) = pics.first(&pictures, icons.as_deref(), &mut images) {
                 st.old = st.now.take().map(|(_, h, _)| (h, now));
                 st.now = Some((name, h, now));

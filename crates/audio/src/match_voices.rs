@@ -358,7 +358,7 @@ impl AnnouncerRoutes {
             AssetNamespace::T5 => T5_LINES,
             AssetNamespace::Iw5 => &[],
             // bo2zm: Black Ops II announcer lines are not mapped yet.
-            AssetNamespace::T6 => &[],
+            AssetNamespace::T6 | AssetNamespace::Iw6 | AssetNamespace::T4 | AssetNamespace::Iw3 => &[],
         };
         let Some(native) = native else {
             return Self::default();

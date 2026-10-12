@@ -6,6 +6,16 @@ mod iw5;
 mod cod4;
 // bo2mp: World at War maps, through the CoD4 lane's builders.
 mod waw;
+// bo2mp: Ghosts' guns as guest guns.
+mod iw6;
+pub(crate) use iw6::{
+    Iw6Guests, build_iw6_guest_guns, iw6_anim_check, iw6_sound_check, prefetch_iw6_guest_guns, walk_iw6_guest_guns,
+};
+// bo2mp: Call of Duty 4's and World at War's guns as guest guns.
+mod legacy_guns;
+pub(crate) use legacy_guns::{
+    Legacy, LegacyGuests, build_legacy_guest_guns, legacy_common_mp, load_legacy_guests, prefetch_legacy_guest_guns,
+};
 mod sink;
 mod t5;
 // bo2zm: Black Ops II.

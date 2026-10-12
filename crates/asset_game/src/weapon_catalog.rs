@@ -4,6 +4,14 @@ use std::collections::{HashMap, HashSet};
 #[path = "weapon_catalog_t6.rs"]
 mod t6;
 pub use t6::T6_SIGHT_ATTACHMENTS;
+// bo2mp: Ghosts weapons (guest guns).
+#[path = "weapon_catalog_iw6.rs"]
+mod iw6;
+pub use iw6::Iw6WeaponView;
+// bo2mp: Call of Duty 4 and World at War weapons (guest guns).
+#[path = "weapon_catalog_legacy.rs"]
+mod legacy;
+pub use legacy::{LegacyGame, LegacyWeaponView};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -6804,6 +6812,9 @@ impl WeaponRegistry {
             return String::new();
         }
         let prefix = ns.guest_prefix();
+        if ns == crate::AssetNamespace::Iw5 {
+            return self.iw5_guest_script_for(id);
+        }
         let tokens: Vec<&str> = row.name.split('_').collect();
         let words = ns.guest_attachment_tokens();
         for k in 1..tokens.len() {
@@ -6813,10 +6824,45 @@ impl WeaponRegistry {
             }
             let base = tokens[..k].join("_");
             if self.by_namespaced.contains_key(&(ns, base.clone())) {
+                // (A word BO2 has its own for is BO2's: WaW `silenced`.)
+                let rest: Vec<&str> = rest.iter().map(|t| ns.guest_attachment_word(t)).collect();
                 return format!("{prefix}{base}_mp+{}", rest.join("+"));
             }
         }
         format!("{prefix}{}_mp", row.name)
+    }
+
+    /// bo2mp: an MW3 row named for a BO2 match. MW3 builds its variants from
+    /// attachment configurations, not from `<gun>_<att>` rows, so the name
+    /// comes from the configuration: the gun without MW3's `iw5_` (`iw5_acr`
+    /// is `mw3_acr_mp`), then the configuration's attachments as BO2 writes
+    /// them (`mw3_acr_mp+reflex+silencer`; MW3's per-class sight and
+    /// suppressor variants, `reflexsmg`, `silencer02`, are the one word).
+    /// An underbarrel's alternate mode is `mw3_alt_acr_mp+gl+...`.
+    fn iw5_guest_script_for(&self, id: usize) -> String {
+        let prefix = crate::AssetNamespace::Iw5.guest_prefix();
+        let row = &self.rows[id];
+        let short = |name: &str| name.strip_prefix("iw5_").unwrap_or(name).to_owned();
+        let Some((base_id, _)) = row.iw5_configuration else {
+            return format!("{prefix}{}_mp", short(&row.name));
+        };
+        let Some(base) = self.rows.get(base_id as usize) else {
+            return format!("{prefix}{}_mp", short(&row.name));
+        };
+        let alternate = row.facts.inventory_type == 3 && base.facts.inventory_type != 3;
+        let mut words: Vec<&str> = row
+            .prepared_attachments
+            .iter()
+            .map(|a| crate::AssetNamespace::iw5_guest_attachment(a))
+            .collect();
+        words.sort_unstable();
+        words.dedup();
+        format!(
+            "{prefix}{}{}_mp+{}",
+            if alternate { "alt_" } else { "" },
+            short(&base.name),
+            words.join("+")
+        )
     }
 
     /// bo2mp: other games' guns join a Black Ops II match under their guest

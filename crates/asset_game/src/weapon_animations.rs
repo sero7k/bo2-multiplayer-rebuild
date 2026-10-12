@@ -29,7 +29,11 @@ impl AdsOverlayConvention {
             crate::AssetNamespace::T5 => Self::PlayAdsAnim,
             // bo2zm: follows Black Ops until BO2 weapons are measured (M2).
             crate::AssetNamespace::T6 => Self::PlayAdsAnim,
-            crate::AssetNamespace::Iw4 | crate::AssetNamespace::Iw5 => Self::WeightIsFrac,
+            crate::AssetNamespace::Iw4
+            | crate::AssetNamespace::Iw5
+            | crate::AssetNamespace::Iw6
+            | crate::AssetNamespace::T4
+            | crate::AssetNamespace::Iw3 => Self::WeightIsFrac,
         }
     }
 }

@@ -652,9 +652,14 @@ pub fn foreign_kill_icon_base(ns: asset_core::AssetNamespace, name: &str) -> Opt
         asset_core::AssetNamespace::T5 => "bo1_",
         asset_core::AssetNamespace::Iw4 => "mw2_",
         asset_core::AssetNamespace::Iw5 => "mw3_",
+        asset_core::AssetNamespace::Iw6 => "gh_",
+        asset_core::AssetNamespace::T4 => "waw_",
+        asset_core::AssetNamespace::Iw3 => "cod4_",
         asset_core::AssetNamespace::T6 => return None,
     };
     let base = name.split('+').next().unwrap_or(name).trim_end_matches("_mp");
+    // (MW3's `iw5_acr` is `mw3_acr_mp` in a BO2 match.)
+    let base = if ns == asset_core::AssetNamespace::Iw5 { base.strip_prefix("iw5_").unwrap_or(base) } else { base };
     if base.is_empty() || base == "none" {
         return None;
     }
@@ -677,5 +682,7 @@ mod foreign_kill_icon_tests {
         assert_eq!(foreign_kill_icon_base(AssetNamespace::T5, "bo1_ak74u_mp").as_deref(), Some("bo1_ak74u"));
         assert_eq!(foreign_kill_icon_base(AssetNamespace::Iw4, "m4_reflex_mp").as_deref(), Some("mw2_m4_reflex"));
         assert_eq!(foreign_kill_icon_base(AssetNamespace::T6, "an94_mp"), None);
+        assert_eq!(foreign_kill_icon_base(AssetNamespace::Iw5, "iw5_acr_mp").as_deref(), Some("mw3_acr"));
+        assert_eq!(foreign_kill_icon_base(AssetNamespace::Iw5, "rpg_mp").as_deref(), Some("mw3_rpg"));
     }
 }

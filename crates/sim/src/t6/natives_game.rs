@@ -797,10 +797,16 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     });
     // bo2mp: a script's vision (mpOutro at the match's end, then the map's
     // own): the frame's grade switches to it at once (its fade is not run).
+    // A vision no zone holds (another game's map names its own) brings the
+    // map's own grade back, so `mpIntro`'s greyscale does not stay.
     f!("visionsetnaked", |vm, _, _, a| {
         let name = text(vm, a, 0);
         let found = asset_world::set_t6_vision(&name);
-        diag::info!(Sim, "bo2mp: visionsetnaked {name} (vision found: {found})");
+        if found {
+            diag::info!(Sim, "bo2mp: visionsetnaked {name} (vision found: true)");
+        } else {
+            diag::info!(Sim, "bo2mp: visionsetnaked {name} (vision found: false; the map's own grade, none for another game's map)");
+        }
         Ok(Value::Undefined)
     });
     // The game's end (end_game): the session takes it from here.

@@ -12,6 +12,11 @@
 //! through them, and opens their Create-a-Class, Barracks and Options
 //! screens over itself until it has its own.
 //!
+//! ZOMBIES opens the same screens in red (`zombies`, `zombies_view`): a
+//! map, a start and mode, then START runs the Zombies rebuild
+//! (DaffyDabz/bo2-zombies-rebuild, built beside this game) and comes back
+//! here when it closes.
+//!
 //! `BO2_SHELL=off` brings BO2's own menus back.
 
 mod background;
@@ -27,6 +32,8 @@ pub(crate) mod pics; // (hud_match reuses the picture resolver)
 pub mod preview;
 pub(crate) mod theme; // (hud_match reuses the colours and fonts)
 mod view;
+pub(crate) mod zombies;
+mod zombies_view;
 
 use bevy::input::gamepad::{Gamepad, GamepadAxis, GamepadButton};
 use bevy::prelude::*;
@@ -53,6 +60,18 @@ pub(crate) enum Screen {
     /// Options (its tab is `page`), Barracks.
     Options,
     Barracks,
+    /// Zombies: its lobby (map, start, starting round, START), its map
+    /// picker (a page per game, `page`) and the map's starts and modes.
+    Zombies,
+    ZmMapPick,
+    ZmStartPick,
+}
+
+impl Screen {
+    /// The red Zombies screens.
+    pub(crate) fn is_zombies(self) -> bool {
+        matches!(self, Screen::Zombies | Screen::ZmMapPick | Screen::ZmStartPick)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -83,6 +102,8 @@ pub(crate) enum Setting {
     Difficulty,
     LethalCount,
     TacticalCount,
+    /// Zombies' starting round.
+    ZmRound,
     /// An Options row (of the tab he is on).
     Option(u8),
 }
@@ -107,6 +128,10 @@ pub(crate) enum Act {
     Classes,
     EditClass(i32),
     EditSlot(usize),
+    /// Zombies: start the game, pick the map, pick the start and mode.
+    ZmPlay,
+    ZmPickMap,
+    ZmPickStart,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -162,6 +187,11 @@ pub(crate) struct Shell {
     pub now: f64,
     /// His new name while he types it (Options > ACCOUNT).
     pub typing: Option<String>,
+    /// Zombies: the map (`zm_transit`), its start (an index into its
+    /// starts) and the starting round (an index into `zombies::ROUNDS`).
+    pub zm_map: String,
+    pub zm_start: usize,
+    pub zm_round: usize,
 }
 
 impl Default for Shell {
@@ -183,6 +213,9 @@ impl Default for Shell {
             cac_from: Screen::Multiplayer,
             now: 0.0,
             typing: None,
+            zm_map: zombies::MAPS[0].map.to_owned(),
+            zm_start: 0,
+            zm_round: 0,
         }
     }
 }
@@ -268,6 +301,7 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
             }
             r
         }
+        Screen::Zombies | Screen::ZmMapPick | Screen::ZmStartPick => zombies::rows(s),
         Screen::MapPick => {
             let p = pages(c);
             p.get(s.page.min(p.len().saturating_sub(1)))
@@ -331,6 +365,16 @@ impl Shell {
             }
             Screen::Main => {}
             Screen::Multiplayer => self.go(Screen::Main),
+            Screen::Zombies => {
+                self.go(Screen::Main);
+                self.focus = 1;
+            }
+            Screen::ZmMapPick | Screen::ZmStartPick => {
+                let from = self.screen;
+                self.go(Screen::Zombies);
+                self.page = 0;
+                self.focus = if from == Screen::ZmMapPick { 1 } else { 2 };
+            }
             Screen::Lobby => {
                 if bridge::starting_in().is_some() {
                     bridge::request(Request::CancelStart);
@@ -358,6 +402,7 @@ impl Shell {
             Setting::Friends => self.friends = step(self.friends, 8),
             Setting::Enemies => self.enemies = step(self.enemies, 9),
             Setting::Difficulty => self.difficulty = step(self.difficulty, 3),
+            Setting::ZmRound => self.zm_round = step(self.zm_round as u32, zombies::ROUNDS.len() as u32 - 1) as usize,
             Setting::Option(k) => options::queue(self.page, k, by),
             Setting::LethalCount | Setting::TacticalCount => {
                 if let Some(b) = classes::book() {
@@ -377,7 +422,21 @@ impl Shell {
     fn activate(&mut self, act: Act, c: &Catalog, now: f64, exit: &mut MessageWriter<AppExit>) {
         match act {
             Act::Multiplayer => self.go(Screen::Multiplayer),
-            Act::Zombies => bridge::request(Request::Zombies),
+            Act::Zombies => {
+                zombies::refresh();
+                self.go(Screen::Zombies);
+            }
+            Act::ZmPlay => match zombies::start(self) {
+                Ok(()) => {}
+                Err(e) => self.note(&e, now),
+            },
+            Act::ZmPickMap => {
+                zombies::open_map_pick(self);
+            }
+            Act::ZmPickStart => {
+                self.go(Screen::ZmStartPick);
+                self.focus = self.zm_start;
+            }
             Act::Options => {
                 self.cac_from = self.screen;
                 self.go(Screen::Options);
@@ -472,6 +531,14 @@ impl Shell {
                         self.back();
                     }
                 }
+                Screen::ZmMapPick => {
+                    zombies::choose_map(self, i);
+                    self.back();
+                }
+                Screen::ZmStartPick => {
+                    self.zm_start = i;
+                    self.back();
+                }
                 _ => {}
             },
         }
@@ -512,7 +579,7 @@ fn shell_input(
     mut sounds: MessageWriter<frame::UiPlaySound>,
     mut heard: Local<Option<(Screen, usize, Tab, usize)>>,
 ) {
-    if !enabled() || front.is_none() || bridge::lui_open() || crate::game_folders::is_open() {
+    if !enabled() || front.is_none() || bridge::lui_open() || crate::game_folders::is_open() || zombies::running() {
         typed.clear();
         return;
     }
@@ -663,6 +730,11 @@ fn shell_input(
             s.page = (s.page as i32 + by).rem_euclid(np) as usize;
             s.focus = 0;
         }
+        Screen::ZmMapPick => {
+            let np = zombies::pages(zombies::state().bo1()).len().max(1) as i32;
+            s.page = (s.page as i32 + by).rem_euclid(np) as usize;
+            s.focus = 0;
+        }
         _ => {}
     };
     if prev_tab {
@@ -673,7 +745,7 @@ fn shell_input(
     }
     // Moving.
     if n > 0 && dir != (0, 0) {
-        if matches!(shell.screen, Screen::MapPick | Screen::ItemPick) {
+        if matches!(shell.screen, Screen::MapPick | Screen::ItemPick | Screen::ZmMapPick) {
             let f = shell.focus as i32;
             let cols = GRID_COLS.load(std::sync::atomic::Ordering::Relaxed).max(1) as i32;
             let mut t = f + dir.0 + dir.1 * cols;
@@ -810,6 +882,7 @@ pub(crate) fn register_shell(app: &mut App) {
                 ingame::ingame_input,
                 ingame::ingame_view,
                 ingame::tag_hits,
+                zombies::zombies_watch,
             )
                 .chain()
                 .in_set(ClientSet::Ui),

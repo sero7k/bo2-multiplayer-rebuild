@@ -584,6 +584,28 @@ pub(crate) fn guest_guns_available() {
     bo2_profile::guest::set_available("iw4", iw4);
     let say = |listed: bool| if listed { "guns listed" } else if on { "not installed" } else { "off (BO2MP_GUEST_GUNS=0)" };
     diag::info!(Ui, "bo2mp guest guns: Black Ops {}, Modern Warfare 2 {}", say(t5), say(iw4));
+    // (Modern Warfare 3's zone version is 1; World at War's and CoD4's are
+    // `legacy_version`'s.)
+    let legacy = |game| asset_transport::legacy_version(game).unwrap_or(u32::MAX);
+    for (game, version, title) in
+        [("iw5", 1, "Modern Warfare 3"), ("t4", legacy("t4"), "World at War"), ("iw3", legacy("iw3"), "Call of Duty 4")]
+    {
+        let listed = on && root.as_ref().is_some_and(|r| asset_transport::find_common_mp_for_envelope(r, version).is_ok());
+        bo2_profile::guest::set_available(game, listed);
+        diag::info!(Ui, "bo2mp guest guns: {title} {}", say(listed));
+    }
+    // (Ghosts: its zones are read by `fastfile_iw6`; its guns are in
+    // common_core_mp.)
+    let ghosts = on && ghosts_install(root.as_ref()).is_some_and(|i| i.join("zone").join("common_core_mp.ff").is_file());
+    bo2_profile::guest::set_available("iw6", ghosts);
+    diag::info!(Ui, "bo2mp guest guns: Ghosts {}", say(ghosts));
+}
+
+/// bo2mp: where Ghosts is installed (`fastfile_iw6::install`'s search, with
+/// game_paths.cfg's `ghosts=`).
+fn ghosts_install(root: Option<&asset_transport::GamesRoot>) -> Option<std::path::PathBuf> {
+    let extra: Vec<std::path::PathBuf> = asset_transport::game_paths::get("ghosts").into_iter().collect();
+    fastfile_iw6::install::find_install(root.map(|r| r.0.as_path()), &extra)
 }
 
 /// The namespace of a game prefix (`iw4` -> MW2).
@@ -598,6 +620,11 @@ fn namespace_of(prefix: &str) -> Option<asset_core::AssetNamespace> {
 
 /// An image from a game's own IWDs (the first of `names` it has).
 pub(crate) fn read_game_image(prefix: &str, names: &[String]) -> Option<(u32, u32, Vec<u8>)> {
+    // bo2mp: Ghosts' pictures are in its zones (ui_mp), not in IWDs.
+    if prefix == "iw6" {
+        let install = ghosts_install(asset_transport::games_root_from_env().ok().as_ref())?;
+        return fastfile_iw6::ui_image::read_ui_image(&install, names);
+    }
     let root = asset_transport::games_root_from_env().ok()?;
     let main = match asset_transport::legacy_version(prefix) {
         // Call of Duty 4 / World at War: the `main` beside their zones.

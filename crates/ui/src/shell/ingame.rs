@@ -326,7 +326,7 @@ pub(crate) fn ingame_view(
         commands.entity(e).despawn();
     }
     let focus = FOCUS.load(Ordering::Relaxed) as usize;
-    let mut cx = Ctx { s, w: area.x / s, h: area.y / s, fonts: &fonts, pics: &mut pics, icons: icons.as_deref(), images: &mut images, pad };
+    let mut cx = Ctx { s, w: area.x / s, h: area.y / s, fonts: &fonts, pics: &mut pics, icons: icons.as_deref(), images: &mut images, pad, pal: super::theme::Palette::MULTIPLAYER };
     commands
         .spawn((
             GameRoot,

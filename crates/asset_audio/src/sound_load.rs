@@ -258,7 +258,31 @@ fn sound_sources(games: &GamesRoot, map: &Path) -> (Vec<SoundSource>, Vec<SoundS
         mw3_voice_source("localized_common_mp", "localized_common_mp (MW3 announcer)"),
         mw3_voice_source("localized_code_post_gfx_mp", "localized_code_post_gfx_mp (MW3 UI sounds)"),
     ]);
+    // bo2mp: Ghosts' guns as extra weapons: their sounds, from its zones
+    // (read by `fastfile_iw6`, kept under the Ghosts namespace).
+    if std::env::var("BO2MP_GUEST_GUNS").map_or(true, |v| v.trim() != "0") {
+        after_map.extend(ghosts_sound_sources(games));
+    }
     (before_map, after_map)
+}
+
+/// bo2mp: the Ghosts zones its guns' sounds come from, when Ghosts is
+/// installed.
+fn ghosts_sound_sources(games: &GamesRoot) -> Vec<SoundSource> {
+    let Some(install) = crate::ghosts_install(Some(games.0.as_path())) else {
+        return Vec::new();
+    };
+    crate::ghosts_sound_zones(&install)
+        .into_iter()
+        .zip(["common_mp (Ghosts guns)", "common_core_mp (Ghosts guns)"])
+        .map(|(path, name)| SoundSource {
+            namespace: AssetNamespace::Iw6,
+            name,
+            found: Ok(path),
+            merge: Merge::Missing,
+            absent: Absent::Skip,
+        })
+        .collect()
 }
 
 /// BO1's multiplayer announcer (`vox_ops_*`, `vox_rus_*`) is carried by its
@@ -358,7 +382,12 @@ impl SoundSources {
                 return None;
             }
         };
-        let (catalog, origin) = ensure_zone_sound(path);
+        // bo2mp: Ghosts zones are read by `fastfile_iw6` (no `ZoneGame`).
+        let (catalog, origin) = if source.namespace == AssetNamespace::Iw6 {
+            (crate::ghosts_weapon_sounds(path), ZoneSoundOrigin::AudioOnly)
+        } else {
+            ensure_zone_sound(path)
+        };
         match catalog {
             Ok(catalog) => {
                 diag::info!(

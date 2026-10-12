@@ -57,7 +57,7 @@ fn link_world_materials(
     let owner = ZoneOwner::intern(owner);
     let mut by_material: HashMap<usize, Option<usize>> = HashMap::new();
     let mut images: HashMap<String, Option<usize>> = HashMap::new();
-    let (mut decoded, mut missing) = (0usize, Vec::new());
+    let (mut decoded, mut grey, mut missing) = (0usize, 0usize, Vec::new());
     let mut out = Vec::with_capacity(world.surfaces.len());
     for surf in &world.surfaces {
         let Some(mid) = surf.material else {
@@ -93,6 +93,7 @@ fn link_world_materials(
                 let (w, h, rgba) = match pixels {
                     Some(p) => {
                         decoded += 1;
+                        grey += usize::from(asset_world::world_iw3::is_greyscale_rgba(&p.2));
                         p
                     }
                     None => {
@@ -158,7 +159,7 @@ fn link_world_materials(
         out.push(Some(index));
     }
     report.push(format!(
-        "{tag} materials: {} linked, {decoded} colour maps decoded from the IWDs, {} not found{}",
+        "{tag} materials: {} linked, {decoded} colour maps decoded from the IWDs ({grey} of them grey), {} not found{}",
         by_material.values().filter(|m| m.is_some()).count(),
         missing.len(),
         if missing.is_empty() {
@@ -237,7 +238,14 @@ pub(crate) fn load_iw3_world(
             );
         }
     };
-    build_legacy_world(&COD4, path, &zone, report, progress, material_seed)
+    let loaded = build_legacy_world(&COD4, path, &zone, report, progress, material_seed);
+    diag::info!(
+        World,
+        "bo2mp iw3: {} loaded: {}",
+        path.display(),
+        loaded.report.iter().filter(|l| l.starts_with("iw3 ") || l.starts_with("world mesh")).cloned().collect::<Vec<_>>().join("; ")
+    );
+    loaded
 }
 
 /// A legacy (CoD4-format) map zone, already read, into the match's world:
@@ -271,12 +279,22 @@ pub(crate) fn build_legacy_world(
     // Collision.
     let collision = match zone.clip_map().map(asset_world::world_iw3::build_iw3_clip_collision) {
         Some(Ok(clip)) => {
+            let origins: Vec<[f32; 3]> = spawns.iter().map(|s| s.origin).collect();
+            let census = asset_world::world_iw3::spawn_ground_census(&clip, &origins);
             report.push(format!(
-                "{tag} clip: {} brushes, {} mesh tris, {} models",
+                "{tag} clip: {} brushes ({} the world's), {} mesh tris in {} trees, {} models; {census}",
                 clip.brushes.len(),
+                clip.leaves.first().map_or(0, |l| l.num_brushes),
                 clip.mesh.tri_indices.len() / 3,
+                clip.mesh.aabb_roots.len(),
                 clip.cmodels.len()
             ));
+            if census.spawns > 0 && census.on_ground * 2 < census.spawns {
+                diag::warn!(
+                    World,
+                    "bo2mp {tag}: {map}: most spawn points have no floor of their own in the collision ({census})"
+                );
+            }
             Some(clip)
         }
         Some(Err(error)) => {

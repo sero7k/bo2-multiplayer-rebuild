@@ -71,6 +71,10 @@ pub struct LoadedSoundPcm {
     pub zone: ZoneOwner,
 
     pub seek_table: Vec<u32>,
+
+    /// bo2mp: the namespace when it is not `game`'s (Ghosts' sounds, which
+    /// no `ZoneGame` reads).
+    pub namespace: Option<AssetNamespace>,
 }
 
 impl LoadedSoundPcm {
@@ -94,7 +98,20 @@ impl LoadedSoundPcm {
             pcm: pcm.into(),
             zone: ZoneOwner::default(),
             seek_table,
+            namespace: None,
         }
+    }
+
+    /// The namespace this clip is looked up in.
+    pub fn ns(&self) -> AssetNamespace {
+        self.namespace.unwrap_or_else(|| ns_of(self.game))
+    }
+
+    /// bo2mp: 16-bit little-endian PCM (`MSS_PCM`) of `samples` frames.
+    pub fn pcm16(name: impl Into<String>, rate: u32, channels: i32, samples: u32, pcm: Vec<u8>) -> Self {
+        let mut s = Self::captured(name, MSS_PCM, rate, channels, pcm, Vec::new());
+        s.samples = samples;
+        s
     }
 
     pub fn t5_adpcm_bytes(&self) -> Option<&[u8]> {
@@ -328,9 +345,17 @@ pub struct CapturedSound {
     pub game: ZoneGame,
 
     pub zone: ZoneOwner,
+
+    /// bo2mp: the namespace when it is not `game`'s (Ghosts' sounds).
+    pub namespace: Option<AssetNamespace>,
 }
 
 impl CapturedSound {
+    /// The namespace this sound is looked up in.
+    pub fn ns(&self) -> AssetNamespace {
+        self.namespace.unwrap_or_else(|| ns_of(self.game))
+    }
+
     pub fn ent_channel(&self, variant: usize) -> Option<u32> {
         match self.game {
             // bo2zm: Black Ops II sound banks are not read yet.
@@ -460,13 +485,13 @@ impl SoundCatalog {
 
     pub fn absorb_missing_aliases_unresolved(&mut self, other: SoundCatalog) {
         for sound in other.sounds {
-            if self.index_in(ns_of(sound.game), &sound.name).is_none() {
+            if self.index_in(sound.ns(), &sound.name).is_none() {
                 self.register_sound(sound);
             }
         }
         for loaded in other.loaded {
             if self
-                .loaded_index_in(ns_of(loaded.game), &loaded.name)
+                .loaded_index_in(loaded.ns(), &loaded.name)
                 .is_none()
             {
                 self.register_loaded(loaded);
@@ -528,7 +553,9 @@ impl SoundCatalog {
     }
 
     pub fn ingest_sound(&mut self, mut sound: CapturedSound) {
-        sound.game = self.capture_game;
+        if sound.namespace.is_none() {
+            sound.game = self.capture_game;
+        }
         sound.zone = self.capture_zone;
         self.register_sound(sound);
     }
@@ -539,7 +566,7 @@ impl SoundCatalog {
 
     pub fn resolve_loaded_edges(&mut self) {
         for i in 0..self.sounds.len() {
-            let ns = ns_of(self.sounds[i].game);
+            let ns = self.sounds[i].ns();
             let alias_name = self.sounds[i].name.clone();
             for j in 0..self.sounds[i].aliases.len() {
                 let null_file = self.sounds[i].aliases[j].is_null_file();
@@ -639,7 +666,7 @@ impl SoundCatalog {
         if sound.name.is_empty() {
             return;
         }
-        let ns = ns_of(sound.game);
+        let ns = sound.ns();
         let idx = self.sounds.len();
         self.by_alias.insert((ns, sound.name.clone()), idx);
         self.by_alias_ci
@@ -651,7 +678,7 @@ impl SoundCatalog {
         if loaded.name.is_empty() {
             return;
         }
-        let ns = ns_of(loaded.game);
+        let ns = loaded.ns();
         let idx = self.loaded.len();
         self.by_loaded.insert((ns, loaded.name.clone()), idx);
         self.loaded.push(loaded);
@@ -706,7 +733,7 @@ impl SoundCatalog {
         }
         let wav = format!("/{alias}.wav");
         self.loaded.iter().enumerate().find_map(|(idx, loaded)| {
-            (ns_of(loaded.game) == ns && loaded.name.ends_with(&wav)).then_some(idx)
+            (loaded.ns() == ns && loaded.name.ends_with(&wav)).then_some(idx)
         })
     }
 
@@ -717,7 +744,7 @@ impl SoundCatalog {
     pub fn namespace_of_alias(&self, index: usize) -> AssetNamespace {
         self.sounds
             .get(index)
-            .map(|s| ns_of(s.game))
+            .map(|s| s.ns())
             .unwrap_or_default()
     }
 
@@ -967,7 +994,7 @@ impl SoundCatalog {
     ) -> Option<(AssetNamespace, String, String)> {
         let sound = self.sounds.get(index)?;
         let row = sound.aliases.get(variant)?;
-        self.streamed_from_row(ns_of(sound.game), row)
+        self.streamed_from_row(sound.ns(), row)
     }
 
     fn streamed_from_row(
@@ -1149,7 +1176,7 @@ impl SoundCatalog {
         avoid: Option<usize>,
     ) -> Option<PickLoadedOutcome<'a>> {
         let sound = self.sounds.get(index)?;
-        self.pick_from_sound(ns_of(sound.game), sound, rng, avoid, 0)
+        self.pick_from_sound(sound.ns(), sound, rng, avoid, 0)
     }
 
     fn pick_loaded_outcome_depth<'a>(
@@ -1680,6 +1707,7 @@ impl AssetLinkSink for SoundCatalog {
             aliases,
             game: self.capture_game,
             zone: self.capture_zone,
+            namespace: None,
         });
         Ok(())
     }

@@ -1155,30 +1155,115 @@ mod same_game_common_tests {
 /// missing pieces). One line each, then a summary.
 pub fn check_guest_guns() -> Vec<String> {
     let mut out = Vec::new();
-    for (game, ns) in [("t5", asset_core::AssetNamespace::T5), ("iw4", asset_core::AssetNamespace::Iw4)] {
+    for (game, ns) in [
+        ("t5", asset_core::AssetNamespace::T5),
+        ("iw4", asset_core::AssetNamespace::Iw4),
+        ("iw5", asset_core::AssetNamespace::Iw5),
+        ("t4", asset_core::AssetNamespace::T4),
+        ("iw3", asset_core::AssetNamespace::Iw3),
+        ("iw6", asset_core::AssetNamespace::Iw6),
+    ] {
+        // (`BO2MP_CHECK_GUNS=iw5,t4` checks only those games.)
+        if std::env::var("BO2MP_CHECK_GUNS").is_ok_and(|only| !only.split(',').any(|g| g.trim() == game)) {
+            continue;
+        }
         out.extend(check_guest_game(game, ns));
     }
     out
 }
 
+/// A guest game's guns read for `check-guns`: the weapons, the names of the
+/// first-person meshes and of the animations its zone brought, the report.
+struct GuestCheckLoad {
+    weapons: WeaponBuild,
+    fpv_names: std::collections::HashSet<String>,
+    xanims: XAnimBuild,
+    report: Vec<String>,
+}
+
+fn load_guest_check(game: &str, ns: asset_core::AssetNamespace, progress: &LoadProgress) -> GuestCheckLoad {
+    if game == "iw5" {
+        return load_iw5_guest_check(progress);
+    }
+    // bo2mp: Ghosts' guns, read by `fastfile_iw6` as a match reads them.
+    if game == "iw6" {
+        let mut guests = crate::lane::walk_iw6_guest_guns(true, MaterialCatalog::default(), progress);
+        guests.report.extend(crate::lane::iw6_sound_check(&guests.weapons));
+        guests.report.push(crate::lane::iw6_anim_check(&guests.xanims));
+        let fpv_names = (0..guests.fpv.len()).filter_map(|i| guests.fpv.name_at(i).map(str::to_owned)).collect();
+        return GuestCheckLoad { weapons: guests.weapons, fpv_names, xanims: guests.xanims, report: guests.report };
+    }
+    // bo2mp: World at War's and CoD4's guns, as a match reads them.
+    if let Some(legacy) = [crate::lane::Legacy::T4, crate::lane::Legacy::Iw3].into_iter().find(|l| l.tag() == game) {
+        let guests = match crate::lane::legacy_common_mp(legacy) {
+            Ok(path) => crate::lane::load_legacy_guests(legacy, &path, MaterialCatalog::default()),
+            Err(error) => crate::lane::LegacyGuests::empty(MaterialCatalog::default(), vec![format!("{game} guest guns: {error}")]),
+        };
+        let fpv_names = (0..guests.fpv.len()).filter_map(|i| guests.fpv.name_at(i).map(str::to_owned)).collect();
+        return GuestCheckLoad { weapons: guests.weapons, fpv_names, xanims: guests.xanims, report: guests.report };
+    }
+    let prep = if game == "t5" { t5_weapon_common_prep(None, progress) } else { iw4_guest_common_prep(None, progress) };
+    let job = load_jobs::open(JobKind::ImageDecode).namespace(ns.as_str());
+    let common = walk_t5_weapon_common(prep, progress, MaterialCatalog::default(), job);
+    let fpv_names = (0..common.fpv.len()).filter_map(|i| common.fpv.name_at(i).map(str::to_owned)).collect();
+    GuestCheckLoad { weapons: common.weapons, fpv_names, xanims: common.xanims, report: common.report }
+}
+
+/// bo2mp: MW3's guns as a Black Ops II match reads them: its common_mp's
+/// weapon bundle, its statstable (code_post_gfx_mp) for the families, and
+/// the attachment configurations prepared from those.
+fn load_iw5_guest_check(progress: &LoadProgress) -> GuestCheckLoad {
+    let mut report = Vec::new();
+    let empty = |report| GuestCheckLoad {
+        weapons: WeaponBuild::default(),
+        fpv_names: Default::default(),
+        xanims: XAnimBuild::default(),
+        report,
+    };
+    let Some(donor) = resolve_iw5_weapon_donor(None, &mut report) else {
+        return empty(report);
+    };
+    let job = load_jobs::open(JobKind::ImageDecode).namespace("iw5");
+    let (bundle, _images, walked) = walk_iw5_weapon_bundle(&donor, progress, job);
+    report.extend(walked);
+    let stats = match find_zone_for_tree(&donor, "code_post_gfx_mp") {
+        Ok(found) => walk_population_file(&found.path, progress, MaterialCatalog::default()).cac_tables,
+        Err(error) => {
+            report.push(format!("iw5 statstable: {error}"));
+            Vec::new()
+        }
+    };
+    let mut weapons = bundle.weapons;
+    weapons.apply_stats_tables(&stats);
+    weapons.set_family_tables(
+        stats
+            .into_iter()
+            .chain(bundle.stats_tables)
+            .map(|table| (asset_core::AssetNamespace::Iw5, table))
+            .collect(),
+    );
+    let prepared = weapons.prepare_iw5_configurations();
+    report.push(format!(
+        "iw5 configurations: prepared={} refused={}",
+        prepared.prepared,
+        prepared.refused.len()
+    ));
+    let fpv_names = (0..bundle.fpv.len()).filter_map(|i| bundle.fpv.name_at(i).map(str::to_owned)).collect();
+    GuestCheckLoad { weapons, fpv_names, xanims: bundle.xanims, report }
+}
+
 fn check_guest_game(game: &str, ns: asset_core::AssetNamespace) -> Vec<String> {
     let progress = LoadProgress::default();
-    let prep = if game == "t5" { t5_weapon_common_prep(None, &progress) } else { iw4_guest_common_prep(None, &progress) };
-    let job = load_jobs::open(JobKind::ImageDecode).namespace(ns.as_str());
-    let common = walk_t5_weapon_common(prep, &progress, MaterialCatalog::default(), job);
-    let mut out: Vec<String> = common.report.iter().map(|l| format!("  {l}")).collect();
-    let mut weapons = common.weapons;
+    let GuestCheckLoad { mut weapons, fpv_names, xanims, report } = load_guest_check(game, ns, &progress);
+    let mut out: Vec<String> = report.iter().map(|l| format!("  {l}")).collect();
     weapons.set_guest_names(true);
-    let fpv_names: std::collections::HashSet<String> = (0..common.fpv.len())
-        .filter_map(|i| common.fpv.name_at(i).map(str::to_owned))
-        .collect();
     let (mut ok, mut bad) = (0, 0);
     let listed: Vec<&bo2_profile::guest::GuestGun> = bo2_profile::guest::all().filter(|g| g.game == game).collect();
     for gun in &listed {
         let key = asset_core::AssetKey::new(ns, asset_core::AssetKind::Weapon, format!("{}_mp", gun.gun));
         let Some(id) = key.ok().and_then(|k| weapons.resolve_key(&k).ok().flatten()) else {
             bad += 1;
-            let near: Vec<String> = (1..weapons.len() as u32)
+            let near: Vec<String> = (1..=weapons.len() as u32)
                 .filter(|&i| weapons.name_of(i).starts_with(gun.gun))
                 .take(3)
                 .map(|i| format!("{}:{:?}", weapons.name_of(i), weapons.namespace_of(i)))
@@ -1188,7 +1273,7 @@ fn check_guest_game(game: &str, ns: asset_core::AssetNamespace) -> Vec<String> {
         };
         let script = weapons.script_name_of(id);
         let base = script.split('+').next().unwrap_or(&script).to_owned();
-        let variant_names: Vec<String> = (1..weapons.len() as u32)
+        let variant_names: Vec<String> = (1..=weapons.len() as u32)
             .map(|i| weapons.script_name_of(i))
             .filter(|n| n.starts_with(&format!("{base}+")))
             .collect();
@@ -1197,6 +1282,14 @@ fn check_guest_game(game: &str, ns: asset_core::AssetNamespace) -> Vec<String> {
         let fpv = !gun_model.is_empty() && fpv_names.contains(&gun_model);
         let world = weapons.world_model_of(id).unwrap_or("").to_owned();
         let anims = weapons.sz_xanims_of(id).map_or(0, |a| a.iter().filter(|x| x.is_some()).count());
+        // (Named animations its zone does not hold: they never play.)
+        let anims_absent: Vec<String> = weapons.sz_xanims_of(id).map_or(Vec::new(), |a| {
+            a.iter()
+                .flatten()
+                .filter(|n| !n.is_empty() && xanims.get(ns, n).is_none())
+                .cloned()
+                .collect()
+        });
         // (Arms are BO2's in a match: `resolve_fpv_hands` gives every gun
         // BO2's when BO2's guns are there, so no hands gap counts here.)
         let gaps: Vec<String> = weapons
@@ -1219,28 +1312,33 @@ fn check_guest_game(game: &str, ns: asset_core::AssetNamespace) -> Vec<String> {
             bad += 1;
         }
         out.push(format!(
-            "{:<22} {} script={script} variants={variants}{} view={gun_model}{} world={} anims={anims} admission={admission}",
+            "{:<22} {} script={script} variants={variants}{} view={gun_model}{} world={} anims={anims}{} admission={admission}",
             gun.reference(),
             if fine { "OK  " } else { "GAPS" },
             variant_names.first().map_or(String::new(), |v| format!(" (e.g. {v})")),
             if fpv { "" } else { " (NO FIRST-PERSON MESH)" },
             if world.is_empty() { "-" } else { world.as_str() },
+            if anims_absent.is_empty() {
+                String::new()
+            } else {
+                format!(" (not in zone: {})", anims_absent.iter().take(4).cloned().collect::<Vec<_>>().join(" "))
+            },
         ));
     }
     out.push(format!("{game}: {ok} guest guns OK, {bad} with gaps"));
     // The game's other guns with their attachment words (what could be
     // listed next).
-    let mut others: Vec<String> = (1..weapons.len() as u32)
+    let mut others: Vec<String> = (1..=weapons.len() as u32)
         .filter(|&i| weapons.namespace_of(i) == Some(ns))
         .map(|i| weapons.script_name_of(i))
         .filter(|n| !n.contains('+'))
         .filter(|n| !listed.iter().any(|g| format!("{}_mp", g.reference()) == *n))
         .filter(|n| {
-            (1..weapons.len() as u32).any(|i| weapons.script_name_of(i).starts_with(&format!("{n}+")))
+            (1..=weapons.len() as u32).any(|i| weapons.script_name_of(i).starts_with(&format!("{n}+")))
                 || weapons.resolve_index(n.trim_start_matches(ns.guest_prefix())).ok().flatten().and_then(|i| weapons.facts_of(i)).is_some_and(|f| f.weap_class <= 5)
         })
         .map(|n| {
-            let mut words: Vec<String> = (1..weapons.len() as u32)
+            let mut words: Vec<String> = (1..=weapons.len() as u32)
                 .map(|i| weapons.script_name_of(i))
                 .filter(|v| v.starts_with(&format!("{n}+")))
                 .flat_map(|v| v.split('+').skip(1).map(str::to_owned).collect::<Vec<_>>())

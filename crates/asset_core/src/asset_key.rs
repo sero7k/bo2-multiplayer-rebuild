@@ -8,6 +8,13 @@ pub enum AssetNamespace {
     Iw5,
     /// bo2zm: Black Ops II.
     T6,
+    /// bo2mp: Call of Duty: Ghosts (guest guns only).
+    Iw6,
+    /// bo2mp: Call of Duty: World at War (guest guns only; its maps are
+    /// read into Black Ops II's own namespace).
+    T4,
+    /// bo2mp: Call of Duty 4 (guest guns only, as World at War).
+    Iw3,
 }
 
 impl AssetNamespace {
@@ -17,6 +24,9 @@ impl AssetNamespace {
             Self::T5 => "t5",
             Self::Iw5 => "iw5",
             Self::T6 => "t6",
+            Self::Iw6 => "iw6",
+            Self::T4 => "t4",
+            Self::Iw3 => "iw3",
         }
     }
 
@@ -28,13 +38,16 @@ impl AssetNamespace {
             Self::Iw4 => "mw2_",
             Self::T5 => "bo1_",
             Self::Iw5 => "mw3_",
+            Self::Iw6 => "gh_",
+            Self::T4 => "waw_",
+            Self::Iw3 => "cod4_",
             Self::T6 => "",
         }
     }
 
     /// bo2mp: the game a guest gun's script name says it is from.
     pub fn from_guest_name(name: &str) -> Option<Self> {
-        [Self::T5, Self::Iw4, Self::Iw5].into_iter().find(|ns| name.starts_with(ns.guest_prefix()))
+        [Self::T5, Self::Iw4, Self::Iw5, Self::Iw6, Self::T4, Self::Iw3].into_iter().find(|ns| name.starts_with(ns.guest_prefix()))
     }
 
     /// bo2mp: the attachment words of this game's gun variants
@@ -49,7 +62,40 @@ impl AssetNamespace {
                 "acog", "akimbo", "eotech", "fmj", "gl", "grip", "heartbeat", "reflex", "rof", "shotgun", "silencer",
                 "tactical", "thermal", "xmags",
             ],
-            Self::Iw5 | Self::T6 => &[],
+            // (World at War's bipod variants are deployed modes, not
+            // attachments: `bar_bipod` stays a gun of its own.)
+            Self::T4 => &[
+                "aperture", "bayonet", "bigammo", "flash", "gl", "grip", "sawoff", "scoped", "silenced", "telescopic",
+            ],
+            Self::Iw3 => &["acog", "gl", "grip", "reflex", "silencer"],
+            Self::Iw5 | Self::T6 | Self::Iw6 => &[],
+        }
+    }
+
+    /// bo2mp: an attachment word of this game's variants as a guest gun's
+    /// name carries it: where it is one Black Ops II has, BO2's word
+    /// (World at War's `silenced` is `silencer`, `bigammo` `extclip`).
+    pub fn guest_attachment_word(self, native: &str) -> &str {
+        match (self, native) {
+            (Self::T4, "silenced") => "silencer",
+            (Self::T4, "bigammo") => "extclip",
+            _ => native,
+        }
+    }
+
+    /// bo2mp: an MW3 attachment as a guest gun's name carries it: MW3's
+    /// per-class variants of one attachment (`reflexsmg`, `reflexlmg`,
+    /// `eotechsmg`, `acogsmg`, `thermalsmg`, `silencer02`, `silencer03`)
+    /// are the one word Create-a-Class lists (`reflex`, `silencer`).
+    pub fn iw5_guest_attachment(native: &str) -> &str {
+        match native {
+            "reflexsmg" | "reflexlmg" => "reflex",
+            "eotechsmg" | "eotechlmg" => "eotech",
+            "acogsmg" => "acog",
+            "thermalsmg" => "thermal",
+            "silencer02" | "silencer03" => "silencer",
+            "gp25" | "m320" => "gl",
+            other => other,
         }
     }
 
@@ -68,6 +114,9 @@ impl AssetNamespace {
             "t5" => Some(Self::T5),
             "iw5" => Some(Self::Iw5),
             "t6" => Some(Self::T6),
+            "iw6" => Some(Self::Iw6),
+            "t4" => Some(Self::T4),
+            "iw3" => Some(Self::Iw3),
             _ => None,
         }
     }

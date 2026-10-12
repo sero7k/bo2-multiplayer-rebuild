@@ -907,6 +907,20 @@ fn prepare_streamed(
             sample_rate: pcm.rate,
         }));
     }
+    // bo2mp: a Ghosts clip names its pak and range (`offset:length`) of a
+    // FLAC stream.
+    if ns == AssetNamespace::Iw6 {
+        let bytes = asset_audio::read_ghosts_stream(dir, name).map_err(|e| {
+            diag::warn!(Audio, "audio: Ghosts clip `{name}` in `{dir}`: {e}");
+            ClipError::Read
+        })?;
+        let pcm = decode_audio_bytes(&bytes).ok_or(ClipError::Decode)?;
+        return Ok(Some(PreparedPcm {
+            samples: Arc::clone(pcm.samples()),
+            channels: pcm.channel_count(),
+            sample_rate: pcm.rate(),
+        }));
+    }
     let iwd = iwd.ok_or(ClipError::Read)?;
     let rel = format!("{dir}/{name}");
     let bytes: Vec<u8> = match iwd.read_sound(ns, &rel) {

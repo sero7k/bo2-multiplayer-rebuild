@@ -29,7 +29,7 @@ pub use gltf_export::{GltfExportSummary, export_prepared_world_gltf};
 pub use iwd::{IwdSoundIndex, NamespaceSoundIwd, NamespaceTree, NamespaceTrees};
 pub use lane::{check_iw4_map, CommonCensus, LANE_GAPS, LaneGap, LoadedWorld, ZoneLane, lane};
 // bo2mp lane C: the multiplayer front end (no map).
-pub use lane::t6_frontend::{T6Frontend, load_t6_frontend, plain_rgba8};
+pub use lane::t6_frontend::{T6Frontend, load_t6_frontend, load_t6_zm_pictures, plain_rgba8};
 pub use lane_capability::{LaneStatus, PreparedCapability, lane_status};
 pub use lighting_iw4::MODEL_LIGHTING_TILE_BYTES;
 pub use loading_screen::{LoadingPreviewSource, LoadingScreen};

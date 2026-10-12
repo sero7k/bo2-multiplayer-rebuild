@@ -321,3 +321,76 @@ fn glyph_pictures(refs: &[&ZoneCapture]) -> Vec<String> {
 pub fn plain_rgba8(image: &bevy::prelude::Image) -> Option<bevy::prelude::Image> {
     super::t6_materials::to_rgba8(image)
 }
+
+/// bo2mp shell (Zombies): Black Ops II's own Zombies pictures - the lobby's
+/// map pictures (`menu_zm_*`) and the loading pictures (`loadscreen_zm_*`) -
+/// from the Zombies front end's zones in `zone_all` (TranZit's loading
+/// pictures sit in `code_post_gfx_zm`, the DLC maps' in their packs' load
+/// zones) and any `extra` zone files (a map pack's `mod_load.ff`), as plain
+/// RGBA8 (`plain_rgba8`), for the shell's Zombies screens. Zones that are
+/// not there are skipped; the report says what was read.
+pub fn load_t6_zm_pictures(zone_all: &Path, extra: &[std::path::PathBuf]) -> (Vec<(String, bevy::prelude::Image)>, Vec<String>) {
+    const ZONES: [&str; 8] = [
+        "code_post_gfx_zm",
+        "ui_zm",
+        "patch_ui_zm",
+        "dlczm0_load_zm",
+        "dlc1_load_zm",
+        "dlc2_load_zm",
+        "dlc3_load_zm",
+        "dlc4_load_zm",
+    ];
+    let mut report = Vec::new();
+    let paths: Vec<std::path::PathBuf> = ZONES.iter().map(|z| zone_all.join(format!("{z}.ff"))).chain(extra.iter().cloned()).collect();
+    let mut captures: Vec<ZoneCapture> = Vec::new();
+    for p in paths.iter().filter(|p| p.is_file()) {
+        match asset_t6::capture_zone(p) {
+            Ok(c) => captures.push(c),
+            Err(e) => report.push(format!("t6 zm pictures: {}: {e}", p.display())),
+        }
+    }
+    // The install's image packs, then each extra zone's folder's.
+    let mut packs: Vec<PackSet> = Vec::new();
+    for dir in std::iter::once(zone_all.to_path_buf()).chain(extra.iter().filter_map(|p| p.parent().map(Path::to_path_buf))) {
+        if let Ok(p) = PackSet::open_dir(&dir) {
+            packs.push(p);
+        }
+    }
+    let mut out: Vec<(String, bevy::prelude::Image)> = Vec::new();
+    // (A later zone's picture wins a name: the patch zones come after.)
+    for c in captures.iter().rev() {
+        for m in &c.materials {
+            let name = m.name.as_str();
+            if !(name.starts_with("menu_zm_") || name.starts_with("loadscreen_zm_")) || out.iter().any(|(n, _)| n == name) {
+                continue;
+            }
+            let Some(image) = super::t6_materials::colour_texture(m, c).and_then(|t| c.images.get(t.image?.index)) else {
+                continue;
+            };
+            // (A `,name` image is one another zone defines: found in the
+            // packs by its name alone, as `hud_icons` does.)
+            let decoded = packs.iter().find_map(|p| {
+                super::t6_materials::decode(p, image).ok().or_else(|| {
+                    if !image.name.starts_with(',') {
+                        return None;
+                    }
+                    let (i, entry) = p.locate_name(&image.name)?;
+                    let bytes = p.packs[i].read(entry).ok()?;
+                    let iwi = ipak_t6::parse_iwi(&bytes).ok()?;
+                    super::t6_materials::gpu_image(&iwi).ok()
+                })
+            });
+            match decoded.as_ref().and_then(super::t6_materials::to_rgba8) {
+                Some(img) => out.push((name.to_owned(), img)),
+                None => report.push(format!("t6 zm pictures: {name}: not decoded")),
+            }
+        }
+    }
+    report.push(format!(
+        "t6 zm pictures: {} from {} zones ({})",
+        out.len(),
+        captures.len(),
+        captures.iter().map(|c| c.zone.as_str()).collect::<Vec<_>>().join(", ")
+    ));
+    (out, report)
+}

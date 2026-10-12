@@ -234,13 +234,32 @@ fn grade_slot() -> &'static RwLock<(u64, Option<Arc<T6Grade>>)> {
     SLOT.get_or_init(Default::default)
 }
 
-/// Installed once per Black Ops II map load (`None`: the map has no vision).
+/// Installed once per map load (`None`: the map has no vision of its own,
+/// as every other game's map: drawn as its colours are).
 pub fn install_t6_grade(grade: Option<T6Grade>) {
     let grade = grade.map(Arc::new);
+    if let Ok(mut m) = map_slot().write() {
+        *m = grade.clone();
+    }
     if let Ok(mut n) = naked_slot().write() {
         *n = (grade.clone(), None);
     }
     put_grade(grade);
+}
+
+/// bo2mp: the loaded map's own grade (what [`install_t6_grade`] put), which
+/// a script's `visionsetnaked` of a vision no zone holds goes back to.
+fn map_slot() -> &'static RwLock<Option<Arc<T6Grade>>> {
+    static SLOT: std::sync::OnceLock<RwLock<Option<Arc<T6Grade>>>> = std::sync::OnceLock::new();
+    SLOT.get_or_init(Default::default)
+}
+
+/// bo2mp: a map from another game under Black Ops II's rules: no vision and
+/// no colour table of its own, so its grade is none (its colours as they
+/// are), and nothing of the Black Ops II map before it stays.
+pub fn install_foreign_map_grade() {
+    set_t6_vision_base(None);
+    install_t6_grade(None);
 }
 
 fn put_grade(grade: Option<Arc<T6Grade>>) {
@@ -310,20 +329,23 @@ pub fn set_t6_vision_base(base: Option<Vec<u8>>) {
 }
 
 /// `visionsetnaked <name>`: install that vision's grade. False when no
-/// zone holds the name (the grade stays).
+/// zone holds the name: the map's own grade comes back. Black Ops II's
+/// scripts name the map's own vision to end `mpIntro` (greyscale, before
+/// the match) and `mpOutro`; a map from another game has none, and its
+/// look must not stay grey for the whole match.
 pub fn set_t6_vision(name: &str) -> bool {
-    let Some(grade) = named_grade(name) else {
-        return false;
-    };
+    let found = named_grade(name);
+    let is_found = found.is_some();
+    let grade = found.or_else(|| map_slot().read().ok().and_then(|m| m.clone()));
     // (A server vision for the local player stays over it until cleared.)
     let over = naked_slot().write().ok().is_some_and(|mut n| {
-        n.0 = Some(grade.clone());
+        n.0 = grade.clone();
         n.1.is_some()
     });
     if !over {
-        put_grade(Some(grade));
+        put_grade(grade);
     }
-    true
+    is_found
 }
 
 /// The installed grade and its generation (bumped by every install).
@@ -380,6 +402,31 @@ vc_FSM \"0.212585 0.715195 0.072220 0.880859\"\n";
             &lut[32 * 32 * 31 * 4..32 * 32 * 31 * 4 + 4],
             &[0, 0, 255, 255]
         );
+    }
+
+    /// bo2mp: `mpIntro` greys the frame before the match; the scripts then
+    /// name the map's own vision. A map with none (another game's) must
+    /// come back to its own grade, not stay grey.
+    #[test]
+    fn missing_vision_goes_back_to_the_maps_own() {
+        let mut grey = T6Vision::default();
+        grey.final_saturation[3] = 0.0;
+        register_t6_visions(vec![("test_mpintro_grey".to_owned(), grey)]);
+        install_foreign_map_grade();
+        assert!(t6_grade().1.is_none());
+        assert!(set_t6_vision("test_mpIntro_grey"));
+        let during = t6_grade().1.expect("the intro's grade");
+        assert_eq!(during.vision.final_saturation[3], 0.0);
+        assert!(!set_t6_vision("test_mp_no_such_map"));
+        assert!(t6_grade().1.is_none(), "the foreign map's own (no) grade is back");
+        // A Black Ops II map's own grade comes back the same way.
+        let own = T6Grade { lut: Vec::new(), vision: T6Vision::default() };
+        install_t6_grade(Some(own));
+        assert!(set_t6_vision("test_mpintro_grey"));
+        assert!(!set_t6_vision("test_mp_no_such_map"));
+        let back = t6_grade().1.expect("the map's own grade");
+        assert_eq!(back.vision, T6Vision::default());
+        install_foreign_map_grade();
     }
 
     #[test]

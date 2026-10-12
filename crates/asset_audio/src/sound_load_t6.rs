@@ -217,6 +217,7 @@ pub fn build_t6_sound_catalog(
                 aliases,
                 game: ZoneGame::T6,
                 zone,
+                namespace: None,
             });
         }
     }

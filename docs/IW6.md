@@ -161,8 +161,9 @@ all six to the end.
   lobby) playlist; the others are listed in `audio_manifest.csv` and can be
   added in music.cfg (`menu = ghosts:music_mainmenu_squad`, `iw6:` works too).
   Tracks stream from the pak as FLAC through `StreamedMusic`.
-* Ghosts is not an `AssetNamespace` (that enum is matched across the asset
-  pipeline; Ghosts feeds none of it yet). Add `Iw6` with phase 2.
+* `AssetNamespace::Iw6` (phase 2) carries Ghosts' guns, animations,
+  materials and sounds; Ghosts zones are still no `ZoneGame` (zone
+  discovery keeps ignoring version 0x235).
 * Zone discovery (`asset_transport::discover::files_under`) now drops plain
   non-`.ff` files before stat/canonicalize, so the paks are never touched;
   Ghosts' version 0x235 zones are ignored by every existing lane.
@@ -171,24 +172,113 @@ all six to the end.
   `<artifacts>/ghosts-check.txt`. Release-speed: common_mp inflates and scans
   in ~2 s (debug ~12 s).
 
-## Next (phase 2: weapons and a map)
+## Phase 2: the exact walk (`walk/`, `stream.rs`, `layout.rs`)
 
-1. **Exact asset walk.** The scan is enough for sounds only. Weapons need the
-   stream read in table order with every preceding asset parsed: port the
-   write() order and `align()` of x64-zt `iw6/assets/*.cpp` type by type
-   (xanim, xmodel/xmodelsurfs, material, techset/shaders, image, fx,
-   attachment, weapon, vehicle ...) onto `cursor.rs`, checking each against
-   the scan's anchors (sound lists give exact VIRTUAL checkpoints mid-zone)
-   and the asset-header references (`AssetList::asset_index_of`).
-2. **Weapons**: `common_core_mp.ff` (132 weapons, 63 attachments, their
-   xanims/models/materials/sounds); IW6 builds guns from a base weapon +
-   attachments (`WeaponCompleteDef` 296 bytes -> `WeaponDef`). Images stream
-   from `imagefile<N>.pak` via the zone's XStreamFile table; models'
-   surfaces may be in separate `xmodelsurfs`; viewhands in `mp_viewhands_*`
-   transient zones; bodies/heads in `mp_body_*_tr` / `mp_head_*_tr`.
-3. **A map**: `mp_prisonbreak.ff` (+ `_load`, `_path`, `techsets_mp_prisonbreak.ff`,
-   `patch_mp_prisonbreak.ff`): clipmap 640, comworld 40, glassworld 16,
-   map_ents 256, fxworld 176, gfxworld 2608 bytes of header. Shaders are
-   D3D11 DXBC (compute/hull/domain types exist), not the D3D9 SM3 our IW4
-   lane translates: the render side needs a DXBC path or re-authored materials.
-4. Add `AssetNamespace::Iw6` when Ghosts assets enter the shared pipeline.
+`walk::Walker` reads every asset in table order as the loader does: one
+stream, a block stack (`stream.rs`: TEMP/VIRTUAL/RUNTIME... positions, each
+`align(mask)`ed), sub-asset headers in TEMP and their contents in VIRTUAL,
+"insert" pointers taking an 8-byte VIRTUAL slot. Struct offsets come from
+`layout.rs`, generated from x64-zt's `structs.hpp` with an MSVC x64 record
+layout (`tools/README.md`). References resolve to what was read: asset slots
+(the table's and every inline-loaded pointer field), strings, shared sound
+files and loaded sounds.
+
+Checks (`cargo test -p fastfile_iw6 --release <name> -- --ignored
+--nocapture` with `IW6_WALK=<zone.ff>`): `walk_retail` (stream end = image
+end, final VIRTUAL offset = the XFile's VIRTUAL block size, unresolved
+references, sound lists against the phase-1 scan, inline-named sound list
+anchors), `surface_check`, `gun_*`, `image_dump`, `type_runs`.
+
+| zone | walked | VIRTUAL at end = block size | notes |
+|---|---|---|---|
+| common_core_mp | 3034/3034 | yes (0xaaacf50) | 0 unresolved; 739 sound lists at the scan's offsets |
+| common_mp | 8777/8777 | yes (0x22c505a) | 0 unresolved; 6296 lists; 972 name anchors ok, 0 off |
+| patch_common_core_mp, patch_common_mp, ui_mp, code_pre_gfx_mp, mp_prisonbreak_load, patch_mp_prisonbreak | all | yes | |
+| mp_prisonbreak | 1043/1741 | - | stops at ReverbPreset (then the world assets) |
+| code_post_gfx_mp, techsets_mp_prisonbreak | partial | no | technique sets with shader programs drift (not needed for guns) |
+
+Layouts settled on retail data (beyond x64-zt):
+* **Menus** (`walk/menu.rs`): x64-zt's order and `align(3)` hold, except an
+  item's `enumDvarName` (type 13): the retail loader does not align it (one
+  item in `ui_mp/ingame.txt` drifted common_mp by 4).
+* **ImpactFx** (no x64-zt type): { name; table } with 15 x 38 effect
+  pointers. **SurfaceFx**: { name; table } with 6 x 31.
+* **EquipmentSndTable** (`soundaliases/equipment_snd.def`, no x64-zt
+  type): an 88-byte header { name; 3 counts; 8 pointers }, its name, a
+  list of 4 names (`vestlight`...), 4 { name, float } (`small` 5.0...),
+  then float tables (pointer arrays and `float[6][3]` blocks, all whole
+  multiples of 8). Read exactly up to the tables, which are taken as one
+  run ending where the following raw files parse; the zone still ends on
+  its exact VIRTUAL size.
+* **Font**: x64-zt's.
+* Weapon enums: `weapType` is IW4's + 1 (0 none; every gun reads 1, the
+  Panzerfaust 3), `weapClass` and `fireType` are IW4's numbers.
+  Animation slots: 0x10 reload, 0x11 reload empty, 0x18 raise, 0x1b drop,
+  0x26/0x28/0x29 sprint, 0x30/0x31 ADS fire, 0x5a/0x5b ADS up/down.
+
+### Models, pictures, animations
+
+* `GfxPackedVertex` (32): position, binormal sign, colour, half2 UV (as
+  BO2's), normal and tangent unsigned 10:10:10 over 1023 (BO2: signed over
+  511). Blend vertices as IW4 in eight buckets (1..8 influences), bones as
+  64-byte offsets, weights /65536. All 146 gun models: 1.26 M vertices
+  inside their bounds, unit normals, indices in range, every bone valid.
+* Streamed images: the four `XStreamFile`s of a streamed image are its
+  parts in `imagefile<N>.pak` (one zlib stream each); part 0 has the
+  smallest streamed size with all smaller levels, each later part one level
+  more (`GfxImageStreamData` width/height/cumulative bytes). Decoded and
+  checked by eye (`image_dump`). Gun pictures span 18 paks
+  (imagefile1..59, ~520 MB of parts).
+* 2-D pictures (`ui_image.rs`): Create-a-Class `weapon_<gun>_360`
+  (512x256 BC3), `hud_icon_<gun>` kill icons, attachment pictures
+  (`scope_acog_360`, `muzzle_break_360` ...), inline in ui_mp.
+* Animations: IW-family part streams; all 828 gun animations decode with
+  the engine's decoder (which refuses a stream it does not use up).
+
+### Sounds
+Gun sounds are in **common_mp** (not common_core_mp): loaded 16-bit PCM
+(`ERiffAudioFormat` 1, 44.1/48 kHz). Shared loaded sounds and shared sound
+files resolve through the walk; streamed aliases name `soundfile<N>.pak`
+ranges (FLAC).
+
+## In the game (phase 2: Ghosts guns as guest guns)
+
+* `assets::lane::iw6` walks common_core_mp in every BO2-rules match with
+  guest guns (`BO2MP_GUEST_GUNS=0` turns all guest guns off): models into
+  BO2's captured form and its skinned-model builder (unit vectors repacked,
+  blend buckets folded to four influences), animations under
+  `AssetNamespace::Iw6`, materials on BO2's draw path by technique-set name
+  (Ghosts' `m_`/`mc_`/`ms_` model techniques; colour, normal, specular maps
+  from the zone or the paks; BC5 normals halved into BO2's
+  `xy*4.0157-2.0157` convention), weapons through
+  `WeaponCatalog::capture_iw6`. Arms are BO2's.
+* Names: `gh_<gun>_mp` (`AssetNamespace::Iw6`, guest prefix `gh_`); a
+  variant `gh_ak12_mp+reflex` resolves to the base gun (Ghosts' attachments
+  are not applied yet).
+* Create-a-Class: `bo2_profile::guest::GHOSTS` (39 guns, statstable rows
+  from 800, attachments as Ghosts names them, new attachment rows for
+  tracker, ironsight, barrelrange, barrelbored, flashsuppress, firetype*,
+  ammoslug); pictures `iw6:weapon_<gun>_360|hud_icon_<gun>` read by
+  `fastfile_iw6::ui_image` (front end and kill feed).
+* Sounds: `asset_audio::sound_load_iw6` adds Ghosts' common_mp and
+  common_core_mp weapon aliases (`weap_`, `wpn_`, `melee_`, ... and what they
+  chain to) to the match bank under the Ghosts namespace
+  (`CapturedSound::namespace`); loaded PCM plays as is, streamed FLAC is read
+  from its pak range when played.
+* `iw4l check-guns` (`BO2MP_CHECK_GUNS=iw6`): 39 of 39 Ghosts guns OK; fire
+  sound playable for 49 of 52 Ghosts weapons (not: the Kastet's
+  `weap_rgm_fire_plr`, the two riot shields), notetrack (reload) sounds 623
+  of 637; 828 animations decode.
+
+## Next
+
+1. Ghosts attachments on the guns (attachment assets: view/world models,
+   reticles, stat changes) instead of the base gun for every variant.
+2. **A map**: `mp_prisonbreak.ff` (+ `_load`, `_path`, `techsets_...`,
+   `patch_...`): the walk stops at ReverbPreset, before clipmap 640, comworld
+   40, glassworld 16, map_ents 256, fxworld 176, gfxworld 2608 bytes of
+   header. Technique sets with programs (code_post_gfx_mp,
+   techsets_mp_prisonbreak) still drift: only their names are needed for
+   BO2's draw path.
+3. Streamed sounds' localized paks (`<language>/..._soundfile<N>.pak`) are
+   unverified.

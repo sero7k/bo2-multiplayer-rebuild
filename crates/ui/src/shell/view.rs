@@ -27,6 +27,8 @@ pub(crate) struct Ctx<'a> {
     pub icons: Option<&'a assets::T6HudIcons>,
     pub images: &'a mut Assets<Image>,
     pub pad: bool,
+    /// The screen's colours (blue, or the Zombies screens' red).
+    pub pal: Palette,
 }
 
 impl Ctx<'_> {
@@ -73,7 +75,7 @@ pub(crate) fn header(c: &mut Kids, cx: &Ctx, trail: &[&str]) {
         },
     ))
     .with_children(|h| {
-        h.spawn((Node { width: cx.px(5.0), height: cx.px(40.0), ..default() }, BackgroundColor(ACCENT)));
+        h.spawn((Node { width: cx.px(5.0), height: cx.px(40.0), ..default() }, BackgroundColor(cx.pal.accent)));
         for (i, part) in trail.iter().enumerate() {
             let last = i + 1 == trail.len();
             if i > 0 {
@@ -101,8 +103,8 @@ fn player_card(c: &mut Kids, cx: &mut Ctx, card: &PlayerCard) {
             border: UiRect::left(cx.px(3.0)),
             ..abs(None, Some(42.0), Some(64.0), None, cx)
         },
-        BackgroundColor(PANEL),
-        BorderColor::all(ACCENT),
+        BackgroundColor(cx.pal.panel),
+        BorderColor::all(cx.pal.accent),
     ))
     .with_children(|p| {
         match icon {
@@ -126,7 +128,7 @@ fn player_card(c: &mut Kids, cx: &mut Ctx, card: &PlayerCard) {
             col.spawn((Node { width: Val::Percent(100.0), height: cx.px(4.0), ..default() }, BackgroundColor(KEYCAP)))
                 .with_child((
                     Node { width: Val::Percent(card.xp_frac * 100.0), height: Val::Percent(100.0), ..default() },
-                    BackgroundColor(ACCENT),
+                    BackgroundColor(cx.pal.accent),
                 ));
         });
         p.spawn((Text::new(card.level.to_string()), cx.bold(44.0), TextColor(WHITE)));
@@ -165,8 +167,8 @@ fn footer(c: &mut Kids, cx: &mut Ctx, shell: &Shell, online: &OnlineInfo) {
             border: UiRect::top(Val::Px(1.0)),
             ..abs(Some(0.0), None, None, Some(0.0), cx)
         },
-        BackgroundColor(Color::srgba(0.01, 0.02, 0.04, 0.72)),
-        BorderColor::all(LINE),
+        BackgroundColor(cx.pal.footer),
+        BorderColor::all(cx.pal.line),
     ))
     .with_children(|f| {
         f.spawn((Node { column_gap: cx.px(28.0), align_items: AlignItems::Center, ..default() }, Hit::Back, Button))
@@ -180,9 +182,10 @@ fn footer(c: &mut Kids, cx: &mut Ctx, shell: &Shell, online: &OnlineInfo) {
                     Screen::Lobby => hint(l, cx, "Q / E", "xenonbutton_lb", "TABS"),
                     Screen::MapPick => hint(l, cx, "Q / E", "xenonbutton_lb", "SECTIONS"),
                     Screen::ItemPick => hint(l, cx, "Q / E", "xenonbutton_lb", "CATEGORIES"),
+                    Screen::ZmMapPick if super::zombies::pages(super::zombies::state().bo1()).len() > 1 => hint(l, cx, "Q / E", "xenonbutton_lb", "SECTIONS"),
                     _ => {}
                 }
-                if (shell.screen == Screen::Lobby && shell.tab == Tab::Settings) || shell.screen == Screen::ClassEdit {
+                if (shell.screen == Screen::Lobby && shell.tab == Tab::Settings) || shell.screen == Screen::ClassEdit || shell.screen == Screen::Zombies {
                     hint(l, cx, "A / D", "xenonbutton_dpad_rl", "CHANGE");
                 }
             });
@@ -236,12 +239,12 @@ pub(crate) fn menu_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, widt
                 border: UiRect::left(cx.px(4.0)),
                 ..default()
             },
-            BorderColor::all(if on { ACCENT } else { Color::NONE }),
+            BorderColor::all(if on { cx.pal.accent } else { Color::NONE }),
         ));
         if on {
-            e.insert(fade_right(Color::srgba(0.26, 0.62, 0.95, 0.30), Color::srgba(0.26, 0.62, 0.95, 0.0)));
+            e.insert(fade_right(cx.pal.accent_a(0.30), cx.pal.accent_a(0.0)));
         } else if !big {
-            e.insert(BackgroundColor(PANEL_SOFT));
+            e.insert(BackgroundColor(cx.pal.panel_soft));
         }
         e.with_children(|row| {
             row.spawn(Node {
@@ -255,16 +258,16 @@ pub(crate) fn menu_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, widt
                 match &r.value {
                     Some(v) => {
                         line.spawn(Node { column_gap: cx.px(14.0), align_items: AlignItems::Center, ..default() }).with_children(|sel| {
-                            sel.spawn((Hit::Step(i, -1), Button, Text::new("‹"), cx.bold(px), TextColor(if on { ACCENT } else { FAINT })));
+                            sel.spawn((Hit::Step(i, -1), Button, Text::new("‹"), cx.bold(px), TextColor(if on { cx.pal.accent } else { FAINT })));
                             sel.spawn((
                                 Node { min_width: cx.px(170.0), justify_content: JustifyContent::Center, ..default() },
                             ))
                             .with_child((Text::new(v.clone()), cx.bold(px * 0.85), TextColor(if on { WHITE } else { DIM })));
-                            sel.spawn((Hit::Step(i, 1), Button, Text::new("›"), cx.bold(px), TextColor(if on { ACCENT } else { FAINT })));
+                            sel.spawn((Hit::Step(i, 1), Button, Text::new("›"), cx.bold(px), TextColor(if on { cx.pal.accent } else { FAINT })));
                         });
                     }
                     None if !big => {
-                        line.spawn((Text::new("›"), cx.bold(px), TextColor(if on { ACCENT } else { FAINT })));
+                        line.spawn((Text::new("›"), cx.bold(px), TextColor(if on { cx.pal.accent } else { FAINT })));
                     }
                     None => {}
                 }
@@ -287,8 +290,8 @@ fn online_panel(c: &mut Kids, cx: &Ctx, online: &OnlineInfo) {
             border: UiRect::top(cx.px(3.0)),
             ..abs(None, Some(176.0), Some(64.0), None, cx)
         },
-        BackgroundColor(PANEL),
-        BorderColor::all(ACCENT),
+        BackgroundColor(cx.pal.panel),
+        BorderColor::all(cx.pal.accent),
     ))
     .with_children(|p| {
         let (dot, label) = match online.status {
@@ -316,7 +319,7 @@ fn online_panel(c: &mut Kids, cx: &Ctx, online: &OnlineInfo) {
                 p.spawn((Text::new("LOCAL"), cx.bold(84.0), TextColor(TEXT.with_alpha(0.5))));
             }
         }
-        p.spawn((Node { height: Val::Px(1.0), width: Val::Percent(100.0), margin: UiRect::vertical(cx.px(8.0)), ..default() }, BackgroundColor(LINE)));
+        p.spawn((Node { height: Val::Px(1.0), width: Val::Percent(100.0), margin: UiRect::vertical(cx.px(8.0)), ..default() }, BackgroundColor(cx.pal.line)));
         let rows: Vec<(&str, String)> = match online.status {
             Status::Online => vec![
                 ("IN LOBBIES", fmt_count(online.in_lobbies)),
@@ -338,12 +341,12 @@ fn online_panel(c: &mut Kids, cx: &Ctx, online: &OnlineInfo) {
 }
 
 /// A picture cut to a box, covering it.
-fn picture_box(c: &mut Kids, cx: &mut Ctx, names: &[String], w: f32, h: f32, extra: impl Bundle) {
+pub(crate) fn picture_box(c: &mut Kids, cx: &mut Ctx, names: &[String], w: f32, h: f32, extra: impl Bundle) {
     let pic = cx.pic(names);
     let size = pic.as_ref().map(|p| cx.pic_size(p));
     c.spawn((
         Node { width: cx.px(w), height: cx.px(h), overflow: Overflow::clip(), ..default() },
-        BackgroundColor(Color::srgb(0.05, 0.07, 0.10)),
+        BackgroundColor(cx.pal.picture_bg),
         extra,
     ))
     .with_children(|b| {
@@ -400,8 +403,8 @@ pub(crate) fn tabs(c: &mut Kids, cx: &mut Ctx, labels: &[String], on: usize, hit
                     border: UiRect::bottom(cx.px(3.0)),
                     ..default()
                 },
-                BorderColor::all(if sel { ACCENT } else { Color::NONE }),
-                BackgroundColor(if sel { ACCENT_SOFT.with_alpha(0.16) } else { Color::NONE }),
+                BorderColor::all(if sel { cx.pal.accent } else { Color::NONE }),
+                BackgroundColor(if sel { cx.pal.accent_soft.with_alpha(0.16) } else { Color::NONE }),
             ))
             .with_child((Text::new(l.clone()), cx.bold(22.0), TextColor(if sel { WHITE } else { DIM })));
         }
@@ -428,8 +431,8 @@ fn lobby(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row])
     .with_children(|col| {
         col.spawn((
             Node { width: cx.px(600.0), flex_direction: FlexDirection::Column, border: UiRect::left(cx.px(4.0)), margin: UiRect::bottom(cx.px(14.0)), ..default() },
-            BorderColor::all(ACCENT),
-            BackgroundColor(PANEL),
+            BorderColor::all(cx.pal.accent),
+            BackgroundColor(cx.pal.panel),
         ))
         .with_children(|card| {
             picture_box(card, cx, &pictures, 596.0, 236.0, ());
@@ -461,9 +464,9 @@ fn lobby(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row])
         let me = &cat.player;
         let icon = cx.pic(&[me.rank_picture.clone()]);
         let diff = DIFFICULTY[shell.difficulty.min(3) as usize];
-        let mut people: Vec<(String, String, Color, bool)> = vec![(me.level.to_string(), me.name.clone(), ACCENT, true)];
+        let mut people: Vec<(String, String, Color, bool)> = vec![(me.level.to_string(), me.name.clone(), cx.pal.accent, true)];
         for i in 0..shell.friends {
-            people.push(("".to_owned(), format!("Bot {} ({})", i + 1, title_case(diff)), ACCENT, false));
+            people.push(("".to_owned(), format!("Bot {} ({})", i + 1, title_case(diff)), cx.pal.accent, false));
         }
         for i in 0..shell.enemies {
             people.push(("".to_owned(), format!("Bot {} ({})", shell.friends + i + 1, title_case(diff)), ENEMY, false));
@@ -471,7 +474,7 @@ fn lobby(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row])
         for (level, name, team, mine) in people {
             list.spawn((
                 Node { height: cx.px(36.0), column_gap: cx.px(12.0), align_items: AlignItems::Center, padding: UiRect::horizontal(cx.px(10.0)), ..default() },
-                BackgroundColor(if mine { Color::srgba(0.26, 0.62, 0.95, 0.14) } else { PANEL_SOFT }),
+                BackgroundColor(if mine { cx.pal.accent_a(0.14) } else { cx.pal.panel_soft }),
             ))
             .with_children(|r| {
                 r.spawn((Node { width: cx.px(4.0), height: cx.px(22.0), ..default() }, BackgroundColor(team)));
@@ -561,7 +564,7 @@ fn map_picker(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog) {
                 Hit::Row(k),
                 Button,
                 Node { width: cx.px(tw), height: cx.px(th), border: UiRect::all(cx.px(if on { 3.0 } else { 1.0 })), ..default() },
-                BorderColor::all(if on { ACCENT } else { LINE }),
+                BorderColor::all(if on { cx.pal.accent } else { cx.pal.line }),
             ))
             .with_children(|tile| {
                 picture_box(tile, cx, &m.pictures, tw - if on { 6.0 } else { 2.0 }, th - if on { 6.0 } else { 2.0 }, ());
@@ -577,13 +580,13 @@ fn map_picker(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog) {
                     },
                     BackgroundGradient::from(LinearGradient::to_bottom(vec![
                         ColorStop::new(Color::srgba(0.0, 0.0, 0.0, 0.0), Val::Percent(0.0)),
-                        ColorStop::new(Color::srgba(0.0, 0.02, 0.05, 0.88), Val::Percent(100.0)),
+                        ColorStop::new(cx.pal.strip, Val::Percent(100.0)),
                     ])),
                 ))
                 .with_children(|bar| {
                     bar.spawn((Text::new(m.title.clone()), cx.bold(21.0), TextColor(if on { WHITE } else { TEXT })));
                     if chosen {
-                        bar.spawn((Text::new("●"), cx.bold(16.0), TextColor(ACCENT)));
+                        bar.spawn((Text::new("●"), cx.bold(16.0), TextColor(cx.pal.accent)));
                     }
                 });
             });
@@ -598,13 +601,13 @@ fn map_picker(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog) {
         })
         .with_children(|t| {
             t.spawn((Text::new(m.title.clone()), cx.bold(64.0), TextColor(WHITE)));
-            t.spawn((Text::new(m.origin.to_uppercase()), cx.bold(22.0), TextColor(ACCENT)));
+            t.spawn((Text::new(m.origin.to_uppercase()), cx.bold(22.0), TextColor(cx.pal.accent)));
         });
     }
 }
 
 /// A map section's tab name (`MODERN WARFARE 3 2` -> `MW3 2`).
-fn short_section(title: &str) -> String {
+pub(crate) fn short_section(title: &str) -> String {
     const SHORT: [(&str, &str); 7] = [
         ("BLACK OPS II", "BO2"),
         ("BLACK OPS", "BO1"),
@@ -641,14 +644,14 @@ fn mode_picker(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &
                 border: UiRect::top(cx.px(3.0)),
                 ..abs(None, Some(176.0), Some(64.0), None, cx)
             },
-            BackgroundColor(PANEL),
-            BorderColor::all(ACCENT),
+            BackgroundColor(cx.pal.panel),
+            BorderColor::all(cx.pal.accent),
         ))
         .with_children(|p| {
             p.spawn((Text::new(m.title.clone()), cx.bold(48.0), TextColor(WHITE)));
             p.spawn((Text::new(m.desc.clone()), cx.regular(23.0), TextColor(TEXT)));
             if m.key == shell.mode {
-                p.spawn((Text::new("SELECTED"), cx.bold(19.0), TextColor(ACCENT)));
+                p.spawn((Text::new("SELECTED"), cx.bold(19.0), TextColor(cx.pal.accent)));
             }
         });
     }
@@ -672,8 +675,8 @@ pub(crate) fn options_view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Ro
     if let Some(r) = rows.get(shell.focus).filter(|r| !r.sub.is_empty()) {
         c.spawn((
             Node { width: cx.px(520.0), padding: UiRect::all(cx.px(22.0)), border: UiRect::top(cx.px(3.0)), ..abs(None, Some(196.0), Some(64.0), None, cx) },
-            BackgroundColor(PANEL),
-            BorderColor::all(ACCENT),
+            BackgroundColor(cx.pal.panel),
+            BorderColor::all(cx.pal.accent),
         ))
         .with_children(|p| {
             p.spawn((Text::new(r.sub.clone()), cx.regular(23.0), TextColor(TEXT)));
@@ -701,8 +704,8 @@ fn barracks_view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows:
             border: UiRect::top(cx.px(3.0)),
             ..abs(Some(680.0), Some(176.0), None, None, cx)
         },
-        BackgroundColor(PANEL),
-        BorderColor::all(ACCENT),
+        BackgroundColor(cx.pal.panel),
+        BorderColor::all(cx.pal.accent),
     ))
     .with_children(|p| {
         p.spawn(Node { column_gap: cx.px(24.0), align_items: AlignItems::Center, ..default() }).with_children(|top| {
@@ -717,20 +720,20 @@ fn barracks_view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows:
             top.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(6.0), flex_grow: 1.0, ..default() }).with_children(|t| {
                 t.spawn((Text::new(me.name.clone()), cx.bold(52.0), TextColor(WHITE)));
                 let prestige = if me.prestige > 0 { format!("PRESTIGE {}  ·  ", me.prestige) } else { String::new() };
-                t.spawn((Text::new(format!("{prestige}LEVEL {} OF {}", me.level, bo2_profile::progression::MAX_LEVEL)), cx.bold(24.0), TextColor(ACCENT)));
+                t.spawn((Text::new(format!("{prestige}LEVEL {} OF {}", me.level, bo2_profile::progression::MAX_LEVEL)), cx.bold(24.0), TextColor(cx.pal.accent)));
                 t.spawn((Node { width: Val::Percent(100.0), height: cx.px(8.0), ..default() }, BackgroundColor(KEYCAP)))
-                    .with_child((Node { width: Val::Percent(me.xp_frac * 100.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(ACCENT)));
+                    .with_child((Node { width: Val::Percent(me.xp_frac * 100.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(cx.pal.accent)));
                 t.spawn((Text::new(format!("{} XP  ·  NEXT LEVEL AT {}", me.xp, me.xp_next)), cx.regular(19.0), TextColor(DIM)));
             });
         });
-        p.spawn((Node { height: Val::Px(1.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(LINE)));
+        p.spawn((Node { height: Val::Px(1.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(cx.pal.line)));
         if shell.focus == 0 {
             p.spawn((Text::new("COMBAT RECORD"), cx.bold(22.0), TextColor(FAINT)));
             p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: cx.px(16.0), row_gap: cx.px(16.0), ..default() }).with_children(|g| {
                 for (k, v) in &me.record {
                     g.spawn((
                         Node { width: cx.px(240.0), flex_direction: FlexDirection::Column, padding: UiRect::all(cx.px(14.0)), ..default() },
-                        BackgroundColor(PANEL_SOFT),
+                        BackgroundColor(cx.pal.panel_soft),
                     ))
                     .with_children(|b| {
                         b.spawn((Text::new(v.clone()), cx.bold(40.0), TextColor(WHITE)));
@@ -753,8 +756,8 @@ fn barracks_view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows:
                         let reached = me.prestige >= n;
                         g.spawn((
                             Node { width: cx.px(46.0), height: cx.px(46.0), border: UiRect::all(cx.px(if me.prestige == n { 2.0 } else { 0.0 })), ..default() },
-                            BorderColor::all(ACCENT),
-                            BackgroundColor(PANEL_SOFT),
+                            BorderColor::all(cx.pal.accent),
+                            BackgroundColor(cx.pal.panel_soft),
                         ))
                         .with_children(|b| {
                             if let Some(h) = pic {
@@ -784,8 +787,8 @@ fn main_menu(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row]) {
             Node { column_gap: cx.px(12.0), align_items: AlignItems::Center, margin: UiRect::bottom(cx.px(56.0)), ..default() },
         ))
         .with_children(|t| {
-            t.spawn((Node { width: cx.px(40.0), height: cx.px(3.0), ..default() }, BackgroundColor(ACCENT)));
-            t.spawn((Text::new("CLASSIC MULTIPLAYER"), cx.bold(24.0), TextColor(ACCENT)));
+            t.spawn((Node { width: cx.px(40.0), height: cx.px(3.0), ..default() }, BackgroundColor(cx.pal.accent)));
+            t.spawn((Text::new("CLASSIC MULTIPLAYER"), cx.bold(24.0), TextColor(cx.pal.accent)));
         });
         menu_rows(col, cx, rows, shell.focus, 460.0, true);
     });
@@ -834,11 +837,12 @@ pub(crate) fn shell_view(
     let tick = if pics.pending() { (time.elapsed_secs() * 2.0) as u64 } else { 0 };
     let book = super::classes::book().map_or(0, |b| std::sync::Arc::as_ptr(&b) as usize);
     let key = format!(
-        "{:?}|{:p}|{}|{online:?}|{area:?}|{pad}|{starting:?}|{tick}|{book}|{}",
+        "{:?}|{:p}|{}|{online:?}|{area:?}|{pad}|{starting:?}|{tick}|{book}|{}|{:?}",
         *shell,
         std::sync::Arc::as_ptr(&cat),
         pics.count(),
-        super::options::snapshot().revision
+        super::options::snapshot().revision,
+        super::zombies::state()
     );
     if *drawn == key && !roots.is_empty() {
         return;
@@ -857,6 +861,7 @@ pub(crate) fn shell_view(
         icons: icons.as_deref(),
         images: &mut images,
         pad,
+        pal: palette(shell.screen),
     };
     commands
         .spawn((
@@ -883,13 +888,14 @@ pub(crate) fn shell_view(
                         super::cac::view(c, &mut cx, &shell, &book, &rows);
                     }
                 }
+                Screen::Zombies | Screen::ZmMapPick | Screen::ZmStartPick => super::zombies_view::view(c, &mut cx, &shell, &rows),
             }
             player_card(c, &mut cx, &cat.player);
             footer(c, &mut cx, &shell, &online);
             if let Some((note, _)) = &shell.note {
                 c.spawn((
                     Node { padding: UiRect::axes(cx.px(22.0), cx.px(10.0)), border: UiRect::left(cx.px(3.0)), ..abs(Some(72.0), None, None, Some(84.0), &cx) },
-                    BackgroundColor(PANEL),
+                    BackgroundColor(cx.pal.panel),
                     BorderColor::all(GOLD),
                 ))
                 .with_child((Text::new(note.clone()), cx.bold(21.0), TextColor(WHITE)));

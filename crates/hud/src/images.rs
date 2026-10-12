@@ -345,6 +345,11 @@ impl HudImages {
                 return;
             }
         }
+        // bo2mp: Ghosts' pictures (its guns' kill icons) are in its zones.
+        if ns == AssetNamespace::Iw6 {
+            self.rgba_by_name.insert(key, ghosts_ui_rgba(name));
+            return;
+        }
         let decoded = self.decode_iwd_rgba(ns, name);
         self.rgba_by_name.insert(key, decoded);
     }
@@ -461,7 +466,16 @@ impl HudImages {
         if cache_key(name) == "white" {
             return Some((1, 1, vec![255; 4]));
         }
-        let main = self.trees.main_for(ns)?;
+        // (bo2mp: World at War's and CoD4's guest guns: their `main` is
+        // beside their common zone; they have no namespace tree.)
+        let legacy_main;
+        let main = match self.trees.main_for(ns) {
+            Some(main) => main,
+            None => {
+                legacy_main = legacy_main_for(ns)?;
+                legacy_main.as_path()
+            }
+        };
         let mapped = (ns == HUD_CHROME_NAMESPACE)
             .then(|| {
                 self.material_images
@@ -516,4 +530,22 @@ impl HudImages {
         self.zone_handles.insert(key, handle.clone());
         Some(handle)
     }
+}
+
+/// bo2mp: World at War's or CoD4's `main` (beside its multiplayer common
+/// zone), for its guest guns' pictures.
+fn legacy_main_for(ns: AssetNamespace) -> Option<std::path::PathBuf> {
+    let version = asset_transport::legacy_version(ns.as_str())?;
+    let root = asset_transport::games_root_from_env().ok()?;
+    let common = asset_transport::find_common_mp_for_envelope(&root, version).ok()?;
+    Some(asset_transport::game_root_for_zone(&common.path).ok()?.join("main"))
+}
+
+/// bo2mp: a Ghosts 2-D picture by material name (`hud_icon_ak12`), read
+/// from its ui_mp / common_core_mp zones when Ghosts is installed.
+fn ghosts_ui_rgba(name: &str) -> Option<(u32, u32, Vec<u8>)> {
+    let root = asset_transport::games_root_from_env().ok();
+    let extra: Vec<std::path::PathBuf> = asset_transport::game_paths::get("ghosts").into_iter().collect();
+    let install = fastfile_iw6::install::find_install(root.as_ref().map(|r| r.0.as_path()), &extra)?;
+    fastfile_iw6::ui_image::read_ui_image(&install, &[name.trim_start_matches(',').to_owned()])
 }

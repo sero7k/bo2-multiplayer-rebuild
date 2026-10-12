@@ -25,5 +25,8 @@ bcdec_rs.workspace = true
 xmodel_runtime.workspace = true
 bevy.workspace = true
 
+[dev-dependencies]
+t4 = { path = "../t4" } # bo2mp: legacy_clip_probe example
+
 [lints]
 workspace = true

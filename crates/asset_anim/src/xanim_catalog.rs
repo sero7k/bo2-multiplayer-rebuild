@@ -235,6 +235,9 @@ impl XAnimCatalog {
                 AssetNamespace::T5 => 2,
                 AssetNamespace::Iw5 => 4,
                 AssetNamespace::T6 => 8, // bo2zm
+                AssetNamespace::Iw6 => 16,
+                AssetNamespace::T4 => 32,
+                AssetNamespace::Iw3 => 64,
             };
         }
         seen.values().filter(|bits| bits.count_ones() >= 2).count()
@@ -527,6 +530,13 @@ impl XAnimBuild {
     /// data streams use the same part types and packing as IW4 and Black
     /// Ops, so they go to the decoder as they are.
     pub fn insert_t6(&mut self, anim: &asset_t6::XAnimRef) -> bool {
+        self.insert_t6_as(AssetNamespace::T6, anim)
+    }
+
+    /// bo2mp: an animation in Black Ops II's captured form under another
+    /// game's namespace (Ghosts' guest guns: their part types and packing
+    /// are the IW family's too).
+    pub fn insert_t6_as(&mut self, namespace: AssetNamespace, anim: &asset_t6::XAnimRef) -> bool {
         let name = anim.name.trim_start_matches(',');
         if name.is_empty() || name.len() != anim.name.len() {
             // A comma-named asset is a reference to another zone's.
@@ -537,9 +547,9 @@ impl XAnimBuild {
             return false;
         }
         self.insert_in(
-            AssetNamespace::T6,
+            namespace,
             CapturedXAnim {
-                namespace: AssetNamespace::T6,
+                namespace,
                 root_motion: if anim.delta {
                     t6_root_motion(&anim.delta_trans).map(Arc::new)
                 } else {

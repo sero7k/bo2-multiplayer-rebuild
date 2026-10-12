@@ -1237,7 +1237,7 @@ fn play_alias_oneshot_at(
     let loaded_ns = outcome
         .picked
         .as_ref()
-        .map(|p| AssetNamespace::from_zone_game(p.sound.game));
+        .map(|p| p.sound.ns());
     let Some(clip) = clip_key_for_variant(
         bank,
         namespace,

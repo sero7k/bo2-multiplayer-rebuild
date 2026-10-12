@@ -99,7 +99,6 @@ pub(crate) struct StartSpec {
 pub(crate) enum Request {
     Start(StartSpec),
     CancelStart,
-    Zombies,
     /// Barracks' ENTER PRESTIGE.
     Prestige,
     /// Options > ACCOUNT > UNLOCK ALL.
@@ -418,11 +417,6 @@ pub(crate) fn lui_side(host: &mut Host, mp: Option<&Mp>) {
                     let mut m = m.borrow_mut();
                     m.start_requested = false;
                     m.private_start_ms = None;
-                }
-            }
-            Request::Zombies => {
-                if let Some(m) = mp {
-                    m.borrow_mut().zombies_requested = true;
                 }
             }
             Request::UnlockAll(on) => {

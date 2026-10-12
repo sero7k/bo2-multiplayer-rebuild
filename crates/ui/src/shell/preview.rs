@@ -10,7 +10,7 @@ use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use super::bridge::{self, Catalog, MapEntry, ModeEntry, PlayerCard};
 use super::classes::{self, ClassBook, ClassItem, ClassView};
 use super::pics::ShellPics;
-use super::{Screen, Shell, Tab};
+use super::{Screen, Shell, Tab, zombies};
 
 #[derive(Resource)]
 struct Plan {
@@ -154,6 +154,18 @@ fn stand_in_book() -> ClassBook {
     b
 }
 
+/// A stand-in Zombies game: the Black Ops maps on, and the Zombies
+/// rebuild's screenshots from `BO2MP_ZOMBIES_SHOTS` (its `docs/screenshots`)
+/// when that is set.
+fn stand_in_zombies() -> zombies::Install {
+    zombies::Install {
+        exe: PathBuf::from("C:/Users/you/Documents/Call of Duty Claude/zombies/play/iw4l.exe"),
+        dir: PathBuf::from("C:/Users/you/Documents/Call of Duty Claude/zombies/play"),
+        extra: vec![PathBuf::from("C:/Users/you/Documents/zombies_declassified")],
+        shots: std::env::var_os("BO2MP_ZOMBIES_SHOTS").map(PathBuf::from),
+    }
+}
+
 fn step(
     mut commands: Commands,
     mut plan: ResMut<Plan>,
@@ -173,7 +185,7 @@ fn step(
         return;
     }
     plan.frames = 0;
-    let shots: [(&str, fn(&mut Shell, &mut Commands)); 16] = [
+    let shots: &[(&str, fn(&mut Shell, &mut Commands))] = &[
         ("01_main", |s, _| *s = Shell::default()),
         ("02_multiplayer", |s, _| {
             s.screen = Screen::Multiplayer;
@@ -236,6 +248,52 @@ fn step(
             s.screen = Screen::Barracks;
             s.focus = 0;
         }),
+        // Zombies: the same screens in red.
+        ("zm1_lobby", |s, _| {
+            zombies::set_preview(Ok(stand_in_zombies()), None);
+            s.screen = Screen::Zombies;
+            s.zm_map = "zm_transit".to_owned();
+            s.zm_start = 3;
+            s.zm_round = 2;
+            s.focus = 0;
+        }),
+        ("zm2_lobby_round", |s, _| {
+            s.focus = 3;
+        }),
+        ("zm3_map_picker", |s, _| {
+            s.screen = Screen::ZmMapPick;
+            s.page = 0;
+            s.focus = 3;
+        }),
+        ("zm4_map_picker_bo1", |s, _| {
+            s.page = 1;
+            s.focus = 4;
+        }),
+        ("zm5_start_picker", |s, _| {
+            s.screen = Screen::ZmStartPick;
+            s.page = 0;
+            s.focus = 6;
+        }),
+        ("zm6_in_zombies", |s, _| {
+            zombies::set_preview(Ok(stand_in_zombies()), Some("TOWN  ·  GRIEF on TRANZIT"));
+            s.screen = Screen::Zombies;
+            s.focus = 0;
+        }),
+        ("zm7_not_installed", |s, _| {
+            zombies::set_preview(
+                Err("The Zombies game is not built yet. It is looked for at C:\\Users\\you\\Documents\\Call of Duty Claude\\zombies\\play\\iw4l.exe. Run run-bo2.cmd again: it builds Zombies (DaffyDabz/bo2-zombies-rebuild) into the project's zombies folder.".to_owned()),
+                None,
+            );
+            s.zm_map = "zm_prison".to_owned();
+            s.zm_start = 0;
+            s.zm_round = 0;
+            s.focus = 0;
+        }),
+        ("zm8_main_after", |s, _| {
+            zombies::set_preview(Ok(stand_in_zombies()), None);
+            s.screen = Screen::Main;
+            s.focus = 1;
+        }),
         ("12_loading", |_, c| {
             c.remove_resource::<crate::lui_frontend::Bo2mpFrontend>();
             c.insert_resource(session::Bo2mpMatchSetup { map: "mp_terminal".to_owned(), gametype: "gun".to_owned(), ..default() });
@@ -247,7 +305,16 @@ fn step(
         }),
     ];
     // Each step: set it up, then a picture of it on the next turn.
+    // (BO2MP_PREVIEW_ONLY=<prefix>: only the pictures named so are saved;
+    // every step is still set up, in order.)
+    let only = std::env::var("BO2MP_PREVIEW_ONLY").unwrap_or_default();
     let i = plan.step / 2;
+    if plan.step % 2 == 0 && i < shots.len() && !shots[i].0.starts_with(only.as_str()) {
+        (shots[i].1)(&mut shell, &mut commands);
+        plan.step += 2;
+        plan.frames = 39;
+        return;
+    }
     if i >= shots.len() {
         exit.write(AppExit::Success);
         return;
@@ -271,5 +338,6 @@ pub fn install(app: &mut App, pictures: Vec<(String, Image)>, out: PathBuf) {
     classes::set_preview_book(stand_in_book());
     app.insert_resource(crate::lui_frontend::Bo2mpFrontend { stats_path: PathBuf::new() });
     app.insert_resource(Plan { out, step: 0, frames: 0, pictures });
+    zombies::set_preview(Ok(stand_in_zombies()), None);
     app.add_systems(Update, step);
 }

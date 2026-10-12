@@ -47,6 +47,17 @@ impl ShellPics {
             self.found.insert(name.to_owned(), h.clone());
             return Some(h);
         }
+        // (The Zombies screens' pictures: Black Ops II's Zombies zones, the
+        // Zombies rebuild's screenshots. While the zones are first read the
+        // wait does not count towards giving up.)
+        if super::zombies::is_zm_picture(name) {
+            let img = super::zombies::picture(name);
+            if img.is_none() && super::zombies::pictures_busy() {
+                self.tried.insert(name.to_owned(), 1);
+                return None;
+            }
+            return self.keep(name, img, images);
+        }
         let own = icons.and_then(|i| i.0.iter().find(|(k, _)| k == name).map(|(_, i)| i.clone()));
         // (A small map shot of BO2's own is made bigger off the main thread
         // too; the original stands in should that fail.)
@@ -68,6 +79,11 @@ impl ShellPics {
         let img = own
             .or_else(|| crate::foreign_maps::map_picture(name))
             .or_else(|| crate::foreign_maps::prestige_picture(name));
+        self.keep(name, img, images)
+    }
+
+    /// A picture read (kept, clamped at its edges), or not (yet).
+    fn keep(&mut self, name: &str, img: Option<std::sync::Arc<Image>>, images: &mut Assets<Image>) -> Option<Handle<Image>> {
         match img {
             Some(img) => {
                 let mut img = (*img).clone();

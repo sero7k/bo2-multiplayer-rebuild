@@ -276,9 +276,11 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
     let mut donor_report = Vec::new();
     let material_donor = key.foreign.clone();
     let weapon_donor = resolve_iw5_weapon_donor(anchor.as_deref(), &mut donor_report);
-    // bo2mp: under Black Ops II's rules MW3's guns are not wanted; MW3's
-    // common zone is walked only when an MW3 map needs its materials.
-    let weapon_donor = if crate::t6_rules() {
+    // bo2mp: under Black Ops II's rules MW3's guns join only as guest guns
+    // (`mw3_acr_mp+reflex`, on with the other games' guest guns); with
+    // `BO2MP_GUEST_GUNS=0` MW3's common zone is walked only when an MW3
+    // map needs its materials.
+    let weapon_donor = if crate::t6_rules() && !crate::guest_guns() {
         let kept = weapon_donor.filter(|donor| material_donor.as_ref() == Some(donor));
         if kept.is_none() {
             donor_report.push("iw5 weapons: skip, Black Ops II rules (its own guns)".into());
@@ -369,6 +371,19 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
             iw4_guest_common_prep(anchor.as_deref(), &progress)
         })
     };
+    // bo2mp: World at War's and CoD4's guns as extra weapons: their common
+    // zones are read ahead here, side by side; their materials are linked
+    // after Ghosts' on the same pool.
+    // bo2mp: Ghosts' guns: its common_core_mp inflated and walked ahead
+    // (linked after MW2's on the same material pool).
+    let iw6_prefetch = {
+        let wanted = crate::t6_rules() && crate::guest_guns();
+        pool.spawn(async move { crate::lane::prefetch_iw6_guest_guns(wanted) })
+    };
+    let legacy_prefetch = [crate::lane::Legacy::T4, crate::lane::Legacy::Iw3].map(|game| {
+        let wanted = crate::t6_rules() && crate::guest_guns();
+        pool.spawn(async move { crate::lane::prefetch_legacy_guest_guns(game, wanted) })
+    });
     let localize_walk = {
         let anchor = anchor.clone();
         let progress = progress.clone();
@@ -425,7 +440,7 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
         weapons: iw4_guest_weapons,
         fpv: iw4_guest_fpv,
         world_guns: iw4_guest_world_guns,
-        mut material_seed,
+        material_seed,
         xanims: iw4_guest_xanims,
         fx: iw4_guest_fx,
         projectiles: iw4_guest_projectiles,
@@ -440,9 +455,37 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
         pool.spawn(async move { walk_t5_weapon_common(prep, &progress, material_seed, job) }).await
     };
     common_report.extend(iw4_guest_report.into_iter().map(|l| l.replacen("t5 weapon common", "iw4 guest guns", 1)));
+    // bo2mp: Ghosts' guest guns, after MW2's on the same material pool.
+    let crate::lane::Iw6Guests {
+        weapons: iw6_guest_weapons,
+        fpv: iw6_guest_fpv,
+        world_guns: iw6_guest_world_guns,
+        xanims: iw6_guest_xanims,
+        material_seed,
+        report: iw6_guest_report,
+    } = {
+        let progress = progress.clone();
+        let prefetch = iw6_prefetch.await;
+        pool.spawn(async move { crate::lane::build_iw6_guest_guns(prefetch, material_seed, &progress) }).await
+    };
+    common_report.extend(iw6_guest_report);
+    let mut legacy_guests = Vec::new();
+    let mut material_seed = material_seed;
+    for prefetch in legacy_prefetch {
+        let prefetch = prefetch.await;
+        let progress = progress.clone();
+        let mut guests =
+            pool.spawn(async move { crate::lane::build_legacy_guest_guns(prefetch, material_seed, &progress) }).await;
+        material_seed = std::mem::take(&mut guests.material_seed);
+        common_report.append(&mut guests.report);
+        legacy_guests.push(guests);
+    }
     let mut t5_xanims = t5_xanims;
     let mut t5_fx = t5_fx;
     let iw4_guest_xanim_n = t5_xanims.absorb(iw4_guest_xanims);
+    let iw6_guest_xanim_n = t5_xanims.absorb(iw6_guest_xanims);
+    let legacy_xanim_n: Vec<usize> =
+        legacy_guests.iter_mut().map(|g| t5_xanims.absorb(std::mem::take(&mut g.xanims))).collect();
     t5_fx.absorb_missing(iw4_guest_fx);
     let t5_ids = t5_weapons.len();
     let t5_fpv_n = t5_fpv.len();
@@ -671,6 +714,32 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
             "iw4 guest guns absorbed: {n} weapons, fpv=+{fpv} world_guns=+{world} xanims=+{iw4_guest_xanim_n}; registry now {} (iw4={})",
             weapons.len(),
             weapons.namespace_count(asset_core::AssetNamespace::Iw4)
+        ));
+    }
+    if !iw6_guest_weapons.is_empty() {
+        let n = iw6_guest_weapons.len();
+        weapons.absorb(iw6_guest_weapons);
+        let fpv = fpv_meshes.absorb(iw6_guest_fpv);
+        let world = world_weapons.absorb(iw6_guest_world_guns);
+        common_report.push(format!(
+            "iw6 guest guns absorbed: {n} weapons, fpv=+{fpv} world_guns=+{world} xanims=+{iw6_guest_xanim_n}; registry now {} (iw6={})",
+            weapons.len(),
+            weapons.namespace_count(asset_core::AssetNamespace::Iw6)
+        ));
+    }
+    for (guests, xanim_n) in legacy_guests.into_iter().zip(legacy_xanim_n) {
+        if guests.weapons.is_empty() {
+            continue;
+        }
+        let ns = guests.weapons.namespace_of(1);
+        let n = guests.weapons.len();
+        weapons.absorb(guests.weapons);
+        let fpv = fpv_meshes.absorb(guests.fpv);
+        let world = world_weapons.absorb(guests.world_guns);
+        common_report.push(format!(
+            "{} guest guns absorbed: {n} weapons, fpv=+{fpv} world_guns=+{world} xanims=+{xanim_n}; registry now {}",
+            ns.map_or("?", |ns| ns.as_str()),
+            weapons.len(),
         ));
     }
     projectile_meshes.absorb(t5_projectiles);

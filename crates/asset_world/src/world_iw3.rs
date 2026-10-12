@@ -11,14 +11,15 @@
 //! Collision: every brush with its axial and side planes (IW3 keeps IW4's
 //! surface flag bits), the collision triangles under their AABB trees, and
 //! the brush models' brushes through their leaf brush trees. The world's
-//! BSP is not read yet: traces test every brush (the trace's own fallback).
+//! BSP is not read yet: one leaf holds every brush no brush model owns, and
+//! the world's triangles are every tree of the AABB forest.
 
 use asset_iw4::size as iw4_sz;
 use dpvs_iw4::{AabbNodeView, Bounds, SurfRange};
 use iw3::zone::{ClipMap, GfxWorld};
 
 use crate::clip_collision::{
-    ClipBrush, ClipCmodel, ClipCollision, ClipCollisionError, ClipMapMaterial,
+    ClipBrush, ClipBspLeaf, ClipBspNode, ClipCmodel, ClipCollision, ClipCollisionError, ClipMapMaterial,
     LEAFBRUSH_NODE_MAX_DEPTH, leafbrush_node_visits, leafbrush_range, t5_axial_plane_flags,
 };
 use crate::world_draw::{
@@ -312,6 +313,33 @@ fn append_tree_brushes(clip: &ClipMap, root: i32, out: &mut Vec<u16>) -> Result<
     leafbrush_range(first_len, out.len())
 }
 
+/// The world's collision triangle trees: every root of the AABB forest (a
+/// node no other node lists as a child) but the brush models' own.
+fn legacy_aabb_roots(clip: &ClipMap) -> Vec<u16> {
+    let nodes: Vec<clipmap_iw4::ClipAabbNode> = clip
+        .aabb_trees
+        .iter()
+        .map(|t| clipmap_iw4::ClipAabbNode {
+            origin: t.origin,
+            half_size: t.half_size,
+            material_index: t.material_index,
+            child_count: t.child_count,
+            u: t.index,
+        })
+        .collect();
+    let mut roots: std::collections::BTreeSet<u16> = clipmap_iw4::aabb_forest_roots(&nodes).into_iter().collect();
+    // A brush model's own trees move with it: not the world's.
+    for m in clip.cmodels.iter().skip(1) {
+        let first = u32::from(m.first_coll_aabb);
+        for id in first..first + u32::from(m.coll_aabb_count) {
+            if let Ok(id) = u16::try_from(id) {
+                roots.remove(&id);
+            }
+        }
+    }
+    roots.into_iter().collect()
+}
+
 pub fn build_iw3_clip_collision(clip: &ClipMap) -> Result<ClipCollision, ClipCollisionError> {
     if clip.brushes.is_empty() && clip.tri_indices.is_empty() {
         return Err(ClipCollisionError::MissingTables);
@@ -406,19 +434,14 @@ pub fn build_iw3_clip_collision(clip: &ClipMap) -> Result<ClipCollision, ClipCol
     mesh.tri_surface_flags = clipmap_iw4::flatten_tri_surface_flags(&leaves, &partitions, &sflags, tri_count);
     mesh.tri_content_flags = clipmap_iw4::flatten_tri_surface_flags(&leaves, &partitions, &cflags, tri_count);
     out.tri_material_index = clipmap_iw4::flatten_tri_material_index(&leaves, &partitions, tri_count);
-    // The triangle trees' roots: every model's own.
-    let mut roots = std::collections::BTreeSet::new();
-    for m in &clip.cmodels {
-        for id in u32::from(m.first_coll_aabb)..u32::from(m.first_coll_aabb) + u32::from(m.coll_aabb_count) {
-            if let Ok(id) = u16::try_from(id) {
-                roots.insert(id);
-            }
-        }
-    }
-    std::sync::Arc::make_mut(&mut out.mesh).aabb_roots = roots.into_iter().collect();
+    // The triangle trees' roots: every tree in the forest. The world model's
+    // own range is empty (`coll_aabb_count` 0): its terrain and patches hang
+    // off the collision BSP's leaves, which are not read, so the models'
+    // ranges alone would leave the world's floors out of every trace.
+    std::sync::Arc::make_mut(&mut out.mesh).aabb_roots = legacy_aabb_roots(clip);
     for (i, m) in clip.cmodels.iter().enumerate() {
-        // The world model (0) has no brush range of its own here: traces
-        // test every brush.
+        // The world model (0) takes its range below, once the brush models
+        // have claimed theirs.
         let (first_brush, num_brushes) = if i == 0 {
             leafbrush_range(out.leafbrushes.len(), out.leafbrushes.len())?
         } else {
@@ -432,5 +455,225 @@ pub fn build_iw3_clip_collision(clip: &ClipMap) -> Result<ClipCollision, ClipCol
             num_brushes,
         });
     }
+    // The world's brushes: every brush no brush model owns. A brush model's
+    // brushes are stored about the model's own origin (a door, a
+    // script_brushmodel); traced where they are stored they stand as phantom
+    // walls around the map's centre, so the world must not test them.
+    let world = world_brush_ids(clip.brushes.len(), &out.leafbrushes);
+    let first = out.leafbrushes.len();
+    out.leafbrushes.extend_from_slice(&world);
+    let (first_brush, num_brushes) = leafbrush_range(first, out.leafbrushes.len())?;
+    if let Some(m) = out.cmodels.first_mut() {
+        m.first_brush = first_brush;
+        m.num_brushes = num_brushes;
+    }
+    // The collision BSP is not read: one node whose both sides are one leaf
+    // holding the world's brushes (its triangles come from the AABB forest,
+    // `aabb_roots`, as the leaf lists none).
+    out.nodes = vec![ClipBspNode { plane: [0.0, 0.0, 1.0, -1.0e9], children: [-1, -1] }];
+    out.leaves = vec![ClipBspLeaf { first_brush, num_brushes, first_coll_aabb_index: 0, coll_aabb_count: 0 }];
     Ok(out)
+}
+
+/// The brushes of `brush_count` that no brush model lists in
+/// `model_brushes`, in order.
+fn world_brush_ids(brush_count: usize, model_brushes: &[u16]) -> Vec<u16> {
+    let mut owned = vec![false; brush_count];
+    for &b in model_brushes {
+        if let Some(o) = owned.get_mut(usize::from(b)) {
+            *o = true;
+        }
+    }
+    (0..brush_count).filter(|&b| !owned[b]).filter_map(|b| u16::try_from(b).ok()).collect()
+}
+
+/// Whether a decoded RGBA picture has no colour: every sampled pixel's red,
+/// green and blue within 3 of each other (a concrete or a detail map; a
+/// whole world of them reads as a greyscale decode).
+pub fn is_greyscale_rgba(rgba: &[u8]) -> bool {
+    let pixels = rgba.len() / 4;
+    let step = (pixels / 4096).max(1);
+    rgba.chunks_exact(4).step_by(step).all(|p| {
+        let (lo, hi) = (p[0].min(p[1]).min(p[2]), p[0].max(p[1]).max(p[2]));
+        hi - lo <= 3
+    })
+}
+
+/// How a legacy map's spawn points stand on its converted collision, the way
+/// Black Ops II's `placespawnpoint` finds their floor: a player box lifted up
+/// to 128 units, then dropped straight down.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SpawnGroundCensus {
+    pub spawns: usize,
+    /// A floor within [`SPAWN_FLOOR_REACH`] below the point, the box free there.
+    pub on_ground: usize,
+    /// The floor found is further down than that: the point's own floor is
+    /// missing from the collision (the player would fall through it).
+    pub dropped_far: usize,
+    /// Nothing below at all.
+    pub no_floor: usize,
+    /// The player box is stuck at its floor (it could not move there).
+    pub in_solid: usize,
+}
+
+/// How far below a spawn point its floor may be and still count as its own.
+pub const SPAWN_FLOOR_REACH: f32 = 64.0;
+
+impl std::fmt::Display for SpawnGroundCensus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} spawns: {} on the ground, {} fall more than {SPAWN_FLOOR_REACH} units, {} over nothing, {} in solid",
+            self.spawns, self.on_ground, self.dropped_far, self.no_floor, self.in_solid
+        )
+    }
+}
+
+/// A player box trace through `clip` as the match's sim does it (its BSP's
+/// brushes, then the collision triangles): the fraction of the way it got,
+/// and whether it started in solid.
+pub fn trace_clip_collision(
+    clip: &ClipCollision,
+    start: [f32; 3],
+    end: [f32; 3],
+    mins: [f32; 3],
+    maxs: [f32; 3],
+    mask: u32,
+) -> (f32, bool) {
+    let map = clipmap_iw4::ClipMapRef {
+        nodes: &clip.nodes,
+        leaves: &clip.leaves,
+        leafbrushes: &clip.leafbrushes,
+        brushes: &clip.brushes,
+    };
+    let ext = clipmap_iw4::TraceExtents::new(start, end, mins, maxs, mask);
+    let mesh = clipmap_iw4::ClipMeshTables::as_ref(&clip.mesh);
+    let best = clipmap_iw4::trace_brush_and_mesh(&map, &mesh, &ext, &|_| true);
+    (best.fraction, best.startsolid != 0)
+}
+
+/// Each spawn point dropped onto `clip` with BO2's player box.
+pub fn spawn_ground_census(clip: &ClipCollision, spawns: &[[f32; 3]]) -> SpawnGroundCensus {
+    const MINS: [f32; 3] = [-15.0, -15.0, 0.0];
+    const MAXS: [f32; 3] = [15.0, 15.0, 70.0];
+    const MASK: u32 = crate::clip_collision::MASK_PLAYER_SOLID;
+    let mut out = SpawnGroundCensus { spawns: spawns.len(), ..Default::default() };
+    for &o in spawns {
+        let (up, _) = trace_clip_collision(clip, o, [o[0], o[1], o[2] + 128.0], MINS, MAXS, MASK);
+        let top = [o[0], o[1], o[2] + 128.0 * up];
+        let drop = 128.0 * up + 8192.0;
+        let (down, _) = trace_clip_collision(clip, top, [o[0], o[1], top[2] - drop], MINS, MAXS, MASK);
+        if down >= 1.0 {
+            out.no_floor += 1;
+            continue;
+        }
+        let floor = [o[0], o[1], top[2] - drop * down];
+        if trace_clip_collision(clip, floor, floor, MINS, MAXS, MASK).1 {
+            out.in_solid += 1;
+        } else if o[2] - floor[2] > SPAWN_FLOOR_REACH {
+            out.dropped_far += 1;
+        } else {
+            out.on_ground += 1;
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iw3::zone::{Brush, CModel, ClipMaterial, CollisionAabbTree, CollisionPartition, LeafBrushNode};
+
+    fn boxed(mins: [f32; 3], maxs: [f32; 3]) -> Brush {
+        Brush { mins, maxs, contents: 1, side_planes: Vec::new(), side_materials: Vec::new(), axial_materials: [[0; 3]; 2] }
+    }
+
+    fn cmodel(leaf_brush_node: i32, first_coll_aabb: u16, coll_aabb_count: u16) -> CModel {
+        CModel { mins: [-1.0; 3], maxs: [1.0; 3], radius: 1.0, leaf_brush_node, first_coll_aabb, coll_aabb_count }
+    }
+
+    /// A CoD4-shaped clipMap: a world floor brush at z 0, a brush model's
+    /// brush stored about its own origin (a box over the map's centre), and
+    /// a terrain square at z 100 over (-400..-200) whose AABB tree no model
+    /// names (the world model's range is empty; its terrain hangs off the
+    /// BSP leaves).
+    fn clip_map() -> ClipMap {
+        ClipMap {
+            name: "test".into(),
+            planes: Vec::new(),
+            static_models: Vec::new(),
+            materials: vec![ClipMaterial { name: "solid".into(), surface_flags: 0, content_flags: 1 }],
+            brushes: vec![
+                boxed([-512.0, -512.0, -16.0], [512.0, 512.0, 0.0]),
+                boxed([150.0, 150.0, -10.0], [250.0, 250.0, 100.0]),
+            ],
+            verts: vec![[-400.0, -400.0, 100.0], [-200.0, -400.0, 100.0], [-200.0, -200.0, 100.0], [-400.0, -200.0, 100.0]],
+            // Wound as the game winds a floor (facing up).
+            tri_indices: vec![0, 2, 1, 0, 3, 2],
+            partitions: vec![CollisionPartition { tri_count: 2, first_tri: 0 }],
+            aabb_trees: vec![CollisionAabbTree {
+                origin: [-300.0, -300.0, 100.0],
+                half_size: [100.0, 100.0, 1.0],
+                material_index: 0,
+                child_count: 0,
+                index: 0,
+            }],
+            cmodels: vec![cmodel(0, 0, 0), cmodel(0, 1, 0)],
+            map_ents: None,
+            dyn_ent_counts: [0; 2],
+            dyn_ents: Vec::new(),
+            leaf_brush_nodes: vec![LeafBrushNode { leaf_brush_count: 1, brushes: vec![1], child_offsets: [0; 2] }],
+        }
+    }
+
+    #[test]
+    fn greyscale_pictures() {
+        assert!(is_greyscale_rgba(&[10, 11, 12, 255, 200, 200, 203, 0]));
+        assert!(!is_greyscale_rgba(&[10, 11, 12, 255, 180, 72, 98, 255]));
+        assert!(is_greyscale_rgba(&[]));
+    }
+
+    #[test]
+    fn world_brushes_are_those_no_brush_model_owns() {
+        assert_eq!(world_brush_ids(5, &[1, 3, 3, 9]), vec![0, 2, 4]);
+        assert_eq!(world_brush_ids(0, &[0]), Vec::<u16>::new());
+    }
+
+    #[test]
+    fn world_triangles_are_every_tree_but_the_brush_models() {
+        let mut clip = clip_map();
+        assert_eq!(legacy_aabb_roots(&clip), vec![0]);
+        // A brush model owning that tree takes it out of the world.
+        clip.cmodels[1].coll_aabb_count = 0;
+        clip.cmodels[1].first_coll_aabb = 0;
+        clip.cmodels.push(cmodel(0, 0, 1));
+        assert!(legacy_aabb_roots(&clip).is_empty());
+    }
+
+    #[test]
+    fn world_leaf_holds_the_world_brushes_only() {
+        let built = build_iw3_clip_collision(&clip_map()).unwrap();
+        assert_eq!(built.nodes.len(), 1);
+        let leaf = built.leaves[0];
+        let world = &built.leafbrushes[leaf.first_brush as usize..][..usize::from(leaf.num_brushes)];
+        assert_eq!(world, &[0]);
+        assert_eq!((built.cmodels[0].first_brush, built.cmodels[0].num_brushes), (leaf.first_brush, leaf.num_brushes));
+        let model = built.cmodels[1];
+        assert_eq!(&built.leafbrushes[model.first_brush as usize..][..usize::from(model.num_brushes)], &[1]);
+        assert_eq!(built.mesh.aabb_roots, vec![0]);
+    }
+
+    #[test]
+    fn spawns_stand_on_brush_floors_and_terrain() {
+        let built = build_iw3_clip_collision(&clip_map()).unwrap();
+        // On the floor brush, inside where the brush model's box would be
+        // if it were traced where it is stored; and on the terrain square,
+        // 100 units over the floor brush.
+        let census = spawn_ground_census(&built, &[[200.0, 200.0, 1.0], [-300.0, -300.0, 108.0], [-300.0, 300.0, 200.0]]);
+        assert_eq!(census, SpawnGroundCensus { spawns: 3, on_ground: 2, dropped_far: 1, no_floor: 0, in_solid: 0 });
+        assert_eq!(
+            census.to_string(),
+            "3 spawns: 2 on the ground, 1 fall more than 64 units, 0 over nothing, 0 in solid"
+        );
+    }
 }

@@ -312,6 +312,7 @@ dependencies = [
  "diag",
  "fastfile_iw4",
  "fastfile_iw5",
+ "fastfile_iw6",
  "fastfile_t5",
  "sab_t6",
 ]
@@ -338,6 +339,7 @@ dependencies = [
  "diag",
  "fastfile_iw4",
  "fastfile_iw5",
+ "fastfile_iw6",
  "fastfile_t5",
  "fastfile_t6",
  "fx_iw4",
@@ -437,6 +439,7 @@ dependencies = [
  "fx_iw4",
  "iw3",
  "lighting_iw4",
+ "t4",
  "weapon_iw4",
  "xmodel_runtime",
 ]
@@ -463,6 +466,7 @@ dependencies = [
  "diag",
  "fastfile_iw4",
  "fastfile_iw5",
+ "fastfile_iw6",
  "fastfile_t5",
  "fastfile_t6",
  "frame",
@@ -2794,7 +2798,9 @@ version = "0.1.0"
 name = "fastfile_iw6"
 version = "0.1.0"
 dependencies = [
+ "bcdec_rs",
  "flate2",
+ "png",
 ]
 
 [[package]]
@@ -3315,6 +3321,7 @@ dependencies = [
  "bevy",
  "diag",
  "entity_iw4",
+ "fastfile_iw6",
  "frame",
  "gamemode_iw4",
  "hud_iw4",
@@ -6422,6 +6429,7 @@ dependencies = [
  "bevy",
  "bo2_profile",
  "diag",
+ "fastfile_iw6",
  "frame",
  "hks_t6",
  "image",

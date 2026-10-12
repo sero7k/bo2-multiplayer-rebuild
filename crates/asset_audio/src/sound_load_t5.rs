@@ -218,6 +218,7 @@ impl AssetLinkSink for T5SoundCapture {
             aliases,
             game: ZoneGame::T5,
             zone: self.catalog.capture_zone_for_ingest(),
+            namespace: None,
         });
         Ok(())
     }
