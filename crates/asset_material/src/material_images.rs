@@ -1729,6 +1729,26 @@ fn parse_iwi_header(bytes: &[u8]) -> Result<IwiHeaderInfo, String> {
                 mip0_start,
             })
         }
+        // Call of Duty 4 and World at War (6): format @4, usage @5, width,
+        // height, depth @6..12, picmip sizes from 12 (mip 0 ends at the
+        // first, starts at the second); 28 bytes of header.
+        6 => {
+            if bytes.len() < 28 {
+                return Err("truncated IWI v6 header".into());
+            }
+            let width = u32::from(u16::from_le_bytes([bytes[6], bytes[7]]));
+            let height = u32::from(u16::from_le_bytes([bytes[8], bytes[9]]));
+            let mip0_end = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+            let mip0_start = u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize;
+            Ok(IwiHeaderInfo {
+                width,
+                height,
+                format: iwi_pixel_format(bytes[4])?,
+                header_len: 28,
+                mip0_end,
+                mip0_start,
+            })
+        }
         // Modern Warfare 3 (0x1b): the picmip sizes start at 32 (mip 0 ends
         // at the first, starts at the second).
         27 => {

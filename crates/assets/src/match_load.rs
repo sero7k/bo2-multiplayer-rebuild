@@ -192,7 +192,14 @@ fn approve_map_load(
             .as_ref()
             .ok()
             .and_then(|path| asset_transport::zone_game_for_path(path))
-            == Some(asset_transport::ZoneGame::T6);
+            == Some(asset_transport::ZoneGame::T6)
+            // bo2mp: a Call of Duty 4 or World at War map loads by Black Ops
+            // II's rules with no common zone of its game.
+            || zone_ff
+                .as_ref()
+                .ok()
+                .and_then(|path| asset_transport::legacy_game_for_path(path))
+                .is_some();
         // A Black Ops II map never takes MW2's common zone, even when MW2 is
         // installed beside it (its guns, scripts and UI are BO2's own).
         let common_mp = if t6 {

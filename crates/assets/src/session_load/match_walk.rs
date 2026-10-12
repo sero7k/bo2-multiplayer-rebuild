@@ -15,8 +15,18 @@ pub(super) async fn walk_prepared_match(
         .unwrap_or_default();
 
     let pool = load_pool();
+    // bo2mp: a Call of Duty 4 (`iw3`) or World at War (`t4`) map: read by
+    // its own reader below, not opened as one of the four envelopes.
+    let legacy = zone_ff
+        .as_ref()
+        .ok()
+        .and_then(|path| asset_transport::legacy_game_for_path(path));
     let map_open = {
-        let zone_ff = zone_ff.clone();
+        let zone_ff = if legacy.is_some() {
+            Err("legacy map zone: read by its own reader".to_owned())
+        } else {
+            zone_ff.clone()
+        };
         let progress = progress.clone();
         pool.spawn(async move {
             let path = match zone_ff {
@@ -127,8 +137,30 @@ pub(super) async fn walk_prepared_match(
         );
         return (MatchLoadOutcome::Canceled, None);
     }
-    let (loaded, map_namespace) = match opened_map {
-        Ok((path, image)) => {
+    let (loaded, map_namespace) = match (legacy, zone_ff.as_ref(), opened_map) {
+        (Some(game), Ok(path), _) => {
+            drop(shared_surfaces);
+            drop(iw5_shared_surfaces);
+            let mut loaded = match game {
+                "iw3" => crate::lane::load_iw3_world(path, &progress, material_seed),
+                _ => {
+                    drop(material_seed);
+                    LoadedWorld::with_gap(
+                        WorldDrawPolicy::t5(),
+                        PreparedCapability::PreparedWorld,
+                        format!("{game} maps are not readable yet"),
+                        Some("assets::session_load::load_prepared_match/legacy"),
+                    )
+                }
+            };
+            if crate::t6_rules() {
+                let stage = progress.begin_scoped(StageId::MapAssets, "black ops ii rules", None);
+                crate::lane::attach_t6_rules(&mut loaded, &zone_name);
+                stage.done();
+            }
+            (loaded, Some(asset_core::AssetNamespace::T6))
+        }
+        (_, _, Ok((path, image))) => {
             let game = image.game;
             let shared_surfaces = match game {
                 asset_core::ZoneGame::Iw5 => iw5_shared_surfaces,
@@ -150,7 +182,7 @@ pub(super) async fn walk_prepared_match(
             }
             (loaded, Some(asset_core::AssetNamespace::from_zone_game(game)))
         }
-        Err(gap) => {
+        (_, _, Err(gap)) => {
             drop(material_seed);
             (
                 LoadedWorld::with_gap(

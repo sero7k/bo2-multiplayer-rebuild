@@ -21,6 +21,7 @@ pub mod world_mesh;
 pub mod world_t5;
 // bo2zm: Black Ops II.
 pub mod world_t6;
+pub mod world_iw3; // bo2mp: Call of Duty 4 maps
 
 pub use asset_core::*;
 pub use asset_transport::{Iw5ZoneMemory, T5ZoneMemory, ZoneMemory};

@@ -15,6 +15,7 @@ fastfile_iw4.workspace = true
 fastfile_iw5.workspace = true
 fastfile_t5.workspace = true
 asset_t6.workspace = true # bo2zm
+iw3 = { path = "../iw3" } # bo2mp: Call of Duty 4 maps
 dpvs_iw4.workspace = true
 clipmap_iw4.workspace = true
 lighting_iw4.workspace = true

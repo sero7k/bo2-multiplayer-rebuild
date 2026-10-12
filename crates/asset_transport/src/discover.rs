@@ -3,6 +3,53 @@ use std::path::{Path, PathBuf};
 
 const IW4_ZONE_VERSION: u32 = 0x114;
 
+/// bo2mp: Call of Duty 4's fast file version (`IWffu100`, 5).
+pub const IW3_ZONE_VERSION: u32 = 5;
+/// bo2mp: World at War's fast file version (`IWffu100`, 0x183).
+pub const T4_ZONE_VERSION: u32 = 0x183;
+
+/// bo2mp: the version of a legacy game's zones by its prefix.
+pub fn legacy_version(prefix: &str) -> Option<u32> {
+    match prefix {
+        "iw3" => Some(IW3_ZONE_VERSION),
+        "t4" => Some(T4_ZONE_VERSION),
+        _ => None,
+    }
+}
+
+/// bo2mp: the legacy game (`iw3` Call of Duty 4, `t4` World at War) a zone
+/// file belongs to, by its version.
+pub fn legacy_game_for_path(path: &Path) -> Option<&'static str> {
+    match peek_zone_version(path)? {
+        IW3_ZONE_VERSION => Some("iw3"),
+        T4_ZONE_VERSION => Some("t4"),
+        _ => None,
+    }
+}
+
+/// bo2mp: every Call of Duty 4 and World at War multiplayer map installed:
+/// (prefix, map), loading zones (`_load`) left out.
+pub fn list_legacy_mp_maps(root: &GamesRoot) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for path in game_files(&root.0).flatten() {
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()).map(str::to_ascii_lowercase) else {
+            continue;
+        };
+        let is_ff = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ff"));
+        if !is_ff || !stem.starts_with("mp_") || stem.ends_with("_load") {
+            continue;
+        }
+        if let Some(game) = legacy_game_for_path(&path) {
+            let key = (game.to_owned(), stem);
+            if !out.contains(&key) {
+                out.push(key);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 const T5_ZONE_VERSION: u32 = 0x1D9;
 
 const IW5_ZONE_VERSION: u32 = 1;
@@ -399,6 +446,13 @@ pub fn find_zone_file(root: &GamesRoot, zone: &str) -> Result<ZoneFile, String> 
     let zone = zone.trim().to_ascii_lowercase();
     if zone.is_empty() {
         return Err("zone name is empty".into());
+    }
+    // bo2mp: Call of Duty 4 (`iw3:`) and World at War (`t4:`) maps, which
+    // load through their own readers (no `ZoneGame` of their own).
+    if let Some((prefix, stem)) = zone.split_once(':')
+        && let Some(version) = legacy_version(prefix)
+    {
+        return find_zone_file_version(root, stem, version);
     }
     let (game, stem) = split_zone_key(&zone);
     find_zone_stem(root, game, stem)

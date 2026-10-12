@@ -293,6 +293,13 @@ fn discover() -> Vec<Category> {
             (game != "t6").then(|| (game.to_owned(), stem.to_owned()))
         })
         .collect();
+    // Call of Duty 4's maps (read by their own reader; World at War's join
+    // once theirs loads too).
+    installed.extend(
+        asset_transport::list_legacy_mp_maps(&root)
+            .into_iter()
+            .filter(|(game, _)| game == "iw3"),
+    );
     installed.sort();
     installed.dedup();
     let shared = |stem: &str| installed.iter().filter(|(_, s)| s == stem).count() > 1;
@@ -459,8 +466,17 @@ fn namespace_of(prefix: &str) -> Option<asset_core::AssetNamespace> {
 /// An image from a game's own IWDs (the first of `names` it has).
 pub(crate) fn read_game_image(prefix: &str, names: &[String]) -> Option<(u32, u32, Vec<u8>)> {
     let root = asset_transport::games_root_from_env().ok()?;
-    let trees = asset_transport::NamespaceTrees::discover(&root);
-    let main = trees.main_for(namespace_of(prefix)?)?.to_path_buf();
+    let main = match asset_transport::legacy_version(prefix) {
+        // Call of Duty 4 / World at War: the `main` beside their zones.
+        Some(version) => {
+            let common = asset_transport::find_zone_file_version(&root, "common_mp", version).ok()?;
+            asset_transport::game_root_for_zone(&common.path).ok()?.join("main")
+        }
+        None => {
+            let trees = asset_transport::NamespaceTrees::discover(&root);
+            trees.main_for(namespace_of(prefix)?)?.to_path_buf()
+        }
+    };
     names
         .iter()
         .find_map(|n| asset_material::decode_ui_image_from_main(&main, n).ok().flatten())

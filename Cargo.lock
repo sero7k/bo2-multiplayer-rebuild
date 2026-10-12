@@ -192,6 +192,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.104"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+
+[[package]]
 name = "approved_tests"
 version = "0.1.0"
 dependencies = [
@@ -429,6 +435,7 @@ dependencies = [
  "fastfile_iw5",
  "fastfile_t5",
  "fx_iw4",
+ "iw3",
  "lighting_iw4",
  "weapon_iw4",
  "xmodel_runtime",
@@ -460,6 +467,7 @@ dependencies = [
  "frame",
  "hks_t6",
  "ipak_t6",
+ "iw3",
  "libc",
  "lighting_iw4",
  "png",
@@ -3545,6 +3553,17 @@ name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+
+[[package]]
+name = "iw3"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "log",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "iw4l-master"

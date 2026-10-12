@@ -20,6 +20,9 @@ pub use discover::{
     group_mp_maps, list_mp_map_packs, list_mp_maps, load_dotenv, map_load_title, peek_zone_version,
     split_zone_key, zone_game_for_path, zone_version,
 };
+pub use discover::{
+    IW3_ZONE_VERSION, T4_ZONE_VERSION, legacy_game_for_path, legacy_version, list_legacy_mp_maps,
+};
 pub use iwd::{
     IwdFile, IwdIndex, IwdSoundIndex, cached_iwd_dirs, game_main_for_zone, game_mains_under,
     inflate_zlib, iwd_entry_reads, iwd_read_cost, read_iwd_named, read_text,

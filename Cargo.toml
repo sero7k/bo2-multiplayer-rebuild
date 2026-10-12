@@ -25,6 +25,7 @@ members = [
     "crates/asset_transport",
     "crates/asset_t6", # bo2zm
     "crates/asset_world",
+    "crates/iw3", # Call of Duty 4 zones (from COD4-Rewrite)
     "crates/assets",
     "crates/bo2_profile", # bo2mp
     "crates/bootstrap",
