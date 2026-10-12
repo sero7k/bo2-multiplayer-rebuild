@@ -240,8 +240,8 @@ fn play_ui_sound_messages(
         if event.alias.is_empty() {
             continue;
         }
-        let (namespace, alias) = match crate::ui_sounds::mw3_ui_sound(&bank.0, &event.alias) {
-            Some(mw3) => (asset_core::AssetNamespace::Iw5, mw3),
+        let (namespace, alias) = match crate::ui_sounds::ui_sound(&bank.0, &event.alias) {
+            Some((ns, to)) => (ns, to),
             None => (alias_namespace(&bank.0, &event.alias), event.alias.as_str()),
         };
         let outcome = play_alias_oneshot(

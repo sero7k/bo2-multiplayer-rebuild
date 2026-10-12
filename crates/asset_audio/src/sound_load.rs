@@ -472,11 +472,15 @@ pub fn menu_music_guests(games: &GamesRoot) -> (Vec<SoundCatalog>, Vec<String>) 
             Err(error) => lines.push(format!("menu music: {label} not available ({error})")),
         }
     };
-    take(
-        "Black Ops common_mp",
-        find_zone_file_version(games, "common_mp", fastfile_t5::ZONE_VERSION_PC).map(|z| z.path),
-        crate::sound_load_t5::load_sound_catalog_t5,
-    );
+    // Black Ops' menu sounds (`uin_navigation_*`) are in whichever of
+    // these carries its interface bank; each is taken when it loads.
+    for zone in ["common_mp", "code_post_gfx_mp", "ui_mp"] {
+        take(
+            &format!("Black Ops {zone}"),
+            find_zone_file_version(games, zone, fastfile_t5::ZONE_VERSION_PC).map(|z| z.path),
+            crate::sound_load_t5::load_sound_catalog_t5,
+        );
+    }
     for (label, version, load) in [
         (
             "Modern Warfare 2 localized_code_post_gfx_mp",

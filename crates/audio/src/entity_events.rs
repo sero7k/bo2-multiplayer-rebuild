@@ -315,9 +315,9 @@ fn play_cs_sound_alias(
     };
     let (namespace, alias) = match bank
         .filter(|_| namespace == asset_core::AssetNamespace::T6)
-        .and_then(|bank| crate::ui_sounds::mw3_ui_sound(bank, &alias))
+        .and_then(|bank| crate::ui_sounds::ui_sound(bank, &alias))
     {
-        Some(mw3) => (asset_core::AssetNamespace::Iw5, mw3.to_owned()),
+        Some((ns, to)) => (ns, to.to_owned()),
         None => (namespace, alias),
     };
     play.write(crate::AliasCommand::Play(PlayAlias {

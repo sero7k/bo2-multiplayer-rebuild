@@ -1234,6 +1234,47 @@ fn hide_for_bo1_hud(vm: &mut Vm) {
         });
         menus.borrow_mut().set_str(name, wrapped);
     }
+    // The HUD's square minimap (`CoD.Compass.AddMinimap(hud)` builds it as
+    // `hud.miniMapContainer`): Black Ops' round one is drawn instead. The
+    // pause menu's full map (`AddInGameMap`) stays BO2's.
+    let Value::Table(cod) = vm.global("CoD") else {
+        return;
+    };
+    let compass = cod.borrow().get_str("Compass");
+    let Value::Table(compass) = compass else {
+        return;
+    };
+    let original = compass.borrow().get_str("AddMinimap");
+    if !matches!(original, Value::Func(_)) {
+        return;
+    }
+    let wrapped = vm.native("AddMinimap", move |vm, args| {
+        let out = vm.call(original.clone(), args.clone())?;
+        let zombies = match vm.global("CoD") {
+            Value::Table(cod) => {
+                let on = cod.borrow().get_str("isZombie").truthy();
+                on
+            }
+            _ => false,
+        };
+        if zombies {
+            return Ok(out);
+        }
+        let hide = |v: &Value| {
+            if let Some(u) = lui::element(v) {
+                lui::with(&u, |e| e.fields.borrow_mut().set_str("bo1Hidden", Value::Bool(true)));
+            }
+        };
+        if let Some(v) = out.first() {
+            hide(v);
+        }
+        if let Some(hud) = args.first().and_then(lui::element) {
+            let container = lui::with(&hud, |e| e.fields.borrow().get_str("miniMapContainer"));
+            hide(&container);
+        }
+        Ok(out)
+    });
+    compass.borrow_mut().set_str("AddMinimap", wrapped);
 }
 
 /// BO2's custom-games lobby offers Setup Bots only in its own list of game
