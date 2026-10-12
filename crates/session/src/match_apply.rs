@@ -852,8 +852,10 @@ fn preflight_match_install(
         );
     }
     let mut objective_weapons = Vec::new();
-    if let Some(namespace @ (asset_core::AssetNamespace::T5 | asset_core::AssetNamespace::Iw5)) =
-        prepared_map.namespace
+    // (Under Black Ops II's rules its own scripts place the objectives.)
+    if !assets::t6_rules()
+        && let Some(namespace @ (asset_core::AssetNamespace::T5 | asset_core::AssetNamespace::Iw5)) =
+            prepared_map.namespace
     {
         let catalog = catalog.ok_or_else(|| {
             InstallRefusal::new("IW4 menu catalog missing for objective bindings".to_owned())

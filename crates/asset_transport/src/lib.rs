@@ -11,6 +11,7 @@ pub use artifact_cache::{
     fnv1a64_more,
 };
 pub use asset_core::ZoneGame;
+pub mod game_paths;
 pub use discover::{
     GamesRoot, MapPack, ZoneFile, ensure_artifacts_dir, find_common_mp_for_envelope,
     find_common_mp_for_zone, find_localized_common_mp_for_zone, find_runtime_common_mp,

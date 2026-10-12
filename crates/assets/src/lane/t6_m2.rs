@@ -1189,6 +1189,11 @@ fn mp_faction_zones(
             }
         }
     }
+    // bo2mp: a map from another game has no row: Aftermath's pairing.
+    if out.is_empty() && map != "mp_la" {
+        report.push(format!("t6 mp factions for {map}: none listed, Aftermath's taken"));
+        return mp_faction_zones(captures, "mp_la", dir, report);
+    }
     report.push(format!(
         "t6 mp factions for {map}: {}",
         out.iter()

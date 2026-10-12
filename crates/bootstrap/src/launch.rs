@@ -358,9 +358,11 @@ fn run_frontend_t6mp(games: asset_transport::GamesRoot, artifacts: PathBuf) {
     // Every match this front end starts plays by Black Ops II's rules,
     // whichever game its map comes from.
     assets::set_t6_rules(true);
+    // The first launch asks where each game is installed.
+    crate::game_folders::first_run();
     let patch = find_zone_file(&games, "t6:patch_mp").unwrap_or_else(|error| {
         fatal(&format!(
-            "Cannot start the Black Ops II multiplayer front end: its files were not found.\n\n{error}"
+            "Cannot start the Black Ops II multiplayer front end: its files were not found.\n\nSet Black Ops II's folder in game_paths.cfg beside the game, or delete that file to be asked again.\n\n{error}"
         ))
     });
     let zone_all = patch.path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();

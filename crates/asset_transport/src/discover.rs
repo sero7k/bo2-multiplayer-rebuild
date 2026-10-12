@@ -74,8 +74,14 @@ fn default_games_root() -> Result<PathBuf, String> {
 }
 
 pub(crate) fn search_roots(root: &Path) -> Vec<PathBuf> {
-    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut roots = vec![root.to_path_buf()];
+    // The game folders he set (game_paths.cfg), searched as if they were
+    // under the games root.
+    for folder in crate::game_paths::search_folders() {
+        if !roots.contains(&folder) {
+            roots.push(folder);
+        }
+    }
     #[cfg(windows)]
     {
         let Ok(entries) = std::fs::read_dir(root) else {
