@@ -399,9 +399,36 @@ fn run_frontend_t6mp(games: asset_transport::GamesRoot, artifacts: PathBuf) {
     // BO2's menu sounds and music: the front end's own bank (also put back
     // when a match ends).
     match front.sound {
-        Ok(catalog) => {
+        Ok(mut catalog) => {
+            // The menu music rotates through BO1's, MW2's and MW3's main-menu
+            // tracks too: their catalogs join BO2's, and their games' sound
+            // archives (BO1 from the games folder, MW2/MW3 from the
+            // voice-only one) are opened for the streamed tracks.
+            let (guests, lines) = asset_audio::menu_music_guests(&games);
+            for line in lines {
+                diag::info!(Launch, "{line}");
+            }
+            for guest in guests {
+                catalog.absorb_missing_aliases_unresolved(guest);
+            }
+            catalog.finalize();
+            let mut trees = asset_transport::NamespaceTrees::discover(&games);
+            if let Some(voice) = asset_audio::voice_games_root() {
+                let voice = asset_transport::NamespaceTrees::discover(&voice);
+                for ns in [asset_core::AssetNamespace::Iw4, asset_core::AssetNamespace::Iw5] {
+                    if trees.get(ns).is_none()
+                        && let Some(tree) = voice.get(ns)
+                    {
+                        trees.adopt_zone(&tree.anchor);
+                    }
+                }
+            }
+            let (iwd, lines) = asset_transport::NamespaceSoundIwd::open(&trees);
+            for line in lines {
+                diag::info!(Launch, "{line}");
+            }
             let bank = std::sync::Arc::new(catalog);
-            let iwd = std::sync::Arc::new(asset_transport::NamespaceSoundIwd::default());
+            let iwd = std::sync::Arc::new(iwd);
             app.insert_resource(SoundBank(std::sync::Arc::clone(&bank)));
             app.insert_resource(SoundIwd(std::sync::Arc::clone(&iwd)));
             app.insert_resource(audio::ClipStore::start(std::sync::Arc::clone(&bank), Some(std::sync::Arc::clone(&iwd))));

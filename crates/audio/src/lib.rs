@@ -50,6 +50,7 @@ mod destructible_loops;
 mod zm_music;
 mod match_set;
 mod match_voices;
+mod menu_music;
 
 mod ads_sounds;
 mod weapon_lock;

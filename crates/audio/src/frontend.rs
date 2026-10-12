@@ -57,6 +57,7 @@ struct PendingMenuBed {
 pub(crate) fn register_frontend_audio(app: &mut App) {
     register_ui_contracts(app);
     app.init_resource::<PendingMenuBed>()
+        .init_resource::<crate::menu_music::MenuMusic>()
         .add_message::<ReturnedToMenu>()
         .add_systems(
             Update,
@@ -74,6 +75,7 @@ pub(crate) fn register_frontend_audio(app: &mut App) {
             (
                 play_ui_sound_messages.after(crate::voice::reclaim_finished_voices),
                 play_ui_music_messages,
+                crate::menu_music::update,
             )
                 .in_set(ClientSet::Effects),
         );

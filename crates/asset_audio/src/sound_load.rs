@@ -449,3 +449,50 @@ impl LoadedSoundBank {
             .collect()
     }
 }
+
+/// The other games' main-menu music for the Black Ops II front end, as
+/// sound catalogs to take in: BO1's (`common_mp`, from the games folder),
+/// MW2's and MW3's (`localized_code_post_gfx_mp`, from the voice-only
+/// folder, so neither game is otherwise loaded). One log line per source.
+pub fn menu_music_guests(games: &GamesRoot) -> (Vec<SoundCatalog>, Vec<String>) {
+    let voice = voice_games_root();
+    let mut catalogs = Vec::new();
+    let mut lines = Vec::new();
+    let mut take = |label: &str, found: Result<std::path::PathBuf, String>, load: fn(&Path) -> Result<SoundCatalog, String>| {
+        match found.and_then(|path| load(&path)) {
+            Ok(catalog) => {
+                lines.push(format!(
+                    "menu music: {label} — {} aliases",
+                    catalog.sounds.len()
+                ));
+                catalogs.push(catalog);
+            }
+            Err(error) => lines.push(format!("menu music: {label} not available ({error})")),
+        }
+    };
+    take(
+        "Black Ops common_mp",
+        find_zone_file_version(games, "common_mp", fastfile_t5::ZONE_VERSION_PC).map(|z| z.path),
+        crate::sound_load_t5::load_sound_catalog_t5,
+    );
+    for (label, version, load) in [
+        (
+            "Modern Warfare 2 localized_code_post_gfx_mp",
+            fastfile_iw4::ZONE_VERSION_PC,
+            load_sound_catalog as fn(&Path) -> Result<SoundCatalog, String>,
+        ),
+        (
+            "Modern Warfare 3 localized_code_post_gfx_mp",
+            fastfile_iw5::ZONE_VERSION_PC,
+            crate::sound_load_iw5::load_sound_catalog_iw5,
+        ),
+    ] {
+        let found = voice
+            .as_ref()
+            .ok_or_else(|| "IW4L_VOICE_GAMES is not set".to_owned())
+            .and_then(|root| find_zone_file_version(root, "localized_code_post_gfx_mp", version))
+            .map(|z| z.path);
+        take(label, found, load);
+    }
+    (catalogs, lines)
+}
