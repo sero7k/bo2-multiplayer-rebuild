@@ -435,7 +435,7 @@ fn stat_value(v: &Value) -> StatValue {
 impl MpState {
     /// Make the profile from the string tables once (they arrive after
     /// `install`), his saved stats first.
-    fn load(&mut self, values: &EngineValues) {
+    pub fn load(&mut self, values: &EngineValues) {
         if self.loaded {
             return;
         }

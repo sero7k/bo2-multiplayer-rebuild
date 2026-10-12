@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
 use super::bridge::{self, Catalog, MapEntry, ModeEntry, PlayerCard};
+use super::classes::{self, ClassBook, ClassItem, ClassView};
 use super::pics::ShellPics;
 use super::{Screen, Shell, Tab};
 
@@ -51,8 +52,106 @@ fn stand_in_catalog() -> Catalog {
     Catalog {
         maps,
         modes: modes.iter().map(|(k, t, d)| ModeEntry { key: (*k).to_owned(), title: (*t).to_owned(), desc: (*d).to_owned() }).collect(),
-        player: PlayerCard { name: "simon".to_owned(), level: 72, prestige: 3, xp_frac: 0.42, rank_picture: String::new() },
+        player: PlayerCard {
+            name: "simon".to_owned(),
+            level: 72,
+            prestige: 3,
+            xp_frac: 0.42,
+            rank_picture: String::new(),
+            record: [("KILLS", "1,204"), ("DEATHS", "876"), ("K/D RATIO", "1.37"), ("WINS", "58"), ("LOSSES", "41"), ("HEADSHOTS", "212"), ("SCORE", "301,550"), ("TIME PLAYED", "14h 05m")]
+                .iter()
+                .map(|(a, b)| ((*a).to_owned(), (*b).to_owned()))
+                .collect(),
+            can_prestige: false,
+            xp: 412_300,
+            xp_next: 425_000,
+        },
     }
+}
+
+fn stand_in_book() -> ClassBook {
+    let mut items = Vec::new();
+    let mut add = |index: i32, name: &str, slot: &str, group: &str, cost: i32, level: i32, image: &str, attachments: &[&str]| {
+        items.push(ClassItem {
+            index,
+            reference: name.to_lowercase().replace(' ', "_"),
+            name: name.to_owned(),
+            image: image.to_owned(),
+            desc: format!("{name}: a stand-in description of what it does."),
+            cost,
+            group: group.to_owned(),
+            slot: slot.to_owned(),
+            level,
+            locked: level > 30,
+            attachments: attachments.iter().enumerate().map(|(k, a)| (k as i32 + 1, (*a).to_owned(), String::new())).collect(),
+        });
+    };
+    let att = ["Reflex Sight", "Suppressor", "Extended Clip", "Fast Mag", "Grip", "ACOG"];
+    for (i, n) in ["MP7", "PDW-57", "Vector K10", "MSMC", "Chicom CQB", "Skorpion EVO", "Peacekeeper"].iter().enumerate() {
+        add(10 + i as i32, n, "primary", "weapon_smg", 1, 1 + i as i32 * 6, "stand_in_c", &att);
+    }
+    for (i, n) in ["MTAR", "Type 25", "SWAT-556", "FAL OSW", "M27", "SCAR-H", "SMR", "M8A1", "AN-94"].iter().enumerate() {
+        add(30 + i as i32, n, "primary", "weapon_assault", 1, 1 + i as i32 * 5, "stand_in_c", &att);
+    }
+    for (i, n) in ["SVU-AS", "DSR 50", "Ballista", "XPR-50"].iter().enumerate() {
+        add(50 + i as i32, n, "primary", "weapon_sniper", 1, 1, "stand_in_c", &att);
+    }
+    for (i, n) in ["Five-seven", "Tac-45", "B23R", "Executioner", "KAP-40"].iter().enumerate() {
+        add(60 + i as i32, n, "secondary", "weapon_pistol", 1, 1, "stand_in_c", &att[..4]);
+    }
+    for (i, n) in ["Lightweight", "Hardline", "Blind Eye", "Flak Jacket", "Ghost"].iter().enumerate() {
+        add(80 + i as i32, n, "specialty1", "specialty", 1, 1, "", &[]);
+    }
+    for (i, n) in ["Toughness", "Cold Blooded", "Fast Hands", "Hard Wired", "Scavenger"].iter().enumerate() {
+        add(90 + i as i32, n, "specialty2", "specialty", 1, 1, "", &[]);
+    }
+    for (i, n) in ["Dexterity", "Extreme Conditioning", "Engineer", "Tactical Mask", "Dead Silence", "Awareness"].iter().enumerate() {
+        add(100 + i as i32, n, "specialty3", "specialty", 1, 1, "", &[]);
+    }
+    for (i, n) in ["Frag", "Semtex", "Combat Axe", "Bouncing Betty", "C4", "Claymore"].iter().enumerate() {
+        add(110 + i as i32, n, "primarygrenade", "weapon_grenade", 1, 1, "", &[]);
+    }
+    for (i, n) in ["Concussion", "Smoke Grenade", "Flashbang", "EMP Grenade", "Shock Charge"].iter().enumerate() {
+        add(120 + i as i32, n, "specialgrenade", "weapon_grenade", 1, 1, "", &[]);
+    }
+    for (i, n) in ["Primary Gunfighter", "Perk 1 Greed", "Overkill", "Danger Close"].iter().enumerate() {
+        add(130 + i as i32, n, "bonuscard", "bonuscard", 1, 1, "", &[]);
+    }
+    for (i, n) in ["UAV", "RC-XD", "Hunter Killer", "Care Package", "Counter-UAV", "Guardian"].iter().enumerate() {
+        add(140 + i as i32, n, "killstreak", "killstreak", 0, 1, "", &[]);
+    }
+    let class = |n: i32, name: &str, primary: i32| {
+        let mut slots = std::collections::HashMap::new();
+        for (k, v) in [
+            ("primary", primary),
+            ("primaryattachment1", 1),
+            ("primaryattachment2", 2),
+            ("secondary", 60),
+            ("specialty1", 80),
+            ("specialty2", 90),
+            ("specialty3", 100),
+            ("primarygrenade", 110),
+            ("primarygrenadecount", 1),
+            ("specialgrenade", 120),
+            ("specialgrenadecount", 2),
+            ("bonuscard1", 130),
+            ("killstreak1", 140),
+            ("killstreak2", 142),
+            ("killstreak3", 143),
+        ] {
+            slots.insert(k.to_owned(), v);
+        }
+        ClassView { n, name: name.to_owned(), slots, spent: 0 }
+    };
+    let mut b = ClassBook {
+        classes: vec![class(0, "Custom 1", 10), class(1, "Custom 2", 30), class(2, "Custom 3", 50), class(3, "Custom 4", 31), class(4, "Custom 5", 50)],
+        items,
+    };
+    let spends: Vec<i32> = b.classes.iter().map(|c| classes::spent(&b, &c.slots)).collect();
+    for (c, s) in b.classes.iter_mut().zip(spends) {
+        c.spent = s;
+    }
+    b
 }
 
 fn step(
@@ -74,7 +173,7 @@ fn step(
         return;
     }
     plan.frames = 0;
-    let shots: [(&str, fn(&mut Shell, &mut Commands)); 8] = [
+    let shots: [(&str, fn(&mut Shell, &mut Commands)); 16] = [
         ("01_main", |s, _| *s = Shell::default()),
         ("02_multiplayer", |s, _| {
             s.screen = Screen::Multiplayer;
@@ -103,10 +202,48 @@ fn step(
             s.screen = Screen::ModePick;
             s.focus = 2;
         }),
-        ("08_loading", |_, c| {
+        ("08_classes", |s, _| {
+            s.screen = Screen::Classes;
+            s.focus = 0;
+        }),
+        ("09_class_edit", |s, _| {
+            s.screen = Screen::ClassEdit;
+            s.class = 0;
+            s.focus = 0;
+        }),
+        ("10_item_pick", |s, _| {
+            s.screen = Screen::ItemPick;
+            s.slot = 0;
+            s.page = 1;
+            s.focus = 2;
+        }),
+        ("11_item_pick_perk", |s, _| {
+            s.screen = Screen::ItemPick;
+            s.slot = 13;
+            s.page = 0;
+            s.focus = 1;
+        }),
+        ("12a_options", |s, _| {
+            s.screen = Screen::Options;
+            s.page = 0;
+            s.focus = 3;
+        }),
+        ("12b_options_pad", |s, _| {
+            s.page = 3;
+            s.focus = 0;
+        }),
+        ("12c_barracks", |s, _| {
+            s.screen = Screen::Barracks;
+            s.focus = 0;
+        }),
+        ("12_loading", |_, c| {
             c.remove_resource::<crate::lui_frontend::Bo2mpFrontend>();
             c.insert_resource(session::Bo2mpMatchSetup { map: "mp_terminal".to_owned(), gametype: "gun".to_owned(), ..default() });
             c.insert_resource(assets::LoadingScreen::new(asset_transport::progress::LoadProgress::new(1), "mp_terminal", "gun"));
+        }),
+        ("13_ingame_class", |_, c| {
+            c.remove_resource::<assets::LoadingScreen>();
+            super::ingame::preview_open(2);
         }),
     ];
     // Each step: set it up, then a picture of it on the next turn.
@@ -130,6 +267,7 @@ fn step(
 pub fn install(app: &mut App, pictures: Vec<(String, Image)>, out: PathBuf) {
     super::register_shell(app);
     bridge::set_preview_catalog(stand_in_catalog());
+    classes::set_preview_book(stand_in_book());
     app.insert_resource(crate::lui_frontend::Bo2mpFrontend { stats_path: PathBuf::new() });
     app.insert_resource(Plan { out, step: 0, frames: 0, pictures });
     app.add_systems(Update, step);

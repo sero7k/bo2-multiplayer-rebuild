@@ -360,7 +360,7 @@ fn menu_input(hud: &mut LuiHud, io: &mut LuiIo<'_, '_>, console_open: bool, curs
     }
     // bo2mp: the Game Folders panel has the keys while it is up.
     // bo2mp: and the shell's screens while they cover BO2's menus.
-    if crate::game_folders::is_open() || crate::shell::covers_lui() {
+    if crate::game_folders::is_open() || crate::shell::covers_lui() || crate::shell::ingame::open() {
         let _ = io.key_events.read().count();
         return;
     }
@@ -371,7 +371,8 @@ fn menu_input(hud: &mut LuiHud, io: &mut LuiIo<'_, '_>, console_open: bool, curs
     // child of the root), so his keys and mouse always work them there.
     let front_end = io.front.is_some() && !hud.match_mp;
     if !front_end && hud.host.open_menus().is_empty() {
-        if io.keys.just_pressed(KeyCode::Escape) || pad_start {
+        // (bo2mp: with the shell, Esc opens its own pause menu.)
+        if (io.keys.just_pressed(KeyCode::Escape) || pad_start) && !crate::shell::enabled() {
             hud.host.root_event("open_ingame_menu", &[("menuName", Value::str("class"))]);
         }
         return;
@@ -1391,6 +1392,13 @@ fn lui_hud(
     if front.is_some() {
         crate::shell::lui_side(&mut hud.host, hud.mp.as_ref());
     }
+    // (His classes for the shell's Create-a-Class and Choose Class.)
+    if crate::shell::enabled() {
+        crate::shell::classes::class_side(&hud.host, hud.mp.as_ref());
+        for (menu, response) in crate::shell::ingame::take_responses() {
+            hud.host.push_call(hks_t6::host::EngineCall::MenuResponse(menu, response));
+        }
+    }
     if bo2_loading && !hud.loading_open {
         hud.loading_open = true;
         // (The shell draws its own loading screen.)
@@ -1660,7 +1668,7 @@ fn lui_hud(
     let front_end = io.front.is_some() && !hud.match_mp;
     // (bo2mp: the loading screen holds nothing and pauses nothing: the
     // front end's menus under it are not open for the match.)
-    let open = open && !bo2_loading;
+    let open = (open && !bo2_loading) || crate::shell::ingame::open();
     let state = frame::LuiMenus { active: true, open: open || front_end };
     if *io.menus != state {
         if io.menus.open != state.open {

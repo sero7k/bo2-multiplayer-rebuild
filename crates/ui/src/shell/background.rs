@@ -106,7 +106,7 @@ pub(crate) fn shell_background(
     let now = time.elapsed_secs_f64();
     // The map to show.
     let target: Option<String> = match shell.screen {
-        Screen::Lobby | Screen::ModePick => Some(shell.map.clone()),
+        Screen::Lobby | Screen::ModePick | Screen::Classes | Screen::ClassEdit | Screen::ItemPick | Screen::Options | Screen::Barracks => Some(shell.map.clone()),
         Screen::MapPick => pages(&c)
             .get(shell.page)
             .and_then(|(_, maps)| maps.get(shell.focus))

@@ -14,36 +14,36 @@ use super::{COLUMNS, DIFFICULTY, Hit, Row, Screen, Shell, Tab, bridge, pages, ro
 #[derive(Component)]
 pub(crate) struct ViewRoot;
 
-type Kids<'a> = ChildSpawnerCommands<'a>;
+pub(crate) type Kids<'a> = ChildSpawnerCommands<'a>;
 
 /// What the drawing needs besides the shell's state.
-struct Ctx<'a> {
-    s: f32,
-    fonts: &'a ShellFonts,
-    pics: &'a mut ShellPics,
-    icons: Option<&'a assets::T6HudIcons>,
-    images: &'a mut Assets<Image>,
-    pad: bool,
+pub(crate) struct Ctx<'a> {
+    pub s: f32,
+    pub fonts: &'a ShellFonts,
+    pub pics: &'a mut ShellPics,
+    pub icons: Option<&'a assets::T6HudIcons>,
+    pub images: &'a mut Assets<Image>,
+    pub pad: bool,
 }
 
 impl Ctx<'_> {
-    fn px(&self, v: f32) -> Val {
+    pub fn px(&self, v: f32) -> Val {
         Val::Px(v * self.s)
     }
 
-    fn bold(&self, px: f32) -> TextFont {
+    pub fn bold(&self, px: f32) -> TextFont {
         font(&self.fonts.bold, px * self.s)
     }
 
-    fn regular(&self, px: f32) -> TextFont {
+    pub fn regular(&self, px: f32) -> TextFont {
         font(&self.fonts.regular, px * self.s)
     }
 
-    fn pic(&mut self, names: &[String]) -> Option<Handle<Image>> {
+    pub fn pic(&mut self, names: &[String]) -> Option<Handle<Image>> {
         self.pics.first(names, self.icons, self.images)
     }
 
-    fn pic_size(&self, h: &Handle<Image>) -> Vec2 {
+    pub fn pic_size(&self, h: &Handle<Image>) -> Vec2 {
         self.images.get(h).map_or(Vec2::new(16.0, 9.0), |i| i.size_f32())
     }
 }
@@ -61,7 +61,7 @@ fn abs(left: Option<f32>, top: Option<f32>, right: Option<f32>, bottom: Option<f
 
 /// The title at the top left: a blue bar, then the trail of screens, the
 /// last one bright.
-fn header(c: &mut Kids, cx: &Ctx, trail: &[&str]) {
+pub(crate) fn header(c: &mut Kids, cx: &Ctx, trail: &[&str]) {
     c.spawn((
         Node {
             column_gap: cx.px(14.0),
@@ -176,9 +176,10 @@ fn footer(c: &mut Kids, cx: &mut Ctx, shell: &Shell, online: &OnlineInfo) {
                 match shell.screen {
                     Screen::Lobby => hint(l, cx, "Q / E", "xenonbutton_lb", "TABS"),
                     Screen::MapPick => hint(l, cx, "Q / E", "xenonbutton_lb", "SECTIONS"),
+                    Screen::ItemPick => hint(l, cx, "Q / E", "xenonbutton_lb", "CATEGORIES"),
                     _ => {}
                 }
-                if shell.screen == Screen::Lobby && shell.tab == Tab::Settings {
+                if (shell.screen == Screen::Lobby && shell.tab == Tab::Settings) || shell.screen == Screen::ClassEdit {
                     hint(l, cx, "A / D", "xenonbutton_dpad_rl", "CHANGE");
                 }
             });
@@ -216,7 +217,7 @@ fn fmt_count(n: u32) -> String {
 }
 
 /// A column of menu rows. `big`: the main menu's large rows.
-fn menu_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, width: f32, big: bool) {
+pub(crate) fn menu_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, width: f32, big: bool) {
     let (h, px) = if big { (64.0, 40.0) } else { (56.0, 28.0) };
     for (i, r) in rows.iter().enumerate() {
         let on = i == focus;
@@ -360,7 +361,20 @@ fn picture_box(c: &mut Kids, cx: &mut Ctx, names: &[String], w: f32, h: f32, ext
     });
 }
 
-fn tabs(c: &mut Kids, cx: &mut Ctx, labels: &[String], on: usize, hit: fn(usize) -> Hit) {
+/// A picture fitted inside a box, keeping its shape.
+pub(crate) fn picture_contain(c: &mut Kids, cx: &mut Ctx, names: &[String], w: f32, h: f32) {
+    let pic = cx.pic(names);
+    c.spawn((Node { width: cx.px(w), height: cx.px(h), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },))
+        .with_children(|b| {
+            if let Some(p) = pic {
+                let size = cx.pic_size(&p);
+                let k = (w / size.x.max(1.0)).min(h / size.y.max(1.0));
+                b.spawn((ImageNode::new(p), Node { width: cx.px(size.x * k), height: cx.px(size.y * k), ..default() }));
+            }
+        });
+}
+
+pub(crate) fn tabs(c: &mut Kids, cx: &mut Ctx, labels: &[String], on: usize, hit: fn(usize) -> Hit) {
     c.spawn(Node {
         column_gap: cx.px(8.0),
         align_items: AlignItems::Center,
@@ -575,6 +589,125 @@ fn mode_picker(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &
     }
 }
 
+/// Options: the tabs, the rows of the one he is on, and a line about the
+/// row in focus.
+pub(crate) fn options_view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row]) {
+    header(c, cx, &["OPTIONS"]);
+    let labels: Vec<String> = super::options::TABS.iter().map(|t| (*t).to_owned()).collect();
+    tabs(c, cx, &labels, shell.page.min(labels.len() - 1), Hit::Page);
+    c.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        row_gap: cx.px(6.0),
+        ..abs(Some(72.0), Some(196.0), None, None, cx)
+    })
+    .with_children(|col| {
+        let shown: Vec<Row> = rows.iter().map(|r| Row { sub: String::new(), ..r.clone() }).collect();
+        menu_rows(col, cx, &shown, shell.focus, 760.0, false);
+    });
+    if let Some(r) = rows.get(shell.focus).filter(|r| !r.sub.is_empty()) {
+        c.spawn((
+            Node { width: cx.px(520.0), padding: UiRect::all(cx.px(22.0)), border: UiRect::top(cx.px(3.0)), ..abs(None, Some(196.0), Some(64.0), None, cx) },
+            BackgroundColor(PANEL),
+            BorderColor::all(ACCENT),
+        ))
+        .with_children(|p| {
+            p.spawn((Text::new(r.sub.clone()), cx.regular(23.0), TextColor(TEXT)));
+        });
+    }
+}
+
+/// Barracks: his card large, then his record or his prestiges.
+fn barracks_view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row]) {
+    header(c, cx, &["MULTIPLAYER", "BARRACKS"]);
+    c.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        row_gap: cx.px(8.0),
+        ..abs(Some(72.0), Some(176.0), None, None, cx)
+    })
+    .with_children(|col| menu_rows(col, cx, rows, shell.focus, 520.0, false));
+    let me = &cat.player;
+    let icon = cx.pic(&[me.rank_picture.clone()]);
+    c.spawn((
+        Node {
+            width: cx.px(1100.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: cx.px(18.0),
+            padding: UiRect::all(cx.px(28.0)),
+            border: UiRect::top(cx.px(3.0)),
+            ..abs(Some(680.0), Some(176.0), None, None, cx)
+        },
+        BackgroundColor(PANEL),
+        BorderColor::all(ACCENT),
+    ))
+    .with_children(|p| {
+        p.spawn(Node { column_gap: cx.px(24.0), align_items: AlignItems::Center, ..default() }).with_children(|top| {
+            match icon {
+                Some(h) => {
+                    top.spawn((ImageNode::new(h), Node { width: cx.px(120.0), height: cx.px(120.0), ..default() }));
+                }
+                None => {
+                    top.spawn((Node { width: cx.px(120.0), height: cx.px(120.0), ..default() }, BackgroundColor(KEYCAP)));
+                }
+            }
+            top.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(6.0), flex_grow: 1.0, ..default() }).with_children(|t| {
+                t.spawn((Text::new(me.name.clone()), cx.bold(52.0), TextColor(WHITE)));
+                let prestige = if me.prestige > 0 { format!("PRESTIGE {}  ·  ", me.prestige) } else { String::new() };
+                t.spawn((Text::new(format!("{prestige}LEVEL {} OF {}", me.level, bo2_profile::progression::MAX_LEVEL)), cx.bold(24.0), TextColor(ACCENT)));
+                t.spawn((Node { width: Val::Percent(100.0), height: cx.px(8.0), ..default() }, BackgroundColor(KEYCAP)))
+                    .with_child((Node { width: Val::Percent(me.xp_frac * 100.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(ACCENT)));
+                t.spawn((Text::new(format!("{} XP  ·  NEXT LEVEL AT {}", me.xp, me.xp_next)), cx.regular(19.0), TextColor(DIM)));
+            });
+        });
+        p.spawn((Node { height: Val::Px(1.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(LINE)));
+        if shell.focus == 0 {
+            p.spawn((Text::new("COMBAT RECORD"), cx.bold(22.0), TextColor(FAINT)));
+            p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: cx.px(16.0), row_gap: cx.px(16.0), ..default() }).with_children(|g| {
+                for (k, v) in &me.record {
+                    g.spawn((
+                        Node { width: cx.px(240.0), flex_direction: FlexDirection::Column, padding: UiRect::all(cx.px(14.0)), ..default() },
+                        BackgroundColor(PANEL_SOFT),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((Text::new(v.clone()), cx.bold(40.0), TextColor(WHITE)));
+                        b.spawn((Text::new(k.clone()), cx.bold(17.0), TextColor(DIM)));
+                    });
+                }
+            });
+        } else {
+            p.spawn((Text::new("PRESTIGE"), cx.bold(22.0), TextColor(FAINT)));
+            let parts = [
+                ("BLACK OPS", 1, bo2_profile::progression::BO1_PRESTIGES),
+                ("MODERN WARFARE 2", 1 + bo2_profile::progression::BO1_PRESTIGES, bo2_profile::progression::MW2_PRESTIGES),
+                ("MODERN WARFARE 3", 1 + bo2_profile::progression::BO1_PRESTIGES + bo2_profile::progression::MW2_PRESTIGES, bo2_profile::progression::MW3_PRESTIGES),
+            ];
+            for (title, first, count) in parts {
+                p.spawn((Text::new(format!("{title}  ·  PRESTIGE {first}-{}", first + count - 1)), cx.bold(18.0), TextColor(DIM)));
+                p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: cx.px(6.0), row_gap: cx.px(6.0), ..default() }).with_children(|g| {
+                    for n in first..first + count {
+                        let pic = cx.pic(&[bo2_profile::progression::rank_picture(1, n)]);
+                        let reached = me.prestige >= n;
+                        g.spawn((
+                            Node { width: cx.px(46.0), height: cx.px(46.0), border: UiRect::all(cx.px(if me.prestige == n { 2.0 } else { 0.0 })), ..default() },
+                            BorderColor::all(ACCENT),
+                            BackgroundColor(PANEL_SOFT),
+                        ))
+                        .with_children(|b| {
+                            if let Some(h) = pic {
+                                b.spawn((
+                                    ImageNode::new(h).with_color(Color::srgba(1.0, 1.0, 1.0, if reached { 1.0 } else { 0.28 })),
+                                    Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+                                ));
+                            }
+                        });
+                    }
+                });
+            }
+            let master = bo2_profile::progression::MAX_PRESTIGE;
+            p.spawn((Text::new(format!("MASTER PRESTIGE  ·  PRESTIGE {master}")), cx.bold(18.0), TextColor(GOLD)));
+        }
+    });
+}
+
 fn main_menu(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row]) {
     c.spawn(Node {
         flex_direction: FlexDirection::Column,
@@ -634,11 +767,13 @@ pub(crate) fn shell_view(
     // (While pictures are still being read the view looks again twice a
     // second.)
     let tick = if pics.pending() { (time.elapsed_secs() * 2.0) as u64 } else { 0 };
+    let book = super::classes::book().map_or(0, |b| std::sync::Arc::as_ptr(&b) as usize);
     let key = format!(
-        "{:?}|{:p}|{}|{online:?}|{area:?}|{pad}|{starting:?}|{tick}",
+        "{:?}|{:p}|{}|{online:?}|{area:?}|{pad}|{starting:?}|{tick}|{book}|{}",
         *shell,
         std::sync::Arc::as_ptr(&cat),
-        pics.count()
+        pics.count(),
+        super::options::snapshot().revision
     );
     if *drawn == key && !roots.is_empty() {
         return;
@@ -674,6 +809,13 @@ pub(crate) fn shell_view(
                 Screen::Lobby => lobby(c, &mut cx, &shell, &cat, &rows),
                 Screen::MapPick => map_picker(c, &mut cx, &shell, &cat),
                 Screen::ModePick => mode_picker(c, &mut cx, &shell, &cat, &rows),
+                Screen::Options => options_view(c, &mut cx, &shell, &rows),
+                Screen::Barracks => barracks_view(c, &mut cx, &shell, &cat, &rows),
+                Screen::Classes | Screen::ClassEdit | Screen::ItemPick => {
+                    if let Some(book) = super::classes::book() {
+                        super::cac::view(c, &mut cx, &shell, &book, &rows);
+                    }
+                }
             }
             player_card(c, &mut cx, &cat.player);
             footer(c, &mut cx, &shell, &online);

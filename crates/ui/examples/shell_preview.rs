@@ -10,7 +10,7 @@ fn main() {
     let out = std::path::PathBuf::from(args.next().unwrap_or_else(|| "shell_preview".to_owned()));
     std::fs::create_dir_all(&out).expect("out dir");
     let mut pictures = Vec::new();
-    for (name, path) in ["stand_in_a", "stand_in_b"].into_iter().zip(args) {
+    for (name, path) in ["stand_in_a", "stand_in_b", "stand_in_c"].into_iter().zip(args) {
         let bytes = std::fs::read(&path).expect("picture");
         let img = Image::from_buffer(&bytes, ImageType::Extension("png"), CompressedImageFormats::NONE, true, ImageSampler::Default, RenderAssetUsages::default())
             .expect("png");

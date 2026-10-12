@@ -12,7 +12,6 @@ use std::sync::{Arc, Mutex};
 
 use hks_t6::host::Host;
 use hks_t6::mp::Mp;
-use hks_t6::value::Value;
 
 /// A map the lobby can pick.
 #[derive(Clone, Debug, PartialEq)]
@@ -46,6 +45,13 @@ pub(crate) struct PlayerCard {
     pub xp_frac: f32,
     /// The rank icon's picture name (another game's as `t5:<material>`).
     pub rank_picture: String,
+    /// His combat record: (label, value).
+    pub record: Vec<(String, String)>,
+    /// He is at the top level and has a prestige to go.
+    pub can_prestige: bool,
+    /// His experience, and what the next level needs.
+    pub xp: i64,
+    pub xp_next: i64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -76,25 +82,6 @@ impl Catalog {
     }
 }
 
-/// Which of BO2's own screens the shell opens over itself for now.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum LuiScreen {
-    CreateAClass,
-    Barracks,
-    Options,
-}
-
-impl LuiScreen {
-    /// `LUI.createMenu` names to try, in order.
-    fn candidates(self) -> &'static [&'static str] {
-        match self {
-            Self::CreateAClass => &["CAC", "CACMain", "CACChooseClass", "ChooseClass", "ClassSelect", "EditClass"],
-            Self::Barracks => &["Barracks", "BarracksMenu", "PlayerCard", "CombatRecord"],
-            Self::Options => &["OptionsMenu", "Options", "OptionsMain", "SettingsMenu", "OptionsSettings"],
-        }
-    }
-}
-
 /// What the match he starts plays.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct StartSpec {
@@ -109,8 +96,9 @@ pub(crate) struct StartSpec {
 pub(crate) enum Request {
     Start(StartSpec),
     CancelStart,
-    Open(LuiScreen),
     Zombies,
+    /// Barracks' ENTER PRESTIGE.
+    Prestige,
 }
 
 #[derive(Default)]
@@ -286,6 +274,26 @@ fn build_catalog(host: &Host, mp: Option<&Mp>) -> Catalog {
         })
         .unwrap_or(0.0);
     let level = rank + 1;
+    let stat = |name: &str| mp.map_or(0.0, |m| m.borrow().stat(&format!("playerstatslist.{name}.statvalue")).as_num().unwrap_or(0.0));
+    let (kills, deaths) = (stat("kills"), stat("deaths"));
+    let minutes = (stat("time_played_total") / 60.0).round() as i64;
+    let record = vec![
+        ("KILLS".to_owned(), format!("{}", kills as i64)),
+        ("DEATHS".to_owned(), format!("{}", deaths as i64)),
+        ("K/D RATIO".to_owned(), format!("{:.2}", if deaths > 0.0 { kills / deaths } else { kills })),
+        ("WINS".to_owned(), format!("{}", stat("wins") as i64)),
+        ("LOSSES".to_owned(), format!("{}", stat("losses") as i64)),
+        ("HEADSHOTS".to_owned(), format!("{}", stat("headshots") as i64)),
+        ("SCORE".to_owned(), format!("{}", stat("score") as i64)),
+        ("TIME PLAYED".to_owned(), format!("{}h {:02}m", minutes / 60, minutes % 60)),
+    ];
+    let xp_next = hks_t6::mp::table_rows(&v, "mp/ranktable.csv")
+        .iter()
+        .chain(hks_t6::mp::table_rows(&v, "mp/rankTable.csv"))
+        .find(|r| cell(r, 0).parse::<i32>().ok() == Some(rank))
+        .and_then(|r| cell(r, 7).parse::<f32>().ok())
+        .unwrap_or(0.0) as i64;
+    let can_prestige = level >= bo2_profile::progression::MAX_LEVEL && prestige < bo2_profile::progression::MAX_PRESTIGE;
     Catalog {
         maps: maps.into_iter().map(|(_, m)| m).collect(),
         modes,
@@ -295,31 +303,12 @@ fn build_catalog(host: &Host, mp: Option<&Mp>) -> Catalog {
             prestige,
             xp_frac,
             rank_picture: bo2_profile::progression::rank_picture(level, prestige),
+            record,
+            can_prestige,
+            xp: xp as i64,
+            xp_next,
         },
     }
-}
-
-/// The names `LUI.createMenu` holds (logged once, to find a screen's name).
-fn menu_names(host: &mut Host) -> Vec<String> {
-    let made = host.field("LUI", "createMenu");
-    let mut out = Vec::new();
-    if let Some(t) = made.table() {
-        let t = t.borrow();
-        let mut k = Value::Nil;
-        while let Some((key, _)) = t.next(&k) {
-            if let Some(s) = key.as_str() {
-                out.push(s.to_owned());
-            }
-            k = key;
-        }
-    }
-    out.sort();
-    out
-}
-
-fn has_menu(host: &mut Host, name: &str) -> bool {
-    let made = host.field("LUI", "createMenu");
-    !matches!(host.vm.index(&made, &Value::str(name)), Ok(Value::Nil) | Err(_))
 }
 
 /// Once a frame in the front end, with BO2's scripts: the catalog out, the
@@ -413,24 +402,22 @@ pub(crate) fn lui_side(host: &mut Host, mp: Option<&Mp>) {
                     m.borrow_mut().zombies_requested = true;
                 }
             }
-            Request::Open(screen) => {
-                static LOGGED: AtomicBool = AtomicBool::new(false);
-                if !LOGGED.swap(true, Ordering::Relaxed) {
-                    let names = menu_names(host);
-                    diag::info!(Ui, "bo2mp shell: BO2 screens available ({}): {}", names.len(), names.join(" "));
-                }
-                let found = screen.candidates().iter().copied().find(|n| has_menu(host, n));
-                match found {
-                    Some(name) => {
-                        with(|b| b.lui = Some((open.clone(), false)));
-                        LUI_OPEN.store(true, Ordering::Relaxed);
-                        host.open_menu(name);
-                        diag::info!(Ui, "bo2mp shell: opened BO2's `{name}` for {screen:?}");
-                    }
-                    None => {
-                        diag::warn!(Ui, "bo2mp shell: none of {:?} is a BO2 screen", screen.candidates());
-                        with(|b| b.note = Some("That screen is not available yet.".to_owned()));
-                    }
+            Request::Prestige => {
+                if let Some(m) = mp {
+                    // (As mp/prestige_reset.cfg: level 1 again, the
+                    // bought items unbought, then the next prestige.)
+                    let done = {
+                        let p = &mut m.borrow_mut().profile;
+                        let ok = p.plevel() < bo2_profile::progression::MAX_PRESTIGE;
+                        if ok {
+                            p.prestige_stats_reset();
+                            p.set_stat(bo2_profile::RANK_XP.to_owned(), bo2_profile::StatValue::Num(0.0));
+                            p.set_stat(bo2_profile::RANK.to_owned(), bo2_profile::StatValue::Num(0.0));
+                        }
+                        ok && p.prestige_request(bo2_profile::progression::MAX_PRESTIGE)
+                    };
+                    diag::info!(Ui, "bo2mp shell: enter prestige: {}", if done { "done" } else { "not allowed" });
+                    with(|b| b.built_at = -1.0e9);
                 }
             }
         }

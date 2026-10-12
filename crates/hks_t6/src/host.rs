@@ -957,6 +957,12 @@ impl Host {
     }
 
     /// The engine calls the scripts made since the last time.
+    /// bo2mp: a call as if the menus had made it (the shell's own menus'
+    /// answers, `MenuResponse`).
+    pub fn push_call(&self, call: EngineCall) {
+        self.calls.borrow_mut().push(call);
+    }
+
     pub fn take_calls(&mut self) -> Vec<EngineCall> {
         std::mem::take(&mut *self.calls.borrow_mut())
     }

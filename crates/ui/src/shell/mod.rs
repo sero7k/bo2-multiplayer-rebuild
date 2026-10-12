@@ -16,8 +16,12 @@
 
 mod background;
 pub(crate) mod bridge;
+mod cac;
+pub(crate) mod classes;
+pub(crate) mod ingame;
 mod loading;
 mod online;
+pub(crate) mod options;
 mod pics;
 #[doc(hidden)]
 pub mod preview;
@@ -31,7 +35,7 @@ use frame::ClientSet;
 
 pub(crate) use bridge::{covers_loading, covers_lui, enabled, lui_side};
 
-use bridge::{Catalog, LuiScreen, Request, StartSpec};
+use bridge::{Catalog, Request, StartSpec};
 
 /// The screen he is on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -42,6 +46,13 @@ pub(crate) enum Screen {
     Lobby,
     MapPick,
     ModePick,
+    /// Create-a-Class: his classes, one class's slots, a slot's items.
+    Classes,
+    ClassEdit,
+    ItemPick,
+    /// Options (its tab is `page`), Barracks.
+    Options,
+    Barracks,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -70,6 +81,10 @@ pub(crate) enum Setting {
     Friends,
     Enemies,
     Difficulty,
+    LethalCount,
+    TacticalCount,
+    /// An Options row (of the tab he is on).
+    Option(u8),
 }
 
 /// What a row does.
@@ -77,7 +92,9 @@ pub(crate) enum Setting {
 pub(crate) enum Act {
     Multiplayer,
     Zombies,
-    Open(LuiScreen),
+    Options,
+    Barracks,
+    Prestige,
     Quit,
     CustomGame,
     Start,
@@ -86,6 +103,10 @@ pub(crate) enum Act {
     Cycle(Setting),
     /// A map tile / mode row (its index in the list shown).
     Choose(usize),
+    /// Create-a-Class: his classes, a class, a slot of it (`cac::EDIT_SLOTS`).
+    Classes,
+    EditClass(i32),
+    EditSlot(usize),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -128,6 +149,13 @@ pub(crate) struct Shell {
     pub note: Option<(String, f64)>,
     /// He started a match from the lobby (coming back lands there).
     pub played: bool,
+    /// Create-a-Class: the class, the slot (`cac::EDIT_SLOTS`), and the
+    /// screen it was opened from.
+    pub class: i32,
+    pub slot: usize,
+    pub cac_from: Screen,
+    /// The clock (seconds) as of his last input, for notes.
+    pub now: f64,
 }
 
 impl Default for Shell {
@@ -144,6 +172,10 @@ impl Default for Shell {
             page: 0,
             note: None,
             played: false,
+            class: 0,
+            slot: 0,
+            cac_from: Screen::Multiplayer,
+            now: 0.0,
         }
     }
 }
@@ -168,14 +200,14 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
         Screen::Main => vec![
             Row::new("MULTIPLAYER", "Custom games with bots on every map.", Act::Multiplayer),
             Row::new("ZOMBIES", "Survive the undead.", Act::Zombies),
-            Row::new("OPTIONS", "Controls, graphics and sound.", Act::Open(LuiScreen::Options)),
+            Row::new("OPTIONS", "Graphics, sound and controls.", Act::Options),
             Row::new("QUIT", "Back to the desktop.", Act::Quit),
         ],
         Screen::Multiplayer => vec![
             Row::new("CUSTOM GAME", "Pick the map, the mode and the bots, then play.", Act::CustomGame),
-            Row::new("CREATE A CLASS", "Build your loadouts.", Act::Open(LuiScreen::CreateAClass)),
-            Row::new("BARRACKS", "Your record, emblems and calling cards.", Act::Open(LuiScreen::Barracks)),
-            Row::new("OPTIONS", "Controls, graphics and sound.", Act::Open(LuiScreen::Options)),
+            Row::new("CREATE A CLASS", "Build your loadouts.", Act::Classes),
+            Row::new("BARRACKS", "Your combat record and prestige.", Act::Barracks),
+            Row::new("OPTIONS", "Graphics, sound and controls.", Act::Options),
         ],
         Screen::Lobby => match s.tab {
             Tab::Lobby => vec![
@@ -184,8 +216,8 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
                 Row::new("CHANGE MODE", "Team Deathmatch, Domination, Search & Destroy...", Act::PickMode),
             ],
             Tab::Loadouts => vec![
-                Row::new("CREATE A CLASS", "Build your loadouts.", Act::Open(LuiScreen::CreateAClass)),
-                Row::new("BARRACKS", "Your record, emblems and calling cards.", Act::Open(LuiScreen::Barracks)),
+                Row::new("CREATE A CLASS", "Build your loadouts.", Act::Classes),
+                Row::new("BARRACKS", "Your combat record and prestige.", Act::Barracks),
             ],
             Tab::Settings => {
                 let mode = c.mode(&s.mode).map_or_else(|| s.mode.to_uppercase(), |m| m.title.clone());
@@ -210,6 +242,17 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
             .enumerate()
             .map(|(i, m)| Row::new(&m.title, &m.desc, Act::Choose(i)))
             .collect(),
+        Screen::Classes | Screen::ClassEdit | Screen::ItemPick => classes::book().map(|b| cac::rows(s, &b)).unwrap_or_default(),
+        Screen::Options => options::rows(s.page, &options::snapshot()),
+        Screen::Barracks => {
+            let mut r = vec![Row::new("COMBAT RECORD", "Your kills, wins and time played.", Act::Barracks)];
+            if c.player.can_prestige {
+                r.push(Row::new("ENTER PRESTIGE", "Back to level 1 with the next prestige icon. Press twice to confirm.", Act::Prestige));
+            } else {
+                r.push(Row::new("PRESTIGE", "Reach level 155 to enter the next prestige.", Act::Prestige));
+            }
+            r
+        }
         Screen::MapPick => {
             let p = pages(c);
             p.get(s.page.min(p.len().saturating_sub(1)))
@@ -236,6 +279,41 @@ impl Shell {
 
     fn back(&mut self) {
         match self.screen {
+            Screen::Options | Screen::Barracks => {
+                let from = self.cac_from;
+                let was = self.screen;
+                self.go(from);
+                self.page = 0;
+                self.focus = match (from, was) {
+                    (Screen::Main, _) => 2,
+                    (Screen::Multiplayer, Screen::Barracks) => 2,
+                    (Screen::Multiplayer, _) => 3,
+                    (Screen::Lobby, _) => 1,
+                    _ => 0,
+                };
+            }
+            Screen::Classes => {
+                let from = self.cac_from;
+                self.go(from);
+                self.focus = if from == Screen::Multiplayer { 1 } else { 0 };
+            }
+            Screen::ClassEdit => {
+                let n = self.class.max(0) as usize;
+                self.go(Screen::Classes);
+                self.focus = n;
+            }
+            Screen::ItemPick => {
+                let slot = self.slot;
+                self.screen = Screen::ClassEdit;
+                self.page = 0;
+                // (Back on the row of the slot he picked for.)
+                self.focus = classes::book()
+                    .and_then(|b| {
+                        let c = b.classes.get(self.class as usize)?;
+                        cac::rows(self, &b).iter().position(|r| r.act == Act::EditSlot(slot)).filter(|_| c.n >= 0)
+                    })
+                    .unwrap_or(0);
+            }
             Screen::Main => {}
             Screen::Multiplayer => self.go(Screen::Main),
             Screen::Lobby => {
@@ -265,6 +343,12 @@ impl Shell {
             Setting::Friends => self.friends = step(self.friends, 8),
             Setting::Enemies => self.enemies = step(self.enemies, 9),
             Setting::Difficulty => self.difficulty = step(self.difficulty, 3),
+            Setting::Option(k) => options::queue(self.page, k, by),
+            Setting::LethalCount | Setting::TacticalCount => {
+                if let Some(b) = classes::book() {
+                    cac::count(self, &b, what == Setting::LethalCount, by, self.now);
+                }
+            }
             Setting::Mode => {
                 if !c.modes.is_empty() {
                     let i = c.modes.iter().position(|m| m.key == self.mode).unwrap_or(0) as i32;
@@ -279,7 +363,26 @@ impl Shell {
         match act {
             Act::Multiplayer => self.go(Screen::Multiplayer),
             Act::Zombies => bridge::request(Request::Zombies),
-            Act::Open(screen) => bridge::request(Request::Open(screen)),
+            Act::Options => {
+                self.cac_from = self.screen;
+                self.go(Screen::Options);
+                self.page = 0;
+            }
+            Act::Barracks if self.screen != Screen::Barracks => {
+                self.cac_from = self.screen;
+                self.go(Screen::Barracks);
+            }
+            Act::Barracks => {}
+            Act::Prestige => {
+                if !c.player.can_prestige {
+                    self.note("Reach level 155 to enter the next prestige.", now);
+                } else if self.note.as_ref().is_some_and(|(t, _)| t.starts_with("Press again")) {
+                    bridge::request(Request::Prestige);
+                    self.note("Prestige entered.", now);
+                } else {
+                    self.note("Press again to enter the next prestige.", now);
+                }
+            }
             Act::Quit => {
                 exit.write(AppExit::Success);
             }
@@ -316,6 +419,19 @@ impl Shell {
                 self.focus = c.modes.iter().position(|m| m.key == self.mode).unwrap_or(0);
             }
             Act::Cycle(what) => self.cycle(what, 1, c),
+            Act::Classes => {
+                self.cac_from = self.screen;
+                self.go(Screen::Classes);
+            }
+            Act::EditClass(n) => {
+                self.class = n;
+                self.go(Screen::ClassEdit);
+            }
+            Act::EditSlot(i) => {
+                if let Some(b) = classes::book() {
+                    cac::open_pick(self, &b, i);
+                }
+            }
             Act::Choose(i) => match self.screen {
                 Screen::ModePick => {
                     if let Some(m) = c.modes.get(i) {
@@ -329,6 +445,13 @@ impl Shell {
                         self.map = c.maps[m].ui_name.clone();
                     }
                     self.back();
+                }
+                Screen::ItemPick => {
+                    if let Some(b) = classes::book()
+                        && cac::choose(self, &b, i, now)
+                    {
+                        self.back();
+                    }
                 }
                 _ => {}
             },
@@ -375,6 +498,8 @@ fn shell_input(
     }
     let Some(c) = bridge::catalog() else { return };
     let now = time.elapsed_secs_f64();
+    shell.now = now;
+    classes::want(matches!(shell.screen, Screen::Classes | Screen::ClassEdit | Screen::ItemPick));
     if let Some(n) = bridge::take_note() {
         shell.note(&n, now);
     }
@@ -444,6 +569,15 @@ fn shell_input(
             s.page = (s.page as i32 + by).rem_euclid(np) as usize;
             s.focus = 0;
         }
+        Screen::Options => {
+            s.page = (s.page as i32 + by).rem_euclid(options::TABS.len() as i32) as usize;
+            s.focus = 0;
+        }
+        Screen::ItemPick => {
+            let np = classes::book().map_or(1, |b| cac::picks(s, &b).0.len().max(1)) as i32;
+            s.page = (s.page as i32 + by).rem_euclid(np) as usize;
+            s.focus = 0;
+        }
         _ => {}
     };
     if prev_tab {
@@ -454,7 +588,7 @@ fn shell_input(
     }
     // Moving.
     if n > 0 && dir != (0, 0) {
-        if shell.screen == Screen::MapPick {
+        if matches!(shell.screen, Screen::MapPick | Screen::ItemPick) {
             let f = shell.focus as i32;
             let cols = COLUMNS as i32;
             let mut t = f + dir.0 + dir.1 * cols;
@@ -562,9 +696,13 @@ pub(crate) fn register_shell(app: &mut App) {
                 shell_shown,
                 online::poll_online,
                 shell_input,
+                options::sync_settings,
                 background::shell_background,
                 view::shell_view,
                 loading::shell_loading,
+                ingame::ingame_input,
+                ingame::ingame_view,
+                ingame::tag_hits,
             )
                 .chain()
                 .in_set(ClientSet::Ui),

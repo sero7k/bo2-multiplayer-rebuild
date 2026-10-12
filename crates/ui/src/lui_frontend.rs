@@ -1379,7 +1379,12 @@ pub(crate) fn match_events(host: &mut Host, seen: &mut MatchSeen, old: Option<&M
     if new.menu != seen.menu {
         seen.menu = new.menu.clone();
         match new.menu.split_once(':') {
-            Some((_, "")) => host.root_event("close_all_ingame_menus", &[]),
+            Some((_, "")) => {
+                crate::shell::ingame::server_close();
+                host.root_event("close_all_ingame_menus", &[]);
+            }
+            // (bo2mp: the shell shows its own Choose Class.)
+            Some((_, menu)) if crate::shell::ingame::server_menu(menu) => {}
             Some((_, menu)) => host.root_event("open_ingame_menu", &[("menuName", Value::str(menu))]),
             None => {}
         }
