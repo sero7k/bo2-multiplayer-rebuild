@@ -5,8 +5,8 @@
 //! - Top centre: the score bar. His side's score in a blue box with its bar
 //!   reaching left, the clock, the enemy's score in a red box with its bar
 //!   reaching right, and WINNING / LOSING / TIED under it.
-//! - Bottom left: his name over a thin progress bar (his score toward the
-//!   limit).
+//! - Bottom left: his name over a thin health bar (his health now, read
+//!   from his player state every frame; red when low, empty when dead).
 //! - Bottom right, as Modern Warfare 3's: his three scorestreaks in a
 //!   column of squares on the right edge (the earned one lit and pulsing,
 //!   the next one filling up, used ones dimmed), the gun's name
@@ -256,6 +256,8 @@ struct HudValues {
     timeleft: Option<i32>,
     name: String,
     score: i32,
+    /// His health, 0..=100 % of his maximum (0 when dead or spectating).
+    health: i32,
     clip: i32,
     clip_left: Option<i32>,
     stock: i32,
@@ -271,6 +273,17 @@ struct HudValues {
     /// His three scorestreaks, dearest first.
     streaks: Vec<Streak>,
     height: u32,
+}
+
+/// His health as a share of his maximum, 0..=100 (0 when dead or not
+/// playing: `pm_type` 2 and up is dead / spectating).
+fn health_percent(state: Option<(i32, i32, i32)>) -> i32 {
+    match state {
+        Some((health, max, pm_type)) if max > 0 && pm_type < 2 && health > 0 => {
+            ((health as f32 / max as f32) * 100.0).round().clamp(0.0, 100.0) as i32
+        }
+        _ => 0,
+    }
 }
 
 fn clip_of(table: &[u8], weapon: i32, hand: usize) -> i32 {
@@ -392,6 +405,7 @@ fn read_values(
         timeleft,
         name,
         score: meta.score,
+        health: health_percent(ps.map(|p| (p.health, p.max_health, p.pm_type))),
         clip,
         clip_left: ps
             .filter(|p| p.last_weapon_hand == 1)
@@ -724,15 +738,13 @@ fn modern_hud(
                 c.spawn(Node::default()).with_children(|n| {
                     text(n, bo2, &font, "Default", &values.name, 20.0 * k, DIM);
                 });
-                let part = if values.limit > 0 {
-                    (values.score as f32 / values.limit.max(1) as f32).clamp(0.0, 1.0)
-                } else {
-                    1.0
-                };
+                // (His health: the bar follows his player state.)
+                let part = values.health as f32 / 100.0;
+                let fill = if values.health <= 35 { RED } else { WHITE };
                 c.spawn((BackgroundColor(TRACK), Node { width: px(210.0), height: px(4.0), ..default() }))
                     .with_children(|t| {
                         t.spawn((
-                            BackgroundColor(WHITE),
+                            BackgroundColor(fill),
                             Node {
                                 width: Val::Percent(part * 100.0),
                                 height: Val::Percent(100.0),
@@ -1468,6 +1480,7 @@ pub mod preview {
             weapon_label: "M8A1".into(),
             clip: 45,
             stock: 180,
+            health: 100,
             offhand: vec![(true, "frag_grenade_mp".into(), 1), (false, "concussion_grenade_mp".into(), 2)],
             attachments: vec!["Suppressor".into(), "Extended Clip".into()],
             ..default()
@@ -1729,5 +1742,22 @@ mod tests {
         assert_eq!(offhand_picture("frag_grenade_mp").map(|p| p.0), Some(true));
         assert_eq!(offhand_picture("flash_grenade_mp").map(|p| p.0), Some(false));
         assert!(offhand_picture("an94_mp").is_none());
+    }
+}
+
+#[cfg(test)]
+mod health_bar_tests {
+    use super::health_percent;
+
+    #[test]
+    fn follows_his_health() {
+        assert_eq!(health_percent(Some((100, 100, 0))), 100);
+        assert_eq!(health_percent(Some((35, 100, 0))), 35);
+        assert_eq!(health_percent(Some((150, 150, 0))), 100);
+        assert_eq!(health_percent(Some((75, 150, 0))), 50);
+        // Dead, spectating, no state: empty.
+        assert_eq!(health_percent(Some((0, 100, 0))), 0);
+        assert_eq!(health_percent(Some((100, 100, 2))), 0);
+        assert_eq!(health_percent(None), 0);
     }
 }

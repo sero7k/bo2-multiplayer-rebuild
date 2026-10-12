@@ -1085,7 +1085,7 @@ pub(crate) fn spawn_banner(commands: &mut Commands, faces: &Faces, m: &BannerMod
                         font(&faces.bold, 19.0 * k),
                         TextColor(ACCENT),
                         shadow(19.0 * k),
-                        TextLayout::new_with_no_wrap(),
+                        TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
                         Node { position_type: PositionType::Absolute, left: Val::Px(0.0), bottom: Val::Px(h + 3.0 * k), ..default() },
                         fade,
                     ));
@@ -1148,7 +1148,7 @@ pub(crate) fn spawn_banner(commands: &mut Commands, faces: &Faces, m: &BannerMod
                     font(&faces.bold, 22.0 * k),
                     TextColor(WHITE),
                     shadow(22.0 * k),
-                    TextLayout::new_with_no_wrap(),
+                    TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
                     Node {
                         position_type: PositionType::Absolute,
                         left: Val::Px(side + 16.0 * k),
