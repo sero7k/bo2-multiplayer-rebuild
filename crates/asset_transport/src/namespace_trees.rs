@@ -27,6 +27,9 @@ pub struct NamespaceTrees {
     iw5: Option<NamespaceTree>,
     // bo2zm: Black Ops II.
     t6: Option<NamespaceTree>,
+    // bo2mp: Ghosts zones are read by `fastfile_iw6` beside these trees;
+    // the slot stays empty.
+    iw6: Option<NamespaceTree>,
 }
 
 // bo2zm: every namespace a tree can hold, in report order.
@@ -75,6 +78,7 @@ impl NamespaceTrees {
             AssetNamespace::T5 => self.t5.as_ref(),
             AssetNamespace::Iw5 => self.iw5.as_ref(),
             AssetNamespace::T6 => self.t6.as_ref(),
+            AssetNamespace::Iw6 => self.iw6.as_ref(),
         }
     }
 
@@ -120,6 +124,7 @@ impl NamespaceTrees {
             AssetNamespace::T5 => &mut self.t5,
             AssetNamespace::Iw5 => &mut self.iw5,
             AssetNamespace::T6 => &mut self.t6,
+            AssetNamespace::Iw6 => &mut self.iw6,
         }
     }
 }
@@ -130,6 +135,8 @@ const fn zone_game_of(ns: AssetNamespace) -> ZoneGame {
         AssetNamespace::T5 => ZoneGame::T5,
         AssetNamespace::Iw5 => ZoneGame::Iw5,
         AssetNamespace::T6 => ZoneGame::T6,
+        // (Never asked: Ghosts is not in `NAMESPACES`.)
+        AssetNamespace::Iw6 => ZoneGame::Iw5,
     }
 }
 
@@ -141,6 +148,8 @@ pub struct NamespaceSoundIwd {
     // bo2zm: Black Ops II keeps its sounds in banks, not IWDs; the slot stays
     // for symmetry and is filled only if an install has loose IWD sounds.
     t6: Option<crate::iwd::IwdSoundIndex>,
+    // bo2mp: Ghosts keeps its sounds in paks (empty slot).
+    iw6: Option<crate::iwd::IwdSoundIndex>,
 }
 
 impl NamespaceSoundIwd {
@@ -181,6 +190,7 @@ impl NamespaceSoundIwd {
             AssetNamespace::T5 => self.t5.as_ref(),
             AssetNamespace::Iw5 => self.iw5.as_ref(),
             AssetNamespace::T6 => self.t6.as_ref(),
+            AssetNamespace::Iw6 => self.iw6.as_ref(),
         }
     }
 
@@ -202,6 +212,7 @@ impl NamespaceSoundIwd {
             AssetNamespace::T5 => &mut self.t5,
             AssetNamespace::Iw5 => &mut self.iw5,
             AssetNamespace::T6 => &mut self.t6,
+            AssetNamespace::Iw6 => &mut self.iw6,
         }
     }
 }

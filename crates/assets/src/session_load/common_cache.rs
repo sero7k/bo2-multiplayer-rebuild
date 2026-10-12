@@ -425,7 +425,7 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
         weapons: iw4_guest_weapons,
         fpv: iw4_guest_fpv,
         world_guns: iw4_guest_world_guns,
-        mut material_seed,
+        material_seed,
         xanims: iw4_guest_xanims,
         fx: iw4_guest_fx,
         projectiles: iw4_guest_projectiles,
@@ -440,9 +440,24 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
         pool.spawn(async move { walk_t5_weapon_common(prep, &progress, material_seed, job) }).await
     };
     common_report.extend(iw4_guest_report.into_iter().map(|l| l.replacen("t5 weapon common", "iw4 guest guns", 1)));
+    // bo2mp: Ghosts' guest guns, after MW2's on the same material pool.
+    let crate::lane::Iw6Guests {
+        weapons: iw6_guest_weapons,
+        fpv: iw6_guest_fpv,
+        world_guns: iw6_guest_world_guns,
+        xanims: iw6_guest_xanims,
+        mut material_seed,
+        report: iw6_guest_report,
+    } = {
+        let progress = progress.clone();
+        let wanted = crate::t6_rules() && crate::guest_guns();
+        pool.spawn(async move { crate::lane::walk_iw6_guest_guns(wanted, material_seed, &progress) }).await
+    };
+    common_report.extend(iw6_guest_report);
     let mut t5_xanims = t5_xanims;
     let mut t5_fx = t5_fx;
     let iw4_guest_xanim_n = t5_xanims.absorb(iw4_guest_xanims);
+    let iw6_guest_xanim_n = t5_xanims.absorb(iw6_guest_xanims);
     t5_fx.absorb_missing(iw4_guest_fx);
     let t5_ids = t5_weapons.len();
     let t5_fpv_n = t5_fpv.len();
@@ -671,6 +686,17 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
             "iw4 guest guns absorbed: {n} weapons, fpv=+{fpv} world_guns=+{world} xanims=+{iw4_guest_xanim_n}; registry now {} (iw4={})",
             weapons.len(),
             weapons.namespace_count(asset_core::AssetNamespace::Iw4)
+        ));
+    }
+    if !iw6_guest_weapons.is_empty() {
+        let n = iw6_guest_weapons.len();
+        weapons.absorb(iw6_guest_weapons);
+        let fpv = fpv_meshes.absorb(iw6_guest_fpv);
+        let world = world_weapons.absorb(iw6_guest_world_guns);
+        common_report.push(format!(
+            "iw6 guest guns absorbed: {n} weapons, fpv=+{fpv} world_guns=+{world} xanims=+{iw6_guest_xanim_n}; registry now {} (iw6={})",
+            weapons.len(),
+            weapons.namespace_count(asset_core::AssetNamespace::Iw6)
         ));
     }
     projectile_meshes.absorb(t5_projectiles);

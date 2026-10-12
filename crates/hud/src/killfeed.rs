@@ -652,6 +652,7 @@ pub fn foreign_kill_icon_base(ns: asset_core::AssetNamespace, name: &str) -> Opt
         asset_core::AssetNamespace::T5 => "bo1_",
         asset_core::AssetNamespace::Iw4 => "mw2_",
         asset_core::AssetNamespace::Iw5 => "mw3_",
+        asset_core::AssetNamespace::Iw6 => "gh_",
         asset_core::AssetNamespace::T6 => return None,
     };
     let base = name.split('+').next().unwrap_or(name).trim_end_matches("_mp");

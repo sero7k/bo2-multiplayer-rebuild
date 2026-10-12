@@ -4,6 +4,10 @@ use std::collections::{HashMap, HashSet};
 #[path = "weapon_catalog_t6.rs"]
 mod t6;
 pub use t6::T6_SIGHT_ATTACHMENTS;
+// bo2mp: Ghosts weapons (guest guns).
+#[path = "weapon_catalog_iw6.rs"]
+mod iw6;
+pub use iw6::Iw6WeaponView;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 

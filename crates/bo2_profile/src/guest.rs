@@ -161,6 +161,56 @@ pub const MW2: &[GuestGun] = &[
     m("m79", "Thumper", LAUNCHER, S, ""),
 ];
 
+const fn gh(gun: &'static str, name: &'static str, group: &'static str, slot: &'static str) -> GuestGun {
+    GuestGun { game: "iw6", gun, name, group, slot, attachments: "", icon: "" }
+}
+
+/// bo2mp: Call of Duty: Ghosts' multiplayer guns (`iw6_<gun>_mp` in its
+/// common_core_mp; no attachments yet: Ghosts builds its variants at run
+/// time from attachment assets). Listed after every other game's so the
+/// statstable indices before them never move.
+pub const GHOSTS: &[GuestGun] = &[
+    gh("ak12", "AK-12", AR, P),
+    gh("sc2010", "SC-2010", AR, P),
+    gh("honeybadger", "Honey Badger", AR, P),
+    gh("bren", "Bren", AR, P),
+    gh("msbs", "MSBS", AR, P),
+    gh("arx160", "ARX-160", AR, P),
+    gh("fads", "FAD", AR, P),
+    gh("r5rgp", "Remington R5", AR, P),
+    gh("kriss", "Vector CRB", SMG, P),
+    gh("pp19", "Bizon", SMG, P),
+    gh("vepr", "Vepr", SMG, P),
+    gh("microtar", "MTAR-X", SMG, P),
+    gh("cbjms", "CBJ-MS", SMG, P),
+    gh("k7", "K7", SMG, P),
+    gh("m27", "M27-IAR", LMG, P),
+    gh("ameli", "Ameli", LMG, P),
+    gh("lsat", "LSAT", LMG, P),
+    gh("kac", "Chain SAW", LMG, P),
+    gh("vks", "VKS", SNIPER, P),
+    gh("gm6", "Lynx", SNIPER, P),
+    gh("usr", "USR", SNIPER, P),
+    gh("l115a3", "L115", SNIPER, P),
+    gh("imbel", "IA-2", SNIPER, P),
+    gh("svu", "SVU", SNIPER, P),
+    gh("g28", "MR-28", SNIPER, P),
+    gh("mk14", "MK14 EBR", SNIPER, P),
+    gh("mts255", "MTS-255", CQB, P),
+    gh("fp6", "FP6", CQB, P),
+    gh("maul", "Maul", CQB, P),
+    gh("uts15", "Bulldog", CQB, P),
+    gh("p226", "P226", PISTOL, S),
+    gh("m9a1", "M9A1", PISTOL, S),
+    gh("mp443", "MP-443 Grach", PISTOL, S),
+    gh("magnum", ".44 Magnum", PISTOL, S),
+    gh("pdw", "PDW", PISTOL, S),
+    gh("panzerfaust3", "Panzerfaust", LAUNCHER, S),
+    gh("mk32", "MK32", LAUNCHER, S),
+    gh("maaws", "MAAWS", LAUNCHER, S),
+    gh("rgm", "Kastet", LAUNCHER, S),
+];
+
 /// Attachments the guest guns have and BO2's table lacks: reference, slot,
 /// name, picture.
 const EXTRA_ATTACHMENTS: &[(&str, &str, &str, &str)] = &[
@@ -188,18 +238,19 @@ pub fn prefix(game: &str) -> &'static str {
         "t5" => "bo1_",
         "iw4" => "mw2_",
         "iw5" => "mw3_",
+        "iw6" => "gh_",
         _ => "",
     }
 }
 
-const GAMES: [&str; 3] = ["t5", "iw4", "iw5"];
+const GAMES: [&str; 4] = ["t5", "iw4", "iw5", "iw6"];
 static AVAILABLE: AtomicU8 = AtomicU8::new(0);
 
 fn bit(game: &str) -> u8 {
     GAMES.iter().position(|g| *g == game).map_or(0, |i| 1 << i)
 }
 
-/// Whether `game`'s guns are listed (`t5`, `iw4`, `iw5`).
+/// Whether `game`'s guns are listed (`t5`, `iw4`, `iw5`, `iw6`).
 pub fn set_available(game: &str, on: bool) {
     if on {
         AVAILABLE.fetch_or(bit(game), Ordering::Relaxed);
@@ -215,7 +266,7 @@ pub fn available(game: &str) -> bool {
 
 /// Every guest gun, available or not, in table order.
 pub fn all() -> impl Iterator<Item = &'static GuestGun> {
-    BO1.iter().chain(MW2.iter())
+    BO1.iter().chain(MW2.iter()).chain(GHOSTS.iter())
 }
 
 impl GuestGun {
@@ -234,6 +285,7 @@ impl GuestGun {
             "t5" => "Call of Duty: Black Ops",
             "iw4" => "Modern Warfare 2",
             "iw5" => "Modern Warfare 3",
+            "iw6" => "Call of Duty: Ghosts",
             _ => "another game",
         }
     }

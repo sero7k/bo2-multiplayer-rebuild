@@ -93,7 +93,7 @@ pub fn material_alpha_test(namespace: crate::AssetNamespace, bits: [u32; 2]) -> 
             alpha_test_from_state_bits(bits).map(Gfxs0AlphaTest::d3d)
         }
         // bo2zm: Black Ops II state bits are not decoded yet.
-        crate::AssetNamespace::T6 => None,
+        crate::AssetNamespace::T6 | crate::AssetNamespace::Iw6 => None,
     }
 }
 

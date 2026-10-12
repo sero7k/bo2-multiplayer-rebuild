@@ -8,6 +8,8 @@ pub enum AssetNamespace {
     Iw5,
     /// bo2zm: Black Ops II.
     T6,
+    /// bo2mp: Call of Duty: Ghosts (guest guns only).
+    Iw6,
 }
 
 impl AssetNamespace {
@@ -17,6 +19,7 @@ impl AssetNamespace {
             Self::T5 => "t5",
             Self::Iw5 => "iw5",
             Self::T6 => "t6",
+            Self::Iw6 => "iw6",
         }
     }
 
@@ -28,13 +31,14 @@ impl AssetNamespace {
             Self::Iw4 => "mw2_",
             Self::T5 => "bo1_",
             Self::Iw5 => "mw3_",
+            Self::Iw6 => "gh_",
             Self::T6 => "",
         }
     }
 
     /// bo2mp: the game a guest gun's script name says it is from.
     pub fn from_guest_name(name: &str) -> Option<Self> {
-        [Self::T5, Self::Iw4, Self::Iw5].into_iter().find(|ns| name.starts_with(ns.guest_prefix()))
+        [Self::T5, Self::Iw4, Self::Iw5, Self::Iw6].into_iter().find(|ns| name.starts_with(ns.guest_prefix()))
     }
 
     /// bo2mp: the attachment words of this game's gun variants
@@ -49,7 +53,7 @@ impl AssetNamespace {
                 "acog", "akimbo", "eotech", "fmj", "gl", "grip", "heartbeat", "reflex", "rof", "shotgun", "silencer",
                 "tactical", "thermal", "xmags",
             ],
-            Self::Iw5 | Self::T6 => &[],
+            Self::Iw5 | Self::T6 | Self::Iw6 => &[],
         }
     }
 
@@ -68,6 +72,7 @@ impl AssetNamespace {
             "t5" => Some(Self::T5),
             "iw5" => Some(Self::Iw5),
             "t6" => Some(Self::T6),
+            "iw6" => Some(Self::Iw6),
             _ => None,
         }
     }
