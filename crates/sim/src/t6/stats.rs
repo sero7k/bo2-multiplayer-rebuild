@@ -33,6 +33,22 @@ pub fn set_local_match_ranked(ranked: bool) {
     RANKED.store(ranked, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// The class set the local player's classes come from, as the front end
+/// that edited them chose (`None`: by the match, see `class_set`). The
+/// shell's own Create-a-Class edits `bo2_profile::LOCAL_MATCH_SET` while
+/// its matches are ranked (they earn XP), so the set can't follow from
+/// `ranked` alone: BO2's own front end edits the public set in Combat
+/// Training.
+static LOCAL_CLASS_SET: Mutex<Option<String>> = Mutex::new(None);
+
+/// The class set the next match gives the local player (the front end
+/// calls this at START MATCH, with the set its Create-a-Class edited).
+pub fn set_local_class_set(set: Option<&str>) {
+    if let Ok(mut s) = LOCAL_CLASS_SET.lock() {
+        *s = set.map(str::to_owned);
+    }
+}
+
 pub fn ranked() -> bool {
     RANKED.load(std::sync::atomic::Ordering::Relaxed) || std::env::var("BO2MP_RANKED").is_ok_and(|v| v == "1")
 }
@@ -102,7 +118,7 @@ pub(crate) fn player(world: &mut World, client: u32) -> &mut PlayerStats {
         let stats = file.as_deref().map(Profile::read_stats_file).unwrap_or_default();
         let (items, atts) = (table_rows(world, "mp/statstable.csv"), table_rows(world, "mp/attachmenttable.csv"));
         let mut profile = Profile::from_tables(&items, &atts, &|_| None, stats);
-        profile.match_set = class_set(world).to_owned();
+        profile.match_set = class_set(world);
         if let Some(f) = &file {
             diag::info!(
                 Sim,
@@ -121,10 +137,18 @@ pub(crate) fn player(world: &mut World, client: u32) -> &mut PlayerStats {
     world.resource_mut::<ServerStats>().into_inner().players.get_mut(&client).expect("inserted above")
 }
 
-/// The class set a match gives (BO2's `cacRoot`): a ranked match (Combat
-/// Training) the public one, else the custom match set.
-fn class_set(world: &World) -> &'static str {
-    if world.resource::<Zm>().ranked_match { "cacloadouts" } else { bo2_profile::LOCAL_MATCH_SET }
+/// The class set a match gives: the one the front end said its
+/// Create-a-Class edited, else BO2's `cacRoot` (a ranked match, Combat
+/// Training, the public one, else the custom match set).
+fn class_set(world: &World) -> String {
+    if let Some(s) = LOCAL_CLASS_SET.lock().ok().and_then(|s| s.clone()) {
+        return s;
+    }
+    class_set_for(world.resource::<Zm>().ranked_match).to_owned()
+}
+
+fn class_set_for(ranked: bool) -> &'static str {
+    if ranked { "cacloadouts" } else { bo2_profile::LOCAL_MATCH_SET }
 }
 
 /// The local player's profile, when the match has his stats (his classes).
@@ -515,4 +539,15 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let v = get(world, c, "playerstatslist.codpoints.statvalue");
         Ok(to_value(vm, v))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    /// Without the front end's word, a ranked match gives the public set
+    /// and a custom one the custom match set (BO2's `cacRoot`).
+    #[test]
+    fn class_set_by_match() {
+        assert_eq!(super::class_set_for(true), "cacloadouts");
+        assert_eq!(super::class_set_for(false), bo2_profile::LOCAL_MATCH_SET);
+    }
 }

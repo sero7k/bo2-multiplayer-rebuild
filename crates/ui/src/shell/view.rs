@@ -10,7 +10,7 @@ use super::online::{OnlineInfo, Status};
 use super::pics::{ShellPics, cover};
 use super::theme::*;
 use super::cards::{self, Kind};
-use super::{Act, DIFFICULTY, Hit, Row, Screen, Setting, Shell, Tab, bridge, pages, rows};
+use super::{Act, DIFFICULTY, Hit, Row, Screen, Shell, Tab, bridge, pages, rows};
 
 #[derive(Component)]
 pub(crate) struct ViewRoot;
@@ -49,6 +49,10 @@ impl Ctx<'_> {
         font(&self.fonts.light, px * self.s)
     }
 
+    pub fn black(&self, px: f32) -> TextFont {
+        font(&self.fonts.black, px * self.s)
+    }
+
     pub fn pic(&mut self, names: &[String]) -> Option<Handle<Image>> {
         self.pics.first(names, self.icons, self.images)
     }
@@ -58,7 +62,7 @@ impl Ctx<'_> {
     }
 }
 
-fn abs(left: Option<f32>, top: Option<f32>, right: Option<f32>, bottom: Option<f32>, cx: &Ctx) -> Node {
+pub(crate) fn abs(left: Option<f32>, top: Option<f32>, right: Option<f32>, bottom: Option<f32>, cx: &Ctx) -> Node {
     Node {
         position_type: PositionType::Absolute,
         left: left.map_or(Val::Auto, |v| cx.px(v)),
@@ -263,6 +267,7 @@ fn footer(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, online: &Onl
                     Screen::Lobby | Screen::Options => hint(l, cx, "Q / E", "xenonbutton_lb", "TABS"),
                     Screen::MapPick => hint(l, cx, "Q / E", "xenonbutton_lb", "SECTIONS"),
                     Screen::ItemPick => hint(l, cx, "Q / E", "xenonbutton_lb", "CATEGORIES"),
+                    Screen::CardPick | Screen::EmblemPick => hint(l, cx, "Q / E", "xenonbutton_lb", "PAGES"),
                     Screen::ZmMapPick if super::zombies::pages(super::zombies::state().bo1()).len() > 1 => hint(l, cx, "Q / E", "xenonbutton_lb", "SECTIONS"),
                     _ => {}
                 }
@@ -826,8 +831,8 @@ fn barracks_view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows:
         });
         p.spawn((Node { height: Val::Px(1.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(cx.pal.line)));
         let focused = rows.get(shell.focus).map(|r| r.act);
-        if let Some(Act::Cycle(what @ (Setting::Card | Setting::Emblem))) = focused {
-            look_strip(p, cx, if what == Setting::Card { Kind::Card } else { Kind::Emblem }, if what == Setting::Card { &me.card } else { &me.emblem });
+        if let Some(Act::Looks(kind)) = focused {
+            look_strip(p, cx, kind, if kind == Kind::Card { &me.card } else { &me.emblem });
         } else if focused != Some(Act::Prestige) {
             p.spawn((Text::new("COMBAT RECORD"), cx.bold(22.0), TextColor(FAINT)));
             p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: cx.px(16.0), row_gap: cx.px(16.0), ..default() }).with_children(|g| {
@@ -877,15 +882,15 @@ fn barracks_view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows:
     });
 }
 
-/// Barracks' picker: his calling card or emblem among its neighbours in
-/// the list (left / right steps through them).
+/// Barracks: his calling card or emblem among its neighbours in the list
+/// (ENTER opens the picker).
 fn look_strip(p: &mut Kids, cx: &mut Ctx, kind: Kind, stat: &str) {
     let list = cards::list(kind);
     let now = cards::mine(kind, stat);
     let (at, n) = cards::place_in(&list, &now);
     let what = if kind == Kind::Card { "CALLING CARD" } else { "EMBLEM" };
     p.spawn(Node { justify_content: JustifyContent::SpaceBetween, ..default() }).with_children(|t| {
-        t.spawn((Text::new(format!("{what}  ·  {}", cards::label(&now))), cx.bold(22.0), TextColor(FAINT)));
+        t.spawn((Text::new(format!("{what}  ·  {}", cards::title(&now).to_uppercase())), cx.bold(22.0), TextColor(FAINT)));
         t.spawn((Text::new(format!("{at} OF {n}")), cx.bold(22.0), TextColor(DIM)));
     });
     let i = at.saturating_sub(1) as i32;
@@ -913,25 +918,123 @@ fn look_strip(p: &mut Kids, cx: &mut Ctx, kind: Kind, stat: &str) {
             });
         }
     });
-    p.spawn((Text::new("A / D or the arrows: the previous or next one. It is saved at once."), cx.regular(19.0), TextColor(DIM)));
+    p.spawn((Text::new(format!("Press ENTER to choose your {} from every page.", what.to_lowercase())), cx.regular(19.0), TextColor(DIM)));
 }
 
 
-fn main_menu(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row]) {
-    c.spawn(Node {
-        flex_direction: FlexDirection::Column,
-        ..abs(Some(150.0), Some(300.0), None, None, cx)
-    })
-    .with_children(|col| {
-        col.spawn((Text::new("BLACK OPS II"), cx.bold(104.0), TextColor(WHITE)));
-        col.spawn((
-            Node { column_gap: cx.px(12.0), align_items: AlignItems::Center, margin: UiRect::bottom(cx.px(56.0)), ..default() },
-        ))
-        .with_children(|t| {
-            t.spawn((Node { width: cx.px(40.0), height: cx.px(3.0), ..default() }, BackgroundColor(cx.pal.accent)));
-            t.spawn((Text::new("CLASSIC MULTIPLAYER"), cx.bold(24.0), TextColor(cx.pal.accent)));
+/// The CALL OF DUTY logo, drawn: the words in the black condensed weight,
+/// a small OF stacked between them, filled with a brushed-silver sweep
+/// (light at the top, a bright band under the middle, darker at the foot:
+/// the words are drawn once per band, each band clipped to its strip) over
+/// a soft dark shadow.
+fn logo(c: &mut Kids, cx: &Ctx, left: f32, top: f32, px: f32) {
+    // The logo's box: the words' line height, the caps sit in it.
+    let (w, h) = (px * 3.9, px * 0.92);
+    let words = |l: &mut Kids, color: Color, shadow: bool| {
+        l.spawn(Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            top: cx.px(-px * 0.24),
+            column_gap: cx.px(px * 0.035),
+            align_items: AlignItems::FlexStart,
+            ..default()
+        })
+        .with_children(|r| {
+            let shade = |px: f32| TextShadow { offset: Vec2::new(0.0, px * 0.035 * cx.s), color: Color::srgba(0.0, 0.0, 0.0, if shadow { 0.85 } else { 0.0 }), ..default() };
+            r.spawn((Text::new("CALL"), cx.black(px), TextColor(color), shade(px)));
+            r.spawn((Text::new("OF"), cx.black(px * 0.40), TextColor(color), shade(px * 0.4), Node { margin: UiRect::top(cx.px(px * 0.17)), ..default() }));
+            r.spawn((Text::new("DUTY"), cx.black(px), TextColor(color), shade(px)));
         });
-        menu_rows(col, cx, rows, shell.focus, 460.0, true);
+    };
+    c.spawn(Node { width: cx.px(w), height: cx.px(h), ..abs(Some(left), Some(top), None, None, cx) }).with_children(|l| {
+        // The shadow under it all (the darkest copy, offset).
+        words(l, Color::srgba(0.0, 0.0, 0.0, 0.0), true);
+        // The silver: (where the band starts, 0..1 down the caps, its grey).
+        const SWEEP: [(f32, f32); 6] = [(0.0, 0.97), (0.30, 0.86), (0.52, 0.70), (0.60, 0.92), (0.78, 0.66), (1.0, 0.50)];
+        let bands = 22;
+        for i in 0..bands {
+            let t = (i as f32 + 0.5) / bands as f32;
+            let k = SWEEP.windows(2).find(|p| t >= p[0].0 && t <= p[1].0).map_or(0.6, |p| {
+                let f = (t - p[0].0) / (p[1].0 - p[0].0);
+                p[0].1 + (p[1].1 - p[0].1) * f
+            });
+            let band = h / bands as f32;
+            l.spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: cx.px(band * i as f32),
+                width: Val::Percent(100.0),
+                height: cx.px(band + 0.6),
+                overflow: Overflow::clip(),
+                ..default()
+            })
+            .with_children(|b| {
+                b.spawn(Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: cx.px(-band * i as f32), width: cx.px(w), height: cx.px(h), ..default() })
+                    .with_children(|inner| words(inner, Color::srgb(k * 0.96, k * 0.975, k), false));
+            });
+        }
+    });
+}
+
+/// The main menu, laid out as Infinite Warfare's: the logo at the top left,
+/// thin rows under it each with a white bar at its left, the row in focus's
+/// line under them, and EXIT at the foot; the menu photos behind.
+fn main_menu(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row], online: &OnlineInfo) {
+    let left = 150.0;
+    // A deeper shade on the menus' side so the rows read over any photo.
+    c.spawn((
+        Node { width: cx.px(900.0), height: Val::Percent(100.0), ..abs(Some(0.0), Some(0.0), None, None, cx) },
+        fade_right(Color::srgba(0.0, 0.01, 0.03, 0.55), Color::srgba(0.0, 0.01, 0.03, 0.0)),
+    ));
+    logo(c, cx, left, 150.0, 132.0);
+    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(5.0), ..abs(Some(left), Some(392.0), None, None, cx) }).with_children(|col| {
+        for (i, r) in rows.iter().enumerate() {
+            let on = i == shell.focus;
+            col.spawn((
+                Hit::Row(i),
+                Button,
+                Node { width: cx.px(492.0), height: cx.px(34.0), align_items: AlignItems::Center, column_gap: cx.px(14.0), ..default() },
+                if on {
+                    fade_right(Color::srgba(1.0, 1.0, 1.0, 0.20), Color::srgba(1.0, 1.0, 1.0, 0.04))
+                } else {
+                    fade_right(Color::srgba(0.0, 0.0, 0.0, 0.62), Color::srgba(0.0, 0.0, 0.0, 0.30))
+                },
+            ))
+            .with_children(|row| {
+                row.spawn((Node { width: cx.px(5.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(if on { WHITE } else { Color::srgba(1.0, 1.0, 1.0, 0.82) })));
+                row.spawn((Text::new(r.label.clone()), cx.regular(25.0), TextColor(if on { WHITE } else { TEXT.with_alpha(0.80) })));
+            });
+        }
+        if let Some(r) = rows.get(shell.focus) {
+            col.spawn((Text::new(r.sub.clone()), cx.regular(25.0), TextColor(WHITE), Node { margin: UiRect::top(cx.px(14.0)), ..default() }));
+        }
+    });
+    // EXIT at the foot (a tab with the same white bar), the server's state
+    // at the right.
+    c.spawn((
+        Hit::Back,
+        Button,
+        Node { width: cx.px(236.0), height: cx.px(38.0), align_items: AlignItems::Center, column_gap: cx.px(14.0), ..abs(Some(left - 16.0), None, None, Some(0.0), cx) },
+        fade_right(Color::srgba(0.0, 0.0, 0.0, 0.70), Color::srgba(0.0, 0.0, 0.0, 0.40)),
+    ))
+    .with_children(|b| {
+        b.spawn((Node { width: cx.px(5.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(WHITE)));
+        b.spawn((Node { flex_grow: 1.0, justify_content: JustifyContent::Center, ..default() },)).with_child((Text::new("EXIT"), cx.regular(24.0), TextColor(WHITE)));
+    });
+    let (dot, label) = match online.status {
+        Status::Online => (GREEN, format!("ONLINE  ·  {} PLAYERS", fmt_count(online.players))),
+        Status::Connecting => (GOLD, "CONNECTING".to_owned()),
+        Status::Unreachable => (ENEMY, "SERVER UNREACHABLE".to_owned()),
+        Status::Offline => (FAINT, "OFFLINE  ·  LOCAL PLAY".to_owned()),
+    };
+    c.spawn(Node { column_gap: cx.px(24.0), align_items: AlignItems::Center, ..abs(None, None, Some(72.0), Some(22.0), cx) }).with_children(|r| {
+        if !cx.pad {
+            hint(r, cx, "F10", "", "GAME FOLDERS");
+        }
+        r.spawn(Node { column_gap: cx.px(10.0), align_items: AlignItems::Center, ..default() }).with_children(|s| {
+            s.spawn((Node { width: cx.px(9.0), height: cx.px(9.0), border_radius: BorderRadius::all(Val::Percent(50.0)), ..default() }, BackgroundColor(dot)));
+            s.spawn((Text::new(label), cx.bold(18.0), TextColor(DIM)));
+        });
     });
 }
 
@@ -1017,13 +1120,14 @@ pub(crate) fn shell_view(
         ))
         .with_children(|c| {
             match shell.screen {
-                Screen::Main => main_menu(c, &mut cx, &shell, &rows),
+                Screen::Main => main_menu(c, &mut cx, &shell, &rows, &online),
                 Screen::Multiplayer => multiplayer(c, &mut cx, &shell, &rows, &online),
                 Screen::Lobby => lobby(c, &mut cx, &shell, &cat, &rows),
                 Screen::MapPick => map_picker(c, &mut cx, &shell, &cat),
                 Screen::ModePick => mode_picker(c, &mut cx, &shell, &cat, &rows),
                 Screen::Options => options_view(c, &mut cx, &shell, &rows),
                 Screen::Barracks => barracks_view(c, &mut cx, &shell, &cat, &rows),
+                Screen::CardPick | Screen::EmblemPick => super::looks::view(c, &mut cx, &shell, &cat, &rows),
                 Screen::Classes | Screen::ClassEdit | Screen::ItemPick => {
                     if let Some(book) = super::classes::book() {
                         super::cac::view(c, &mut cx, &shell, &book, &rows);
@@ -1031,8 +1135,14 @@ pub(crate) fn shell_view(
                 }
                 Screen::Zombies | Screen::ZmMapPick | Screen::ZmStartPick => super::zombies_view::view(c, &mut cx, &shell, &rows),
             }
-            player_card(c, &mut cx, &cat.player);
-            footer(c, &mut cx, &shell, &cat, &online);
+            // (The main menu has its own foot, and no player card; the
+            // calling card and emblem pickers show his card in their middle.)
+            if !matches!(shell.screen, Screen::Main | Screen::CardPick | Screen::EmblemPick) {
+                player_card(c, &mut cx, &cat.player);
+            }
+            if shell.screen != Screen::Main {
+                footer(c, &mut cx, &shell, &cat, &online);
+            }
             if let Some((note, _)) = &shell.note {
                 c.spawn((
                     Node { padding: UiRect::axes(cx.px(22.0), cx.px(10.0)), border: UiRect::left(cx.px(3.0)), ..abs(Some(72.0), None, None, Some(84.0), &cx) },

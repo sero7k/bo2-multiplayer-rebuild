@@ -95,7 +95,7 @@ fn photo(i: usize, pics: &mut ShellPics, images: &mut Assets<Image>) -> Option<H
 /// The screens with no map to show: the photos take turns there.
 fn photo_screen(shell: &Shell) -> bool {
     match shell.screen {
-        Screen::Main | Screen::Multiplayer | Screen::Options | Screen::Barracks => true,
+        Screen::Main | Screen::Multiplayer | Screen::Options | Screen::Barracks | Screen::CardPick | Screen::EmblemPick => true,
         Screen::Classes | Screen::ClassEdit | Screen::ItemPick => shell.cac_from != Screen::Lobby,
         _ => false,
     }

@@ -161,7 +161,19 @@ fn stand_in_book() -> ClassBook {
 fn stand_in_looks() -> (Vec<String>, Vec<String>) {
     let cards = ["tf141", "army_ranger", "bloodsplat", "seals", "ac130", "harrier", "nuke", "skull", "1st_place"];
     let emblems = ["tf141", "army", "seal", "skull_black", "ac130", "harrier", "nuke", "militia"];
-    (cards.iter().map(|n| format!("iw4:cardtitle_{n}")).collect(), emblems.iter().map(|n| format!("iw4:cardicon_{n}")).collect())
+    // (Enough for more than one page in the pickers.)
+    let more = ["heartbreaker", "frag_out", "living_dead", "phoenix_rising", "uav_rays", "last_resort", "toxic", "martyr", "how_the", "perfectionist", "voyeur", "chick_magnet", "catch_shrapnel", "infected", "rejected", "kleptomaniac"];
+    let mut c: Vec<String> = cards.iter().map(|n| format!("iw4:cardtitle_{n}")).collect();
+    let mut e: Vec<String> = emblems.iter().map(|n| format!("iw4:cardicon_{n}")).collect();
+    for i in 0..3 {
+        for n in more {
+            c.push(format!("{}:cardtitle_{n}{}", if i == 0 { "iw4" } else { "iw5" }, if i > 0 { format!("_{i}") } else { String::new() }));
+        }
+    }
+    for i in 0..62 {
+        e.push(format!("{}:cardicon_{}_{i}", if i < 30 { "iw4" } else { "iw5" }, more[i % more.len()]));
+    }
+    (c, e)
 }
 
 /// A stand-in card (512x128, a coloured sweep with stripes) or emblem
@@ -225,6 +237,9 @@ fn step(
     plan.frames = 0;
     let shots: &[(&str, fn(&mut Shell, &mut Commands))] = &[
         ("01_main", |s, _| *s = Shell::default()),
+        ("01b_main_zombies", |s, _| {
+            s.focus = 1;
+        }),
         ("02_multiplayer", |s, _| {
             s.screen = Screen::Multiplayer;
             s.focus = 0;
@@ -299,6 +314,20 @@ fn step(
         }),
         ("12e_barracks_emblem", |s, _| {
             s.focus = 2;
+        }),
+        ("12e2_card_picker", |s, _| {
+            s.screen = Screen::CardPick;
+            s.page = 0;
+            s.focus = 4;
+        }),
+        ("12e3_emblem_picker", |s, _| {
+            s.screen = Screen::EmblemPick;
+            s.page = 1;
+            s.focus = 11;
+        }),
+        ("12e4_barracks_after", |s, _| {
+            s.screen = Screen::Barracks;
+            s.focus = 1;
         }),
         ("12f_lobby_countdown", |s, _| {
             bridge::set_preview_starting(Some(3350.0));

@@ -479,6 +479,13 @@ pub fn prefix(game: &str) -> &'static str {
     }
 }
 
+/// Whether a weapon name is a guest gun's (`bo1_ak74u_mp+reflex`,
+/// `gh_ak12_mp`): it starts with a game's prefix.
+#[must_use]
+pub fn is_guest_name(name: &str) -> bool {
+    GAMES.iter().any(|g| name.starts_with(prefix(g)))
+}
+
 const GAMES: [&str; 6] = ["t5", "iw4", "iw5", "iw6", "t4", "iw3"];
 static AVAILABLE: AtomicU8 = AtomicU8::new(0);
 

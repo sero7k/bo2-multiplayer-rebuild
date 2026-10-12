@@ -1,5 +1,6 @@
 //! The shell's screens with stand-in data, saved as pictures:
-//! `cargo run -p ui --example shell_preview -- <out dir> [picture a.png] [picture b.png]`.
+//! `cargo run -p ui --example shell_preview -- <out dir> [picture a.png] [picture b.png]`
+//! (`BO2MP_PREVIEW_SIZE=1366x768`: the window's size, 1920x1080 without).
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{CompressedImageFormats, ImageSampler, ImageType};
@@ -16,10 +17,17 @@ fn main() {
             .expect("png");
         pictures.push((name.to_owned(), img));
     }
+    let (w, h) = std::env::var("BO2MP_PREVIEW_SIZE")
+        .ok()
+        .and_then(|s| {
+            let (w, h) = s.split_once('x')?;
+            Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?))
+        })
+        .unwrap_or((1920, 1080));
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
-            resolution: (1920, 1080).into(),
+            resolution: (w, h).into(),
             ..default()
         }),
         ..default()

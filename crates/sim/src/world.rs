@@ -1166,25 +1166,13 @@ impl SimState {
         if let Some(w) = self.weapon_index_by_script_name(name) {
             return Some(w);
         }
-        let mut parts = name.split('+');
-        let base = parts.next()?;
-        let base = if base.ends_with("_mp") { base.to_owned() } else { format!("{base}_mp") };
-        let wanted: Vec<&str> = parts.filter(|p| !p.is_empty()).collect();
-        let mut best: Option<(usize, u32)> = None;
-        for (i, n) in self.content.data.weapon_script_names.iter().enumerate().skip(1) {
-            let mut p = n.split('+');
-            if p.next() != Some(base.as_str()) {
-                continue;
-            }
-            let have: Vec<&str> = p.collect();
-            if !have.iter().all(|h| wanted.contains(h)) {
-                continue;
-            }
-            if best.is_none_or(|(k, _)| have.len() > k) {
-                best = Some((have.len(), i as u32));
-            }
-        }
-        best.map(|(_, i)| i)
+        nearest_guest_variant(&self.content.data.weapon_script_names, name, |_| true)
+    }
+
+    /// `guest_weapon_index` among the weapons `usable` passes (ones a
+    /// player can be given: with combat data).
+    pub(crate) fn guest_weapon_index_where(&self, name: &str, usable: impl Fn(u32) -> bool) -> Option<u32> {
+        nearest_guest_variant(&self.content.data.weapon_script_names, name, usable)
     }
 
     pub fn weapon_index_by_script_name(&self, name: &str) -> Option<u32> {
@@ -3789,4 +3777,31 @@ pub struct WeaponScriptSounds {
     pub pickup: Option<String>,
     pub pickup_player: Option<String>,
     pub proj_explosion: Option<String>,
+}
+
+/// bo2mp: the script name in `names` (index = weapon) for a guest gun with
+/// attachments (`bo1_ak74u_mp+grip+reflex`): its own name exactly (any
+/// attachment order), else the variant with the most of those attachments
+/// and none other, the base gun (`bo1_ak74u_mp`) at worst; only weapons
+/// `usable` passes. Never weapon 0.
+pub(crate) fn nearest_guest_variant(names: &[String], name: &str, usable: impl Fn(u32) -> bool) -> Option<u32> {
+    let mut parts = name.split('+');
+    let base = parts.next()?;
+    let base = if base.ends_with("_mp") { base.to_owned() } else { format!("{base}_mp") };
+    let wanted: Vec<&str> = parts.filter(|p| !p.is_empty()).collect();
+    let mut best: Option<(usize, u32)> = None;
+    for (i, n) in names.iter().enumerate().skip(1) {
+        let mut p = n.split('+');
+        if p.next() != Some(base.as_str()) {
+            continue;
+        }
+        let have: Vec<&str> = p.collect();
+        if !have.iter().all(|h| wanted.contains(h)) || !usable(i as u32) {
+            continue;
+        }
+        if best.is_none_or(|(k, _)| have.len() > k) {
+            best = Some((have.len(), i as u32));
+        }
+    }
+    best.map(|(_, i)| i)
 }

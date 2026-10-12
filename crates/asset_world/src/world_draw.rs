@@ -246,6 +246,7 @@ fn reject_negative_half(
             continue;
         }
         if let Some(axis) = bounds.negative_half_axis() {
+            eprintln!("DBGBOX {table} {index}: {:?}", bounds);
             return Err(WorldMeshError::NegativeBoundsHalf {
                 table,
                 index,

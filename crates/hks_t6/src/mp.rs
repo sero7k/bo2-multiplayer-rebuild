@@ -477,7 +477,7 @@ impl MpState {
     }
 
     /// The class set the menus edit (`bo2_profile::class_set`).
-    fn class_set(&self) -> &'static str {
+    pub fn class_set(&self) -> &'static str {
         bo2_profile::class_set(self.online, self.game_modes.contains(&1), self.game_modes.contains(&6))
     }
 
