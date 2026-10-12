@@ -598,6 +598,7 @@ dependencies = [
  "bevy",
  "diag",
  "entity_iw4",
+ "fastfile_iw6",
  "frame",
  "gamemode_iw4",
  "hud_iw4",
@@ -2788,6 +2789,13 @@ dependencies = [
 [[package]]
 name = "fastfile_iw5"
 version = "0.1.0"
+
+[[package]]
+name = "fastfile_iw6"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+]
 
 [[package]]
 name = "fastfile_t5"

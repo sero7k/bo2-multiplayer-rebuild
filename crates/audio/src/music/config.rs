@@ -20,7 +20,7 @@
 //! crossfade = 4.0
 //! menu = defaults        // a playlist line; any line for a context replaces
 //! menu = music/menu      // its defaults. An entry is `defaults`, a game
-//! menu = t6:mus_mp_frontend  // alias (`t6:`, `t5:`, `iw4:`, `iw5:`), a
+//! menu = t6:mus_mp_frontend  // alias (`t6:`, `t5:`, `iw4:`, `iw5:`, `ghosts:`), a
 //! lobby = D:/Music/x.mp3 // folder, or a file (relative to the exe dir).
 //! match = none           // an empty playlist
 //! ```
@@ -67,6 +67,8 @@ pub enum Entry {
     Defaults,
     None,
     Game(AssetNamespace, String),
+    /// A Ghosts music alias (`ghosts:music_mainmenu_squad`); see `ghosts.rs`.
+    Ghosts(String),
     Path(PathBuf),
 }
 
@@ -112,6 +114,13 @@ pub fn parse_entry(value: &str, base: &Path) -> Entry {
     }
     if v.eq_ignore_ascii_case("none") || v.is_empty() {
         return Entry::None;
+    }
+    // `ghosts:alias` / `iw6:alias`.
+    if let Some((prefix, alias)) = v.split_once(':')
+        && matches!(prefix.to_ascii_lowercase().as_str(), "ghosts" | "iw6")
+        && !alias.is_empty()
+    {
+        return Entry::Ghosts(alias.to_owned());
     }
     // `t6:alias` (but not a Windows drive, `C:\...`).
     if let Some((prefix, alias)) = v.split_once(':')
@@ -248,6 +257,7 @@ fade_out = 1.5
 crossfade = 4.0
 // menu = defaults
 // menu = t6:mus_mp_frontend
+// menu = ghosts:music_mainmenu_squad
 // lobby = music/lobby
 // match = none
 ";
@@ -286,14 +296,13 @@ pub fn scan_dir(dir: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
     (music, other)
 }
 
-/// Game folders whose formats this build cannot read, by folder name.
+/// Game folders whose formats this build cannot read, by folder name
+/// (Ghosts is read now, for its menu music).
 pub fn unreadable_game(name: &str) -> Option<&'static str> {
     let n = name.to_ascii_lowercase();
     let has = |s: &str| n.contains(s);
     if has("advanced warfare") || has("advanced_warfare") || n == "aw" || has("s1_mp") || n.ends_with(" aw") {
         Some("Advanced Warfare")
-    } else if has("ghosts") || n == "iw6" || has("iw6x") {
-        Some("Ghosts")
     } else if has("infinite warfare") || has("infinite_warfare") || n == "iw" || n == "iw7" || n.ends_with(" iw") {
         Some("Infinite Warfare")
     } else {
@@ -358,12 +367,18 @@ mod tests {
             parse_entry("mw2:music_mainmenu_mp", Path::new(".")),
             Entry::Game(AssetNamespace::Iw4, "music_mainmenu_mp".into())
         );
+        assert_eq!(
+            parse_entry("ghosts:music_mainmenu_squad", Path::new(".")),
+            Entry::Ghosts("music_mainmenu_squad".into())
+        );
+        assert_eq!(parse_entry("IW6:music_mainmenu_mp", Path::new(".")), Entry::Ghosts("music_mainmenu_mp".into()));
     }
 
     #[test]
     fn folder_names() {
         assert_eq!(unreadable_game("Call of Duty Advanced Warfare"), Some("Advanced Warfare"));
-        assert_eq!(unreadable_game("Call of Duty Ghosts"), Some("Ghosts"));
+        assert_eq!(unreadable_game("Call of Duty Ghosts"), None);
+        assert_eq!(unreadable_game("aw"), Some("Advanced Warfare"));
         assert_eq!(unreadable_game("Call of Duty Infinite Warfare"), Some("Infinite Warfare"));
         assert_eq!(unreadable_game("Call of Duty Black Ops II"), None);
         assert_eq!(unwired_game("Call of Duty World at War"), Some("World at War"));

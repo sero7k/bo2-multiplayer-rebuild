@@ -483,7 +483,21 @@ fn files_under(roots: Vec<PathBuf>) -> impl Iterator<Item = Result<PathBuf, Stri
                 Ok(entries) => entries,
                 Err(error) => return Some(Err(format!("cannot read {}: {error}", path.display()))),
             };
+            // Every caller looks for zones (`.ff`): plain files of any other
+            // kind are dropped here, before the per-path canonicalize and
+            // stat (Ghosts and later keep 100+ GB in hundreds of
+            // `imagefile*.pak` / `soundfile*.pak` files beside their zones).
+            // Links are kept: they may point at folders.
             let mut children = entries
+                .filter(|entry| {
+                    entry.as_ref().map_or(true, |entry| {
+                        !entry.file_type().is_ok_and(|t| t.is_file())
+                            || entry
+                                .path()
+                                .extension()
+                                .is_some_and(|ext| ext.eq_ignore_ascii_case("ff"))
+                    })
+                })
                 .map(|entry| {
                     entry.map(|entry| entry.path()).map_err(|error| {
                         format!("cannot read entry in {}: {error}", path.display())
@@ -1176,6 +1190,23 @@ mod usermap_tests {
         put(&mw2.join("usermaps/stray.ff"), &zone_bytes(b"IWffu100", 0x114));
         std::fs::create_dir_all(mw2.join("usermaps/empty")).unwrap();
         root
+    }
+
+    #[test]
+    fn zone_scan_skips_paks_and_lists_ghosts_zones_without_reading_them_as_maps() {
+        let root = games("paks");
+        let ghosts = root.join("ghosts");
+        put(&ghosts.join("zone/code_post_gfx_mp.ff"), &zone_bytes(b"IWff0100", 0x235));
+        put(&ghosts.join("zone/mp_prisonbreak.ff"), &zone_bytes(b"IWff0100", 0x235));
+        put(&ghosts.join("zone/imagefile3.pak"), b"pixels");
+        put(&ghosts.join("zone/soundfile1.pak"), b"fLaC");
+        let files: Vec<PathBuf> = files_under(vec![root.clone()]).flatten().collect();
+        assert!(files.iter().any(|p| p.ends_with("ghosts/zone/code_post_gfx_mp.ff")));
+        assert!(!files.iter().any(|p| p.extension().is_some_and(|e| e == "pak" || e == "iwd")));
+        // Ghosts maps are not offered (no lane reads version 0x235).
+        let maps = map_packs_in(files_under(vec![root.clone()]));
+        assert!(!maps.iter().flat_map(|p| &p.maps).any(|m| m.contains("prisonbreak")));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -21,6 +21,7 @@ use super::config::{
     self, Entry, GAME_TRACKS, MusicConfig, game_label, is_music_file, scan_dir, unreadable_game,
     unwired_game,
 };
+use super::ghosts;
 use super::logic::{Action, Core, MusicContext, Playlist, TrackId};
 use super::manifest::{self, ManifestRow};
 use super::stream::{Probe, StreamedMusic, probe};
@@ -41,6 +42,8 @@ const MANIFEST_EVERY_S: f64 = 2.0;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Source {
     Game(AssetNamespace, String),
+    /// A Ghosts music alias, streamed from its sound pak (`ghosts.rs`).
+    Ghosts(String),
     File(PathBuf),
 }
 
@@ -59,6 +62,7 @@ impl Track {
     fn label(&self) -> String {
         match &self.source {
             Source::Game(ns, alias) => format!("{} `{alias}`", game_label(*ns)),
+            Source::Ghosts(alias) => format!("{} `{alias}`", ghosts::GAME),
             Source::File(path) => format!(
                 "`{}`",
                 path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned())
@@ -108,6 +112,8 @@ pub(crate) struct MusicDirector {
     prepared: HashMap<TrackId, Prepared>,
     preparing: Option<Preparing>,
     probes: Option<Task<Vec<(TrackId, Result<Probe, String>)>>>,
+    /// The Ghosts install, when there is one.
+    ghosts: Option<PathBuf>,
     game_store: Option<(Arc<asset_audio::SoundCatalog>, ClipStore)>,
     bank_checked: bool,
     manifest_path: Option<PathBuf>,
@@ -121,7 +127,7 @@ impl MusicDirector {
             return id;
         }
         let (origin, format) = match &source {
-            Source::Game(..) => (String::new(), String::new()),
+            Source::Game(..) | Source::Ghosts(..) => (String::new(), String::new()),
             Source::File(path) => (
                 path.display().to_string(),
                 path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default(),
@@ -170,6 +176,7 @@ impl MusicDirector {
                     .collect();
                 let (game, alias, source) = match &t.source {
                     Source::Game(ns, alias) => (game_label(*ns).to_owned(), alias.clone(), t.origin.clone()),
+                    Source::Ghosts(alias) => (ghosts::GAME.to_owned(), alias.clone(), t.origin.clone()),
                     Source::File(_) => ("user file".to_owned(), String::new(), t.origin.clone()),
                 };
                 ManifestRow {
@@ -336,6 +343,7 @@ fn build_director(identity: Option<&LaunchIdentity>) -> MusicDirector {
         prepared: HashMap::new(),
         preparing: None,
         probes: None,
+        ghosts: ghosts::install(identity.map(|i| i.games_root.as_path())),
         game_store: None,
         bank_checked: false,
         manifest_path: identity
@@ -350,6 +358,15 @@ fn build_director(identity: Option<&LaunchIdentity>) -> MusicDirector {
         .iter()
         .map(|(ns, alias, _)| director.add_track(Source::Game(*ns, (*alias).to_owned()), "menu"))
         .collect();
+    // Ghosts' main-menu track, only when Ghosts is installed.
+    let ghost: Vec<TrackId> = if director.ghosts.is_some() {
+        ghosts::DEFAULT_TRACKS
+            .iter()
+            .map(|alias| director.add_track(Source::Ghosts((*alias).to_owned()), "menu"))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let folder = |director: &mut MusicDirector, sub: &str, intended: &'static str| -> Vec<TrackId> {
         let dir = root.join(sub);
         let (music, other) = scan_dir(&dir);
@@ -372,7 +389,7 @@ fn build_director(identity: Option<&LaunchIdentity>) -> MusicDirector {
     let menu_files = folder(&mut director, "menu", "menu");
     let lobby_files = folder(&mut director, "lobby", "lobby");
     let match_files = folder(&mut director, "match", "ambience");
-    let menu_default: Vec<TrackId> = game.iter().chain(&menu_files).copied().collect();
+    let menu_default: Vec<TrackId> = game.iter().chain(&ghost).chain(&menu_files).copied().collect();
     let lobby_default = if lobby_files.is_empty() { menu_default.clone() } else { lobby_files };
     // (No menu tracks in a match: only his own match music, if any.)
     let match_default = match_files;
@@ -389,6 +406,7 @@ fn build_director(identity: Option<&LaunchIdentity>) -> MusicDirector {
                 Entry::Defaults => lists[slot].extend(&defaults[slot]),
                 Entry::None => {}
                 Entry::Game(ns, alias) => lists[slot].push(director.add_track(Source::Game(ns, alias), "custom")),
+                Entry::Ghosts(alias) => lists[slot].push(director.add_track(Source::Ghosts(alias), "custom")),
                 Entry::Path(path) if path.is_dir() => {
                     let (music, _) = scan_dir(&path);
                     for p in music {
@@ -435,23 +453,26 @@ fn build_director(identity: Option<&LaunchIdentity>) -> MusicDirector {
     }
     director.extras.extend(games_folder_rows(&roots));
 
-    // Probe every file in the background: format, length, playable.
-    let files: Vec<(TrackId, PathBuf)> = director
+    // Probe every file (and Ghosts track) in the background: format,
+    // length, playable. Ghosts' zones are read there too, once.
+    let files: Vec<(TrackId, Source)> = director
         .tracks
         .iter()
         .enumerate()
         .filter(|(_, t)| t.playable.is_none())
-        .filter_map(|(id, t)| match &t.source {
-            Source::File(p) => Some((id, p.clone())),
-            Source::Game(..) => None,
-        })
+        .filter(|(_, t)| matches!(t.source, Source::File(_) | Source::Ghosts(_)))
+        .map(|(id, t)| (id, t.source.clone()))
         .collect();
-    if !files.is_empty() {
+    if !files.is_empty() || director.ghosts.is_some() {
         let pool = AsyncComputeTaskPool::get_or_init(TaskPool::default);
+        let ghosts_dir = director.ghosts.clone();
         director.probes = Some(pool.spawn(async move {
+            if let Some(dir) = &ghosts_dir {
+                ghosts::tracks(dir);
+            }
             files
                 .into_iter()
-                .map(|(id, path)| (id, read_and_probe(&path).map(|(_, p)| p)))
+                .map(|(id, source)| (id, read_and_probe_source(&source, ghosts_dir.as_deref()).map(|(_, p)| p)))
                 .collect()
         }));
     }
@@ -472,6 +493,39 @@ fn build_director(identity: Option<&LaunchIdentity>) -> MusicDirector {
         if cfg.enabled { "" } else { " — DISABLED by music.cfg" },
     );
     director
+}
+
+fn read_and_probe_source(source: &Source, ghosts_dir: Option<&Path>) -> Result<(Arc<[u8]>, Probe), String> {
+    match source {
+        Source::File(path) => read_and_probe(path),
+        Source::Ghosts(alias) => ghosts::read_and_probe(ghosts_dir, alias),
+        Source::Game(..) => Err("game bank tracks are prepared from the front end's bank".to_owned()),
+    }
+}
+
+/// The manifest rows for Ghosts' music that is in no playlist.
+fn ghosts_extras(director: &MusicDirector) -> Vec<ManifestRow> {
+    let Some(dir) = director.ghosts.as_deref() else {
+        return Vec::new();
+    };
+    let all = ghosts::tracks(dir);
+    let Ok(list) = all.as_ref() else {
+        return Vec::new();
+    };
+    list.iter()
+        .filter(|t| !director.by_source.contains_key(&Source::Ghosts(t.alias.clone())))
+        .map(|t| ManifestRow {
+            game: ghosts::GAME.to_owned(),
+            source: ghosts::origin(t),
+            alias: t.alias.clone(),
+            format: "streamed flac".to_owned(),
+            duration_s: Some(t.seconds()),
+            intended_use: if t.alias.contains("mainmenu") { "menu" } else { "other" }.to_owned(),
+            playable: "unknown".to_owned(),
+            reason: format!("in Ghosts' menu zones, not in a playlist (add `ghosts:{}` to music.cfg)", t.alias),
+            ..ManifestRow::default()
+        })
+        .collect()
 }
 
 fn read_and_probe(path: &Path) -> Result<(Arc<[u8]>, Probe), String> {
@@ -652,7 +706,14 @@ pub(crate) fn update_director(
         && let Some(results) = future::block_on(future::poll_once(task))
     {
         director.probes = None;
+        let extras = ghosts_extras(director);
+        director.extras.extend(extras);
         for (id, result) in results {
+            if let (Source::Ghosts(alias), Some(dir)) = (director.tracks[id].source.clone(), director.ghosts.clone())
+                && let Ok(track) = ghosts::find_track(&dir, &alias)
+            {
+                director.tracks[id].origin = ghosts::origin(&track);
+            }
             match result {
                 Ok(p) => {
                     let t = &mut director.tracks[id];
@@ -660,7 +721,7 @@ pub(crate) fn update_director(
                     t.length = p.length;
                     diag::info!(
                         Audio,
-                        "audio: music: user track {} — {}, {}",
+                        "audio: music: track {} — {}, {}",
                         t.label(),
                         t.format,
                         p.length.map_or_else(|| "length unknown".to_owned(), |l| format!("{l:.1} s"))
@@ -796,6 +857,12 @@ fn start_preparing(director: &mut MusicDirector, frontend: Option<&FrontendAudio
             let task = pool.spawn(async move { read_and_probe(&path) });
             director.preparing = Some(Preparing::File { track, task });
         }
+        Source::Ghosts(alias) => {
+            let pool = AsyncComputeTaskPool::get_or_init(TaskPool::default);
+            let dir = director.ghosts.clone();
+            let task = pool.spawn(async move { ghosts::read_and_probe(dir.as_deref(), &alias) });
+            director.preparing = Some(Preparing::File { track, task });
+        }
         Source::Game(ns, alias) => {
             let Some(frontend) = frontend else {
                 director.fail(track, "no front end sound bank in this run");
@@ -838,6 +905,7 @@ fn poll_preparing(director: &mut MusicDirector, assets: &mut MusicAssets) {
                 Ok((bytes, p)) => {
                     let ext = match &director.tracks[track].source {
                         Source::File(path) => path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()),
+                        Source::Ghosts(..) => Some("flac".to_owned()),
                         Source::Game(..) => None,
                     };
                     let length = p.length;
@@ -930,6 +998,28 @@ pub(crate) fn register(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// With `IW4L_GHOSTS_DIR` (a Ghosts install), `IW4L_MUSIC_DIR` and
+    /// `IW4L_MUSIC_CFG` pointing at scratch places: Ghosts' main-menu track is
+    /// in the default menu playlist and its startup probe decodes it.
+    #[test]
+    #[ignore]
+    fn ghosts_track_joins_the_menu_playlist() {
+        let mut d = build_director(None);
+        if d.ghosts.is_none() {
+            eprintln!("no Ghosts install");
+            return;
+        }
+        let id = *d.by_source.get(&Source::Ghosts("music_mainmenu_mp".into())).expect("Ghosts track");
+        assert!(d.core.playlist(MusicContext::Menu).is_some_and(|p| p.contains(id)));
+        let results = future::block_on(d.probes.take().expect("probe task"));
+        let (_, probed) = results.iter().find(|(t, _)| *t == id).expect("probed");
+        let p = probed.as_ref().expect("decodes");
+        assert_eq!((p.codec.as_str(), p.channels, p.rate), ("flac", 2, 44_100));
+        assert!((p.length.unwrap() - 131.095).abs() < 0.05);
+        let extras = ghosts_extras(&d);
+        assert_eq!(extras.len(), 5, "{extras:?}");
+    }
 
     #[test]
     fn contexts() {

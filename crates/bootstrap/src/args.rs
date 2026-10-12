@@ -25,6 +25,9 @@ pub enum LaunchMode {
     CheckMaps,
     /// bo2mp: `iw4l check-guns` - the guest guns, read as a match reads them.
     CheckGuns,
+    /// `iw4l check-ghosts [zone]` - a Ghosts zone's assets and sounds, and
+    /// Ghosts' menu music checked in its sound pak (no window).
+    CheckGhosts(Option<String>),
 }
 
 pub fn parse_cli(
@@ -116,6 +119,7 @@ pub fn parse_launch_args(mut args: impl Iterator<Item = String>) -> Result<Launc
         Some("play") => parse_play_args(args),
         Some("check-maps") => Ok(LaunchMode::CheckMaps),
         Some("check-guns") => Ok(LaunchMode::CheckGuns),
+        Some("check-ghosts") => Ok(LaunchMode::CheckGhosts(args.next().filter(|z| !z.is_empty()))),
         Some("frontend") => match (args.next().as_deref(), args.next()) {
             (Some("t6mp"), None) => Ok(LaunchMode::FrontendT6Mp),
             _ => Err("usage: iw4l frontend t6mp [--cmds '<script>']".into()),

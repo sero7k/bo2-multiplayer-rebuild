@@ -154,6 +154,7 @@ pub fn launch(
             run_frontend_t6mp(games, artifacts);
         }
         LaunchMode::CheckMaps => run_check_maps(&games, &artifacts),
+        LaunchMode::CheckGhosts(zone) => run_check_ghosts(&games, &artifacts, zone.as_deref()),
         LaunchMode::CheckGuns => {
             let lines = assets::check_guest_guns();
             for line in &lines {
@@ -217,6 +218,21 @@ fn run_check_maps(games: &asset_transport::GamesRoot, artifacts: &std::path::Pat
     lines.push(format!("{ok} OK, {bad} with problems"));
     println!("{}", lines.last().map_or("", String::as_str));
     let out = artifacts.join("map-check.txt");
+    let _ = std::fs::create_dir_all(artifacts);
+    match std::fs::write(&out, lines.join("\r\n")) {
+        Ok(()) => println!("report: {}", out.display()),
+        Err(e) => println!("report not written ({}): {e}", out.display()),
+    }
+}
+
+/// `iw4l check-ghosts [zone]`: see `audio::music::ghosts_check_report`;
+/// to the console and `<artifacts>/ghosts-check.txt`.
+fn run_check_ghosts(games: &asset_transport::GamesRoot, artifacts: &std::path::Path, zone: Option<&str>) {
+    let lines = audio::music::ghosts_check_report(Some(&games.0), zone);
+    for line in &lines {
+        println!("{line}");
+    }
+    let out = artifacts.join("ghosts-check.txt");
     let _ = std::fs::create_dir_all(artifacts);
     match std::fs::write(&out, lines.join("\r\n")) {
         Ok(()) => println!("report: {}", out.display()),
