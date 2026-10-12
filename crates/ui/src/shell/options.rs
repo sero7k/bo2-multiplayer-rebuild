@@ -111,7 +111,7 @@ pub(crate) fn rows(tab: usize, s: &GameSettings) -> Vec<Row> {
             ),
             Row {
                 label: "FRIEND CODE".to_owned(),
-                sub: "Give this to a friend so they can add you (both of you on the same server).".to_owned(),
+                sub: "Give this to a friend so they can add you (FRIENDS on the main menu).".to_owned(),
                 value: Some(GameSettings::friend_code_text(s.friend_code)),
                 act: Act::Info,
             },
@@ -220,6 +220,11 @@ pub(crate) fn sync_settings(settings: Option<bevy::prelude::ResMut<GameSettings>
         s.sanitize();
         s.touch();
         diag::info!(Ui, "bo2mp shell: player name now `{}`", s.player_name);
+    }
+    // (Friends added or removed on the FRIENDS screen.)
+    if super::friends::apply_edits(&mut s) {
+        s.sanitize();
+        s.touch();
     }
     let queued = QUEUED.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default();
     for (tab, k, by) in queued {

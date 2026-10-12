@@ -26,6 +26,7 @@ pub(crate) mod cards;
 pub(crate) mod classes;
 pub(crate) mod ingame;
 mod loading;
+mod friends;
 mod looks;
 mod online;
 pub(crate) mod options;
@@ -65,6 +66,8 @@ pub(crate) enum Screen {
     /// Barracks' calling card and emblem pickers (a page of them, `page`).
     CardPick,
     EmblemPick,
+    /// His friend code and his friends (`friends`).
+    Friends,
     /// Zombies: its lobby (map, start, starting round, START), its map
     /// picker (a page per game, `page`) and the map's starts and modes.
     Zombies,
@@ -119,6 +122,7 @@ pub(crate) enum Act {
     Multiplayer,
     Zombies,
     Options,
+    Friends,
     Barracks,
     Prestige,
     Quit,
@@ -143,6 +147,9 @@ pub(crate) enum Act {
     Looks(cards::Kind),
     /// A row that only shows something (Options > ACCOUNT's friend code).
     Info,
+    /// FRIENDS: type a code to add; a friend (by code).
+    AddFriend,
+    Friend(u32),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -198,6 +205,8 @@ pub(crate) struct Shell {
     pub now: f64,
     /// His new name while he types it (Options > ACCOUNT).
     pub typing: Option<String>,
+    /// FRIENDS > ADD FRIEND: the code being typed.
+    pub code_entry: Option<String>,
     /// Zombies: the map (`zm_transit`), its start (an index into its
     /// starts) and the starting round (an index into `zombies::ROUNDS`).
     pub zm_map: String,
@@ -224,6 +233,7 @@ impl Default for Shell {
             cac_from: Screen::Multiplayer,
             now: 0.0,
             typing: None,
+            code_entry: None,
             zm_map: zombies::MAPS[0].map.to_owned(),
             zm_start: 0,
             zm_round: 0,
@@ -256,6 +266,7 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
             Row::new("MULTIPLAYER", "Custom games with bots on every map.", Act::Multiplayer),
             Row::new("ZOMBIES", "Survive the undead.", Act::Zombies),
             Row::new("OPTIONS", "Graphics, sound and controls.", Act::Options),
+            Row::new("FRIENDS", "Add friends by their code and see where they are.", Act::Friends),
             Row::new("QUIT", "Back to the desktop.", Act::Quit),
         ],
         Screen::Multiplayer => vec![
@@ -298,6 +309,7 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
             .map(|(i, m)| Row::new(&m.title, &m.desc, Act::Choose(i)))
             .collect(),
         Screen::Classes | Screen::ClassEdit | Screen::ItemPick => classes::book().map(|b| cac::rows(s, &b)).unwrap_or_default(),
+        Screen::Friends => friends::rows(s),
         Screen::Options => {
             let mut r = options::rows(s.page, &options::snapshot());
             if let Some(t) = &s.typing
@@ -404,6 +416,10 @@ impl Shell {
                 self.focus = if from == Screen::CardPick { 1 } else { 2 };
             }
             Screen::Main => {}
+            Screen::Friends => {
+                self.go(Screen::Main);
+                self.focus = 3;
+            }
             Screen::Multiplayer => self.go(Screen::Main),
             Screen::Zombies => {
                 self.go(Screen::Main);
@@ -482,6 +498,9 @@ impl Shell {
                 self.go(Screen::Options);
                 self.page = 0;
             }
+            Act::Friends => self.go(Screen::Friends),
+            Act::AddFriend => self.code_entry = Some(String::new()),
+            Act::Friend(code) => self.note(&friends::friend_note(code), now),
             Act::Barracks if self.screen != Screen::Barracks => {
                 self.cac_from = self.screen;
                 self.go(Screen::Barracks);
@@ -643,6 +662,66 @@ fn shell_input(
     if !enabled() || front.is_none() || bridge::lui_open() || crate::game_folders::is_open() || zombies::running() {
         typed.clear();
         return;
+    }
+    let now_s = time.elapsed_secs_f64();
+    // FRIENDS > ADD FRIEND: digits (8 at most); Enter adds the friend,
+    // Esc leaves the list as it was.
+    if let Some(mut t) = shell.code_entry.clone() {
+        use bevy::input::keyboard::Key;
+        for ev in typed.read() {
+            if !ev.state.is_pressed() {
+                continue;
+            }
+            match &ev.logical_key {
+                Key::Enter => {
+                    let code: u32 = t.parse().unwrap_or(0);
+                    if frame::GameSettings::is_friend_code(code) {
+                        friends::queue_add(code);
+                        shell.note(&format!("Friend {} added.", frame::GameSettings::friend_code_text(code)), now_s);
+                        sounds.write(frame::UiPlaySound { alias: "uin_navigation_select_main".to_owned() });
+                    } else {
+                        shell.note("A friend code is 8 digits.", now_s);
+                    }
+                    shell.code_entry = None;
+                    return;
+                }
+                Key::Escape => {
+                    shell.code_entry = None;
+                    sounds.write(frame::UiPlaySound { alias: "cac_cmn_backout".to_owned() });
+                    return;
+                }
+                Key::Backspace => {
+                    t.pop();
+                }
+                Key::Character(s) => {
+                    for ch in s.chars().filter(char::is_ascii_digit) {
+                        if t.len() < 8 {
+                            t.push(ch);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if shell.code_entry.as_ref() != Some(&t) {
+            shell.code_entry = Some(t);
+        }
+        return;
+    }
+    // FRIENDS: Del removes the friend in focus.
+    if shell.screen == Screen::Friends {
+        use bevy::input::keyboard::Key;
+        let del = typed.read().any(|ev| ev.state.is_pressed() && ev.logical_key == Key::Delete);
+        if del
+            && let Some(cat) = bridge::catalog()
+            && let Some(Act::Friend(code)) = rows(&shell, &cat).get(shell.focus).map(|r| r.act)
+        {
+            friends::queue_remove(code);
+            shell.note(&format!("Friend {} removed.", frame::GameSettings::friend_code_text(code)), now_s);
+            sounds.write(frame::UiPlaySound { alias: "cac_cmn_backout".to_owned() });
+            shell.focus = shell.focus.saturating_sub(1);
+            return;
+        }
     }
     // His new name, typed: letters, digits and a few marks; Enter keeps it,
     // Esc leaves it as it was.

@@ -288,6 +288,37 @@ fn step(
             s.page = 0;
             s.focus = 1;
         }),
+        ("12h_friends", |s, _| {
+            let advert = |in_match: bool, players: u8| net::master_protocol::Advert {
+                id: Default::default(),
+                name: "egs's lobby".to_owned(),
+                map: "mp_nuketown_2020".to_owned(),
+                mode: "tdm".to_owned(),
+                players,
+                max_players: 12,
+                locked: false,
+                in_match,
+                requires: Default::default(),
+                generation: 0,
+            };
+            let f = |code: u32, online: bool, name: &str, room: Option<net::master_protocol::Advert>| net::FriendStatus {
+                code,
+                online,
+                name: name.to_owned(),
+                room,
+            };
+            super::friends::preview(
+                48_213_907,
+                vec![12_345_678, 23_456_789, 34_567_890, 45_678_901],
+                vec![
+                    f(12_345_678, true, "egs", Some(advert(false, 3))),
+                    f(23_456_789, true, "reaaL", None),
+                    f(34_567_890, true, "Jimbo", Some(advert(true, 9))),
+                ],
+            );
+            s.screen = Screen::Friends;
+            s.focus = 1;
+        }),
         ("12a_options", |s, _| {
             s.screen = Screen::Options;
             s.page = 0;

@@ -49,6 +49,7 @@ pub(crate) fn poll_online(
                 b.refresh();
             }
             let snap = b.snapshot();
+            super::friends::set_seen(snap.friends.clone());
             let in_lobbies: u32 = snap.adverts.iter().filter(|a| !a.in_match).map(|a| u32::from(a.players)).sum();
             let in_matches: u32 = snap.adverts.iter().filter(|a| a.in_match).map(|a| u32::from(a.players)).sum();
             let open = snap.adverts.iter().filter(|a| !a.locked && a.players < a.max_players).count() as u32;

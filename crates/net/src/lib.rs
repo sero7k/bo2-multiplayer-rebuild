@@ -146,6 +146,7 @@ pub use transport::master::{
     set_friends,
 };
 pub use master_protocol::FriendStatus;
+pub use master_protocol;
 pub use transport::meta_wire::{
     SnapshotMetaSectionBytes, WORLD_SYNC_PERIOD_TICKS, WorldObjectSyncDecoder,
     WorldObjectSyncEncoder, decode_world_object_sync_wire, encode_world_object_sync,

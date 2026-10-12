@@ -1128,6 +1128,7 @@ pub(crate) fn shell_view(
                 Screen::ModePick => mode_picker(c, &mut cx, &shell, &cat, &rows),
                 Screen::Options => options_view(c, &mut cx, &shell, &rows),
                 Screen::Barracks => barracks_view(c, &mut cx, &shell, &cat, &rows),
+                Screen::Friends => super::friends::view(c, &mut cx, &shell, &rows),
                 Screen::CardPick | Screen::EmblemPick => super::looks::view(c, &mut cx, &shell, &cat, &rows),
                 Screen::Classes | Screen::ClassEdit | Screen::ItemPick => {
                     if let Some(book) = super::classes::book() {
