@@ -642,6 +642,22 @@ pub(crate) fn read_game_image(prefix: &str, names: &[String]) -> Option<(u32, u3
         .find_map(|n| asset_material::decode_ui_image_from_main(&main, n).ok().flatten())
 }
 
+/// bo2mp shell: the names of every image a game's own IWDs hold that start
+/// with `starts` (lower case, sorted; empty when the game is not installed).
+/// Slow the first time (the archives are indexed): call it off the main
+/// thread.
+pub(crate) fn game_image_names(prefix: &str, starts: &str) -> Vec<String> {
+    let Some(root) = asset_transport::games_root_from_env().ok() else { return Vec::new() };
+    let trees = asset_transport::NamespaceTrees::discover(&root);
+    let Some(main) = namespace_of(prefix).and_then(|ns| trees.main_for(ns)).map(std::path::Path::to_path_buf) else {
+        return Vec::new();
+    };
+    let Ok(index) = asset_transport::IwdIndex::open(&main) else { return Vec::new() };
+    let mut out: Vec<String> = index.image_names().filter(|n| n.starts_with(starts)).map(str::to_owned).collect();
+    out.sort();
+    out
+}
+
 /// A prestige icon from another game where BO2's menus ask for one: the
 /// combined prestiges' `<game>:<material>` (bo2_profile's progression),
 /// read from that game's own files, the first of its candidate names it

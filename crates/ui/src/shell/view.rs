@@ -9,7 +9,8 @@ use super::bridge::{Catalog, PlayerCard};
 use super::online::{OnlineInfo, Status};
 use super::pics::{ShellPics, cover};
 use super::theme::*;
-use super::{DIFFICULTY, Hit, Row, Screen, Shell, Tab, bridge, pages, rows};
+use super::cards::{self, Kind};
+use super::{Act, DIFFICULTY, Hit, Row, Screen, Setting, Shell, Tab, bridge, pages, rows};
 
 #[derive(Component)]
 pub(crate) struct ViewRoot;
@@ -42,6 +43,10 @@ impl Ctx<'_> {
 
     pub fn regular(&self, px: f32) -> TextFont {
         font(&self.fonts.regular, px * self.s)
+    }
+
+    pub fn light(&self, px: f32) -> TextFont {
+        font(&self.fonts.light, px * self.s)
     }
 
     pub fn pic(&mut self, names: &[String]) -> Option<Handle<Image>> {
@@ -90,48 +95,124 @@ pub(crate) fn header(c: &mut Kids, cx: &Ctx, trail: &[&str]) {
     });
 }
 
-/// His card at the top right: rank icon, name, level and how far into it.
+/// A calling card: the picture covering a box, dark to its left so a name
+/// over it reads (`name`: the name and its size).
+pub(crate) fn banner(c: &mut Kids, cx: &mut Ctx, card: &str, w: f32, h: f32, name: Option<(&str, f32)>) {
+    let pic = cx.pic(&[card.to_owned()]);
+    let size = pic.as_ref().map(|p| cx.pic_size(p));
+    c.spawn((Node { width: cx.px(w), height: cx.px(h), flex_shrink: 0.0, overflow: Overflow::clip(), ..default() }, BackgroundColor(cx.pal.picture_bg)))
+        .with_children(|b| {
+            match (pic, size) {
+                (Some(p), Some(size)) => {
+                    let s = cover(size, Vec2::new(w, h) * cx.s);
+                    b.spawn((
+                        ImageNode::new(p),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            width: Val::Px(s.x),
+                            height: Val::Px(s.y),
+                            left: Val::Px((w * cx.s - s.x) * 0.5),
+                            top: Val::Px((h * cx.s - s.y) * 0.5),
+                            ..default()
+                        },
+                    ));
+                }
+                // (Not in yet, or the game is not installed: a plain plate.)
+                _ => {
+                    b.spawn((
+                        Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+                        BackgroundGradient::from(LinearGradient::to_right(vec![
+                            ColorStop::new(cx.pal.accent_a(0.10), Val::Percent(0.0)),
+                            ColorStop::new(cx.pal.accent_a(0.32), Val::Percent(100.0)),
+                        ])),
+                    ));
+                }
+            }
+            if let Some((text, px)) = name {
+                b.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        top: Val::Px(0.0),
+                        bottom: Val::Px(0.0),
+                        width: Val::Percent(100.0),
+                        padding: UiRect::horizontal(cx.px(px * 0.4)),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundGradient::from(LinearGradient::to_right(vec![
+                        ColorStop::new(Color::srgba(0.0, 0.0, 0.0, 0.62), Val::Percent(0.0)),
+                        ColorStop::new(Color::srgba(0.0, 0.0, 0.0, 0.0), Val::Percent(85.0)),
+                    ])),
+                ))
+                .with_child((Text::new(text), cx.bold(px), TextColor(WHITE)));
+            }
+        });
+}
+
+/// An emblem in a square.
+pub(crate) fn emblem(c: &mut Kids, cx: &mut Ctx, name: &str, size: f32) {
+    let pic = cx.pic(&[name.to_owned()]);
+    c.spawn((
+        Node { width: cx.px(size), height: cx.px(size), flex_shrink: 0.0, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
+        BackgroundColor(cx.pal.panel_soft),
+    ))
+    .with_children(|b| match pic {
+        Some(p) => {
+            let sz = cx.pic_size(&p);
+            let k = (size / sz.x.max(1.0)).min(size / sz.y.max(1.0));
+            b.spawn((ImageNode::new(p), Node { width: cx.px(sz.x * k), height: cx.px(sz.y * k), ..default() }));
+        }
+        None => {
+            b.spawn((
+                Node { width: cx.px(size * 0.42), height: cx.px(size * 0.42), border: UiRect::all(cx.px(2.0)), ..default() },
+                BorderColor::all(cx.pal.accent_a(0.45)),
+                UiTransform { rotation: Rot2::degrees(45.0), ..UiTransform::IDENTITY },
+            ));
+        }
+    });
+}
+
+/// His card at the top right: his emblem, his calling card with his name
+/// on it, his rank icon, level and how far into it.
 fn player_card(c: &mut Kids, cx: &mut Ctx, card: &PlayerCard) {
     let icon = cx.pic(&[card.rank_picture.clone()]);
+    let (title, mark) = (cards::mine(Kind::Card, &card.card), cards::mine(Kind::Emblem, &card.emblem));
     c.spawn((
         Node {
-            width: cx.px(430.0),
-            height: cx.px(88.0),
-            padding: UiRect::axes(cx.px(16.0), cx.px(12.0)),
-            column_gap: cx.px(16.0),
+            width: cx.px(540.0),
+            padding: UiRect::all(cx.px(10.0)),
+            column_gap: cx.px(12.0),
             align_items: AlignItems::Center,
             border: UiRect::left(cx.px(3.0)),
-            ..abs(None, Some(42.0), Some(64.0), None, cx)
+            ..abs(None, Some(36.0), Some(64.0), None, cx)
         },
         BackgroundColor(cx.pal.panel),
         BorderColor::all(cx.pal.accent),
     ))
     .with_children(|p| {
-        match icon {
-            Some(h) => {
-                p.spawn((ImageNode::new(h), Node { width: cx.px(60.0), height: cx.px(60.0), ..default() }));
-            }
-            None => {
-                p.spawn((Node { width: cx.px(60.0), height: cx.px(60.0), ..default() }, BackgroundColor(KEYCAP)));
-            }
-        }
-        p.spawn(Node {
-            flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
-            row_gap: cx.px(4.0),
-            ..default()
-        })
-        .with_children(|col| {
-            col.spawn((Text::new(card.name.clone()), cx.bold(30.0), TextColor(WHITE)));
+        emblem(p, cx, &mark, 84.0);
+        p.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, row_gap: cx.px(6.0), ..default() }).with_children(|col| {
+            banner(col, cx, &title, 300.0, 56.0, Some((card.name.as_str(), 28.0)));
             let prestige = if card.prestige > 0 { format!("PRESTIGE {}  ·  ", card.prestige) } else { String::new() };
-            col.spawn((Text::new(format!("{prestige}LEVEL {}", card.level)), cx.regular(19.0), TextColor(DIM)));
-            col.spawn((Node { width: Val::Percent(100.0), height: cx.px(4.0), ..default() }, BackgroundColor(KEYCAP)))
+            col.spawn((Text::new(format!("{prestige}LEVEL {}", card.level)), cx.regular(18.0), TextColor(DIM)));
+            col.spawn((Node { width: cx.px(300.0), height: cx.px(4.0), ..default() }, BackgroundColor(KEYCAP)))
                 .with_child((
                     Node { width: Val::Percent(card.xp_frac * 100.0), height: Val::Percent(100.0), ..default() },
                     BackgroundColor(cx.pal.accent),
                 ));
         });
-        p.spawn((Text::new(card.level.to_string()), cx.bold(44.0), TextColor(WHITE)));
+        p.spawn(Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: cx.px(2.0), ..default() }).with_children(|r| {
+            match icon {
+                Some(h) => {
+                    r.spawn((ImageNode::new(h), Node { width: cx.px(52.0), height: cx.px(52.0), ..default() }));
+                }
+                None => {
+                    r.spawn((Node { width: cx.px(52.0), height: cx.px(52.0), ..default() }, BackgroundColor(KEYCAP)));
+                }
+            }
+            r.spawn((Text::new(card.level.to_string()), cx.bold(30.0), TextColor(WHITE)));
+        });
     });
 }
 
@@ -156,7 +237,7 @@ fn hint(c: &mut Kids, cx: &mut Ctx, key: &str, pad: &str, what: &str) {
     });
 }
 
-fn footer(c: &mut Kids, cx: &mut Ctx, shell: &Shell, online: &OnlineInfo) {
+fn footer(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, online: &OnlineInfo) {
     c.spawn((
         Node {
             width: Val::Percent(100.0),
@@ -179,13 +260,14 @@ fn footer(c: &mut Kids, cx: &mut Ctx, shell: &Shell, online: &OnlineInfo) {
                 }
                 hint(l, cx, "ENTER", "xenonbutton_a", "SELECT");
                 match shell.screen {
-                    Screen::Lobby => hint(l, cx, "Q / E", "xenonbutton_lb", "TABS"),
+                    Screen::Lobby | Screen::Options => hint(l, cx, "Q / E", "xenonbutton_lb", "TABS"),
                     Screen::MapPick => hint(l, cx, "Q / E", "xenonbutton_lb", "SECTIONS"),
                     Screen::ItemPick => hint(l, cx, "Q / E", "xenonbutton_lb", "CATEGORIES"),
                     Screen::ZmMapPick if super::zombies::pages(super::zombies::state().bo1()).len() > 1 => hint(l, cx, "Q / E", "xenonbutton_lb", "SECTIONS"),
                     _ => {}
                 }
-                if (shell.screen == Screen::Lobby && shell.tab == Tab::Settings) || shell.screen == Screen::ClassEdit || shell.screen == Screen::Zombies {
+                let stepped = super::rows(shell, &cat).get(shell.focus).is_some_and(|r| matches!(r.act, Act::Cycle(_)));
+                if stepped || shell.screen == Screen::ClassEdit || shell.screen == Screen::Zombies {
                     hint(l, cx, "A / D", "xenonbutton_dpad_rl", "CHANGE");
                 }
             });
@@ -256,6 +338,10 @@ pub(crate) fn menu_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, widt
             .with_children(|line| {
                 line.spawn((Text::new(r.label.clone()), cx.bold(px), TextColor(if on { WHITE } else { TEXT.with_alpha(0.72) })));
                 match &r.value {
+                    // (A value typed in, not stepped: no arrows.)
+                    Some(v) if !matches!(r.act, Act::Cycle(_)) => {
+                        line.spawn((Text::new(v.clone()), cx.bold(px * 0.85), TextColor(if on { WHITE } else { DIM })));
+                    }
                     Some(v) => {
                         line.spawn(Node { column_gap: cx.px(14.0), align_items: AlignItems::Center, ..default() }).with_children(|sel| {
                             sel.spawn((Hit::Step(i, -1), Button, Text::new("‹"), cx.bold(px), TextColor(if on { cx.pal.accent } else { FAINT })));
@@ -464,20 +550,27 @@ fn lobby(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row])
         let me = &cat.player;
         let icon = cx.pic(&[me.rank_picture.clone()]);
         let diff = DIFFICULTY[shell.difficulty.min(3) as usize];
-        let mut people: Vec<(String, String, Color, bool)> = vec![(me.level.to_string(), me.name.clone(), cx.pal.accent, true)];
+        // (level, name, team, his, calling card, emblem: a bot's by its name.)
+        let bot = |n: u32, team: Color| {
+            let key = format!("Bot {n}");
+            (String::new(), format!("{key} ({})", title_case(diff)), team, false, cards::for_name(Kind::Card, &key), cards::for_name(Kind::Emblem, &key))
+        };
+        let mut people: Vec<(String, String, Color, bool, String, String)> =
+            vec![(me.level.to_string(), me.name.clone(), cx.pal.accent, true, cards::mine(Kind::Card, &me.card), cards::mine(Kind::Emblem, &me.emblem))];
         for i in 0..shell.friends {
-            people.push(("".to_owned(), format!("Bot {} ({})", i + 1, title_case(diff)), cx.pal.accent, false));
+            people.push(bot(i + 1, cx.pal.accent));
         }
         for i in 0..shell.enemies {
-            people.push(("".to_owned(), format!("Bot {} ({})", shell.friends + i + 1, title_case(diff)), ENEMY, false));
+            people.push(bot(shell.friends + i + 1, ENEMY));
         }
-        for (level, name, team, mine) in people {
+        for (level, name, team, mine, card, mark) in people {
             list.spawn((
-                Node { height: cx.px(36.0), column_gap: cx.px(12.0), align_items: AlignItems::Center, padding: UiRect::horizontal(cx.px(10.0)), ..default() },
+                Node { height: cx.px(36.0), column_gap: cx.px(10.0), align_items: AlignItems::Center, padding: UiRect::new(cx.px(0.0), cx.px(10.0), cx.px(0.0), cx.px(0.0)), ..default() },
                 BackgroundColor(if mine { cx.pal.accent_a(0.14) } else { cx.pal.panel_soft }),
             ))
             .with_children(|r| {
-                r.spawn((Node { width: cx.px(4.0), height: cx.px(22.0), ..default() }, BackgroundColor(team)));
+                r.spawn((Node { width: cx.px(4.0), height: cx.px(36.0), ..default() }, BackgroundColor(team)));
+                emblem(r, cx, &mark, 32.0);
                 match (&icon, mine) {
                     (Some(h), true) => {
                         r.spawn((ImageNode::new(h.clone()), Node { width: cx.px(26.0), height: cx.px(26.0), ..default() }));
@@ -486,10 +579,11 @@ fn lobby(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row])
                         r.spawn(Node { width: cx.px(26.0), ..default() });
                     }
                 }
-                r.spawn((Node { width: cx.px(40.0), ..default() },)).with_child((Text::new(level), cx.bold(20.0), TextColor(WHITE)));
+                r.spawn((Node { width: cx.px(34.0), ..default() },)).with_child((Text::new(level), cx.bold(20.0), TextColor(WHITE)));
                 r.spawn((Node { flex_grow: 1.0, ..default() },))
                     .with_child((Text::new(name), cx.bold(21.0), TextColor(if mine { GOLD } else { TEXT })));
-                r.spawn((Text::new("0"), cx.bold(20.0), TextColor(DIM)));
+                banner(r, cx, &card, 128.0, 30.0, None);
+                r.spawn((Node { width: cx.px(22.0), justify_content: JustifyContent::FlexEnd, ..default() },)).with_child((Text::new("0"), cx.bold(20.0), TextColor(DIM)));
             });
         }
     });
@@ -708,26 +802,33 @@ fn barracks_view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows:
         BorderColor::all(cx.pal.accent),
     ))
     .with_children(|p| {
+        let (title, mark) = (cards::mine(Kind::Card, &me.card), cards::mine(Kind::Emblem, &me.emblem));
         p.spawn(Node { column_gap: cx.px(24.0), align_items: AlignItems::Center, ..default() }).with_children(|top| {
-            match icon {
-                Some(h) => {
-                    top.spawn((ImageNode::new(h), Node { width: cx.px(120.0), height: cx.px(120.0), ..default() }));
-                }
-                None => {
-                    top.spawn((Node { width: cx.px(120.0), height: cx.px(120.0), ..default() }, BackgroundColor(KEYCAP)));
-                }
-            }
-            top.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(6.0), flex_grow: 1.0, ..default() }).with_children(|t| {
-                t.spawn((Text::new(me.name.clone()), cx.bold(52.0), TextColor(WHITE)));
+            emblem(top, cx, &mark, 132.0);
+            top.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(8.0), flex_grow: 1.0, ..default() }).with_children(|t| {
+                banner(t, cx, &title, 560.0, 96.0, Some((me.name.as_str(), 48.0)));
                 let prestige = if me.prestige > 0 { format!("PRESTIGE {}  ·  ", me.prestige) } else { String::new() };
-                t.spawn((Text::new(format!("{prestige}LEVEL {} OF {}", me.level, bo2_profile::progression::MAX_LEVEL)), cx.bold(24.0), TextColor(cx.pal.accent)));
+                t.spawn(Node { column_gap: cx.px(10.0), align_items: AlignItems::Center, ..default() }).with_children(|l| {
+                    match icon {
+                        Some(h) => {
+                            l.spawn((ImageNode::new(h), Node { width: cx.px(34.0), height: cx.px(34.0), ..default() }));
+                        }
+                        None => {
+                            l.spawn((Node { width: cx.px(34.0), height: cx.px(34.0), ..default() }, BackgroundColor(KEYCAP)));
+                        }
+                    }
+                    l.spawn((Text::new(format!("{prestige}LEVEL {} OF {}", me.level, bo2_profile::progression::MAX_LEVEL)), cx.bold(24.0), TextColor(cx.pal.accent)));
+                });
                 t.spawn((Node { width: Val::Percent(100.0), height: cx.px(8.0), ..default() }, BackgroundColor(KEYCAP)))
                     .with_child((Node { width: Val::Percent(me.xp_frac * 100.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(cx.pal.accent)));
                 t.spawn((Text::new(format!("{} XP  ·  NEXT LEVEL AT {}", me.xp, me.xp_next)), cx.regular(19.0), TextColor(DIM)));
             });
         });
         p.spawn((Node { height: Val::Px(1.0), width: Val::Percent(100.0), ..default() }, BackgroundColor(cx.pal.line)));
-        if shell.focus == 0 {
+        let focused = rows.get(shell.focus).map(|r| r.act);
+        if let Some(Act::Cycle(what @ (Setting::Card | Setting::Emblem))) = focused {
+            look_strip(p, cx, if what == Setting::Card { Kind::Card } else { Kind::Emblem }, if what == Setting::Card { &me.card } else { &me.emblem });
+        } else if focused != Some(Act::Prestige) {
             p.spawn((Text::new("COMBAT RECORD"), cx.bold(22.0), TextColor(FAINT)));
             p.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: cx.px(16.0), row_gap: cx.px(16.0), ..default() }).with_children(|g| {
                 for (k, v) in &me.record {
@@ -772,6 +873,158 @@ fn barracks_view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows:
             }
             let master = bo2_profile::progression::MAX_PRESTIGE;
             p.spawn((Text::new(format!("MASTER PRESTIGE  ·  PRESTIGE {master}")), cx.bold(18.0), TextColor(GOLD)));
+        }
+    });
+}
+
+/// Barracks' picker: his calling card or emblem among its neighbours in
+/// the list (left / right steps through them).
+fn look_strip(p: &mut Kids, cx: &mut Ctx, kind: Kind, stat: &str) {
+    let list = cards::list(kind);
+    let now = cards::mine(kind, stat);
+    let (at, n) = cards::place_in(&list, &now);
+    let what = if kind == Kind::Card { "CALLING CARD" } else { "EMBLEM" };
+    p.spawn(Node { justify_content: JustifyContent::SpaceBetween, ..default() }).with_children(|t| {
+        t.spawn((Text::new(format!("{what}  ·  {}", cards::label(&now))), cx.bold(22.0), TextColor(FAINT)));
+        t.spawn((Text::new(format!("{at} OF {n}")), cx.bold(22.0), TextColor(DIM)));
+    });
+    let i = at.saturating_sub(1) as i32;
+    let (w, h) = if kind == Kind::Card { (196.0, 44.0) } else { (96.0, 96.0) };
+    let side = if kind == Kind::Card { 2 } else { 4 };
+    p.spawn(Node { column_gap: cx.px(12.0), align_items: AlignItems::Center, justify_content: JustifyContent::Center, ..default() }).with_children(|row| {
+        for d in -side..=side {
+            if list.is_empty() {
+                break;
+            }
+            let name = &list[(i + d).rem_euclid(list.len() as i32) as usize];
+            let on = d == 0;
+            row.spawn((
+                Node { padding: UiRect::all(cx.px(3.0)), border: UiRect::all(cx.px(2.0)), ..default() },
+                BorderColor::all(if on { cx.pal.accent } else { Color::NONE }),
+                BackgroundColor(if on { cx.pal.accent_a(0.18) } else { Color::NONE }),
+            ))
+            .with_children(|b| {
+                let k = if on { 1.0 } else { 0.8 };
+                if kind == Kind::Card {
+                    banner(b, cx, name, w * k, h * k, None);
+                } else {
+                    emblem(b, cx, name, w * k);
+                }
+            });
+        }
+    });
+    p.spawn((Text::new("A / D or the arrows: the previous or next one. It is saved at once."), cx.regular(19.0), TextColor(DIM)));
+}
+
+/// The lobby's countdown ring: the arc's colour and the track's.
+#[derive(Component, Clone, Copy)]
+pub(crate) struct CountdownRing {
+    arc: Color,
+    track: Color,
+}
+
+/// What is left of the second under way, 1 at its start, 0 at its end
+/// (the ring sweeps it each second).
+pub(crate) fn second_left(ms: f64) -> f32 {
+    let r = ms.max(0.0) % 1000.0;
+    if ms > 0.0 && r == 0.0 { 1.0 } else { (r / 1000.0) as f32 }
+}
+
+/// The number the countdown shows (whole seconds left, rounded up).
+pub(crate) fn seconds_shown(ms: f64) -> i32 {
+    (ms.max(0.0) / 1000.0).ceil() as i32
+}
+
+fn ring_gradient(ring: &CountdownRing, left: f32) -> BackgroundGradient {
+    let turn = std::f32::consts::TAU * left.clamp(0.0, 1.0);
+    BackgroundGradient::from(ConicGradient::new(
+        UiPosition::CENTER,
+        vec![
+            AngularColorStop::new(ring.arc, 0.0),
+            AngularColorStop::new(ring.arc, turn),
+            AngularColorStop::new(ring.track, turn),
+            AngularColorStop::new(ring.track, std::f32::consts::TAU),
+        ],
+    ))
+}
+
+/// The ring follows the start timer every frame (the view itself is drawn
+/// again only when the number changes).
+pub(crate) fn countdown_tick(mut rings: Query<(&CountdownRing, &mut BackgroundGradient)>) {
+    let Some(ms) = bridge::starting_in() else { return };
+    for (ring, mut g) in &mut rings {
+        *g = ring_gradient(ring, second_left(ms));
+    }
+}
+
+/// "Match starting": Ghosts' lobby countdown - thin numerals in a ring that
+/// sweeps each second, the map and mode under it - over the screen.
+fn countdown(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, ms: f64) {
+    let map = cat.map(&shell.map).map_or_else(|| shell.map.to_uppercase(), |m| m.title.clone());
+    let mode = cat.mode(&shell.mode).map_or_else(|| shell.mode.to_uppercase(), |m| m.title.clone());
+    let players = 1 + shell.friends + shell.enemies;
+    let ring = CountdownRing { arc: cx.pal.accent, track: cx.pal.accent_a(0.14) };
+    let size = 280.0;
+    let thick = 5.0;
+    c.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            row_gap: cx.px(18.0),
+            ..default()
+        },
+        BackgroundGradient::from(RadialGradient::new(
+            UiPosition::CENTER,
+            RadialGradientShape::FarthestCorner,
+            vec![
+                ColorStop::new(Color::srgba(0.004, 0.012, 0.03, 0.90), Val::Percent(0.0)),
+                ColorStop::new(Color::srgba(0.004, 0.012, 0.03, 0.62), Val::Percent(100.0)),
+            ],
+        )),
+        GlobalZIndex(20),
+    ))
+    .with_children(|o| {
+        o.spawn(Node { column_gap: cx.px(18.0), align_items: AlignItems::Center, ..default() }).with_children(|t| {
+            t.spawn((Node { width: cx.px(64.0), height: Val::Px(1.0), ..default() }, BackgroundColor(cx.pal.accent_a(0.6))));
+            t.spawn((Text::new("MATCH STARTING"), cx.bold(24.0), TextColor(cx.pal.accent), TextLayout::linebreak(LineBreak::NoWrap)));
+            t.spawn((Node { width: cx.px(64.0), height: Val::Px(1.0), ..default() }, BackgroundColor(cx.pal.accent_a(0.6))));
+        });
+        o.spawn((
+            ring,
+            Node {
+                width: cx.px(size),
+                height: cx.px(size),
+                border_radius: BorderRadius::all(Val::Percent(50.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            ring_gradient(&ring, second_left(ms)),
+        ))
+        .with_children(|r| {
+            r.spawn((
+                Node {
+                    width: cx.px(size - thick * 2.0),
+                    height: cx.px(size - thick * 2.0),
+                    border_radius: BorderRadius::all(Val::Percent(50.0)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.012, 0.022, 0.045)),
+            ))
+            .with_child((Text::new(seconds_shown(ms).to_string()), cx.light(176.0), TextColor(WHITE)));
+        });
+        o.spawn((Text::new(map), cx.light(72.0), TextColor(WHITE), Node { margin: UiRect::top(cx.px(8.0)), ..default() }));
+        o.spawn((Text::new(format!("{mode}  ·  {players} PLAYERS")), cx.bold(22.0), TextColor(DIM)));
+        if shell.screen == Screen::Lobby {
+            o.spawn(Node { column_gap: cx.px(8.0), align_items: AlignItems::Center, margin: UiRect::top(cx.px(18.0)), ..default() }).with_children(|h| {
+                hint(h, cx, "ESC", "xenonbutton_b", "CANCEL");
+            });
         }
     });
 }
@@ -891,7 +1144,10 @@ pub(crate) fn shell_view(
                 Screen::Zombies | Screen::ZmMapPick | Screen::ZmStartPick => super::zombies_view::view(c, &mut cx, &shell, &rows),
             }
             player_card(c, &mut cx, &cat.player);
-            footer(c, &mut cx, &shell, &online);
+            footer(c, &mut cx, &shell, &cat, &online);
+            if let Some(ms) = bridge::starting_in().filter(|_| !shell.screen.is_zombies()) {
+                countdown(c, &mut cx, &shell, &cat, ms);
+            }
             if let Some((note, _)) = &shell.note {
                 c.spawn((
                     Node { padding: UiRect::axes(cx.px(22.0), cx.px(10.0)), border: UiRect::left(cx.px(3.0)), ..abs(Some(72.0), None, None, Some(84.0), &cx) },

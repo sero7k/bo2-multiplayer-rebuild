@@ -966,15 +966,8 @@ pub mod preview {
         );
         commands.entity(e).insert(Shot);
         if banner {
-            let mut cache = HashMap::new();
-            let model = crate::hud_match::BannerModel {
-                name: "Grim_Gorilla".into(),
-                level: 1,
-                rank: None,
-                backing: Some(crate::hud_match::drawn_backing(&mut cache, &mut images)),
-                start: now,
-            };
-            let e = crate::hud_match::spawn_banner(&mut commands, &faces, &model, 1080.0);
+            let model = crate::hud_match::BannerModel::new("Grim_Gorilla".into(), 1, now);
+            let e = crate::hud_match::spawn_banner(&mut commands, &faces, &model, Vec2::new(1920.0, 1080.0));
             commands.entity(e).insert(Shot);
         }
         // A plain stand-in scene, and a crosshair's place.

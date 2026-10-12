@@ -81,18 +81,23 @@ pub(crate) fn palette(screen: super::Screen) -> Palette {
 
 const REGULAR: &[u8] = include_bytes!("../../assets/BarlowCondensed-400.ttf");
 const SEMIBOLD: &[u8] = include_bytes!("../../assets/BarlowCondensed-600.ttf");
+/// The countdown's thin numerals.
+const LIGHT: &[u8] = include_bytes!("../../assets/BarlowCondensed-200.ttf");
 
-/// The shell's two weights (the in-game HUD's `GameUiFont` is the semibold).
+/// The shell's weights (the in-game HUD's `GameUiFont` is the semibold;
+/// the thin one is the lobby countdown's).
 #[derive(Resource, Clone)]
 pub(crate) struct ShellFonts {
     pub regular: Handle<Font>,
     pub bold: Handle<Font>,
+    pub light: Handle<Font>,
 }
 
 pub(crate) fn load_fonts(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
     commands.insert_resource(ShellFonts {
         regular: fonts.add(Font::from_bytes(REGULAR.to_vec())),
         bold: fonts.add(Font::from_bytes(SEMIBOLD.to_vec())),
+        light: fonts.add(Font::from_bytes(LIGHT.to_vec())),
     });
 }
 

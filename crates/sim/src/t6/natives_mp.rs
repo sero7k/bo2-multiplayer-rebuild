@@ -792,6 +792,18 @@ pub(super) fn publish_screen(world: &mut World) {
         let clients: Vec<(u32, gsc_t6::ObjRef)> = zm.players.iter().map(|(c, p)| (*c, p.obj)).collect();
         (format!("{},{}", score("allies"), score("axis")), left.unwrap_or_default(), clients)
     };
+    // bo2mp: the match's start countdown: the milliseconds until play
+    // starts while the scripts hold the prematch period
+    // (`level.bo2mp_prematchend`, set as the countdown starts), "" else.
+    let now_ms = world.resource::<Zm>().now_ms;
+    let prematch = super::with_vm(world, |vm, _| {
+        let (on, end) = (vm.intern("inprematchperiod"), vm.intern("bo2mp_prematchend"));
+        let on = gsc_t6::truthy(&vm.raw_field(vm.level, on));
+        let end = vm.raw_field(vm.level, end).as_int();
+        end.filter(|_| on).map(|end| (i64::from(end) - now_ms).max(0).to_string())
+    })
+    .flatten()
+    .unwrap_or_default();
     // The game type's settings the HUD reads (score limit, rounds), with
     // the BO2MP_SETTING_<name> test overrides the server uses.
     let settings = {
@@ -897,6 +909,7 @@ pub(super) fn publish_screen(world: &mut World) {
             ("bo2mp_settings", settings.clone()),
             ("bo2mp_minimap", minimap.clone()),
             ("bo2mp_killcam", killcams.get(&c).cloned().unwrap_or_default()),
+            ("bo2mp_prematch", prematch.clone()),
         ] {
             super::set_client_dvar(world, c, k, &v);
         }

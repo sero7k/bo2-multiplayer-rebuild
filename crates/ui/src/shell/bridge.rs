@@ -55,6 +55,10 @@ pub(crate) struct PlayerCard {
     /// His experience, and what the next level needs.
     pub xp: i64,
     pub xp_next: i64,
+    /// His calling card and emblem as his stats hold them (`iw4:cardtitle_*`,
+    /// `iw4:cardicon_*`; empty = the default, `cards`).
+    pub card: String,
+    pub emblem: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -103,6 +107,8 @@ pub(crate) enum Request {
     Prestige,
     /// Options > ACCOUNT > UNLOCK ALL.
     UnlockAll(bool),
+    /// Barracks: his calling card or emblem.
+    SetLook(super::cards::Kind, String),
 }
 
 #[derive(Default)]
@@ -165,6 +171,11 @@ pub(crate) fn catalog() -> Option<Arc<Catalog>> {
 /// The preview's stand-in catalog.
 pub(crate) fn set_preview_catalog(c: Catalog) {
     with(|b| b.catalog = Some(Arc::new(c)));
+}
+
+/// The preview's stand-in countdown.
+pub(crate) fn set_preview_starting(ms: Option<f64>) {
+    with(|b| b.starting_in = ms);
 }
 
 pub(crate) fn request(r: Request) {
@@ -315,6 +326,14 @@ fn build_catalog(host: &Host, mp: Option<&Mp>) -> Catalog {
         .find(|r| cell(r, 0).parse::<i32>().ok() == Some(rank))
         .and_then(|r| cell(r, 7).parse::<f32>().ok())
         .unwrap_or(0.0) as i64;
+    let look = |stat: &str| {
+        mp.and_then(|m| match m.borrow().profile.stat(stat) {
+            Some(bo2_profile::StatValue::Str(t)) => Some(t.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
+    };
+    let (card, emblem) = (look(super::cards::CARD_STAT), look(super::cards::EMBLEM_STAT));
     let can_prestige = level >= bo2_profile::progression::MAX_LEVEL && prestige < bo2_profile::progression::MAX_PRESTIGE;
     Catalog {
         maps: maps.into_iter().map(|(_, m)| m).collect(),
@@ -329,6 +348,8 @@ fn build_catalog(host: &Host, mp: Option<&Mp>) -> Catalog {
             can_prestige,
             xp: xp as i64,
             xp_next,
+            card,
+            emblem,
         },
     }
 }
@@ -424,6 +445,13 @@ pub(crate) fn lui_side(host: &mut Host, mp: Option<&Mp>) {
                     m.borrow_mut().profile.set_stat(UNLOCK_ALL_STAT.to_owned(), bo2_profile::StatValue::Num(if on { 1.0 } else { 0.0 }));
                     super::options::UNLOCK_ALL.store(on, std::sync::atomic::Ordering::Relaxed);
                     diag::info!(Ui, "bo2mp shell: unlock all {}", if on { "on" } else { "off" });
+                    with(|b| b.built_at = -1.0e9);
+                }
+            }
+            Request::SetLook(kind, name) => {
+                if let Some(m) = mp {
+                    m.borrow_mut().profile.set_stat(kind.stat().to_owned(), bo2_profile::StatValue::Str(name.clone()));
+                    diag::info!(Ui, "bo2mp shell: {kind:?} now {name}");
                     with(|b| b.built_at = -1.0e9);
                 }
             }

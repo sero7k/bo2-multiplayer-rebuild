@@ -190,6 +190,13 @@ impl LuiHudSlot {
         Some((m.profile.rank().max(0) + 1, m.profile.plevel().max(0)))
     }
 
+    /// bo2mp: his own calling card and emblem as his stats hold them
+    /// (`bo2mp.callingcard` / `bo2mp.emblem`; empty: none picked).
+    pub(crate) fn his_look_stats(&self) -> (String, String) {
+        let Some(mp) = self.0.as_ref().and_then(|h| h.mp.as_ref()) else { return Default::default() };
+        crate::hud_cards::his_look_stats(&mp.borrow().profile)
+    }
+
     /// bo2mp: a game type's name as BO2's tables give it (mp/gametypestable.csv's
     /// name key, localized), upper case.
     pub(crate) fn gametype_title(&self, gametype: &str) -> Option<String> {

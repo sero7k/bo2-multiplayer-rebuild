@@ -22,6 +22,7 @@
 mod background;
 pub(crate) mod bridge;
 mod cac;
+pub(crate) mod cards;
 pub(crate) mod classes;
 pub(crate) mod ingame;
 mod loading;
@@ -106,6 +107,9 @@ pub(crate) enum Setting {
     ZmRound,
     /// An Options row (of the tab he is on).
     Option(u8),
+    /// Barracks: his calling card, his emblem.
+    Card,
+    Emblem,
 }
 
 /// What a row does.
@@ -132,6 +136,8 @@ pub(crate) enum Act {
     ZmPlay,
     ZmPickMap,
     ZmPickStart,
+    /// Options > ACCOUNT: type a new name.
+    TypeName,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -246,7 +252,7 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
         Screen::Multiplayer => vec![
             Row::new("CUSTOM GAME", "Pick the map, the mode and the bots, then play.", Act::CustomGame),
             Row::new("CREATE A CLASS", "Build your loadouts.", Act::Classes),
-            Row::new("BARRACKS", "Your combat record and prestige.", Act::Barracks),
+            Row::new("BARRACKS", "Your combat record, calling card, emblem and prestige.", Act::Barracks),
             Row::new("OPTIONS", "Graphics, sound and controls.", Act::Options),
         ],
         Screen::Lobby => match s.tab {
@@ -257,7 +263,7 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
             ],
             Tab::Loadouts => vec![
                 Row::new("CREATE A CLASS", "Build your loadouts.", Act::Classes),
-                Row::new("BARRACKS", "Your combat record and prestige.", Act::Barracks),
+                Row::new("BARRACKS", "Your combat record, calling card, emblem and prestige.", Act::Barracks),
             ],
             Tab::Settings => {
                 let mode = c.mode(&s.mode).map_or_else(|| s.mode.to_uppercase(), |m| m.title.clone());
@@ -285,8 +291,8 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
         Screen::Classes | Screen::ClassEdit | Screen::ItemPick => classes::book().map(|b| cac::rows(s, &b)).unwrap_or_default(),
         Screen::Options => {
             let mut r = options::rows(s.page, &options::snapshot());
-            if s.page == options::ACCOUNT_TAB
-                && let (Some(t), Some(row)) = (&s.typing, r.first_mut())
+            if let Some(t) = &s.typing
+                && let Some(row) = r.iter_mut().find(|r| r.act == Act::TypeName)
             {
                 row.value = Some(format!("{t}_"));
             }
@@ -294,6 +300,15 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
         }
         Screen::Barracks => {
             let mut r = vec![Row::new("COMBAT RECORD", "Your kills, wins and time played.", Act::Barracks)];
+            for (label, sub, kind, what) in [
+                ("CALLING CARD", "Your calling card, from Modern Warfare 2 and 3.", cards::Kind::Card, Setting::Card),
+                ("EMBLEM", "Your emblem, from Modern Warfare 2 and 3.", cards::Kind::Emblem, Setting::Emblem),
+            ] {
+                let stat = if kind == cards::Kind::Card { &c.player.card } else { &c.player.emblem };
+                let mut row = Row::new(label, sub, Act::Cycle(what));
+                row.value = Some(cards::label(&cards::mine(kind, stat)));
+                r.push(row);
+            }
             if c.player.can_prestige {
                 r.push(Row::new("ENTER PRESTIGE", "Back to level 1 with the next prestige icon. Press twice to confirm.", Act::Prestige));
             } else {
@@ -404,6 +419,8 @@ impl Shell {
             Setting::Difficulty => self.difficulty = step(self.difficulty, 3),
             Setting::ZmRound => self.zm_round = step(self.zm_round as u32, zombies::ROUNDS.len() as u32 - 1) as usize,
             Setting::Option(k) => options::queue(self.page, k, by),
+            Setting::Card => cards::pick(cards::Kind::Card, &c.player.card, by),
+            Setting::Emblem => cards::pick(cards::Kind::Emblem, &c.player.emblem, by),
             Setting::LethalCount | Setting::TacticalCount => {
                 if let Some(b) = classes::book() {
                     cac::count(self, &b, what == Setting::LethalCount, by, self.now);
@@ -493,7 +510,7 @@ impl Shell {
                 self.focus = c.modes.iter().position(|m| m.key == self.mode).unwrap_or(0);
             }
             // (His name is typed, not stepped.)
-            Act::Cycle(Setting::Option(0)) if self.screen == Screen::Options && self.page == options::ACCOUNT_TAB => {
+            Act::TypeName => {
                 self.typing = Some(options::snapshot().player_name);
             }
             Act::Cycle(what) => self.cycle(what, 1, c),
@@ -861,6 +878,7 @@ fn prefetch_pictures(
     }
     let Some(c) = bridge::catalog() else { return };
     crate::foreign_maps::warm_map_pictures();
+    cards::warm();
     pics.prefetch(&mut cursor, &c, icons.as_deref(), &mut images);
 }
 
@@ -878,6 +896,7 @@ pub(crate) fn register_shell(app: &mut App) {
                 background::shell_background,
                 prefetch_pictures,
                 view::shell_view,
+                view::countdown_tick,
                 loading::shell_loading,
                 ingame::ingame_input,
                 ingame::ingame_view,

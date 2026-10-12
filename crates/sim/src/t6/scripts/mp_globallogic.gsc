@@ -449,6 +449,8 @@ prematchperiod()
     {
         thread matchstarttimer();
         waitforplayers();
+        // bo2mp: when play starts (the HUD's countdown counts to it).
+        level.bo2mp_prematchend = gettime() + int( level.prematchperiod * 1000 );
         wait level.prematchperiod;
     }
     else
@@ -487,6 +489,14 @@ matchstarttimer()
     left = int( level.prematchperiod );
     if ( left >= 2 )
     {
+        // bo2mp: the part second first (shown as the next whole one), so
+        // the count's last second ends as play starts.
+        part = level.prematchperiod - left;
+        if ( part > 0.05 )
+        {
+            timer setvalue( left + 1 );
+            wait part;
+        }
         while ( left > 0 && !level.gameended )
         {
             timer setvalue( left );

@@ -109,6 +109,8 @@ pub(crate) fn ingame_input(
     mouse: Res<ButtonInput<MouseButton>>,
     pads: Query<&Gamepad>,
     hits: Query<(&GameHit, &Interaction)>,
+    // (Options' tabs and a selector's arrows, clicked.)
+    parts: Query<(&Hit, &Interaction), Without<GameHit>>,
     hud_keys: Option<Res<frame::HudInputView>>,
     time: Res<Time>,
     mut st: Local<InGame>,
@@ -187,7 +189,7 @@ pub(crate) fn ingame_input(
         }
     }
     if up == 3 {
-        let tabs = super::options::TABS.len() as i32;
+        let tabs = super::options::MATCH_TABS as i32;
         let mut tab = OPT_TAB.load(Ordering::Relaxed) as i32;
         if keys.just_pressed(KeyCode::KeyQ) || pad(GamepadButton::LeftTrigger) {
             tab = (tab - 1).rem_euclid(tabs);
@@ -199,8 +201,30 @@ pub(crate) fn ingame_input(
             st.focus = 0;
             sound = Some("uin_navigation_click");
         }
+        let mut clicked_side = 0;
+        if mouse.just_pressed(MouseButton::Left) {
+            for (hit, i) in &parts {
+                if *i == Interaction::None {
+                    continue;
+                }
+                match *hit {
+                    Hit::Page(p) => {
+                        tab = (p as i32).clamp(0, tabs - 1);
+                        st.focus = 0;
+                        sound = Some("uin_navigation_click");
+                    }
+                    Hit::Step(row, by) => {
+                        st.focus = row.min(n - 1);
+                        clicked_side = by;
+                    }
+                    _ => {}
+                }
+            }
+        }
         OPT_TAB.store(tab as usize, Ordering::Relaxed);
-        let side = if keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::KeyA) || pad(GamepadButton::DPadLeft) {
+        let side = if clicked_side != 0 {
+            clicked_side
+        } else if keys.just_pressed(KeyCode::ArrowLeft) || keys.just_pressed(KeyCode::KeyA) || pad(GamepadButton::DPadLeft) {
             -1
         } else if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::KeyD) || pad(GamepadButton::DPadRight) {
             1
@@ -345,7 +369,7 @@ pub(crate) fn ingame_view(
                 _ => "CHOOSE CLASS",
             }]);
             if up == 3 {
-                let labels: Vec<String> = super::options::TABS.iter().map(|t| (*t).to_owned()).collect();
+                let labels: Vec<String> = super::options::TABS.iter().take(super::options::MATCH_TABS).map(|t| (*t).to_owned()).collect();
                 super::view::tabs(c, &mut cx, &labels, OPT_TAB.load(Ordering::Relaxed), Hit::Page);
             }
             c.spawn(Node {

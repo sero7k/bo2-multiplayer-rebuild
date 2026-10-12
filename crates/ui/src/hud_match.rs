@@ -1,4 +1,4 @@
-//! bo2mp: the match's own kill feed, hit marker, Black Ops kill card and
+//! bo2mp: the match's own kill feed, hit marker, kill and Killed By cards and
 //! scoreboard, in the shell's look (navy panels, the blue accent, Barlow
 //! Condensed), drawn in place of BO2's LUI versions while the modern HUD is
 //! on (`hud_modern::modern_hud_enabled`):
@@ -12,14 +12,16 @@
 //!   element in `bo2zm_hud` coming back up), red on the killing shot (his
 //!   kill in the feed), a quick scale pop and a ~0.3 s fade. BO2's picture
 //!   is left out of the script HUD (`zm_hud`).
-//! - Kill card: Black Ops' "killed" player card at the lower middle: a
-//!   dark honeycomb card with a thin edge, the victim's rank icon large on
-//!   the left (Black Ops' `rank_*` icons, read from its IWDs), his name at
-//!   the top, his rank icon and level small at the bottom right; it rises
-//!   and settles in, holds and fades. The backing is Black Ops' own picture
-//!   when its IWDs have one by a known name (logged), else the honeycomb
-//!   drawn here. No sound, as in Black Ops. Not for the match's last kill
-//!   (the final killcam has it).
+//! - Kill card: the victim's card at the lower middle, under the gun (its
+//!   middle 82% down, 310 x 84 at 1080 lines): his Modern Warfare 2 / 3
+//!   calling card with his emblem on the left (`hud_cards`; a plain drawn
+//!   card until or unless the picture is in, never Black Ops II's), his
+//!   name at the top, his rank icon (Black Ops' `rank_*` icons, read from
+//!   its IWDs) and level small at the bottom right; it rises and settles
+//!   in, holds and fades. No sound, as in Black Ops. Not for the match's
+//!   last kill (the final killcam has it).
+//! - Killed By: at his death, before the killcam, the killer's card the
+//!   same way under "KILLED BY" (BO2's own LUI card is not sent).
 //! - Scoreboard: while his scores key is held and at the match's end (BO2's
 //!   LUI `Scoreboard` menu is not opened then, `lui_hud`): the game type and
 //!   the clock, then each side's players (or one list in a free-for-all)
@@ -111,11 +113,13 @@ struct Fade {
     out: f32,
     alpha: f32,
     shadow: f32,
+    /// A panel's edge's alpha (`BorderColor`, with `FadeEdge`).
+    edge: f32,
 }
 
 impl Fade {
     fn new(start: f64, fade_in: f32, life: f32, out: f32) -> Self {
-        Fade { start, fade_in, life, out, alpha: 1.0, shadow: 0.75 }
+        Fade { start, fade_in, life, out, alpha: 1.0, shadow: 0.75, edge: 0.85 }
     }
 
     fn with(mut self, alpha: f32) -> Self {
@@ -135,6 +139,10 @@ impl Fade {
 #[derive(Component, Clone, Copy, Debug)]
 struct FadeBack;
 
+/// A `Fade` that fades the node's edge (`BorderColor`) too.
+#[derive(Component, Clone, Copy, Debug)]
+struct FadeEdge;
+
 fn now_secs(time: &Time<Real>) -> f64 {
     time.elapsed_secs_f64()
 }
@@ -149,11 +157,13 @@ fn apply_fades(
         Option<&mut ImageNode>,
         Option<&mut BackgroundColor>,
         Option<&mut TextShadow>,
+        Option<&mut BorderColor>,
         Has<FadeBack>,
+        Has<FadeEdge>,
     )>,
 ) {
     let now = now_secs(&time);
-    for (f, text, image, back, shade, fades_back) in &mut q {
+    for (f, text, image, back, shade, edge, fades_back, fades_edge) in &mut q {
         let a = f.at(now);
         if let Some(mut c) = text {
             let want = c.0.with_alpha(f.alpha * a);
@@ -172,6 +182,13 @@ fn apply_fades(
             let want = b.0.with_alpha(f.alpha * a);
             if b.0 != want {
                 b.0 = want;
+            }
+        }
+        // (A panel's edge fades with it, from its own alpha.)
+        if let Some(mut e) = edge.filter(|_| fades_edge) {
+            let want = BorderColor::all(e.top.with_alpha(f.edge * a));
+            if *e != want {
+                *e = want;
             }
         }
         if let Some(mut s) = shade {
@@ -465,9 +482,6 @@ struct Catalog {
     /// Black Ops' rank icons in its IWDs, one per `BO1_RANKS` row (`None`:
     /// none of that row's names is there).
     bo1_ranks: Vec<Option<String>>,
-    /// Black Ops' honeycomb card backing, when its IWDs have one by a name
-    /// we know (`BO1_BACKINGS`, else any `*hex*` / `*honeycomb*` picture).
-    bo1_backing: Option<String>,
     /// MW3's level icons in rank order (`rank_*` images): the game and its
     /// pictures (the scoreboard's).
     ranks: Option<(&'static str, Vec<String>)>,
@@ -503,19 +517,6 @@ const BO1_RANKS: &[(i32, &[&str])] = &[
 fn bo1_rank_row(level: i32) -> usize {
     BO1_RANKS.iter().rposition(|(first, _)| level.max(1) >= *first).unwrap_or(0)
 }
-
-/// Black Ops' card backing (the black honeycomb), by the names it may have
-/// in its IWDs: not known for certain (its zones do not name it), so each
-/// is tried and what was found is logged.
-const BO1_BACKINGS: &[&str] = &[
-    "emblem_bg_default",
-    "emblem_bg_hex",
-    "emblem_bg_honeycomb",
-    "emblem_bg_hexagon",
-    "playercard_bg",
-    "playercard_default",
-    "hud_playercard_bg",
-];
 
 /// MW2/MW3 rank stems in order (some ranks have two spellings).
 const RANK_ORDER: &[&[&str]] = &[
@@ -599,7 +600,7 @@ fn image_names(game: asset_core::AssetNamespace) -> Vec<String> {
 
 fn find_catalog() -> Catalog {
     let mut cat = Catalog::default();
-    // Black Ops' pictures (its IWDs): its rank icons and its card backing.
+    // Black Ops' pictures (its IWDs): its rank icons.
     let t5 = image_names(asset_core::AssetNamespace::T5);
     let has = |n: &str| t5.iter().any(|x| x.eq_ignore_ascii_case(n));
     cat.bo1_ranks = BO1_RANKS.iter().map(|(_, names)| names.iter().find(|n| has(n)).map(|n| (*n).to_owned())).collect();
@@ -609,23 +610,12 @@ fn find_catalog() -> Catalog {
         v.dedup();
         v
     };
-    let hex = like(&["hex", "honeycomb"]);
-    cat.bo1_backing = BO1_BACKINGS
-        .iter()
-        .find(|n| has(n))
-        .map(|n| (*n).to_owned())
-        .or_else(|| hex.first().map(|n| (*n).clone()));
     diag::info!(
         Ui,
-        "bo2mp hud: BO1 IWDs: {} pictures; rank icons {:?}; card backing {:?} (procedural honeycomb when none); \
-         BO1 rank_* {:?}; emblem_bg_* {:?}; hex/honeycomb {:?}; card/playercard {:?}",
+        "bo2mp hud: BO1 IWDs: {} pictures; rank icons {:?}; BO1 rank_* {:?}",
         t5.len(),
         cat.bo1_ranks,
-        cat.bo1_backing,
         like(&["rank_"]).iter().take(80).collect::<Vec<_>>(),
-        like(&["emblem_bg"]).iter().take(80).collect::<Vec<_>>(),
-        hex.iter().take(40).collect::<Vec<_>>(),
-        like(&["playercard", "callingcard", "card_bg", "cardback"]).iter().take(40).collect::<Vec<_>>(),
     );
     // MW3's rank icons (else MW2's), for the scoreboard.
     for (prefix, ns) in [("iw5", asset_core::AssetNamespace::Iw5), ("iw4", asset_core::AssetNamespace::Iw4)] {
@@ -976,19 +966,32 @@ fn hit_marker(
     spawn_hitmarker(&mut commands, size, age, kill);
 }
 
-// --- Black Ops' kill card -------------------------------------------------------
+// --- The kill card and the Killed By card -----------------------------------
 
-/// The victim's card as drawn.
+/// A player's card as drawn: his Modern Warfare 2 / 3 calling card with his
+/// emblem on it, his name, his rank icon and level.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct BannerModel {
     pub name: String,
     pub level: i32,
     /// His rank icon (Black Ops', else the combined progression's).
     pub rank: Option<Handle<Image>>,
-    /// The card's backing (Black Ops' honeycomb, or the drawn one) and its
-    /// picture size.
-    pub backing: Option<(Handle<Image>, Vec2)>,
+    /// His calling card (`cardtitle_*`) and its picture size; none: the
+    /// plain drawn card.
+    pub card: Option<(Handle<Image>, Vec2)>,
+    /// His emblem (`cardicon_*`).
+    pub emblem: Option<Handle<Image>>,
+    /// A line over the card ("KILLED BY").
+    pub title: Option<String>,
     pub start: f64,
+    /// How long it holds before it fades (s).
+    pub hold: f32,
+}
+
+impl BannerModel {
+    pub(crate) fn new(name: String, level: i32, start: f64) -> Self {
+        BannerModel { name, level, rank: None, card: None, emblem: None, title: None, start, hold: BANNER_HOLD }
+    }
 }
 
 #[derive(Component)]
@@ -996,18 +999,44 @@ struct BannerRoot {
     start: f64,
 }
 
-/// The card's edge and the dark under its pattern.
-const CARD_EDGE: Color = Color::srgba(0.62, 0.62, 0.60, 0.85);
-const CARD_BASE: Color = Color::srgba(0.07, 0.07, 0.07, 0.92);
+/// The Killed By card (a `BannerRoot` too, for its slide in).
+#[derive(Component)]
+struct KilledByRoot;
 
-/// Black Ops' kill card at the lower middle of the screen: a dark
-/// honeycomb card with a thin edge, the victim's rank icon large on the
-/// left, his name at the top, and his rank icon and level small at the
-/// bottom right.
-pub(crate) fn spawn_banner(commands: &mut Commands, faces: &Faces, m: &BannerModel, height: f32) -> Entity {
-    let k = (height / 1080.0).max(0.4);
-    let (w, h) = (430.0 * k, 116.0 * k);
-    let life = BANNER_IN + BANNER_HOLD + BANNER_OUT;
+/// The card's edge, the plain drawn card's two ends, the shade over a
+/// calling card that keeps the name readable.
+const CARD_EDGE: Color = Color::srgba(0.62, 0.66, 0.72, 0.85);
+const CARD_TOP: Color = Color::srgba(0.16, 0.20, 0.27, 0.35);
+const CARD_FOOT: Color = Color::srgba(0.03, 0.04, 0.06, 0.94);
+const CARD_SHADE: Color = Color::srgba(0.0, 0.0, 0.0, 0.30);
+const EMBLEM_BACK: Color = Color::srgba(0.0, 0.0, 0.0, 0.45);
+
+/// The card on a 1080-line screen (about 72% of the old Black Ops card,
+/// 430 x 116) and where its middle sits: 82% of the way down, under the
+/// gun, clear of the kill feed (bottom left) and the ammo corner (bottom
+/// right).
+const CARD_W: f32 = 310.0;
+const CARD_H: f32 = 84.0;
+const CARD_CENTRE: f32 = 0.82;
+
+/// The card's scale on a `size` screen: by its height, as the rest of the
+/// HUD, but no wider than a share of a narrow screen.
+fn card_scale(size: Vec2) -> f32 {
+    (size.y / 1080.0).min(size.x / 1400.0).max(0.4)
+}
+
+/// The card's place: its top edge in pixels.
+fn card_top(size: Vec2) -> f32 {
+    (size.y * CARD_CENTRE - CARD_H * card_scale(size) * 0.5).round()
+}
+
+/// The card at the lower middle of the screen: his calling card covering
+/// it (shaded a little), his emblem on the left, his name at the top and
+/// his rank icon and level small at the bottom right; a title over it.
+pub(crate) fn spawn_banner(commands: &mut Commands, faces: &Faces, m: &BannerModel, size: Vec2) -> Entity {
+    let k = card_scale(size);
+    let (w, h) = ((CARD_W * k).round(), (CARD_H * k).round());
+    let life = BANNER_IN + m.hold + BANNER_OUT;
     let fade = Fade::new(m.start, BANNER_IN, life, BANNER_OUT);
     commands
         .spawn((
@@ -1017,7 +1046,7 @@ pub(crate) fn spawn_banner(commands: &mut Commands, faces: &Faces, m: &BannerMod
             GlobalZIndex(110),
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Percent(69.0),
+                top: Val::Px(card_top(size)),
                 width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
@@ -1032,56 +1061,98 @@ pub(crate) fn spawn_banner(commands: &mut Commands, faces: &Faces, m: &BannerMod
                     height: Val::Px(h),
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
-                    overflow: Overflow::clip(),
-                    border: UiRect::all(Val::Px((1.5 * k).max(1.0))),
+                    border: UiRect::all(Val::Px((1.0 * k).max(1.0))),
                     ..default()
                 },
-                BackgroundColor(CARD_BASE),
+                BackgroundColor(CARD_FOOT),
                 BorderColor::all(CARD_EDGE),
-                fade.with(CARD_BASE.alpha()),
+                fade.with(CARD_FOOT.alpha()),
                 FadeBack,
+                FadeEdge,
             ))
             .with_children(|card| {
-                // The honeycomb, covering the card.
-                if let Some((image, size)) = &m.backing {
-                    let s = crate::shell::pics::cover(*size, Vec2::new(w, h));
+                // The plain card: dark, a little lighter over its top half.
+                card.spawn((
+                    Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(52.0), ..default() },
+                    BackgroundColor(CARD_TOP),
+                    fade.with(CARD_TOP.alpha()),
+                    FadeBack,
+                ));
+                // The title over the card.
+                if let Some(title) = &m.title {
                     card.spawn((
-                        ImageNode::new(image.clone()),
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px((w - s.x) * 0.5),
-                            top: Val::Px((h - s.y) * 0.5),
-                            width: Val::Px(s.x),
-                            height: Val::Px(s.y),
-                            ..default()
-                        },
+                        Text::new(title.to_uppercase()),
+                        font(&faces.bold, 19.0 * k),
+                        TextColor(ACCENT),
+                        shadow(19.0 * k),
+                        TextLayout::new_with_no_wrap(),
+                        Node { position_type: PositionType::Absolute, left: Val::Px(0.0), bottom: Val::Px(h + 3.0 * k), ..default() },
                         fade,
                     ));
                 }
-                // His rank, large on the left.
-                let big = 86.0 * k;
-                card.spawn(Node {
-                    width: Val::Px(big),
-                    height: Val::Px(big),
-                    margin: UiRect::left(Val::Px(12.0 * k)),
-                    flex_shrink: 0.0,
-                    ..default()
-                })
-                .with_children(|r| {
-                    if let Some(icon) = &m.rank {
-                        r.spawn((ImageNode::new(icon.clone()), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, fade));
+                // His calling card, covering the card, clipped to it.
+                if let Some((image, pic)) = &m.card {
+                    let s = crate::shell::pics::cover(*pic, Vec2::new(w, h));
+                    card.spawn(Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        top: Val::Px(0.0),
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    })
+                    .with_children(|clip| {
+                        clip.spawn((
+                            ImageNode::new(image.clone()),
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px((w - s.x) * 0.5),
+                                top: Val::Px((h - s.y) * 0.5),
+                                width: Val::Px(s.x),
+                                height: Val::Px(s.y),
+                                ..default()
+                            },
+                            fade,
+                        ));
+                        clip.spawn((
+                            Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+                            BackgroundColor(CARD_SHADE),
+                            fade.with(CARD_SHADE.alpha()),
+                            FadeBack,
+                        ));
+                    });
+                }
+                // His emblem on the left.
+                let side = (h - 14.0 * k).round();
+                card.spawn((
+                    Node {
+                        width: Val::Px(side),
+                        height: Val::Px(side),
+                        margin: UiRect::left(Val::Px(7.0 * k)),
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                    BackgroundColor(EMBLEM_BACK),
+                    fade.with(EMBLEM_BACK.alpha()),
+                    FadeBack,
+                ))
+                .with_children(|e| {
+                    if let Some(icon) = &m.emblem {
+                        e.spawn((ImageNode::new(icon.clone()), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, fade));
                     }
                 });
                 // His name at the top.
                 card.spawn((
                     Text::new(m.name.to_uppercase()),
-                    font(&faces.bold, 27.0 * k),
+                    font(&faces.bold, 22.0 * k),
                     TextColor(WHITE),
-                    shadow(27.0 * k),
+                    shadow(22.0 * k),
+                    TextLayout::new_with_no_wrap(),
                     Node {
                         position_type: PositionType::Absolute,
-                        left: Val::Px(big + 24.0 * k),
-                        top: Val::Px(9.0 * k),
+                        left: Val::Px(side + 16.0 * k),
+                        top: Val::Px(5.0 * k),
                         ..default()
                     },
                     fade,
@@ -1089,69 +1160,22 @@ pub(crate) fn spawn_banner(commands: &mut Commands, faces: &Faces, m: &BannerMod
                 // His rank and level, small at the bottom right.
                 card.spawn(Node {
                     position_type: PositionType::Absolute,
-                    right: Val::Px(14.0 * k),
-                    bottom: Val::Px(9.0 * k),
+                    right: Val::Px(9.0 * k),
+                    bottom: Val::Px(5.0 * k),
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
-                    column_gap: Val::Px(4.0 * k),
+                    column_gap: Val::Px(3.0 * k),
                     ..default()
                 })
                 .with_children(|r| {
                     if let Some(icon) = &m.rank {
-                        r.spawn((ImageNode::new(icon.clone()), Node { width: Val::Px(28.0 * k), height: Val::Px(28.0 * k), ..default() }, fade));
+                        r.spawn((ImageNode::new(icon.clone()), Node { width: Val::Px(21.0 * k), height: Val::Px(21.0 * k), ..default() }, fade));
                     }
-                    r.spawn((Text::new(m.level.to_string()), font(&faces.bold, 25.0 * k), TextColor(WHITE), shadow(25.0 * k), fade));
+                    r.spawn((Text::new(m.level.to_string()), font(&faces.bold, 19.0 * k), TextColor(WHITE), shadow(19.0 * k), fade));
                 });
             });
         })
         .id()
-}
-
-/// Black Ops' honeycomb drawn (when its own picture is not found): black
-/// cells edged darker, each lit a little from the top. `cell` is a cell's
-/// width in pixels.
-fn honeycomb(w: u32, h: u32, cell: f32) -> Image {
-    use bevy::asset::RenderAssetUsages;
-    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-    let mut px = vec![0u8; (w * h * 4) as usize];
-    let (rx, ry) = (1.0f32, 3.0f32.sqrt());
-    let fmod = |a: f32, b: f32| a - b * (a / b).floor();
-    for y in 0..h {
-        for x in 0..w {
-            let p = Vec2::new(x as f32 + 0.5, y as f32 + 0.5) / cell;
-            let a = Vec2::new(fmod(p.x, rx), fmod(p.y, ry)) - Vec2::new(rx, ry) * 0.5;
-            let b = Vec2::new(fmod(p.x - rx * 0.5, rx), fmod(p.y - ry * 0.5, ry)) - Vec2::new(rx, ry) * 0.5;
-            let g = if a.length_squared() < b.length_squared() { a } else { b };
-            let q = g.abs();
-            // 0 at the centre, 0.5 at the edge.
-            let d = (q.x * 0.5 + q.y * 0.866_025).max(q.x);
-            let edge = ((d - 0.36) / 0.08).clamp(0.0, 1.0);
-            let lit = 0.5 - g.y / ry;
-            let inner = 0.115 + 0.06 * lit;
-            let v = inner * (1.0 - edge) + 0.015 * edge;
-            let o = ((y * w + x) * 4) as usize;
-            let c = (v.clamp(0.0, 1.0) * 255.0) as u8;
-            px[o] = c;
-            px[o + 1] = c;
-            px[o + 2] = c;
-            px[o + 3] = 255;
-        }
-    }
-    let mut img = Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, px, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default());
-    img.sampler = bevy::image::ImageSampler::linear();
-    img
-}
-
-/// The drawn honeycomb, made once.
-pub(crate) fn drawn_backing(cache: &mut HashMap<String, Option<(Handle<Image>, Vec2)>>, images: &mut Assets<Image>) -> (Handle<Image>, Vec2) {
-    let key = "drawn:honeycomb";
-    if let Some(Some(found)) = cache.get(key) {
-        return found.clone();
-    }
-    let (w, h) = (860, 232);
-    let found = (images.add(honeycomb(w, h, 20.0)), Vec2::new(w as f32, h as f32));
-    cache.insert(key.to_owned(), Some(found.clone()));
-    found
 }
 
 /// His rank icon on the card: Black Ops' for his level (no prestige),
@@ -1175,6 +1199,51 @@ fn card_rank(
     pics?.get(&name, icons, images)
 }
 
+/// A calling card's or emblem's picture as a handle (in once read).
+fn look_picture(cache: &mut HashMap<String, Option<(Handle<Image>, Vec2)>>, images: &mut Assets<Image>, material: &str) -> Option<(Handle<Image>, Vec2)> {
+    if let Some(Some(found)) = cache.get(material) {
+        return Some(found.clone());
+    }
+    let img = crate::hud_cards::picture(material)?;
+    let size = img.size().as_vec2();
+    let mut img = (*img).clone();
+    img.sampler = bevy::image::ImageSampler::linear();
+    let found = (images.add(img), size);
+    cache.insert(material.to_owned(), Some(found.clone()));
+    Some(found)
+}
+
+/// A player's meta in the snapshot by name.
+fn meta_named(snap: Option<&sim::Snapshot>, name: &str) -> Option<sim::ClientSnapshotMeta> {
+    snap?.meta.clients.iter().find(|(_, m)| String::from_utf8_lossy(&m.name).trim_end_matches(char::from(0)) == name).map(|(_, m)| m.clone())
+}
+
+/// A card's pictures for `model.name` (his look, his rank), and a key that
+/// changes as they come in.
+#[allow(clippy::too_many_arguments)]
+fn dress_card(
+    model: &mut BannerModel,
+    me: &str,
+    snap: Option<&sim::Snapshot>,
+    slot: &crate::lui_hud::LuiHudSlot,
+    cat: Option<&Catalog>,
+    cache: &mut HashMap<String, Option<(Handle<Image>, Vec2)>>,
+    pics: Option<&mut crate::shell::pics::ShellPics>,
+    icons: Option<&assets::T6HudIcons>,
+    images: &mut Assets<Image>,
+) -> u32 {
+    let mine = !me.is_empty() && model.name == me;
+    let stats = mine.then(|| slot.his_look_stats());
+    let (card, emblem) = crate::hud_cards::look_of(&model.name, stats.as_ref());
+    model.card = look_picture(cache, images, &card);
+    model.emblem = look_picture(cache, images, &emblem).map(|(h, _)| h);
+    let meta = meta_named(snap, &model.name);
+    let (level, prestige) = rank_of(&model.name, meta.as_ref(), mine, Some(slot));
+    model.level = level;
+    model.rank = card_rank(level, prestige, cat, cache, pics, icons, images);
+    u32::from(model.rank.is_some()) | u32::from(model.card.is_some()) << 1 | u32::from(model.emblem.is_some()) << 2
+}
+
 #[derive(Default)]
 struct BannerState {
     last_kill: Option<u32>,
@@ -1183,10 +1252,14 @@ struct BannerState {
     shown: Option<(BannerModel, u32)>,
 }
 
+/// While his Killed By card is up (real seconds it ends): no kill card then.
+#[derive(Resource, Default)]
+struct KilledByUntil(f64);
+
 /// The card's slide and pop: it rises a little and settles as it comes in.
 fn banner_pop(time: Res<Time<Real>>, window: Query<&Window, With<PrimaryWindow>>, mut q: Query<(&BannerRoot, &mut UiTransform)>) {
     let now = now_secs(&time);
-    let k = window.single().map_or(1.0, |w| (w.height() / 1080.0).max(0.4));
+    let k = window.single().map_or(1.0, |w| card_scale(Vec2::new(w.width(), w.height())));
     for (b, mut t) in &mut q {
         let age = (now - b.start) as f32;
         let (y, s) = card_motion(age);
@@ -1205,6 +1278,10 @@ fn card_motion(age: f32) -> (f32, f32) {
     (CARD_RISE * (1.0 - ease), 1.0 + CARD_POP * (1.0 - ease))
 }
 
+fn window_size(window: &Query<&Window, With<PrimaryWindow>>) -> Vec2 {
+    window.single().map_or(Vec2::new(1920.0, 1080.0), |w| Vec2::new(w.width(), w.height()))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn kill_banner(
     mut commands: Commands,
@@ -1215,7 +1292,8 @@ fn kill_banner(
     (shell_fonts, game_font, mut pics): (Option<Res<ShellFonts>>, Option<Res<GameUiFont>>, Option<ResMut<crate::shell::pics::ShellPics>>),
     slot: NonSend<crate::lui_hud::LuiHudSlot>,
     window: Query<&Window, With<PrimaryWindow>>,
-    roots: Query<Entity, With<BannerRoot>>,
+    roots: Query<Entity, (With<BannerRoot>, Without<KilledByRoot>)>,
+    killed_by: Res<KilledByUntil>,
     time: Res<Time<Real>>,
     mut images: ResMut<Assets<Image>>,
     mut sounds: MessageWriter<frame::UiPlaySound>,
@@ -1258,29 +1336,16 @@ fn kill_banner(
         if seen.ended || seen.at_limit(my_score) {
             diag::info!(Ui, "bo2mp hud: no kill card for {victim}: the match ended on it");
         } else {
-            let meta = snap.and_then(|s| {
-                s.meta
-                    .clients
-                    .iter()
-                    .find(|(_, m)| String::from_utf8_lossy(&m.name).trim_end_matches(char::from(0)) == victim)
-                    .map(|(_, m)| m.clone())
-            });
-            let (level, prestige) = rank_of(&victim, meta.as_ref(), false, Some(&*slot));
-            let model = BannerModel { name: victim.clone(), level, rank: None, backing: None, start: now };
-            let bo1_rank = cat.as_ref().and_then(|c| c.bo1_ranks.get(bo1_rank_row(level)).cloned().flatten());
-            diag::info!(
-                Ui,
-                "bo2mp hud: kill card: {victim} level {level} prestige {prestige}; BO1 rank icon {bo1_rank:?}, backing {:?}",
-                cat.as_ref().map(|c| c.bo1_backing.clone().unwrap_or_else(|| "drawn honeycomb".into()))
-            );
+            diag::info!(Ui, "bo2mp hud: kill card: {victim}");
             if let Some(alias) = KILL_CARD_SOUND {
                 sounds.write(frame::UiPlaySound { alias: alias.to_owned() });
             }
-            st.shown = Some((model, 0));
+            st.shown = Some((BannerModel::new(victim, 1, now), u32::MAX));
         }
     }
     let life = (BANNER_IN + BANNER_HOLD + BANNER_OUT) as f64;
-    if st.shown.as_ref().is_some_and(|(m, _)| now - m.start >= life) {
+    // (His Killed By card has the place: he died, the kill card goes.)
+    if st.shown.as_ref().is_some_and(|(m, _)| now - m.start >= life) || now < killed_by.0 {
         st.shown = None;
     }
     let Some((mut model, built)) = st.shown.clone() else {
@@ -1289,35 +1354,126 @@ fn kill_banner(
     };
     if !seen.hud {
         clear(&mut commands);
-        st.shown = Some((model, 0));
+        st.shown = Some((model, u32::MAX));
         return;
     }
-    // Its pictures (Black Ops' files; in as they come).
-    let bo1_backing = cat
-        .as_ref()
-        .and_then(|c| c.bo1_backing.as_deref())
-        .and_then(|name| game_picture(&mut cache, &mut images, "t5", name));
-    let from_bo1 = bo1_backing.is_some();
-    model.backing = bo1_backing.or_else(|| Some(drawn_backing(&mut cache, &mut images)));
-    let meta = snap.and_then(|s| {
-        s.meta
-            .clients
-            .iter()
-            .find(|(_, m)| String::from_utf8_lossy(&m.name).trim_end_matches(char::from(0)) == model.name)
-            .map(|(_, m)| m.clone())
-    });
-    let (level, prestige) = rank_of(&model.name, meta.as_ref(), false, Some(&*slot));
-    model.rank = card_rank(level, prestige, cat.as_ref(), &mut cache, pics.as_deref_mut(), icons.as_deref(), &mut images);
-    let height = window.single().map_or(1080.0, Window::height);
+    let pictures = dress_card(&mut model, &seen.me, snap, &slot, cat.as_ref(), &mut cache, pics.as_deref_mut(), icons.as_deref(), &mut images);
+    let size = window_size(&window);
     // Built again when a picture comes in or the window changes.
-    let key = u32::from(model.rank.is_some()) | u32::from(from_bo1) << 1 | (height as u32) << 2;
+    let key = pictures | (size.y as u32) << 3 | (size.x as u32) << 16;
     if built == key && !roots.is_empty() {
         return;
     }
     let Some(faces) = Faces::of(shell_fonts.as_deref(), game_font.as_deref()) else { return };
     clear(&mut commands);
-    spawn_banner(&mut commands, &faces, &model, height);
+    spawn_banner(&mut commands, &faces, &model, size);
     st.shown = Some((model, key));
+}
+
+/// How long the Killed By card holds (BO2's obituary callout goes after
+/// 2.5 s, or as the killcam starts).
+const KILLED_BY_HOLD: f32 = 2.5 - BANNER_IN - BANNER_OUT;
+
+#[derive(Default)]
+struct KilledByState {
+    /// The killer's client and the card as built (its key).
+    shown: Option<(i32, BannerModel, u32)>,
+    /// The death it was for (`bo2mp_killcam` "3|<killer>" seen) is over.
+    done: bool,
+}
+
+/// The Killed By card at his death, before the killcam (BO2's own LUI one
+/// is not sent under this HUD, `lui_frontend`): the killer's card under
+/// "KILLED BY", where the kill card goes.
+#[allow(clippy::too_many_arguments)]
+fn killed_by_card(
+    mut commands: Commands,
+    presented: Option<Res<PresentedSnapshot>>,
+    local: Option<Res<LocalPresentClient>>,
+    icons: Option<Res<assets::T6HudIcons>>,
+    (shell_fonts, game_font, mut pics): (Option<Res<ShellFonts>>, Option<Res<GameUiFont>>, Option<ResMut<crate::shell::pics::ShellPics>>),
+    slot: NonSend<crate::lui_hud::LuiHudSlot>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    roots: Query<Entity, With<KilledByRoot>>,
+    time: Res<Time<Real>>,
+    mut until: ResMut<KilledByUntil>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: Local<HashMap<String, Option<(Handle<Image>, Vec2)>>>,
+    mut st: Local<KilledByState>,
+) {
+    let clear = |commands: &mut Commands| {
+        for e in &roots {
+            commands.entity(e).despawn();
+        }
+    };
+    let snap = presented.as_deref().and_then(PresentedSnapshot::snapshot);
+    let found = match (snap, local.as_deref()) {
+        (Some(snap), Some(l)) if crate::hud_modern::modern_hud_enabled() => {
+            let dvars = snap.meta.script_dvars(l.0);
+            let me = snap.meta.for_client(l.0).map(|m| String::from_utf8_lossy(&m.name).trim_end_matches(char::from(0)).to_owned()).unwrap_or_default();
+            let killer = dvars
+                .string("bo2mp_killcam")
+                .and_then(|k| k.strip_prefix("3|"))
+                .and_then(|k| k.trim().parse::<i32>().ok())
+                .filter(|k| *k >= 0)
+                .filter(|_| dvars.string("bo2zm_hud_hidden") != Some("1"));
+            killer.map(|k| (k, me))
+        }
+        _ => None,
+    };
+    let now = now_secs(&time);
+    let Some((killer, me)) = found else {
+        clear(&mut commands);
+        *st = KilledByState::default();
+        until.0 = 0.0;
+        return;
+    };
+    if st.done {
+        clear(&mut commands);
+        return;
+    }
+    let mut model = match st.shown.take() {
+        Some((k, m, built)) if k == killer => {
+            st.shown = Some((k, m.clone(), built));
+            m
+        }
+        _ => {
+            let name = snap
+                .and_then(|s| s.meta.clients.iter().find(|(c, _)| c.0 as i32 == killer))
+                .map(|(_, m)| String::from_utf8_lossy(&m.name).trim_end_matches(char::from(0)).to_owned())
+                .unwrap_or_default();
+            if name.is_empty() {
+                clear(&mut commands);
+                return;
+            }
+            diag::info!(Ui, "bo2mp hud: killed-by card: {name} (client {killer})");
+            let mut m = BannerModel::new(name, 1, now);
+            m.title = Some("Killed By".into());
+            m.hold = KILLED_BY_HOLD;
+            st.shown = Some((killer, m.clone(), u32::MAX));
+            m
+        }
+    };
+    let life = (BANNER_IN + model.hold + BANNER_OUT) as f64;
+    if now - model.start >= life {
+        st.done = true;
+        until.0 = 0.0;
+        clear(&mut commands);
+        return;
+    }
+    until.0 = model.start + life;
+    let cat = catalog();
+    let pictures = dress_card(&mut model, &me, snap, &slot, cat.as_ref(), &mut cache, pics.as_deref_mut(), icons.as_deref(), &mut images);
+    let size = window_size(&window);
+    let key = pictures | (size.y as u32) << 3 | (size.x as u32) << 16;
+    if st.shown.as_ref().is_some_and(|(_, _, b)| *b == key) && !roots.is_empty() {
+        return;
+    }
+    let Some(faces) = Faces::of(shell_fonts.as_deref(), game_font.as_deref()) else { return };
+    clear(&mut commands);
+    let e = spawn_banner(&mut commands, &faces, &model, size);
+    commands.entity(e).insert(KilledByRoot);
+    st.shown = Some((killer, model, key));
 }
 
 // --- Scoreboard ---------------------------------------------------------------
@@ -1669,11 +1825,12 @@ fn scoreboard(
 }
 
 pub(crate) fn register_match_hud_systems(app: &mut App) {
+    app.init_resource::<KilledByUntil>();
     app.add_systems(
         Update,
-        (kill_feed, hit_marker, kill_banner, scoreboard).in_set(ClientSet::Ui),
+        (kill_feed, hit_marker, killed_by_card, kill_banner.after(killed_by_card), scoreboard).in_set(ClientSet::Ui),
     )
-    .add_systems(Update, (banner_pop, apply_fades).in_set(ClientSet::Ui).after(kill_banner).after(kill_feed));
+    .add_systems(Update, (banner_pop, apply_fades).in_set(ClientSet::Ui).after(kill_banner).after(killed_by_card).after(kill_feed));
 }
 
 // --- Preview --------------------------------------------------------------------
@@ -1750,6 +1907,7 @@ pub mod preview {
         fonts: Option<Res<ShellFonts>>,
         shots: Query<Entity, With<Shot>>,
         time: Res<Time<Real>>,
+        window: Query<&Window, With<PrimaryWindow>>,
         mut images: ResMut<Assets<Image>>,
         mut exit: MessageWriter<AppExit>,
     ) {
@@ -1767,7 +1925,7 @@ pub mod preview {
             return;
         }
         if plan.step % 2 == 1 {
-            let path = plan.out.join(format!("{}.png", names[i]));
+            let path = plan.out.join(format!("{}_{}p.png", names[i], super::window_size(&window).y as u32));
             commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
             plan.step += 1;
             return;
@@ -1781,7 +1939,7 @@ pub mod preview {
         let wide_gun = images.add(stand_in(2, 256, 64));
         let rank = images.add(stand_in(1, 64, 64));
         let emblem = images.add(stand_in(3, 64, 64));
-        let size = Vec2::new(1920.0, 1080.0);
+        let size = super::window_size(&window);
         let mark = |commands: &mut Commands, e: Entity| {
             commands.entity(e).insert(Shot);
         };
@@ -1794,21 +1952,24 @@ pub mod preview {
                     FeedRow { attacker: "Sass".into(), attacker_side: Side::Enemy, icon: Some((wide_gun.clone(), 4.0)), headshot: None, victim: "simon".into(), victim_side: Side::You, born: now },
                     FeedRow { attacker: String::new(), attacker_side: Side::Neutral, icon: Some((emblem.clone(), 1.0)), headshot: None, victim: "JTAG".into(), victim_side: Side::Enemy, born: now },
                 ];
-                let e = spawn_feed(&mut commands, &faces, &rows, 1080.0);
+                let e = spawn_feed(&mut commands, &faces, &rows, size.y);
                 mark(&mut commands, e);
                 // (Black Ops' rank icon when its IWDs are under IW4L_GAMES,
-                // else a green chevron stand-in; the drawn honeycomb.)
+                // else a green chevron stand-in; the Modern Warfare calling
+                // card and emblem when their games are there, else stand-ins
+                // (case 1: none, the plain drawn card).)
                 let mut cache = HashMap::new();
                 let bo1_rank = game_picture(&mut cache, &mut images, "t5", "rank_pvt1_128").map(|(h, _)| h);
                 println!("hud preview: BO1 rank_pvt1_128 {}", if bo1_rank.is_some() { "read" } else { "not read (stand-in)" });
-                let model = BannerModel {
-                    name: "Grim_Gorilla".into(),
-                    level: 1,
-                    rank: bo1_rank.or_else(|| Some(images.add(stand_in(4, 128, 128)))),
-                    backing: Some(drawn_backing(&mut cache, &mut images)),
-                    start: now,
-                };
-                let e = spawn_banner(&mut commands, &faces, &model, 1080.0);
+                let mut model = BannerModel::new("Grim_Gorilla".into(), 1, now);
+                model.rank = bo1_rank.or_else(|| Some(images.add(stand_in(4, 128, 128))));
+                if i == 0 {
+                    model.card = Some((images.add(stand_in(0, 512, 128)), Vec2::new(512.0, 128.0)));
+                    model.emblem = Some(images.add(stand_in(3, 64, 64)));
+                } else {
+                    model.title = Some("Killed By".into());
+                }
+                let e = spawn_banner(&mut commands, &faces, &model, size);
                 mark(&mut commands, e);
                 if let Some(e) = spawn_hitmarker(&mut commands, size, 0.02, i == 1) {
                     mark(&mut commands, e);

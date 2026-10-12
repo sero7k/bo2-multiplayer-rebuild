@@ -65,6 +65,8 @@ fn stand_in_catalog() -> Catalog {
             can_prestige: false,
             xp: 412_300,
             xp_next: 425_000,
+            card: String::new(),
+            emblem: String::new(),
         },
     }
 }
@@ -152,6 +154,42 @@ fn stand_in_book() -> ClassBook {
         c.spent = s;
     }
     b
+}
+
+/// Stand-in calling cards and emblems (the games' names; the pictures are
+/// drawn here, as the games' files are not read in the preview).
+fn stand_in_looks() -> (Vec<String>, Vec<String>) {
+    let cards = ["tf141", "army_ranger", "bloodsplat", "seals", "ac130", "harrier", "nuke", "skull", "1st_place"];
+    let emblems = ["tf141", "army", "seal", "skull_black", "ac130", "harrier", "nuke", "militia"];
+    (cards.iter().map(|n| format!("iw4:cardtitle_{n}")).collect(), emblems.iter().map(|n| format!("iw4:cardicon_{n}")).collect())
+}
+
+/// A stand-in card (512x128, a coloured sweep with stripes) or emblem
+/// (128x128, a ring and a bar).
+fn look_picture(k: usize, card: bool) -> Image {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let hues = [(0.15, 0.32, 0.55), (0.55, 0.25, 0.12), (0.30, 0.38, 0.18), (0.42, 0.10, 0.10), (0.20, 0.20, 0.24), (0.10, 0.30, 0.40), (0.50, 0.42, 0.08), (0.28, 0.12, 0.36), (0.35, 0.35, 0.38)];
+    let (r, g, b) = hues[k % hues.len()];
+    let (w, h) = if card { (512u32, 128u32) } else { (128, 128) };
+    let mut px = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let (u, v) = (x as f32 / w as f32, y as f32 / h as f32);
+            let (c, a) = if card {
+                let stripe = if ((x + y * 2 + k as u32 * 37) / 18) % 5 == 0 { 0.18 } else { 0.0 };
+                (0.35 + 0.65 * u + stripe, 1.0)
+            } else {
+                let d = ((u - 0.5).powi(2) + (v - 0.5).powi(2)).sqrt();
+                let ring = (0.30..0.42).contains(&d);
+                let bar = (u - 0.5).abs() < 0.07 && (0.18..0.82).contains(&v);
+                (if ring || bar { 1.4 } else { 0.0 }, if ring || bar { 1.0 } else { 0.0 })
+            };
+            let to = |x: f32| ((x * c).clamp(0.0, 1.0) * 255.0) as u8;
+            px.extend_from_slice(&[to(r), to(g), to(b), (a * 255.0) as u8]);
+        }
+    }
+    Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, px, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default())
 }
 
 /// A stand-in Zombies game: the Black Ops maps on, and the Zombies
@@ -244,9 +282,35 @@ fn step(
             s.page = 3;
             s.focus = 0;
         }),
+        ("12b2_options_sound", |s, _| {
+            s.page = 1;
+            s.focus = 1;
+        }),
+        ("12b3_options_account", |s, _| {
+            s.page = super::options::ACCOUNT_TAB;
+            s.focus = 1;
+        }),
         ("12c_barracks", |s, _| {
             s.screen = Screen::Barracks;
             s.focus = 0;
+        }),
+        ("12d_barracks_card", |s, _| {
+            s.focus = 1;
+        }),
+        ("12e_barracks_emblem", |s, _| {
+            s.focus = 2;
+        }),
+        ("12f_lobby_countdown", |s, _| {
+            bridge::set_preview_starting(Some(3350.0));
+            s.screen = Screen::Lobby;
+            s.tab = Tab::Lobby;
+            s.map = "mp_terminal".to_owned();
+            s.friends = 5;
+            s.enemies = 6;
+            s.focus = 0;
+        }),
+        ("12g_lobby_after", |_, _| {
+            bridge::set_preview_starting(None);
         }),
         // Zombies: the same screens in red.
         ("zm1_lobby", |s, _| {
@@ -339,5 +403,15 @@ pub fn install(app: &mut App, pictures: Vec<(String, Image)>, out: PathBuf) {
     app.insert_resource(crate::lui_frontend::Bo2mpFrontend { stats_path: PathBuf::new() });
     app.insert_resource(Plan { out, step: 0, frames: 0, pictures });
     zombies::set_preview(Ok(stand_in_zombies()), None);
+    let (cards, emblems) = stand_in_looks();
+    if let Some(mut plan) = app.world_mut().get_resource_mut::<Plan>() {
+        for (k, n) in cards.iter().enumerate() {
+            plan.pictures.push((n.clone(), look_picture(k, true)));
+        }
+        for (k, n) in emblems.iter().enumerate() {
+            plan.pictures.push((n.clone(), look_picture(k, false)));
+        }
+    }
+    super::cards::set_preview(cards, emblems);
     app.add_systems(Update, step);
 }
