@@ -528,7 +528,7 @@ fn think_bots(mut p: ThinkBots) {
 }
 
 fn prepare_navigation(
-    world: Option<Res<AuthorityWorld>>,
+    world: Option<ResMut<AuthorityWorld>>,
     installed: Option<Res<HasWorld>>,
     role: Res<RuntimeRole>,
     mut nav: ResMut<BotNav>,
@@ -542,10 +542,40 @@ fn prepare_navigation(
     if !installed.is_some_and(|installed| installed.0) {
         return;
     }
-    let Some(world) = world else {
+    let Some(mut world) = world else {
         return;
     };
     ready.0 = refresh_nav(&world.0, &mut nav, load.as_deref());
+    // bo2mp: a map from another game has no Black Ops II path nodes; BO2's
+    // bots route over the walk graph baked here instead.
+    if ready.0 && !nav.graph.is_empty() && world.0.t6_needs_path_nodes() {
+        let nodes = t6_path_nodes(&nav.graph);
+        world.0.adopt_t6_path_nodes(nodes);
+    }
+}
+
+/// The baked walk graph as Black Ops II path nodes: one plain path node per
+/// graph node, linked to its neighbours by their distance.
+fn t6_path_nodes(graph: &crate::nav::NavGraph) -> Vec<sim::T6PathNode> {
+    let dist = |a: [f32; 3], b: [f32; 3]| ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+    graph
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(i, &origin)| sim::T6PathNode {
+            ty: 1,
+            origin,
+            radius: 32.0,
+            links: graph
+                .adj
+                .get(i)
+                .into_iter()
+                .flatten()
+                .filter_map(|e| Some((e.to, dist(origin, *graph.nodes.get(e.to as usize)?), false)))
+                .collect(),
+            ..Default::default()
+        })
+        .collect()
 }
 
 fn refresh_nav(world: &SimWorld, nav: &mut BotNav, load: Option<&assets::MapLoadProcess>) -> bool {

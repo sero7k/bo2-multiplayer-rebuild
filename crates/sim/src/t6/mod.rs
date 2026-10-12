@@ -2166,3 +2166,26 @@ pub(crate) fn weapon_text(world: &mut World, w: u32) -> String {
 pub(crate) fn names(set: &BTreeSet<String>) -> String {
     set.iter().cloned().collect::<Vec<_>>().join(", ")
 }
+
+/// bo2mp: a map with no path nodes of its own (one from another game:
+/// MW2's and MW3's multiplayer maps carry none) takes the walk graph the
+/// engine baked for it as Black Ops II path nodes, so BO2's bots can route
+/// over it. Nothing changes when the map has its own. True when installed.
+pub(crate) fn adopt_path_nodes(world: &mut World, nodes: Vec<T6PathNode>) -> bool {
+    if nodes.is_empty() || world.get_resource::<Zm>().is_none_or(|zm| !zm.nav.nodes.is_empty()) {
+        return false;
+    }
+    let node_objs = with_vm(world, |vm, _| node_objects(vm, &nodes)).unwrap_or_default();
+    let count = nodes.len();
+    let mut zm = world.resource_mut::<Zm>();
+    zm.nav = nav::Nav::new(nodes);
+    zm.node_of = node_objs.iter().enumerate().map(|(i, o)| (*o, i as u32)).collect();
+    zm.node_objs = node_objs;
+    diag::info!(Sim, "bo2mp nav: {count} path nodes from the engine's walk graph (the map has none of its own)");
+    true
+}
+
+/// bo2mp: BO2's scripts run on this map and it has no path nodes yet.
+pub(crate) fn needs_path_nodes(world: &World) -> bool {
+    world.get_resource::<Zm>().is_some_and(|zm| zm.nav.nodes.is_empty())
+}

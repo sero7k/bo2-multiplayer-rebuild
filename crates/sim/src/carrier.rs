@@ -151,6 +151,16 @@ impl SimWorld {
         crate::t6::install(&mut self.ecs, install)
     }
 
+    /// bo2mp: path nodes for a map that has none (see `t6::adopt_path_nodes`).
+    pub fn adopt_t6_path_nodes(&mut self, nodes: Vec<crate::T6PathNode>) -> bool {
+        crate::t6::adopt_path_nodes(&mut self.ecs, nodes)
+    }
+
+    /// bo2mp: the map's Black Ops II scripts run and have no path nodes.
+    pub fn t6_needs_path_nodes(&self) -> bool {
+        crate::t6::needs_path_nodes(&self.ecs)
+    }
+
     /// bo2mp: the bot clients Black Ops II's scripts asked for since the
     /// last call (`addtestclient`), by client number; the host's bot roster
     /// joins each as a client its commands come from.
