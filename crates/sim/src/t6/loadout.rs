@@ -112,10 +112,19 @@ pub(crate) fn streak_picks(world: &World) -> String {
 }
 
 /// A player's own scorestreaks as BO2's HUD column lists them:
-/// `icon:cost:held` by `;`, dearest first, `held` 1 while his streak weapon
-/// holds one (its quantity: earned and not used yet). His picks are the
-/// menu references BO2's class script gives him (`player.killstreak`);
-/// none read yet: the default ones (`streak_picks`).
+/// `icon:cost:held` by `;`, dearest first, `held` 1 while he has one of it
+/// to use (earned and not used yet). His picks are the menu references
+/// BO2's class script gives him (`player.killstreak`, pick order); not
+/// given yet (no array): `None`, the default ones (`streak_picks`) stand
+/// in. An empty array (he picked none, or the game type's
+/// `loadoutKillstreaksEnabled` is off: `level.loadoutkillstreaksenabled`)
+/// is an empty column.
+///
+/// Held is what BO2's scripts count: `pers["killstreak_quantity"][weapon]`
+/// (`changekillstreakquantity`: +1 earned, -1 used; it outlives a death),
+/// `pers["held_killstreak_ammo_count"][weapon]` for the guns (Death
+/// Machine, War Machine), else the streak weapon in his hands with one in
+/// its clip.
 pub(crate) fn his_streaks(vm: &mut Vm<World>, world: &mut World, client: u32) -> Option<String> {
     let obj = world.resource::<Zm>().players.get(&client)?.obj;
     let f = vm.intern("killstreak");
@@ -123,14 +132,17 @@ pub(crate) fn his_streaks(vm: &mut Vm<World>, world: &mut World, client: u32) ->
         Value::Array(a) => a.read().values_in_order().map(|v| vm.to_text(v)).collect(),
         _ => return None,
     };
-    if refs.is_empty() {
-        return None;
+    let enabled = vm.intern("loadoutkillstreaksenabled");
+    let enabled = vm.raw_field(vm.level, enabled);
+    if refs.is_empty() || (!enabled.is_undefined() && enabled.as_int() == Some(0)) {
+        return Some(String::new());
     }
     let all = items(world);
-    let (types, killstreaks, weapon) = (
+    let (types, killstreaks, weapon, pers) = (
         vm.intern("menureferenceforkillstreak"),
         vm.intern("killstreaks"),
         vm.intern("weapon"),
+        vm.intern("pers"),
     );
     let lookup = |vm: &mut Vm<World>, table: &Value, key: &str| match table {
         Value::Array(a) => {
@@ -140,6 +152,7 @@ pub(crate) fn his_streaks(vm: &mut Vm<World>, world: &mut World, client: u32) ->
         _ => Value::Undefined,
     };
     let (by_menu, by_type) = (vm.raw_field(vm.level, types), vm.raw_field(vm.level, killstreaks));
+    let his_pers = vm.raw_field(obj, pers);
     let mut out: Vec<(String, i32, bool)> = Vec::new();
     for r in refs {
         let Some(it) = all.iter().find(|i| i.reference == r) else {
@@ -150,22 +163,31 @@ pub(crate) fn his_streaks(vm: &mut Vm<World>, world: &mut World, client: u32) ->
         let held = match lookup(vm, &by_type, &kind) {
             Value::Object(o) => {
                 let name = vm.to_text(&vm.raw_field(o, weapon));
-                super::weapon(world, &name).ok().filter(|w| *w != 0).is_some_and(|w| {
-                    crate::script_player::ammo_clip(&super::frame(world), crate::world::ClientId(client), w)
-                        > 0
-                })
+                let count = |vm: &mut Vm<World>, key: &str| {
+                    let per_weapon = lookup(vm, &his_pers, key);
+                    lookup(vm, &per_weapon, &name).as_int().unwrap_or(0)
+                };
+                count(vm, "killstreak_quantity") > 0
+                    || count(vm, "held_killstreak_ammo_count") > 0
+                    || super::weapon(world, &name).ok().filter(|w| *w != 0).is_some_and(|w| {
+                        let f = super::frame(world);
+                        let id = crate::world::ClientId(client);
+                        f.player(id).is_some_and(|ps| ps.weapons.contains(&(w as i32)))
+                            && crate::script_player::ammo_clip(&f, id, w) > 0
+                    })
             }
             _ => false,
         };
         out.push((it.icon.clone(), it.cost, held));
     }
-    out.sort_by_key(|p| std::cmp::Reverse(p.1));
-    Some(
-        out.iter()
-            .map(|(i, c, h)| format!("{i}:{c}:{}", u8::from(*h)))
-            .collect::<Vec<_>>()
-            .join(";"),
-    )
+    Some(streak_list(out))
+}
+
+/// The column's dvar from his picks (icon, cost, held): dearest first (the
+/// column lists it top down), equal costs in pick order.
+fn streak_list(mut picks: Vec<(String, i32, bool)>) -> String {
+    picks.sort_by_key(|p| std::cmp::Reverse(p.1));
+    picks.iter().map(|(i, c, h)| format!("{i}:{c}:{}", u8::from(*h))).collect::<Vec<_>>().join(";")
 }
 
 /// A player's perks as BO2's perk list draws them (the spawn list, the
@@ -386,4 +408,24 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let v = atts.iter().map(|s| vm.string(s)).collect();
         Ok(list(v))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::streak_list;
+
+    #[test]
+    fn streak_column_lists_dearest_first_with_held() {
+        // Pick order (as `player.killstreak` holds them) is not cost order.
+        let picks = vec![
+            ("hud_ks_qr_drone".to_owned(), 425, false),
+            ("hud_ks_spy_sat".to_owned(), 350, true),
+            ("hud_ks_straferun".to_owned(), 1000, false),
+        ];
+        assert_eq!(streak_list(picks), "hud_ks_straferun:1000:0;hud_ks_qr_drone:425:0;hud_ks_spy_sat:350:1");
+        // Equal costs keep his pick order.
+        let picks = vec![("a".to_owned(), 500, false), ("b".to_owned(), 500, true)];
+        assert_eq!(streak_list(picks), "a:500:0;b:500:1");
+        assert_eq!(streak_list(Vec::new()), "");
+    }
 }

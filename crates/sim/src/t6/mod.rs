@@ -1945,19 +1945,24 @@ fn publish_hud(world: &mut World) {
             .unwrap_or(0)
             .to_string();
         // His own picks, each lit while he holds it; the defaults until his
-        // class script has given him his.
+        // class script has given him his. Sent every tick it changes, an
+        // empty list too (no streaks: the column goes), so nothing of a
+        // last life or class stays on his screen.
         let picks = with_vm(world, |vm, world| loadout::his_streaks(vm, world, c))
             .flatten()
             .unwrap_or_else(|| picks.clone());
-        if !picks.is_empty() {
+        {
             let mut f = frame(world);
             if f.client_meta(crate::world::ClientId(c)).is_some() {
                 let dvars = &mut f.client_meta_mut(crate::world::ClientId(c)).client_dvars;
-                for (name, value) in [("bo2mp_streaks", picks.clone()), ("bo2mp_momentum", momentum)] {
-                    match dvars.iter_mut().find(|(k, _)| k == name) {
-                        Some(row) if row.1 != value => row.1 = value,
-                        Some(_) => {}
-                        None => dvars.push((name.to_owned(), value)),
+                let shown = dvars.iter().any(|(k, _)| k == "bo2mp_streaks");
+                if !picks.is_empty() || shown {
+                    for (name, value) in [("bo2mp_streaks", picks.clone()), ("bo2mp_momentum", momentum)] {
+                        match dvars.iter_mut().find(|(k, _)| k == name) {
+                            Some(row) if row.1 != value => row.1 = value,
+                            Some(_) => {}
+                            None => dvars.push((name.to_owned(), value)),
+                        }
                     }
                 }
             }

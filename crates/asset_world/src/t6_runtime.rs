@@ -35,6 +35,25 @@ pub struct T6LightSampler {
     /// body and head, the gun and effects read the same cells frame after
     /// frame).
     pub cache: Mutex<HashMap<[i32; 3], T6PointLight>>,
+    /// bo2mp: a map from another game under Black Ops II's rules (MW2, MW3,
+    /// Black Ops, CoD4): its own grid read as Black Ops II light; `None` on
+    /// a Black Ops II map. Before, such a map installed nothing: the gun and
+    /// players read the last Black Ops II map's grid at this map's points
+    /// (or no grid: black).
+    pub foreign: Option<ForeignGridLight>,
+}
+
+/// bo2mp: how a foreign map's light grid reads as Black Ops II light.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ForeignGridLight {
+    /// The grid's mean colour (0..1), squared, times this: Black Ops' grids
+    /// keep sqrt(light * 8 / 255) (~32); Infinity Ward's lit models read
+    /// (2 * colour)^2 (4).
+    pub scale: f32,
+    /// The light where the map has no grid (outside it, a sample the grid
+    /// cannot answer, or a map without one): an ambient light, and the sun
+    /// at full visibility.
+    pub outside: T6PointLight,
 }
 
 fn slot() -> &'static RwLock<Option<Arc<T6LightSampler>>> {
@@ -86,6 +105,9 @@ impl T6LightSampler {
     }
 
     fn sample(&self, pos: [f32; 3]) -> T6PointLight {
+        if let Some(foreign) = self.foreign {
+            return self.sample_foreign(pos, foreign);
+        }
         if !self.in_grid(pos) {
             if let Some(v) = self
                 .sky
@@ -143,6 +165,55 @@ impl T6LightSampler {
             .as_ref()
             .and_then(|s| crate::t6_sampled_visibility(s, primary))
             .map_or(0.0, |v| f32::from(v) / 255.0);
+        T6PointLight {
+            light,
+            primary,
+            visibility,
+        }
+    }
+}
+
+impl T6LightSampler {
+    /// bo2mp: a foreign map's grid at `pos`: its light (the mean of the
+    /// lookup's colours, decoded as `foreign.scale` says), the primary light
+    /// the lookup picked and, for that light's visibility, the share of the
+    /// corners' weight that names it (Infinity Ward's grids carry no baked
+    /// visibility; a corner of another light is in its shadow).
+    fn sample_foreign(&self, pos: [f32; 3], foreign: ForeignGridLight) -> T6PointLight {
+        let Some(grid) = self.grid.as_ref().filter(|_| self.in_grid(pos)) else {
+            return foreign.outside;
+        };
+        let sampled = match self.clip.as_deref() {
+            Some(clip) => {
+                let clear = |a: [f32; 3], b: [f32; 3]| {
+                    clip.box_sight_clear(a, b, lighting_iw4::LIGHT_GRID_SIGHT_CONTENT_MASK)
+                };
+                asset_model::sample_light_grid_with_sight(&grid.view(), pos, Some(&clear))
+            }
+            None => asset_model::sample_light_grid(&grid.view(), pos),
+        };
+        let Ok(s) = sampled else {
+            return foreign.outside;
+        };
+        let mean = asset_model::mean_tile_rgba01(&s.tile);
+        let light = mean.map(|c| c * c * foreign.scale);
+        let primary = s.picked_primary;
+        let (mut named, mut all) = (0.0f32, 0.0f32);
+        for i in 0..8 {
+            if let Some(p) = s.corner_primaries[i] {
+                all += s.weights[i];
+                if p == primary {
+                    named += s.weights[i];
+                }
+            }
+        }
+        let visibility = if primary == 0 {
+            0.0
+        } else if all > 1e-6 {
+            (named / all).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
         T6PointLight {
             light,
             primary,

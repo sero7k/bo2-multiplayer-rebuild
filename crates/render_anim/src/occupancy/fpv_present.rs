@@ -529,6 +529,11 @@ pub fn tick_fpv_viewmodel(
     }
     let Some(session) = session_vm.0.as_mut() else {
         product.kind = FpvPoseKind::Hide;
+        product.why = if pending.0.is_some() {
+            "no FPV session yet (spawn queued)"
+        } else {
+            "no FPV session (not alive, no weapon, or the spawn was refused: see `fpv held sync` / render gaps)"
+        };
         return;
     };
     if !same_material_catalog(&session.material_catalog, tess.as_deref()) {
@@ -540,6 +545,7 @@ pub fn tick_fpv_viewmodel(
         settled.0 = None;
         pending.0 = None;
         product.kind = FpvPoseKind::Hide;
+        product.why = "material catalog changed; FPV session retired";
         return;
     }
     if fpv_meshes
@@ -550,10 +556,12 @@ pub fn tick_fpv_viewmodel(
         settled.0 = None;
         pending.0 = None;
         product.kind = FpvPoseKind::Hide;
+        product.why = "FPV mesh catalog changed or absent; FPV session retired";
         return;
     }
     if presented_is_third_person(&presented, local.0, view.in_killcam()) {
         product.kind = FpvPoseKind::Hide;
+        product.why = "third person / killcam view";
         return;
     }
     let Some(fpv) = fpv_meshes.as_ref() else {
@@ -588,6 +596,7 @@ pub fn tick_fpv_viewmodel(
                                 parent_weapon: ps.weapon_primary,
                             });
                             product.kind = FpvPoseKind::Hide;
+                            product.why = "held weapon changed (same gun model); FPV re-queued";
                             return;
                         }
                     }
@@ -603,10 +612,12 @@ pub fn tick_fpv_viewmodel(
                             "fpv: weapon id → {weapon}; re-queue FPV for new gunXModel"
                         );
                         product.kind = FpvPoseKind::Hide;
+                        product.why = "held weapon changed; FPV re-queued for its gun model";
                         return;
                     }
                     None => {
                         product.kind = FpvPoseKind::Hide;
+                        product.why = "held weapon has no first-person gun model in the FPV table";
                         return;
                     }
                 }
@@ -760,38 +771,50 @@ fn skin_fpv_geometry(
 ) {
     fpv_plan.drawgun = product.drawgun;
     let handle = fpv_plan.lighting_handle;
-    match &product.kind {
-        FpvPoseKind::Hide => crate::clear_fpv_draw_plan(&mut fpv_plan, handle),
+    let why: std::borrow::Cow<'static, str> = match &product.kind {
+        FpvPoseKind::Hide => {
+            crate::clear_fpv_draw_plan(&mut fpv_plan, handle);
+            if product.why.is_empty() { "hidden".into() } else { product.why.into() }
+        }
         FpvPoseKind::Refuse(refuse) => {
             let cause = refuse_gap_cause(refuse.clone());
             crate::clear_fpv_draw_plan(&mut fpv_plan, handle);
+            let why = format!("refused: {cause}");
             gaps.raise(cause.clone());
             status.0 = Some(FpvState::Blocked(cause));
+            why.into()
         }
-        FpvPoseKind::Posed(frame) => {
+        FpvPoseKind::Posed(frame) => 'posed: {
             let session = session_vm.as_ref().and_then(|session| session.0.as_ref());
             if !session.is_some_and(|session| {
                 same_material_catalog(&session.material_catalog, tess.as_deref())
             }) {
                 crate::clear_fpv_draw_plan(&mut fpv_plan, handle);
-                return;
+                break 'posed "posed, but the session's material catalog is not the scene's".into();
             }
             let rig = session.and_then(|session| session.active_rig.as_ref());
             let (Some(rig), Some(catalog)) = (rig, fpv_meshes.as_ref()) else {
                 crate::clear_fpv_draw_plan(&mut fpv_plan, handle);
-                return;
+                break 'posed format!(
+                    "posed, but no {} yet",
+                    if rig.is_none() { "active rig" } else { "FPV mesh catalog" }
+                )
+                .into();
             };
             if session.is_none_or(|session| session.catalog_id != catalog.0.identity()) {
                 crate::clear_fpv_draw_plan(&mut fpv_plan, handle);
-                return;
+                break 'posed "posed, but the session's FPV catalog id is stale".into();
             }
             if fpv_plan.rig_generation != rig.generation() {
                 crate::install_prepared_fpv_plan(&mut fpv_plan, &rig.geometry, handle);
                 fpv_plan.rig_generation = rig.generation();
             }
-            if let Some(rows) = fpv_plan.packed_rows_mut() {
+            let packed = if let Some(rows) = fpv_plan.packed_rows_mut() {
                 rig.skin_into(&catalog.0, &frame.poses, rows);
-            }
+                true
+            } else {
+                false
+            };
             fpv_plan.revisions.bump_vertices();
             fpv_plan.geometry_ok = !fpv_plan.draws().is_empty();
             fpv_plan.settle_visible();
@@ -802,7 +825,54 @@ fn skin_fpv_geometry(
             for mut lens_tf in &mut lenses {
                 *lens_tf = Transform::from_matrix(frame.lens);
             }
+            if !packed {
+                "posed, but the rig's composition has no packed vertices (nothing for the BO2 draw)".into()
+            } else if !fpv_plan.geometry_ok {
+                "posed, but the rig settled no draws (every surface refused)".into()
+            } else {
+                "posed".into()
+            }
         }
+    };
+    note_fpv_plan(&why, &fpv_plan);
+}
+
+/// bo2mp diag: why the first-person plan is (not) drawable, on change: the
+/// pose stage's reason, then the plan's own state (the BO2 draw needs
+/// geometry_ok, placement_ok and drawgun != 0).
+fn note_fpv_plan(why: &str, plan: &crate::FpvDrawPlan) {
+    use std::sync::Mutex;
+    static LAST: Mutex<Option<String>> = Mutex::new(None);
+    let line = format!(
+        "{why} | geometry_ok={} placement_ok={} drawgun={:?} draws={} materials={} t6_materials={}",
+        plan.geometry_ok,
+        plan.placement_ok,
+        plan.drawgun,
+        plan.draws().len(),
+        plan.materials.len(),
+        plan.materials.iter().filter(|m| m.t6_material.is_some()).count(),
+    );
+    let Ok(mut last) = LAST.lock() else { return };
+    if last.as_deref() != Some(line.as_str()) {
+        diag::info!(Fpv, "fpv plan: {line}");
+        *last = Some(line);
+    }
+}
+
+/// bo2mp diag: the placement's inputs on change (placement_ok needs one
+/// FlyCamera and one FpvPlacementRoot; no root = no FPV spawned).
+fn note_fpv_placement(placed: (usize, usize)) {
+    use std::sync::Mutex;
+    static LAST: Mutex<Option<(usize, usize)>> = Mutex::new(None);
+    let Ok(mut last) = LAST.lock() else { return };
+    if *last != Some(placed) {
+        *last = Some(placed);
+        diag::info!(
+            Fpv,
+            "fpv placement: cameras={} placement_roots={} (placement_ok needs 1 and 1)",
+            placed.0,
+            placed.1
+        );
     }
 }
 
@@ -814,6 +884,8 @@ pub fn stamp_fpv_placement_matrix(
     cameras: Query<&Transform, (With<FlyCamera>, Without<FpvPlacementRoot>)>,
     roots: Query<&Transform, With<FpvPlacementRoot>>,
 ) {
+    let placed = (cameras.iter().count(), roots.iter().count());
+    note_fpv_placement(placed);
     let (Ok(cam), Ok(local)) = (cameras.single(), roots.single()) else {
         fpv_plan.placement_ok = false;
         fpv_plan.settle_visible();

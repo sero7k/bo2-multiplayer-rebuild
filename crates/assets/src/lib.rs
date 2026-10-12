@@ -27,7 +27,7 @@ pub use asset_graph::{
 pub use fastfile_iw4::GlyphCapture;
 pub use gltf_export::{GltfExportSummary, export_prepared_world_gltf};
 pub use iwd::{IwdSoundIndex, NamespaceSoundIwd, NamespaceTree, NamespaceTrees};
-pub use lane::{CommonCensus, LANE_GAPS, LaneGap, LoadedWorld, ZoneLane, lane};
+pub use lane::{check_iw4_map, CommonCensus, LANE_GAPS, LaneGap, LoadedWorld, ZoneLane, lane};
 // bo2mp lane C: the multiplayer front end (no map).
 pub use lane::t6_frontend::{T6Frontend, load_t6_frontend, plain_rgba8};
 pub use lane_capability::{LaneStatus, PreparedCapability, lane_status};

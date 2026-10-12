@@ -153,6 +153,7 @@ pub fn launch(
             }
             run_frontend_t6mp(games, artifacts);
         }
+        LaunchMode::CheckMaps => run_check_maps(&games, &artifacts),
         LaunchMode::Map(zone) => run_map(games, artifacts, zone, acceptance, Role::Listen, None),
         LaunchMode::Serve(zone) => run_map(games, artifacts, zone, None, Role::Dedicated, None),
         LaunchMode::ExportGltf(zone) => {
@@ -165,6 +166,49 @@ pub fn launch(
             name,
             zone_override,
         } => run_play(games, artifacts, name, zone_override, acceptance),
+    }
+}
+
+/// bo2mp `iw4l check-maps`: every MW2 map the front end lists (MW2's own,
+/// IW4x's packs, usermaps) read and checked (`assets::check_iw4_map`), one
+/// line each, to the console and `<artifacts>/map-check.txt`.
+fn run_check_maps(games: &asset_transport::GamesRoot, artifacts: &std::path::Path) {
+    let mut maps: Vec<String> = asset_transport::list_mp_map_packs(games)
+        .into_iter()
+        .flat_map(|p| p.maps)
+        .filter(|k| k.starts_with("iw4:"))
+        .collect();
+    maps.sort();
+    maps.dedup();
+    let mut lines = vec![format!("MW2 map check: {} maps under {}", maps.len(), games.0.display())];
+    println!("{}", lines[0]);
+    let (mut ok, mut bad) = (0, 0);
+    for key in &maps {
+        let started = std::time::Instant::now();
+        let line = match find_zone_file(games, key) {
+            Ok(found) => {
+                let path = found.path.clone();
+                let result = std::panic::catch_unwind(move || assets::check_iw4_map(&path))
+                    .unwrap_or_else(|_| "FAIL the reader panicked".to_owned());
+                format!("{key:<28} {result} [{:.1}s] {}", started.elapsed().as_secs_f32(), found.path.display())
+            }
+            Err(e) => format!("{key:<28} FAIL not found: {e}"),
+        };
+        if line.contains(" OK:") {
+            ok += 1;
+        } else {
+            bad += 1;
+        }
+        println!("{line}");
+        lines.push(line);
+    }
+    lines.push(format!("{ok} OK, {bad} with problems"));
+    println!("{}", lines.last().map_or("", String::as_str));
+    let out = artifacts.join("map-check.txt");
+    let _ = std::fs::create_dir_all(artifacts);
+    match std::fs::write(&out, lines.join("\r\n")) {
+        Ok(()) => println!("report: {}", out.display()),
+        Err(e) => println!("report not written ({}): {e}", out.display()),
     }
 }
 

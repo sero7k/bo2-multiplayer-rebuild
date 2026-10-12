@@ -20,6 +20,9 @@ pub enum LaunchMode {
         name: String,
         zone_override: Option<String>,
     },
+    /// bo2mp: `check-maps` - every MW2 map zone read and its pictures looked
+    /// up, a report written (no window).
+    CheckMaps,
 }
 
 pub fn parse_cli(
@@ -109,6 +112,7 @@ pub fn parse_launch_args(mut args: impl Iterator<Item = String>) -> Result<Launc
             Ok(LaunchMode::Menu)
         }
         Some("play") => parse_play_args(args),
+        Some("check-maps") => Ok(LaunchMode::CheckMaps),
         Some("frontend") => match (args.next().as_deref(), args.next()) {
             (Some("t6mp"), None) => Ok(LaunchMode::FrontendT6Mp),
             _ => Err("usage: iw4l frontend t6mp [--cmds '<script>']".into()),

@@ -105,6 +105,9 @@ pub struct FpvPosedFrame {
 pub struct FpvPoseProduct {
     pub drawgun: Option<i32>,
     pub kind: FpvPoseKind,
+    /// bo2mp diag: why this frame's pose is `Hide` (which condition), for
+    /// the `fpv plan:` line; empty when posed.
+    pub why: &'static str,
 }
 
 pub struct FpvGenerateArgs<'a> {

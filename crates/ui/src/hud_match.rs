@@ -1,4 +1,4 @@
-//! bo2mp: the match's own kill feed, hit marker, "YOU KILLED" banner and
+//! bo2mp: the match's own kill feed, hit marker, Black Ops kill card and
 //! scoreboard, in the shell's look (navy panels, the blue accent, Barlow
 //! Condensed), drawn in place of BO2's LUI versions while the modern HUD is
 //! on (`hud_modern::modern_hud_enabled`):
@@ -12,11 +12,14 @@
 //!   element in `bo2zm_hud` coming back up), red on the killing shot (his
 //!   kill in the feed), a quick scale pop and a ~0.3 s fade. BO2's picture
 //!   is left out of the script HUD (`zm_hud`).
-//! - "YOU KILLED": the victim's card under the crosshair: an emblem, his
-//!   name, his title and his rank icon and level, on a Modern Warfare 2
-//!   calling card (`cardtitle_*`, emblems `cardicon_*`, read from MW2's
-//!   IWDs; title and card picked by the player's name, as no one has chosen
-//!   one yet). Not for the match's last kill (the final killcam has it).
+//! - Kill card: Black Ops' "killed" player card at the lower middle: a
+//!   dark honeycomb card with a thin edge, the victim's rank icon large on
+//!   the left (Black Ops' `rank_*` icons, read from its IWDs), his name at
+//!   the top, his rank icon and level small at the bottom right; it rises
+//!   and settles in, holds and fades. The backing is Black Ops' own picture
+//!   when its IWDs have one by a known name (logged), else the honeycomb
+//!   drawn here. No sound, as in Black Ops. Not for the match's last kill
+//!   (the final killcam has it).
 //! - Scoreboard: while his scores key is held and at the match's end (BO2's
 //!   LUI `Scoreboard` menu is not opened then, `lui_hud`): the game type and
 //!   the clock, then each side's players (or one list in a free-for-all)
@@ -51,12 +54,20 @@ const POP_TIME: f32 = 0.07;
 /// A kill in the feed this soon after a hit turns that hit's marker red.
 const KILL_AFTER_HIT: f64 = 0.35;
 
-/// The kill banner's fades and hold (s), and how long a kill waits before
-/// its banner (the match may have ended on it).
-const BANNER_IN: f32 = 0.14;
-const BANNER_HOLD: f32 = 2.3;
-const BANNER_OUT: f32 = 0.45;
+/// The kill card's fades and hold (s), and how long a kill waits before
+/// its card (the match may have ended on it).
+const BANNER_IN: f32 = 0.15;
+const BANNER_HOLD: f32 = 2.4;
+const BANNER_OUT: f32 = 0.4;
 const BANNER_WAIT: f64 = 0.22;
+/// The card's slide up (px at 1080) and pop as it comes in, and how long.
+const CARD_RISE: f32 = 26.0;
+const CARD_POP: f32 = 0.05;
+const CARD_SETTLE: f32 = 0.22;
+/// Black Ops played no sound with its kill card (its `playerCardPopUp`
+/// menu plays none, no script plays one with it, and its sound zones have
+/// no card alias): the kill is heard in the hit marker.
+const KILL_CARD_SOUND: Option<&str> = None;
 
 const HIT_RED: Color = Color::srgb(0.96, 0.16, 0.12);
 const MINE_ROW: Color = Color::srgba(0.26, 0.62, 0.95, 0.24);
@@ -445,29 +456,65 @@ fn new_kills<'a>(kills: &'a [Kill], last: &mut Option<u32>) -> Vec<&'a Kill> {
     fresh
 }
 
-// --- Modern Warfare 2's cards, titles and Modern Warfare 3's rank icons ----
+// --- Black Ops' card pictures and Modern Warfare 3's rank icons -------------
 
-/// What another game's files give the banner and the rank icons, found
-/// once off the main thread (each list empty when its game is not there).
+/// What another game's files give the kill card and the rank icons, found
+/// once off the main thread (each empty when its game is not there).
 #[derive(Clone, Debug, Default)]
 struct Catalog {
-    /// MW2's calling card banners (`cardtitle_*` images).
-    cards: Vec<String>,
-    /// MW2's emblems (`cardicon_*` images).
-    emblems: Vec<String>,
-    /// MW2's titles (its own text where found, else `MW2_TITLES`).
-    titles: Vec<String>,
+    /// Black Ops' rank icons in its IWDs, one per `BO1_RANKS` row (`None`:
+    /// none of that row's names is there).
+    bo1_ranks: Vec<Option<String>>,
+    /// Black Ops' honeycomb card backing, when its IWDs have one by a name
+    /// we know (`BO1_BACKINGS`, else any `*hex*` / `*honeycomb*` picture).
+    bo1_backing: Option<String>,
     /// MW3's level icons in rank order (`rank_*` images): the game and its
-    /// pictures.
+    /// pictures (the scoreboard's).
     ranks: Option<(&'static str, Vec<String>)>,
 }
 
-/// Modern Warfare 2 titles, used when its text could not be read.
-const MW2_TITLES: &[&str] = &[
-    "Gun Runner", "Bulletproof", "Ghost", "Tactician", "Brutal", "No Mercy", "The Bomb", "Ninja",
-    "Kingslayer", "Truly Elite", "Overkill", "Blindfire", "Lifer", "Collateral", "Hard Landing",
-    "Hot Potato", "Survivalist", "Mach 5", "Grim Reaper", "Fearless", "Flawless", "Rapid Fire",
-    "Juggernaut", "Sharpshooter", "Afterburner", "Carpenter", "Hijacker", "Unbelievable",
+/// Black Ops' ranks: the level each starts at and its icon's image names
+/// (its `rank_<x>_128` materials' images, as its `ui_mp` / `common_mp`
+/// zones name them: `rank_prvt_128` draws `rank_pvt1_128`, ...), first the
+/// image, then the material names. 50 levels; its General and Commander
+/// have one level each (no `RANK_GEN_FULL_N` / `RANK_COM_FULL_N`).
+const BO1_RANKS: &[(i32, &[&str])] = &[
+    (1, &["rank_pvt1_128", "rank_prvt_128", "rank_prvt"]),
+    (4, &["rank_pfc1_128", "rank_pfc_128", "rank_pfc"]),
+    (7, &["rank_spc1_128", "rank_spc_128", "rank_spc"]),
+    (10, &["rank_cpl1_128", "rank_cpl_128", "rank_cpl"]),
+    (13, &["rank_sgt1_128", "rank_sgt_128", "rank_sgt"]),
+    (16, &["rank_ssgt1_128", "rank_ssgt_128", "rank_ssgt"]),
+    (19, &["rank_sgtfc1_128", "rank_sfc_128", "rank_sfc"]),
+    (22, &["rank_sgtm1_128", "rank_sgtm_128", "rank_sgtm"]),
+    (25, &["rank_2ndlt1_128", "rank_lt_128", "rank_lt"]),
+    (28, &["rank_capt1_128", "rank_cpt_128", "rank_cpt"]),
+    (31, &["rank_maj1_128", "rank_maj_128", "rank_maj"]),
+    (34, &["rank_ltcol1_128", "rank_ltcol_128", "rank_ltcol"]),
+    (37, &["rank_col1_128", "rank_col_128", "rank_col"]),
+    (40, &["rank_bgen1_128", "rank_briggen_128", "rank_briggen"]),
+    (43, &["rank_majgen1_128", "rank_majgen_128", "rank_majgen"]),
+    (46, &["rank_ltgen1_128", "rank_ltgen_128", "rank_ltgen"]),
+    (49, &["rank_gen1_128", "rank_gen_128", "rank_gen"]),
+    (50, &["rank_comm_128", "rank_com_128", "rank_com"]),
+];
+
+/// Black Ops' row in `BO1_RANKS` for a level (its last for any higher).
+fn bo1_rank_row(level: i32) -> usize {
+    BO1_RANKS.iter().rposition(|(first, _)| level.max(1) >= *first).unwrap_or(0)
+}
+
+/// Black Ops' card backing (the black honeycomb), by the names it may have
+/// in its IWDs: not known for certain (its zones do not name it), so each
+/// is tried and what was found is logged.
+const BO1_BACKINGS: &[&str] = &[
+    "emblem_bg_default",
+    "emblem_bg_hex",
+    "emblem_bg_honeycomb",
+    "emblem_bg_hexagon",
+    "playercard_bg",
+    "playercard_default",
+    "hud_playercard_bg",
 ];
 
 /// MW2/MW3 rank stems in order (some ranks have two spellings).
@@ -552,29 +599,37 @@ fn image_names(game: asset_core::AssetNamespace) -> Vec<String> {
 
 fn find_catalog() -> Catalog {
     let mut cat = Catalog::default();
-    let iw4 = image_names(asset_core::AssetNamespace::Iw4);
-    let pick = |names: &[String], prefix: &str| -> Vec<String> {
-        let mut v: Vec<String> = names.iter().filter(|n| n.starts_with(prefix)).cloned().collect();
+    // Black Ops' pictures (its IWDs): its rank icons and its card backing.
+    let t5 = image_names(asset_core::AssetNamespace::T5);
+    let has = |n: &str| t5.iter().any(|x| x.eq_ignore_ascii_case(n));
+    cat.bo1_ranks = BO1_RANKS.iter().map(|(_, names)| names.iter().find(|n| has(n)).map(|n| (*n).to_owned())).collect();
+    let like = |words: &[&str]| -> Vec<&String> {
+        let mut v: Vec<&String> = t5.iter().filter(|n| words.iter().any(|w| n.to_ascii_lowercase().contains(w))).collect();
         v.sort();
         v.dedup();
         v
     };
-    cat.cards = pick(&iw4, "cardtitle_");
-    // (Emblems: MW2's `cardicon_*`, less its prestige and weapon-perk icons.)
-    cat.emblems = pick(&iw4, "cardicon_").into_iter().filter(|n| !n.contains("prestige")).collect();
+    let hex = like(&["hex", "honeycomb"]);
+    cat.bo1_backing = BO1_BACKINGS
+        .iter()
+        .find(|n| has(n))
+        .map(|n| (*n).to_owned())
+        .or_else(|| hex.first().map(|n| (*n).clone()));
     diag::info!(
         Ui,
-        "bo2mp hud: MW2 IWDs: {} pictures, {} calling cards (cardtitle_*), {} emblems (cardicon_*); first: {:?} / {:?}",
-        iw4.len(),
-        cat.cards.len(),
-        cat.emblems.len(),
-        cat.cards.iter().take(6).collect::<Vec<_>>(),
-        cat.emblems.iter().take(6).collect::<Vec<_>>()
+        "bo2mp hud: BO1 IWDs: {} pictures; rank icons {:?}; card backing {:?} (procedural honeycomb when none); \
+         BO1 rank_* {:?}; emblem_bg_* {:?}; hex/honeycomb {:?}; card/playercard {:?}",
+        t5.len(),
+        cat.bo1_ranks,
+        cat.bo1_backing,
+        like(&["rank_"]).iter().take(80).collect::<Vec<_>>(),
+        like(&["emblem_bg"]).iter().take(80).collect::<Vec<_>>(),
+        hex.iter().take(40).collect::<Vec<_>>(),
+        like(&["playercard", "callingcard", "card_bg", "cardback"]).iter().take(40).collect::<Vec<_>>(),
     );
-    cat.titles = mw2_titles();
-    // MW3's rank icons (else MW2's).
+    // MW3's rank icons (else MW2's), for the scoreboard.
     for (prefix, ns) in [("iw5", asset_core::AssetNamespace::Iw5), ("iw4", asset_core::AssetNamespace::Iw4)] {
-        let names = if prefix == "iw4" { iw4.clone() } else { image_names(ns) };
+        let names = image_names(ns);
         let all: Vec<&String> = names.iter().filter(|n| n.starts_with("rank_")).collect();
         let mut ladder: Vec<(usize, u32, String)> =
             all.iter().filter_map(|n| rank_place(n).map(|(i, k)| (i, k, (*n).clone()))).collect();
@@ -594,38 +649,6 @@ fn find_catalog() -> Catalog {
         }
     }
     cat
-}
-
-/// MW2's own title text (its localized strings), else `MW2_TITLES`.
-fn mw2_titles() -> Vec<String> {
-    let fallback = || MW2_TITLES.iter().map(|t| (*t).to_owned()).collect::<Vec<_>>();
-    let Ok(root) = asset_transport::games_root_from_env() else { return fallback() };
-    let mut found: Vec<(String, String)> = Vec::new();
-    let mut keys_seen = 0usize;
-    let mut sample: Vec<String> = Vec::new();
-    for zone in ["iw4:localized_common_mp", "iw4:localized_ui_mp", "iw4:localized_code_post_gfx_mp"] {
-        let Ok(file) = asset_transport::find_zone_file(&root, zone) else { continue };
-        let Ok(cat) = asset_game::load_localize_catalog(&file.path) else { continue };
-        keys_seen += cat.len();
-        for (k, v) in cat.iter() {
-            let title_key = ["PLAYERCARDS_TITLE_", "CARDTITLE_", "MPUI_CARDTITLE_", "PLAYERCARD_TITLE_"].iter().any(|p| k.starts_with(p));
-            if title_key && !v.trim().is_empty() && v.len() <= 28 {
-                found.push((k.to_owned(), v.trim().to_owned()));
-            } else if k.contains("TITLE") && sample.len() < 24 {
-                sample.push(k.to_owned());
-            }
-        }
-    }
-    found.sort();
-    found.dedup_by(|a, b| a.1 == b.1);
-    diag::info!(
-        Ui,
-        "bo2mp hud: MW2 text: {keys_seen} strings, {} titles found{}; other TITLE keys: {:?}",
-        found.len(),
-        if found.is_empty() { " (using the built-in MW2 list)" } else { "" },
-        sample
-    );
-    if found.is_empty() { fallback() } else { found.into_iter().map(|(_, v)| v).collect() }
 }
 
 /// A player's level (1 first) and prestige: his own from his stats, a
@@ -953,18 +976,18 @@ fn hit_marker(
     spawn_hitmarker(&mut commands, size, age, kill);
 }
 
-// --- "YOU KILLED" banner ------------------------------------------------------
+// --- Black Ops' kill card -------------------------------------------------------
 
 /// The victim's card as drawn.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct BannerModel {
     pub name: String,
-    pub title: String,
     pub level: i32,
-    /// The calling card banner and its picture size.
-    pub card: Option<(Handle<Image>, Vec2)>,
-    pub emblem: Option<Handle<Image>>,
+    /// His rank icon (Black Ops', else the combined progression's).
     pub rank: Option<Handle<Image>>,
+    /// The card's backing (Black Ops' honeycomb, or the drawn one) and its
+    /// picture size.
+    pub backing: Option<(Handle<Image>, Vec2)>,
     pub start: f64,
 }
 
@@ -973,11 +996,17 @@ struct BannerRoot {
     start: f64,
 }
 
-/// The banner under the crosshair: "YOU KILLED" over the victim's card
-/// (his emblem, name and title on his calling card, his rank on the right).
+/// The card's edge and the dark under its pattern.
+const CARD_EDGE: Color = Color::srgba(0.62, 0.62, 0.60, 0.85);
+const CARD_BASE: Color = Color::srgba(0.07, 0.07, 0.07, 0.92);
+
+/// Black Ops' kill card at the lower middle of the screen: a dark
+/// honeycomb card with a thin edge, the victim's rank icon large on the
+/// left, his name at the top, and his rank icon and level small at the
+/// bottom right.
 pub(crate) fn spawn_banner(commands: &mut Commands, faces: &Faces, m: &BannerModel, height: f32) -> Entity {
     let k = (height / 1080.0).max(0.4);
-    let (w, h) = (520.0 * k, 92.0 * k);
+    let (w, h) = (430.0 * k, 116.0 * k);
     let life = BANNER_IN + BANNER_HOLD + BANNER_OUT;
     let fade = Fade::new(m.start, BANNER_IN, life, BANNER_OUT);
     commands
@@ -988,17 +1017,15 @@ pub(crate) fn spawn_banner(commands: &mut Commands, faces: &Faces, m: &BannerMod
             GlobalZIndex(110),
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Percent(64.0),
+                top: Val::Percent(69.0),
                 width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                row_gap: Val::Px(6.0 * k),
                 ..default()
             },
             UiTransform::IDENTITY,
         ))
         .with_children(|col| {
-            col.spawn((Text::new("YOU KILLED"), font(&faces.bold, 21.0 * k), TextColor(TEXT), shadow(21.0 * k), fade));
             col.spawn((
                 Node {
                     width: Val::Px(w),
@@ -1006,17 +1033,17 @@ pub(crate) fn spawn_banner(commands: &mut Commands, faces: &Faces, m: &BannerMod
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
                     overflow: Overflow::clip(),
-                    border: UiRect::all(Val::Px(1.0)),
+                    border: UiRect::all(Val::Px((1.5 * k).max(1.0))),
                     ..default()
                 },
-                BackgroundColor(PANEL),
-                BorderColor::all(LINE),
-                fade.with(0.82),
+                BackgroundColor(CARD_BASE),
+                BorderColor::all(CARD_EDGE),
+                fade.with(CARD_BASE.alpha()),
                 FadeBack,
             ))
             .with_children(|card| {
-                // The calling card, covering the banner (cut at its edges).
-                if let Some((image, size)) = &m.card {
+                // The honeycomb, covering the card.
+                if let Some((image, size)) = &m.backing {
                     let s = crate::shell::pics::cover(*size, Vec2::new(w, h));
                     card.spawn((
                         ImageNode::new(image.clone()),
@@ -1030,131 +1057,152 @@ pub(crate) fn spawn_banner(commands: &mut Commands, faces: &Faces, m: &BannerMod
                         },
                         fade,
                     ));
-                    // (A navy wash from the left keeps the name readable.)
-                    card.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(0.0),
-                            top: Val::Px(0.0),
-                            width: Val::Percent(62.0),
-                            height: Val::Percent(100.0),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgba(0.025, 0.04, 0.07, 0.55)),
-                        fade.with(0.55),
-                        FadeBack,
-                    ));
-                } else {
-                    card.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(0.0),
-                            top: Val::Px(0.0),
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            ..default()
-                        },
-                        BackgroundColor(ACCENT.with_alpha(0.16)),
-                        fade.with(0.16),
-                        FadeBack,
-                    ));
                 }
-                // The accent along the top.
-                card.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(0.0),
-                        top: Val::Px(0.0),
-                        width: Val::Percent(100.0),
-                        height: Val::Px(2.0 * k),
-                        ..default()
-                    },
-                    BackgroundColor(ACCENT),
-                    fade,
-                    FadeBack,
-                ));
-                // His emblem.
-                let es = h - 14.0 * k;
-                card.spawn((
-                    Node {
-                        width: Val::Px(es),
-                        height: Val::Px(es),
-                        margin: UiRect::left(Val::Px(7.0 * k)),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        border: UiRect::all(Val::Px(1.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.45)),
-                    BorderColor::all(LINE),
-                    fade.with(0.45),
-                    FadeBack,
-                ))
-                .with_children(|e| match &m.emblem {
-                    Some(image) => {
-                        e.spawn((ImageNode::new(image.clone()), Node { width: Val::Px(es - 6.0 * k), height: Val::Px(es - 6.0 * k), ..default() }, fade));
-                    }
-                    None => {
-                        let initial: String = m.name.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default();
-                        e.spawn((Text::new(initial), font(&faces.bold, 44.0 * k), TextColor(ACCENT), fade));
-                    }
-                });
-                // His name and title.
+                // His rank, large on the left.
+                let big = 86.0 * k;
                 card.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    justify_content: JustifyContent::Center,
-                    padding: UiRect::left(Val::Px(14.0 * k)),
-                    flex_grow: 1.0,
+                    width: Val::Px(big),
+                    height: Val::Px(big),
+                    margin: UiRect::left(Val::Px(12.0 * k)),
+                    flex_shrink: 0.0,
                     ..default()
                 })
-                .with_children(|t| {
-                    t.spawn((Text::new(m.name.clone()), font(&faces.bold, 34.0 * k), TextColor(WHITE), shadow(34.0 * k), fade));
-                    t.spawn((Text::new(m.title.clone()), font(&faces.regular, 20.0 * k), TextColor(TEXT), shadow(20.0 * k), fade));
-                });
-                // His rank.
-                card.spawn((
-                    Node {
-                        flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(6.0 * k),
-                        padding: UiRect::axes(Val::Px(10.0 * k), Val::Px(6.0 * k)),
-                        margin: UiRect::right(Val::Px(10.0 * k)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
-                    fade.with(0.5),
-                    FadeBack,
-                ))
                 .with_children(|r| {
                     if let Some(icon) = &m.rank {
-                        r.spawn((ImageNode::new(icon.clone()), Node { width: Val::Px(38.0 * k), height: Val::Px(38.0 * k), ..default() }, fade));
+                        r.spawn((ImageNode::new(icon.clone()), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, fade));
                     }
-                    r.spawn((Text::new(m.level.to_string()), font(&faces.bold, 26.0 * k), TextColor(WHITE), shadow(26.0 * k), fade));
+                });
+                // His name at the top.
+                card.spawn((
+                    Text::new(m.name.to_uppercase()),
+                    font(&faces.bold, 27.0 * k),
+                    TextColor(WHITE),
+                    shadow(27.0 * k),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(big + 24.0 * k),
+                        top: Val::Px(9.0 * k),
+                        ..default()
+                    },
+                    fade,
+                ));
+                // His rank and level, small at the bottom right.
+                card.spawn(Node {
+                    position_type: PositionType::Absolute,
+                    right: Val::Px(14.0 * k),
+                    bottom: Val::Px(9.0 * k),
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(4.0 * k),
+                    ..default()
+                })
+                .with_children(|r| {
+                    if let Some(icon) = &m.rank {
+                        r.spawn((ImageNode::new(icon.clone()), Node { width: Val::Px(28.0 * k), height: Val::Px(28.0 * k), ..default() }, fade));
+                    }
+                    r.spawn((Text::new(m.level.to_string()), font(&faces.bold, 25.0 * k), TextColor(WHITE), shadow(25.0 * k), fade));
                 });
             });
         })
         .id()
 }
 
+/// Black Ops' honeycomb drawn (when its own picture is not found): black
+/// cells edged darker, each lit a little from the top. `cell` is a cell's
+/// width in pixels.
+fn honeycomb(w: u32, h: u32, cell: f32) -> Image {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let mut px = vec![0u8; (w * h * 4) as usize];
+    let (rx, ry) = (1.0f32, 3.0f32.sqrt());
+    let fmod = |a: f32, b: f32| a - b * (a / b).floor();
+    for y in 0..h {
+        for x in 0..w {
+            let p = Vec2::new(x as f32 + 0.5, y as f32 + 0.5) / cell;
+            let a = Vec2::new(fmod(p.x, rx), fmod(p.y, ry)) - Vec2::new(rx, ry) * 0.5;
+            let b = Vec2::new(fmod(p.x - rx * 0.5, rx), fmod(p.y - ry * 0.5, ry)) - Vec2::new(rx, ry) * 0.5;
+            let g = if a.length_squared() < b.length_squared() { a } else { b };
+            let q = g.abs();
+            // 0 at the centre, 0.5 at the edge.
+            let d = (q.x * 0.5 + q.y * 0.866_025).max(q.x);
+            let edge = ((d - 0.36) / 0.08).clamp(0.0, 1.0);
+            let lit = 0.5 - g.y / ry;
+            let inner = 0.115 + 0.06 * lit;
+            let v = inner * (1.0 - edge) + 0.015 * edge;
+            let o = ((y * w + x) * 4) as usize;
+            let c = (v.clamp(0.0, 1.0) * 255.0) as u8;
+            px[o] = c;
+            px[o + 1] = c;
+            px[o + 2] = c;
+            px[o + 3] = 255;
+        }
+    }
+    let mut img = Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, px, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default());
+    img.sampler = bevy::image::ImageSampler::linear();
+    img
+}
+
+/// The drawn honeycomb, made once.
+pub(crate) fn drawn_backing(cache: &mut HashMap<String, Option<(Handle<Image>, Vec2)>>, images: &mut Assets<Image>) -> (Handle<Image>, Vec2) {
+    let key = "drawn:honeycomb";
+    if let Some(Some(found)) = cache.get(key) {
+        return found.clone();
+    }
+    let (w, h) = (860, 232);
+    let found = (images.add(honeycomb(w, h, 20.0)), Vec2::new(w as f32, h as f32));
+    cache.insert(key.to_owned(), Some(found.clone()));
+    found
+}
+
+/// His rank icon on the card: Black Ops' for his level (no prestige),
+/// else the combined progression's.
+fn card_rank(
+    level: i32,
+    prestige: i32,
+    cat: Option<&Catalog>,
+    cache: &mut HashMap<String, Option<(Handle<Image>, Vec2)>>,
+    pics: Option<&mut crate::shell::pics::ShellPics>,
+    icons: Option<&assets::T6HudIcons>,
+    images: &mut Assets<Image>,
+) -> Option<Handle<Image>> {
+    if prestige <= 0
+        && let Some(Some(name)) = cat.and_then(|c| c.bo1_ranks.get(bo1_rank_row(level)))
+        && let Some((h, _)) = game_picture(cache, images, "t5", name)
+    {
+        return Some(h);
+    }
+    let name = bo2_profile::progression::rank_picture(level, prestige);
+    pics?.get(&name, icons, images)
+}
+
 #[derive(Default)]
 struct BannerState {
     last_kill: Option<u32>,
-    /// A kill waiting for its banner: the victim and when.
+    /// A kill waiting for its card: the victim and when.
     pending: Option<(String, f64)>,
     shown: Option<(BannerModel, u32)>,
 }
 
-/// The banner's pop: a little bigger as it comes in.
-fn banner_pop(time: Res<Time<Real>>, mut q: Query<(&BannerRoot, &mut UiTransform)>) {
+/// The card's slide and pop: it rises a little and settles as it comes in.
+fn banner_pop(time: Res<Time<Real>>, window: Query<&Window, With<PrimaryWindow>>, mut q: Query<(&BannerRoot, &mut UiTransform)>) {
     let now = now_secs(&time);
+    let k = window.single().map_or(1.0, |w| (w.height() / 1080.0).max(0.4));
     for (b, mut t) in &mut q {
         let age = (now - b.start) as f32;
-        let s = 1.0 + 0.06 * (1.0 - age / 0.16).clamp(0.0, 1.0);
-        let want = Vec2::splat(s);
-        if t.scale != want {
-            t.scale = want;
+        let (y, s) = card_motion(age);
+        let (pos, size) = (Val2::px(0.0, y * k), Vec2::splat(s));
+        if t.translation != pos || t.scale != size {
+            t.translation = pos;
+            t.scale = size;
         }
     }
+}
+
+/// The card's rise (px at 1080, down positive) and scale at `age`.
+fn card_motion(age: f32) -> (f32, f32) {
+    let t = (age / CARD_SETTLE).clamp(0.0, 1.0);
+    let ease = 1.0 - (1.0 - t).powi(3);
+    (CARD_RISE * (1.0 - ease), 1.0 + CARD_POP * (1.0 - ease))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1170,6 +1218,7 @@ fn kill_banner(
     roots: Query<Entity, With<BannerRoot>>,
     time: Res<Time<Real>>,
     mut images: ResMut<Assets<Image>>,
+    mut sounds: MessageWriter<frame::UiPlaySound>,
     mut cache: Local<HashMap<String, Option<(Handle<Image>, Vec2)>>>,
     mut st: Local<BannerState>,
 ) {
@@ -1207,7 +1256,7 @@ fn kill_banner(
         // (Not the match's last kill: the final killcam and the end screen
         // show that one.)
         if seen.ended || seen.at_limit(my_score) {
-            diag::info!(Ui, "bo2mp hud: no kill banner for {victim}: the match ended on it");
+            diag::info!(Ui, "bo2mp hud: no kill card for {victim}: the match ended on it");
         } else {
             let meta = snap.and_then(|s| {
                 s.meta
@@ -1217,22 +1266,16 @@ fn kill_banner(
                     .map(|(_, m)| m.clone())
             });
             let (level, prestige) = rank_of(&victim, meta.as_ref(), false, Some(&*slot));
-            let title = cat
-                .as_ref()
-                .map(|c| c.titles.clone())
-                .filter(|t| !t.is_empty())
-                .unwrap_or_else(|| MW2_TITLES.iter().map(|t| (*t).to_owned()).collect());
-            let title = title[name_hash(&victim, 1) as usize % title.len()].clone();
-            let model = BannerModel {
-                name: victim.clone(),
-                title,
-                level,
-                card: None,
-                emblem: None,
-                rank: None,
-                start: now,
-            };
-            diag::info!(Ui, "bo2mp hud: kill banner: {victim} \"{}\" level {level} prestige {prestige}", model.title);
+            let model = BannerModel { name: victim.clone(), level, rank: None, backing: None, start: now };
+            let bo1_rank = cat.as_ref().and_then(|c| c.bo1_ranks.get(bo1_rank_row(level)).cloned().flatten());
+            diag::info!(
+                Ui,
+                "bo2mp hud: kill card: {victim} level {level} prestige {prestige}; BO1 rank icon {bo1_rank:?}, backing {:?}",
+                cat.as_ref().map(|c| c.bo1_backing.clone().unwrap_or_else(|| "drawn honeycomb".into()))
+            );
+            if let Some(alias) = KILL_CARD_SOUND {
+                sounds.write(frame::UiPlaySound { alias: alias.to_owned() });
+            }
             st.shown = Some((model, 0));
         }
     }
@@ -1249,17 +1292,13 @@ fn kill_banner(
         st.shown = Some((model, 0));
         return;
     }
-    // Its pictures (read from MW2's files; in as they come).
-    if let Some(c) = cat.as_ref() {
-        if !c.cards.is_empty() {
-            let name = &c.cards[name_hash(&model.name, 2) as usize % c.cards.len()];
-            model.card = game_picture(&mut cache, &mut images, "iw4", name);
-        }
-        if !c.emblems.is_empty() {
-            let name = &c.emblems[name_hash(&model.name, 3) as usize % c.emblems.len()];
-            model.emblem = game_picture(&mut cache, &mut images, "iw4", name).map(|(h, _)| h);
-        }
-    }
+    // Its pictures (Black Ops' files; in as they come).
+    let bo1_backing = cat
+        .as_ref()
+        .and_then(|c| c.bo1_backing.as_deref())
+        .and_then(|name| game_picture(&mut cache, &mut images, "t5", name));
+    let from_bo1 = bo1_backing.is_some();
+    model.backing = bo1_backing.or_else(|| Some(drawn_backing(&mut cache, &mut images)));
     let meta = snap.and_then(|s| {
         s.meta
             .clients
@@ -1268,10 +1307,10 @@ fn kill_banner(
             .map(|(_, m)| m.clone())
     });
     let (level, prestige) = rank_of(&model.name, meta.as_ref(), false, Some(&*slot));
-    model.rank = rank_picture(level, prestige, cat.as_ref(), &mut cache, pics.as_deref_mut(), icons.as_deref(), &mut images);
+    model.rank = card_rank(level, prestige, cat.as_ref(), &mut cache, pics.as_deref_mut(), icons.as_deref(), &mut images);
     let height = window.single().map_or(1080.0, Window::height);
     // Built again when a picture comes in or the window changes.
-    let key = u32::from(model.card.is_some()) | u32::from(model.emblem.is_some()) << 1 | u32::from(model.rank.is_some()) << 2 | (height as u32) << 3;
+    let key = u32::from(model.rank.is_some()) | u32::from(from_bo1) << 1 | (height as u32) << 2;
     if built == key && !roots.is_empty() {
         return;
     }
@@ -1680,6 +1719,12 @@ pub mod preview {
                         let on = (v - 0.25 - d * 0.8).abs() < 0.09 || (v - 0.55 - d * 0.8).abs() < 0.09;
                         if on { [0.85, 0.82, 0.70, 1.0] } else { [0.0; 4] }
                     }
+                    4 => {
+                        // (Black Ops' private: one broad green chevron.)
+                        let d = (u - 0.5).abs();
+                        let on = d < 0.42 && v > 0.30 + d * 0.62 && v < 0.62 + d * 0.62;
+                        if on { [0.42 + 0.2 * (1.0 - v), 0.62 + 0.15 * (1.0 - v), 0.10, 1.0] } else { [0.0; 4] }
+                    }
                     2 => {
                         let body = v > 0.3 && v < 0.55 && u > 0.05 && u < 0.95;
                         let grip = v >= 0.55 && v < 0.95 && u > 0.55 && u < 0.68;
@@ -1736,7 +1781,6 @@ pub mod preview {
         let wide_gun = images.add(stand_in(2, 256, 64));
         let rank = images.add(stand_in(1, 64, 64));
         let emblem = images.add(stand_in(3, 64, 64));
-        let card = images.add(stand_in(0, 512, 96));
         let size = Vec2::new(1920.0, 1080.0);
         let mark = |commands: &mut Commands, e: Entity| {
             commands.entity(e).insert(Shot);
@@ -1752,13 +1796,16 @@ pub mod preview {
                 ];
                 let e = spawn_feed(&mut commands, &faces, &rows, 1080.0);
                 mark(&mut commands, e);
+                // (Black Ops' rank icon when its IWDs are under IW4L_GAMES,
+                // else a green chevron stand-in; the drawn honeycomb.)
+                let mut cache = HashMap::new();
+                let bo1_rank = game_picture(&mut cache, &mut images, "t5", "rank_pvt1_128").map(|(h, _)| h);
+                println!("hud preview: BO1 rank_pvt1_128 {}", if bo1_rank.is_some() { "read" } else { "not read (stand-in)" });
                 let model = BannerModel {
-                    name: "Jimbo".into(),
-                    title: "Gun Runner".into(),
-                    level: 62,
-                    card: Some((card.clone(), Vec2::new(512.0, 96.0))),
-                    emblem: Some(emblem.clone()),
-                    rank: Some(rank.clone()),
+                    name: "Grim_Gorilla".into(),
+                    level: 1,
+                    rank: bo1_rank.or_else(|| Some(images.add(stand_in(4, 128, 128)))),
+                    backing: Some(drawn_backing(&mut cache, &mut images)),
                     start: now,
                 };
                 let e = spawn_banner(&mut commands, &faces, &model, 1080.0);
@@ -1878,6 +1925,23 @@ mod tests {
         assert_eq!(rank_place("rank_comm"), Some((21, 0)));
         assert_eq!(rank_place("rank_prestige3"), None);
         assert!(rank_place("rank_sgt1").unwrap().0 < rank_place("rank_ssgt1").unwrap().0);
+    }
+
+    #[test]
+    fn black_ops_rank_rows_by_level() {
+        assert_eq!(bo1_rank_row(0), 0);
+        assert_eq!(bo1_rank_row(1), 0);
+        assert_eq!(bo1_rank_row(3), 0);
+        assert_eq!(bo1_rank_row(4), 1);
+        assert_eq!(BO1_RANKS[bo1_rank_row(49)].1[0], "rank_gen1_128");
+        assert_eq!(BO1_RANKS[bo1_rank_row(50)].1[0], "rank_comm_128");
+        // BO2's levels past Black Ops' 50 keep its last.
+        assert_eq!(bo1_rank_row(55), BO1_RANKS.len() - 1);
+        // The card rises and settles, then stays put.
+        let (y0, s0) = card_motion(0.0);
+        assert!(y0 > 20.0 && s0 > 1.0);
+        assert_eq!(card_motion(CARD_SETTLE), (0.0, 1.0));
+        const { assert!(KILL_CARD_SOUND.is_none()) };
     }
 
     #[test]

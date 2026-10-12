@@ -1296,3 +1296,77 @@ fn decode_map_material_images(
     stage.done();
     report
 }
+
+/// bo2mp `iw4l check-maps`: one MW2 map zone read the way a match reads
+/// it, and every picture its materials use looked up - in the zone, or in
+/// the archives beside the game's `main` (stock, IW4x's DLC packs and
+/// usermaps) - without loading a match. One line: whether the zone opens
+/// and walks to its end, and the pictures it has and lacks (the first
+/// missing ones named).
+pub fn check_iw4_map(path: &Path) -> String {
+    let image = match asset_transport::open_zone(path) {
+        Ok(image) => image,
+        Err(e) => return format!("FAIL zone does not open: {e}"),
+    };
+    let header = match image.header() {
+        Ok(h) => h,
+        Err(e) => return format!("FAIL zone header: {e}"),
+    };
+    let mut memory = ZoneMemory::for_header(&header);
+    let mut stream = match memory.stream(&image.bytes) {
+        Ok(s) => s,
+        Err(e) => return format!("FAIL zone arenas: {e}"),
+    };
+    let progress = LoadProgress::new(0);
+    let mut sink = ZoneWalkSink::with_stage(progress.begin_scoped(StageId::MapAssets, "walk", None));
+    sink.set_capture_zone(asset_core::ZoneOwner::from_zone_path(path));
+    sink.set_capture_ns(asset_core::AssetNamespace::Iw4);
+    let walked = load_zone(&mut stream, &mut sink);
+    let walk = match &walked {
+        Ok(_) => format!("walk ok ({} assets)", sink.walked),
+        Err(e) => format!("FAIL walk stopped after {} assets: {e}", sink.walked),
+    };
+    let index = asset_transport::game_main_for_zone(path).and_then(|main| asset_transport::IwdIndex::open(&main));
+    let mut wanted = std::collections::BTreeSet::new();
+    for m in &sink.materials.materials {
+        for t in &m.textures {
+            if let Some(i) = t.image {
+                wanted.insert(i);
+            }
+        }
+    }
+    let (mut in_zone, mut in_iwd, mut missing) = (0usize, 0usize, Vec::new());
+    for i in wanted {
+        let Some(img) = sink.materials.images.get(i) else { continue };
+        let name = img.name.as_str();
+        if name.starts_with('$') {
+            continue;
+        }
+        if !img.payload.is_empty() {
+            in_zone += 1;
+        } else if index.as_ref().is_ok_and(|ix| ix.image_candidates(name).is_some()) {
+            in_iwd += 1;
+        } else {
+            missing.push(name.to_owned());
+        }
+    }
+    let archives = index.as_ref().map_or_else(|e| format!("no archives: {e}"), |ix| format!("{} archives", ix.archive_count()));
+    let status = if walked.is_err() {
+        "FAIL"
+    } else if missing.is_empty() {
+        "OK"
+    } else {
+        "MISSING PICTURES"
+    };
+    let sample = if missing.is_empty() {
+        String::new()
+    } else {
+        format!(" - first missing: {}", missing.iter().take(6).cloned().collect::<Vec<_>>().join(", "))
+    };
+    format!(
+        "{status}: {walk}; {} materials; pictures {} in the zone, {in_iwd} in the archives ({archives}), {} missing{sample}",
+        sink.materials.materials.len(),
+        in_zone,
+        missing.len()
+    )
+}

@@ -12,7 +12,8 @@
 //! - its description underneath, smaller ("Killed an enemy with one
 //!   shot."), followed by its points in Black Ops' yellow (`MEDAL_XP_POPUP`,
 //!   `^3+&&1^7`);
-//! - on a dark translucent box with a thin orange accent.
+//! - no box: the text stands over the game on a soft dark shadow, at the
+//!   upper middle of the screen.
 //!
 //! The text is Black Ops' own (`MEDAL_*` / `MEDAL_*_DESC` from its English
 //! zones, read once off the main thread) where BO1 had that medal, else
@@ -21,8 +22,14 @@
 //! `mp/scoreInfo.csv` (`<gametype> XP`; its `<gametype> score` when it has
 //! no XP): the same table the server scores with. Nothing here scores.
 //!
-//! Medals that come close together queue: each shows ~1.8 s (fade and
-//! slide in, hold, fade and rise out), quicker while more wait.
+//! Black Ops' timing (its `maps/mp/_popups.gsc` and `MedalPopUp` menu): a
+//! medal pops in (a little bigger, settling in 0.2 s), holds ~2.5 s and
+//! fades; medals that come close together queue, and a waiting one takes
+//! the place of the shown one after `level.medalSettings.waitTime` (1.25 s).
+//! Each medal shown plays Black Ops' medal sound once as it pops in
+//! (`displayMedal(.., "uin_challenge_repeatable")`, routed by the audio
+//! crate's `ui_sounds` as `bo2mp_bo1_medal`); a medal dropped from a full
+//! queue or passed over while the HUD is away (killcam, menu) is silent.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
@@ -39,25 +46,32 @@ use crate::shell::theme::ShellFonts;
 /// BO2's table the medal rows index.
 const SCORE_INFO: &str = "mp/scoreInfo.csv";
 
-/// A medal's fade in, its whole life, its fade out (s). While two or more
-/// wait, each is shown for `QUICK_LIFE` instead.
-const MEDAL_IN: f32 = 0.18;
-const MEDAL_LIFE: f32 = 1.8;
-const QUICK_LIFE: f32 = 1.3;
-const MEDAL_OUT: f32 = 0.32;
+/// A medal's pop in, its hold and its fade out (s), and its whole life.
+const MEDAL_IN: f32 = 0.2;
+const MEDAL_HOLD: f32 = 2.5;
+const MEDAL_OUT: f32 = 0.35;
+const MEDAL_LIFE: f32 = MEDAL_IN + MEDAL_HOLD + MEDAL_OUT;
+/// Black Ops' `level.medalSettings.waitTime`: a waiting medal takes the
+/// shown one's place this long after it popped in.
+const MEDAL_STEP: f32 = 1.25;
+/// How much bigger a medal pops in.
+const MEDAL_POP: f32 = 0.16;
 /// The most medals that wait; more are dropped (logged).
 const MAX_WAITING: usize = 8;
-/// Where the box sits: its top, as a share of the screen height (BO2's
-/// medal sat a little higher, ~20%).
-const TOP: f32 = 0.255;
+/// Where the text sits: its top, as a share of the screen height.
+const TOP: f32 = 0.2;
+/// A medal drawn later than this into its life (the HUD came back while it
+/// was up) is shown without its sound.
+const SOUND_LATE: f32 = 0.3;
+/// The audio crate's name for Black Ops' medal sound (`ui_sounds::BO1_MEDAL`).
+pub(crate) const MEDAL_SOUND: &str = "bo2mp_bo1_medal";
 
-/// Black Ops' look: white title, light description, yellow points
-/// (its `^3`), a dark box and an orange accent.
+/// Black Ops' look: white title, light description, yellow points (its
+/// `^3`), a soft black shadow.
 const TITLE: Color = Color::srgb(1.0, 1.0, 1.0);
-const DESC: Color = Color::srgba(0.90, 0.90, 0.88, 0.95);
-const POINTS: Color = Color::srgb(1.0, 0.80, 0.22);
-const BOX: Color = Color::srgba(0.01, 0.01, 0.012, 0.66);
-const ACCENT: Color = Color::srgb(1.0, 0.58, 0.12);
+const DESC: Color = Color::srgba(0.92, 0.92, 0.90, 0.96);
+const POINTS: Color = Color::srgb(1.0, 0.84, 0.20);
+const SHADE: Color = Color::srgba(0.0, 0.0, 0.0, 1.0);
 
 // --- Medal text and points ----------------------------------------------------------
 
@@ -474,25 +488,20 @@ impl MedalQueue {
     }
 
     /// The medal shown at `now` (its start and life): the one shown until
-    /// its life is over, then the next one waiting, from `now`.
+    /// its life is over, or until `MEDAL_STEP` into it while another
+    /// waits (Black Ops' queue), then the next one waiting, from `now`.
     pub(crate) fn tick(&mut self, now: f64) -> Option<(&MedalModel, f64, f32)> {
-        if self
-            .shown
-            .as_ref()
-            .is_some_and(|(_, start, life)| now - start >= f64::from(*life))
-        {
+        let waiting = !self.waiting.is_empty();
+        if self.shown.as_ref().is_some_and(|(_, start, life)| {
+            let age = now - start;
+            age >= f64::from(*life) || (waiting && age >= f64::from(MEDAL_STEP))
+        }) {
             self.shown = None;
         }
         if self.shown.is_none()
             && let Some(next) = self.waiting.pop_front()
         {
-            // (Quicker while others wait, so a run of medals keeps up.)
-            let life = if self.waiting.len() >= 2 {
-                QUICK_LIFE
-            } else {
-                MEDAL_LIFE
-            };
-            self.shown = Some((next, now, life));
+            self.shown = Some((next, now, MEDAL_LIFE));
             self.started += 1;
         }
         self.shown.as_ref().map(|(m, s, l)| (m, *s, *l))
@@ -542,46 +551,68 @@ fn new_medals(feed: &str, last: &mut Option<u32>) -> Vec<usize> {
 
 // --- Drawing -----------------------------------------------------------------------------------
 
-/// The box (its start and life on the real clock).
+/// The medal on screen (its start and life on the real clock).
 #[derive(Component, Clone, Copy, Debug)]
 pub(crate) struct MedalRoot {
     pub start: f64,
     pub life: f32,
 }
 
-/// A piece of the box that fades with it: its full colour, and whether
-/// the colour is its background (else its text).
+/// A piece of text that fades with the medal: its full colour.
 #[derive(Component, Clone, Copy, Debug)]
 struct MedalPiece {
     color: Color,
-    back: bool,
-    shadow: f32,
 }
 
-/// The box's look at `age` into a `life`: its opacity, its rise (px at
-/// 1080, down positive) and its scale (a little bigger as it lands).
-pub(crate) fn medal_motion(age: f32, life: f32) -> (f32, f32, f32) {
-    let fin = (age / MEDAL_IN).clamp(0.0, 1.0);
+/// The medal's look at `age` into a `life`: its opacity and its scale
+/// (Black Ops' "Pop": in a little bigger, settling as it fades in).
+pub(crate) fn medal_motion(age: f32, life: f32) -> (f32, f32) {
+    let fin = (age / (MEDAL_IN * 0.6)).clamp(0.0, 1.0);
     let fout = ((life - age) / MEDAL_OUT).clamp(0.0, 1.0);
-    let ease = |t: f32| 1.0 - (1.0 - t) * (1.0 - t);
-    let y = -16.0 * (1.0 - ease(fin)) - 10.0 * (1.0 - fout);
-    let scale = 1.0 + 0.10 * (1.0 - ease(fin));
-    (fin.min(fout), y, scale)
+    let settle = (age / MEDAL_IN).clamp(0.0, 1.0);
+    let ease = |t: f32| 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
+    let scale = 1.0 + MEDAL_POP * (1.0 - ease(settle));
+    (fin.min(fout), scale)
 }
 
 fn font(h: &Handle<Font>, px: f32) -> TextFont {
     crate::shell::theme::font(h, px)
 }
 
-fn shadow(px: f32) -> TextShadow {
-    TextShadow {
-        offset: Vec2::splat((px / 16.0).max(1.0)),
-        color: Color::srgba(0.0, 0.0, 0.0, 0.8),
-        ..default()
-    }
+/// A line of text on a soft dark shadow: rings of faint black copies
+/// behind it, a little lower (a blur Bevy's one hard `TextShadow` cannot
+/// give), then the text itself.
+fn soft_text(parent: &mut ChildSpawnerCommands, text: &str, face: &Handle<Font>, px: f32, color: Color) {
+    let r = (px * 0.055).max(1.0);
+    parent
+        .spawn(Node { position_type: PositionType::Relative, ..default() })
+        .with_children(|t| {
+            for (ring, alpha) in [(2.2f32, 0.09f32), (1.2, 0.16)] {
+                for i in 0..8 {
+                    let a = i as f32 * std::f32::consts::FRAC_PI_4;
+                    let (dx, dy) = (a.cos() * r * ring, a.sin() * r * ring + r * 0.9);
+                    let shade = SHADE.with_alpha(alpha);
+                    t.spawn((
+                        Text::new(text),
+                        font(face, px),
+                        TextColor(shade),
+                        MedalPiece { color: shade },
+                        Node { position_type: PositionType::Absolute, left: Val::Px(dx), top: Val::Px(dy), ..default() },
+                    ));
+                }
+            }
+            t.spawn((
+                Text::new(text),
+                font(face, px),
+                TextColor(color),
+                MedalPiece { color },
+                TextShadow { offset: Vec2::new(r * 0.6, r), color: Color::srgba(0.0, 0.0, 0.0, 0.55) },
+            ));
+        });
 }
 
-/// Black Ops' medal box: the title over the description and its points.
+/// Black Ops' medal notification: the title over the description and its
+/// points, no box.
 pub(crate) fn spawn_medal(
     commands: &mut Commands,
     faces: &Faces,
@@ -590,16 +621,6 @@ pub(crate) fn spawn_medal(
     root: MedalRoot,
 ) -> Entity {
     let k = (height / 1080.0).max(0.4);
-    let text = |c: Color| MedalPiece {
-        color: c,
-        back: false,
-        shadow: 0.8,
-    };
-    let back = |c: Color| MedalPiece {
-        color: c,
-        back: true,
-        shadow: 0.0,
-    };
     commands
         .spawn((
             root,
@@ -612,173 +633,59 @@ pub(crate) fn spawn_medal(
                 width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
+                row_gap: Val::Px(1.0 * k),
                 ..default()
             },
             UiTransform::IDENTITY,
         ))
         .with_children(|col| {
-            col.spawn((
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    padding: UiRect::new(
-                        Val::Px(30.0 * k),
-                        Val::Px(30.0 * k),
-                        Val::Px(8.0 * k),
-                        Val::Px(9.0 * k),
-                    ),
-                    min_width: Val::Px(300.0 * k),
-                    ..default()
-                },
-                BackgroundColor(BOX),
-                back(BOX),
-            ))
-            .with_children(|b| {
-                // The orange line along the top, brightest at the middle.
-                b.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Percent(0.0),
-                        top: Val::Px(0.0),
-                        width: Val::Percent(100.0),
-                        height: Val::Px((2.0 * k).max(1.0)),
-                        ..default()
-                    },
-                    accent_line(1.0),
-                    MedalAccent::Line,
-                ));
-                // A faint warm glow under it.
-                b.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Percent(0.0),
-                        top: Val::Px(0.0),
-                        width: Val::Percent(100.0),
-                        height: Val::Percent(60.0),
-                        ..default()
-                    },
-                    accent_glow(1.0),
-                    MedalAccent::Glow,
-                ));
-                b.spawn((
-                    Text::new(m.title.clone()),
-                    font(&faces.bold, 36.0 * k),
-                    TextColor(TITLE),
-                    shadow(36.0 * k),
-                    text(TITLE),
-                ));
-                b.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Baseline,
-                    column_gap: Val::Px(7.0 * k),
-                    ..default()
-                })
-                .with_children(|r| {
-                    if !m.desc.is_empty() {
-                        r.spawn((
-                            Text::new(m.desc.clone()),
-                            font(&faces.regular, 20.0 * k),
-                            TextColor(DESC),
-                            shadow(20.0 * k),
-                            text(DESC),
-                        ));
-                    }
-                    if !m.points.is_empty() {
-                        r.spawn((
-                            Text::new(m.points.clone()),
-                            font(&faces.bold, 21.0 * k),
-                            TextColor(POINTS),
-                            shadow(21.0 * k),
-                            text(POINTS),
-                        ));
-                    }
-                });
+            soft_text(col, &m.title, &faces.bold, 46.0 * k, TITLE);
+            col.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Baseline,
+                column_gap: Val::Px(6.0 * k),
+                ..default()
+            })
+            .with_children(|r| {
+                if !m.desc.is_empty() {
+                    soft_text(r, &m.desc, &faces.regular, 23.0 * k, DESC);
+                }
+                if !m.points.is_empty() {
+                    soft_text(r, &m.points, &faces.bold, 23.0 * k, POINTS);
+                }
             });
         })
         .id()
 }
 
-/// The accent's gradients (redrawn as the box fades).
-#[derive(Component, Clone, Copy)]
-enum MedalAccent {
-    Line,
-    Glow,
-}
-
-impl MedalAccent {
-    fn at(self, a: f32) -> BackgroundGradient {
-        match self {
-            MedalAccent::Line => accent_line(a),
-            MedalAccent::Glow => accent_glow(a),
-        }
-    }
-}
-
-/// A faint warm wash from the top line down (blended in linear light, so
-/// it stays faint).
-fn accent_glow(a: f32) -> BackgroundGradient {
-    BackgroundGradient::from(LinearGradient::to_bottom(vec![
-        ColorStop::new(ACCENT.with_alpha(0.035 * a), Val::Percent(0.0)),
-        ColorStop::new(ACCENT.with_alpha(0.0), Val::Percent(100.0)),
-    ]))
-}
-
-fn accent_line(a: f32) -> BackgroundGradient {
-    BackgroundGradient::from(LinearGradient::to_right(vec![
-        ColorStop::new(ACCENT.with_alpha(0.0), Val::Percent(0.0)),
-        ColorStop::new(ACCENT.with_alpha(0.9 * a), Val::Percent(50.0)),
-        ColorStop::new(ACCENT.with_alpha(0.0), Val::Percent(100.0)),
-    ]))
-}
-
-/// Each box's fade, rise and scale for now.
+/// Each medal's fade and pop for now.
 #[allow(clippy::type_complexity)]
 fn medal_animate(
     time: Res<Time<Real>>,
-    window: Query<&Window, With<PrimaryWindow>>,
     mut roots: Query<(Entity, &MedalRoot, &mut UiTransform)>,
     children: Query<&Children>,
-    mut pieces: Query<(
-        Option<&MedalPiece>,
-        Option<&mut TextColor>,
-        Option<&mut BackgroundColor>,
-        Option<&mut TextShadow>,
-        Option<(&MedalAccent, &mut BackgroundGradient)>,
-    )>,
+    mut pieces: Query<(&MedalPiece, &mut TextColor, Option<&mut TextShadow>)>,
 ) {
     let now = time.elapsed_secs_f64();
-    let k = window
-        .single()
-        .map_or(1.0, |w| (w.height() / 1080.0).max(0.4));
     for (e, root, mut t) in &mut roots {
-        let (a, y, s) = medal_motion((now - root.start) as f32, root.life);
-        let (pos, size) = (Val2::px(0.0, y * k), Vec2::splat(s));
-        if t.translation != pos || t.scale != size {
-            t.translation = pos;
+        let (a, s) = medal_motion((now - root.start) as f32, root.life);
+        let size = Vec2::splat(s);
+        if t.scale != size {
             t.scale = size;
         }
         for child in children.iter_descendants(e) {
-            let Ok((piece, text, back, shade, grad)) = pieces.get_mut(child) else {
+            let Ok((p, mut text, shade)) = pieces.get_mut(child) else {
                 continue;
             };
-            if let Some((kind, mut g)) = grad {
-                *g = kind.at(a);
-            }
-            let Some(p) = piece else { continue };
             let c = p.color.with_alpha(p.color.alpha() * a);
-            if p.back {
-                if let Some(mut b) = back
-                    && b.0 != c
-                {
-                    b.0 = c;
-                }
-            } else if let Some(mut tc) = text
-                && tc.0 != c
-            {
-                tc.0 = c;
+            if text.0 != c {
+                text.0 = c;
             }
             if let Some(mut sh) = shade {
-                sh.color = sh.color.with_alpha(p.shadow * a);
+                let want = sh.color.with_alpha(0.55 * a);
+                if sh.color != want {
+                    sh.color = want;
+                }
             }
         }
     }
@@ -788,14 +695,19 @@ fn medal_animate(
 struct MedalState {
     last: Option<u32>,
     queue: MedalQueue,
-    /// The box drawn: its medal number and the window height it was built for.
+    /// The medal drawn: its number and the window height it was built for.
     built: Option<(u64, u32)>,
+    /// The last medal whose sound was played (or passed over): each medal
+    /// sounds once, as it pops in.
+    sounded: u64,
 }
 
-/// BO2's `medal_received` notifies, shown as Black Ops' medal boxes.
+/// BO2's `medal_received` notifies, shown as Black Ops' medal notifications
+/// with its medal sound.
 #[allow(clippy::too_many_arguments)]
 fn medal_notify(
     mut commands: Commands,
+    mut sounds: MessageWriter<frame::UiPlaySound>,
     presented: Option<Res<PresentedSnapshot>>,
     local: Option<Res<LocalPresentClient>>,
     menus: Option<Res<frame::LuiMenus>>,
@@ -907,6 +819,18 @@ fn medal_notify(
         MedalRoot { start, life },
     );
     st.built = Some(key);
+    // Its sound, once, with its pop (none when it is drawn late: the HUD
+    // came back while it was up).
+    if st.sounded < id {
+        st.sounded = id;
+        let age = (now - start) as f32;
+        if age <= SOUND_LATE {
+            sounds.write(frame::UiPlaySound { alias: MEDAL_SOUND.to_owned() });
+            diag::info!(Ui, "bo2mp hud: medal {id} \"{}\": sound `{MEDAL_SOUND}`", model.title);
+        } else {
+            diag::info!(Ui, "bo2mp hud: medal {id} \"{}\" drawn {age:.2}s late: no sound", model.title);
+        }
+    }
 }
 
 pub(crate) fn register_medal_systems(app: &mut App) {
@@ -919,7 +843,7 @@ pub(crate) fn register_medal_systems(app: &mut App) {
 // --- Preview ----------------------------------------------------------------------------------
 
 pub mod preview {
-    //! Black Ops' medal box with real medal rows, saved as pictures
+    //! Black Ops' medal notification with real medal rows, saved as pictures
     //! (`cargo run -p ui --example medal_preview -- <out dir>`). Black
     //! Ops' text is read from `IW4L_GAMES` when it is set.
 
@@ -958,9 +882,9 @@ pub mod preview {
     /// (name, rows shown (first drawn, rest waiting), game type, age, with the kill banner)
     const SHOTS: &[(&str, usize, &str, f32, bool)] = &[
         ("01_one_shot_one_kill", 0, "tdm", 0.6, false),
-        ("02_payback_sliding_in", 1, "tdm", 0.07, false),
-        ("03_double_kill_with_banner", 2, "tdm", 0.8, true),
-        ("04_first_blood_fading_out", 3, "tdm", 1.62, false),
+        ("02_payback_popping_in", 1, "tdm", 0.06, false),
+        ("03_double_kill_with_kill_card", 2, "tdm", 0.8, true),
+        ("04_first_blood_fading_out", 3, "tdm", 2.88, false),
         ("05_kill_denied_conf_points", 4, "conf", 0.6, false),
         ("06_bo2_text_bloodthirsty", 5, "tdm", 0.6, false),
     ];
@@ -990,6 +914,7 @@ pub mod preview {
         fonts: Option<Res<ShellFonts>>,
         shots: Query<Entity, With<Shot>>,
         time: Res<Time<Real>>,
+        mut images: ResMut<Assets<Image>>,
         mut exit: MessageWriter<AppExit>,
     ) {
         let Some(fonts) = fonts else { return };
@@ -1041,13 +966,12 @@ pub mod preview {
         );
         commands.entity(e).insert(Shot);
         if banner {
+            let mut cache = HashMap::new();
             let model = crate::hud_match::BannerModel {
-                name: "Jimbo".into(),
-                title: "Gun Runner".into(),
-                level: 62,
-                card: None,
-                emblem: None,
+                name: "Grim_Gorilla".into(),
+                level: 1,
                 rank: None,
+                backing: Some(crate::hud_match::drawn_backing(&mut cache, &mut images)),
                 start: now,
             };
             let e = crate::hud_match::spawn_banner(&mut commands, &faces, &model, 1080.0);
@@ -1056,7 +980,14 @@ pub mod preview {
         // A plain stand-in scene, and a crosshair's place.
         let e = commands
             .spawn((
-                BackgroundColor(Color::srgb(0.36, 0.37, 0.34)),
+                // (A bright evening sky over darker ground: the shadow
+                // has to carry the white text over both.)
+                BackgroundGradient::from(LinearGradient::to_bottom(vec![
+                    ColorStop::new(Color::srgb(0.86, 0.66, 0.70), Val::Percent(0.0)),
+                    ColorStop::new(Color::srgb(0.78, 0.74, 0.78), Val::Percent(40.0)),
+                    ColorStop::new(Color::srgb(0.40, 0.40, 0.36), Val::Percent(58.0)),
+                    ColorStop::new(Color::srgb(0.27, 0.28, 0.24), Val::Percent(100.0)),
+                ])),
                 Node {
                     position_type: PositionType::Absolute,
                     width: Val::Percent(100.0),
@@ -1250,55 +1181,65 @@ mod tests {
         let mut q = MedalQueue::default();
         assert!(q.tick(0.0).is_none());
         q.push(medal("a"));
-        q.push(medal("b"));
         let (m, start, life) = q
             .tick(1.0)
             .map(|(m, s, l)| (m.title.clone(), s, l))
             .unwrap();
         assert_eq!((m.as_str(), start, life), ("a", 1.0, MEDAL_LIFE));
-        assert_eq!(
-            q.tick(1.0 + f64::from(MEDAL_LIFE) - 0.01).unwrap().0.title,
-            "a"
-        );
-        // "b" right after "a", from then.
-        let t = 1.0 + f64::from(MEDAL_LIFE);
-        let (m, start, _) = q.tick(t).map(|(m, s, l)| (m.title.clone(), s, l)).unwrap();
-        assert_eq!((m.as_str(), start), ("b", t));
-        // Gone after its life: nothing left on screen.
+        // Alone, it holds its whole life.
+        assert_eq!(q.tick(1.0 + f64::from(MEDAL_LIFE) - 0.01).unwrap().0.title, "a");
+        assert!(q.tick(1.0 + f64::from(MEDAL_LIFE)).is_none());
+        assert!(q.tick(100.0).is_none());
+        assert_eq!(q.started, 1);
+    }
+
+    #[test]
+    fn a_waiting_medal_takes_over_after_black_ops_step() {
+        let mut q = MedalQueue::default();
+        q.push(medal("a"));
+        assert_eq!(q.tick(0.0).unwrap().0.title, "a");
+        // "b" comes while "a" is up: "a" stays until Black Ops' 1.25 s.
+        q.push(medal("b"));
+        assert_eq!(q.tick(f64::from(MEDAL_STEP) - 0.01).unwrap().0.title, "a");
+        let t = f64::from(MEDAL_STEP);
+        let (m, start, life) = q.tick(t).map(|(m, s, l)| (m.title.clone(), s, l)).unwrap();
+        assert_eq!((m.as_str(), start, life), ("b", t, MEDAL_LIFE));
+        // The last one gets its whole life, then nothing.
+        assert_eq!(q.tick(t + f64::from(MEDAL_LIFE) - 0.01).unwrap().0.title, "b");
         assert!(q.tick(t + f64::from(MEDAL_LIFE)).is_none());
-        assert!(q.tick(t + 100.0).is_none());
         assert_eq!(q.started, 2);
     }
 
     #[test]
-    fn queue_hurries_a_backlog_and_caps_it() {
+    fn queue_caps_a_backlog() {
         let mut q = MedalQueue::default();
         for i in 0..MAX_WAITING {
             assert!(q.push(medal(&i.to_string())));
         }
         assert!(!q.push(medal("over")));
-        let (_, _, life) = q.tick(0.0).unwrap();
-        assert_eq!(life, QUICK_LIFE);
-        // Each in turn, then none.
+        // Each in turn, one step apart, then none.
         let mut now = 0.0;
-        while let Some((_, s, l)) = q.tick(now) {
-            now = s + f64::from(l);
+        let mut starts = Vec::new();
+        while let Some((_, s, _)) = q.tick(now) {
+            if starts.last() != Some(&s) {
+                starts.push(s);
+            }
+            now += 0.05;
         }
         assert_eq!(q.started, MAX_WAITING as u64);
-        // The last ones, with fewer waiting, get the whole life.
-        let mut q = MedalQueue::default();
-        q.push(medal("x"));
-        assert_eq!(q.tick(0.0).unwrap().2, MEDAL_LIFE);
+        assert_eq!(starts.len(), MAX_WAITING);
+        assert!(starts.windows(2).all(|w| (w[1] - w[0] - f64::from(MEDAL_STEP)).abs() < 0.06));
     }
 
     #[test]
-    fn motion_fades_in_holds_and_out() {
-        let (a0, y0, s0) = medal_motion(0.0, MEDAL_LIFE);
-        assert!(a0 < 0.01 && y0 < -10.0 && s0 > 1.05);
-        let (a, y, s) = medal_motion(0.8, MEDAL_LIFE);
-        assert!((a - 1.0).abs() < 1e-6 && y.abs() < 1e-6 && (s - 1.0).abs() < 1e-6);
-        let (a, y, _) = medal_motion(MEDAL_LIFE - 0.1, MEDAL_LIFE);
-        assert!(a < 0.5 && y < 0.0);
+    fn motion_pops_in_holds_and_fades() {
+        let (a0, s0) = medal_motion(0.0, MEDAL_LIFE);
+        assert!(a0 < 0.01 && s0 > 1.1);
+        let (a, s) = medal_motion(1.0, MEDAL_LIFE);
+        assert!((a - 1.0).abs() < 1e-6 && (s - 1.0).abs() < 1e-6);
+        assert!(medal_motion(MEDAL_LIFE - 0.1, MEDAL_LIFE).0 < 0.5);
         assert!(medal_motion(MEDAL_LIFE, MEDAL_LIFE).0 < 1e-6);
+        // Black Ops' ~2.5 s hold.
+        assert!((MEDAL_HOLD - 2.5).abs() < 1e-6);
     }
 }

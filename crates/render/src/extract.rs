@@ -831,6 +831,33 @@ fn t6_lighting(
     ])
 }
 
+/// bo2mp: the lighting Black Ops II's moving things (the first-person gun
+/// and arms, players, grenades, marks, effects) draw with. A Black Ops II
+/// (or Black Ops, CoD4) map has it in full (`t6_lighting`). A MW2 or MW3
+/// map has a sun but no exposure carrier: under Black Ops II's rules its
+/// guns and players still draw by the fallback pass, so it takes exposure
+/// 1 (Infinity Ward's lit models write `albedo^2 * light` unscaled) and
+/// its sun, or no sun at all. Without this the pass had no lighting group
+/// on those maps and drew none of them: the gun and every player
+/// invisible on Favela, Countdown, Winter Crash.
+fn t6_dynamic_lighting(
+    full: Option<[[f32; 4]; 3]>,
+    sun: Option<&render_frontend::assemble::drawsurf::MapDirPrimaryLight>,
+    exposure: Option<&render_frontend::assemble::drawsurf::MapT5SunParseExposure>,
+    sky: Option<[f32; 4]>,
+) -> Option<[[f32; 4]; 3]> {
+    if full.is_some() || !assets::t6_rules() {
+        return full;
+    }
+    let exposure = exposure.map_or(1.0, |e| e.exposure);
+    let (direction, color) = sun.map_or(([0.0, 0.0, 1.0], [0.0; 3]), |s| (s.direction, s.color));
+    Some([
+        [direction[0], direction[1], direction[2], exposure],
+        [color[0], color[1], color[2], 1.0],
+        sky.unwrap_or([1.0, 0.0, 0.0, 1.0]),
+    ])
+}
+
 pub fn extract_geometry(
     mut commands: Commands,
     world: Extract<Option<Res<WorldDrawGpuPlan>>>,
@@ -850,11 +877,38 @@ pub fn extract_geometry(
     if !render_gpu::geometry_diagnostic_enabled() {
         return;
     }
-    let t6_lighting = t6_lighting(
-        lighting.0.as_deref(),
-        lighting.1.as_deref(),
-        lighting.2.as_ref().and_then(|scene| scene.t5_sky_dynamic_intensity),
-    );
+    let sky = lighting.2.as_ref().and_then(|scene| scene.t5_sky_dynamic_intensity);
+    let full_lighting = t6_lighting(lighting.0.as_deref(), lighting.1.as_deref(), sky);
+    // bo2mp: BO2's bloom and final colour only where the map has its full
+    // lighting (not over a MW2 world drawn by its own path).
+    let t6_bloom = full_lighting.is_some();
+    let t6_lighting =
+        t6_dynamic_lighting(full_lighting, lighting.0.as_deref(), lighting.1.as_deref(), sky);
+    // bo2mp: which lighting the moving things got this map, on change.
+    {
+        static LAST: std::sync::Mutex<Option<(bool, bool, bool, bool)>> = std::sync::Mutex::new(None);
+        let now = (
+            t6_lighting.is_some(),
+            t6_bloom,
+            lighting.0.is_some(),
+            lighting.1.is_some(),
+        );
+        if let Ok(mut last) = LAST.lock()
+            && *last != Some(now)
+        {
+            *last = Some(now);
+            diag::info!(
+                Fpv,
+                "bo2 dynamic lighting: lighting_group_input={} full_t6={} (sun={} exposure={}) t6_rules={} light_sampler={}",
+                now.0,
+                now.1,
+                now.2,
+                now.3,
+                assets::t6_rules(),
+                asset_world::t6_light_sampler().map_or("none", |s| if s.foreign.is_some() { "foreign" } else { "t6" }),
+            );
+        }
+    }
     let sun_sample_size_near = lighting
         .2
         .as_ref()
@@ -977,6 +1031,7 @@ pub fn extract_geometry(
             existing.t6_lights = Arc::clone(&scene.t6_lights);
         }
         existing.t6_lighting = t6_lighting;
+        existing.t6_bloom = t6_bloom;
         existing.t6_sun_sample_size_near = sun_sample_size_near;
         existing.t6_props = t6_props.0;
         existing.t6_prop_instances = t6_props.1;
@@ -1015,6 +1070,7 @@ pub fn extract_geometry(
         world_surface_draw,
         world_surface_lightmap,
         t6_lighting,
+        t6_bloom,
         t6_sun_sample_size_near: sun_sample_size_near,
         t6_props: t6_props.0,
         t6_prop_instances: t6_props.1,
@@ -1259,18 +1315,24 @@ fn t6_model_surfaces(
 ) -> Vec<T6Surface> {
     let skel = &item.skel;
     let mut out = Vec::new();
+    // bo2mp diag: the surfaces left out, by cause (see `t6_note_refused`).
+    let mut refused: Vec<(usize, &'static str, String)> = Vec::new();
     let ranges = skel.surface_vertex_ranges.iter().zip(&skel.surface_index_ranges);
     for (surface, (&(vbase, vn), &(ibase, icount))) in ranges.enumerate() {
         let Some(material) = item.materials.get(surface).copied().flatten() else {
+            refused.push((surface, "no material bound", String::new()));
             continue;
         };
         let Some(m) = catalog.derived(assets::MaterialIndex::from_order(material as usize)) else {
+            refused.push((surface, "material not in the scene catalog", format!("#{material}")));
             continue;
         };
         let Some(draw) = m.t6_draw else {
+            refused.push((surface, "material has no BO2 draw (not linked by a T6 lane)", m.name.to_string()));
             continue;
         };
         if vbase + vn > skel.positions.len() || ibase + icount > skel.indices.len() {
+            refused.push((surface, "surface ranges past the mesh", m.name.to_string()));
             continue;
         }
         // bo2mp: less its hidden parts (a mannequin's shot-off head).
@@ -1283,9 +1345,50 @@ fn t6_model_surfaces(
         let slot = m
             .texture_semantic(asset_material::TS_COLOR_MAP)
             .map_or(u32::MAX, |id| id.0);
+        if slot == u32::MAX {
+            refused.push((surface, "no colour map (draw skipped by the pass)", m.name.to_string()));
+        } else if draw.blend == asset_core::T6Blend::ShadowOnly {
+            refused.push((surface, "shadow-only material (never drawn in colour)", m.name.to_string()));
+        }
         out.push(T6Surface { vbase, vn, triangles, slot, code: draw.code() });
     }
+    if !refused.is_empty() {
+        t6_note_refused(&skel.name, skel.surface_vertex_ranges.len(), &refused);
+    }
     out
+}
+
+/// bo2mp diag: a model (a player's body or head, a gun) with surfaces the
+/// Black Ops II draw leaves out, once per model and cause set (the first
+/// 256 models): the surface, why, and its material.
+fn t6_note_refused(model: &str, surfaces: usize, refused: &[(usize, &'static str, String)]) {
+    use std::collections::HashSet;
+    use std::sync::Mutex;
+    static SEEN: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+    let causes: Vec<&str> = refused.iter().map(|r| r.1).collect();
+    let key = format!("{model}|{causes:?}");
+    let Ok(mut seen) = SEEN.lock() else { return };
+    let seen = seen.get_or_insert_with(HashSet::new);
+    if seen.len() >= 256 || !seen.insert(key) {
+        return;
+    }
+    let list: Vec<String> = refused
+        .iter()
+        .take(12)
+        .map(|(s, why, name)| {
+            if name.is_empty() {
+                format!("#{s} {why}")
+            } else {
+                format!("#{s} {why} [{name}]")
+            }
+        })
+        .collect();
+    diag::info!(
+        World,
+        "bo2 model surfaces refused: {model} {} of {surfaces}: {}",
+        refused.len(),
+        list.join("; ")
+    );
 }
 
 /// Per surface (first index, count, colour slot, draw code), the first

@@ -147,6 +147,10 @@ pub struct ExtractedDiagnosticGeometry {
     /// bo2zm: the T6 sun direction and exposure scale, the sun colour, then
     /// the sky's rotation and brightness.
     pub t6_lighting: Option<[[f32; 4]; 3]>,
+    /// bo2mp: whether `t6_lighting` is the map's own (a Black Ops II,
+    /// Black Ops or CoD4 world): BO2's bloom and final colour. Under BO2's
+    /// rules a MW2/MW3 world gets `t6_lighting` for the moving things only.
+    pub t6_bloom: bool,
     /// bo2mp: the map's `sm_sunSampleSizeNear`; 0 = not set.
     pub t6_sun_sample_size_near: f32,
     /// bo2zm: Black Ops II props: `[surface, colour slot, draw code,
@@ -802,6 +806,83 @@ const STYLE_PROP_TILE: u16 = 0x4000;
 /// colour scale, unused by lit styles).
 const STYLE_PROP_FLOW: u16 = 0x2000;
 
+/// bo2mp: what the fallback pass has to draw this frame, logged when it
+/// changes: whether world surfaces were left to it, which of Black Ops II's
+/// moving-thing lists arrived (the gun is `viewmodel`, players are in
+/// `missiles` / `held`) and whether their lighting group exists (without
+/// it none of them draws: the map gave no T6 lighting).
+fn note_pass_state(
+    world_draws: usize,
+    geometry: &DiagnosticGeometry,
+    lists: &[Option<&DynamicBuffers>; 6],
+    lighting_group: bool,
+) {
+    use std::sync::Mutex;
+    static LAST: Mutex<Option<[bool; 10]>> = Mutex::new(None);
+    let state = [
+        world_draws > 0,
+        !geometry.t6_props.is_empty(),
+        lists[0].is_some(),
+        lists[1].is_some(),
+        lists[2].is_some(),
+        lists[3].is_some(),
+        lists[4].is_some(),
+        lists[5].is_some(),
+        lighting_group,
+        geometry.t6_lighting.is_some(),
+    ];
+    // Logged when the gun's or the players' lists come or go, or the
+    // lighting changes (world surfaces, marks and effects come and go with
+    // the view; they ride along).
+    let key = [state[2], state[3] || state[4], state[8], state[9]];
+    let Ok(mut last) = LAST.lock() else { return };
+    if last.is_some_and(|l| [l[2], l[3] || l[4], l[8], l[9]] == key) {
+        return;
+    }
+    *last = Some(state);
+    let draws = |l: Option<&DynamicBuffers>| l.map_or(0, |b| b.3.len());
+    diag::info!(
+        Fpv,
+        "bo2 fallback pass: world_left={} props={} viewmodel={} (draws {}) bodies/missiles={} (draws {}) held={} (draws {}) marks={} effects={} vm_effects={} lighting_group={} t6_lighting={}{}",
+        state[0],
+        state[1],
+        state[2],
+        draws(lists[0]),
+        state[3],
+        draws(lists[1]),
+        state[4],
+        draws(lists[2]),
+        state[5],
+        state[6],
+        state[7],
+        state[8],
+        state[9],
+        if !lighting_group && lists.iter().any(Option::is_some) {
+            " — NO LIGHTING GROUP: gun, players and effects are not drawn"
+        } else {
+            ""
+        }
+    );
+}
+
+/// bo2mp: a dynamic draw left out for want of its pipeline or colour map,
+/// the first 32 kinds (always; `IW4L_T6_DRAWLOG` logs every one).
+fn note_dynamic_skip(slot: u32, code: u32, style: u16, pipeline_known: bool, pipeline_ready: bool, texture: bool) {
+    use std::sync::Mutex;
+    static SEEN: Mutex<Vec<(u32, u32, u16, bool, bool, bool)>> = Mutex::new(Vec::new());
+    let key = (slot, code, style, pipeline_known, pipeline_ready, texture);
+    let Ok(mut seen) = SEEN.lock() else { return };
+    if seen.len() >= 32 || seen.contains(&key) {
+        return;
+    }
+    seen.push(key);
+    diag::info!(
+        World,
+        "bo2 dynamic draw skipped: slot {slot} code {code:#x} style {style:#x} pipeline {pipeline_known} ready {pipeline_ready} texture {texture}{}",
+        if slot == u32::MAX { " (material has no colour map)" } else { "" }
+    );
+}
+
 /// bo2zm: one dynamic list (marks, projectiles, effects, the gun) into a
 /// pass: the draws `keep` admits, opaque first, then blended by sort key;
 /// effects with soft edges when `soft` (the scene depth) is given. Returns
@@ -872,6 +953,14 @@ fn draw_dynamic_list<'w>(
             pipeline,
             shine_group.or_else(|| world_textures.bind_groups.get(&slot)),
         ) else {
+            note_dynamic_skip(
+                slot,
+                code,
+                style,
+                pipelines.contains_key(&key),
+                pipeline.is_some(),
+                world_textures.bind_groups.contains_key(&slot),
+            );
             // IW4L_T6_DRAWLOG=1: why a draw was left out.
             static LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
             if *LOG.get_or_init(|| std::env::var_os("IW4L_T6_DRAWLOG").is_some()) {
@@ -1726,7 +1815,7 @@ fn upload_geometry(
     }
     // bo2zm: BO2's bloom and final colour on a Black Ops II map (it has T6
     // lighting). (`IW4L_T6_NO_BLOOM` turns the bloom off, not the colour.)
-    bloom.0 = source.t6_lighting.is_some();
+    bloom.0 = source.t6_lighting.is_some() && source.t6_bloom;
     if source.overlay_gpu_wait {
         use std::sync::atomic::{AtomicBool, Ordering};
         static SKIPPED: AtomicBool = AtomicBool::new(false);
@@ -2290,8 +2379,11 @@ fn prepare_world_textures(
     let (Some(pipeline), Some(registry)) = (pipeline, registry) else {
         return;
     };
+    // bo2mp: on a map from another game the gun's and players' colour maps
+    // (`dynamic`) may be all there is to bind.
     if geometry.world_surface_color.iter().all(|&slot| slot == u32::MAX)
         && geometry.t6_props.is_empty()
+        && dynamic.as_ref().is_none_or(|d| d.materials.is_empty())
     {
         return;
     }
@@ -2775,8 +2867,37 @@ fn draw_geometry_diagnostic(
             draws.push((item, false));
         }
     }
+    // bo2mp: Black Ops II's moving things (the first-person gun and arms,
+    // players, grenades, marks, effects) draw only in this pass. On a map
+    // from another game its own path draws the world, and once its
+    // pipelines are built no world surface is left to this pass: returning
+    // then left the gun and every player undrawn (most frames on MW2 maps).
+    let dynamic_lists = [
+        dynamic.viewmodel.as_ref(),
+        dynamic.missiles.as_ref(),
+        dynamic.script_static.as_ref(),
+        dynamic.marks.as_ref(),
+        dynamic.effects.as_ref(),
+        dynamic.viewmodel_effects.as_ref(),
+    ];
+    let has_dynamic = dynamic_lists.iter().any(Option::is_some);
+    note_pass_state(
+        draws.len(),
+        &geometry,
+        &dynamic_lists,
+        world_lightmaps.lighting_group.is_some(),
+    );
     if draws.is_empty() && geometry.t6_props.is_empty() && geometry.t6_sky_slot.is_none() {
-        return;
+        if !has_dynamic {
+            return;
+        }
+        static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            diag::info!(
+                Fpv,
+                "bo2 fallback pass: no world surface left to it this frame; running for the gun and players (it used to stop here)"
+            );
+        }
     }
     let (target, depth, extracted_view, view_offset, view_bind) = view.into_inner();
     let world_pipeline = cache.get_render_pipeline(view_bind.world_pipeline);
@@ -2789,7 +2910,7 @@ fn draw_geometry_diagnostic(
     let sky_pipeline = cache.get_render_pipeline(view_bind.sky_pipeline);
     let smodel_pipeline = cache.get_render_pipeline(view_bind.smodel_pipeline);
     let xmodel_pipeline = cache.get_render_pipeline(view_bind.xmodel_pipeline);
-    if world_pipeline.is_none() && smodel_pipeline.is_none() && xmodel_pipeline.is_none() {
+    if world_pipeline.is_none() && smodel_pipeline.is_none() && xmodel_pipeline.is_none() && !has_dynamic {
         return;
     }
     smodel_instances.clear();

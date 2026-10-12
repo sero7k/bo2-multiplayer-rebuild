@@ -331,6 +331,16 @@ fn queue_match_clips(
                 request_named(clips, &bank.0, ns, to, &mut set);
             }
         }
+        // bo2mp: Black Ops' notification sounds (medal, rank up, challenge):
+        // what each plays as in this bank, and every BO1 alias that looks
+        // like one (the names come from its zones).
+        let notify = [crate::ui_sounds::BO1_MEDAL, crate::ui_sounds::BO1_RANK_UP, crate::ui_sounds::BO1_CHALLENGE]
+            .map(|n| (n, crate::ui_sounds::ui_sound(&bank.0, n)));
+        diag::info!(
+            Audio,
+            "audio: BO1 notification sounds: {notify:?}; BO1 candidates in the bank: {:?}",
+            crate::ui_sounds::bo1_notification_candidates(&bank.0)
+        );
         for alias in &announcer_lines {
             aliases += 1;
             let lower = alias.to_ascii_lowercase();

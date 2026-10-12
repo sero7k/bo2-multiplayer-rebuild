@@ -541,6 +541,7 @@ fn build_props(
         sun_primary: g.sun_primary_light_index as u8,
         clip: clip.map(|c| std::sync::Arc::new(c.clone())),
         cache: Default::default(),
+        foreign: None,
     }));
     report.push(format!(
         "t6 props: {} placed, {} meshes; {baked_n} with baked vertex light, {gridded} lit by the light grid (scale {scale:.3} measured on {} baked), {unlit} without light; {visible_n} see their primary light; {sky_n} outside the grid (sky volume)",
@@ -1244,6 +1245,108 @@ pub(crate) fn t6_surface_list(loaded: &mut LoadedWorld, map: &str, iw_list: bool
     loaded.report.push(line);
 }
 
+/// bo2mp: what lights Black Ops II's moving things (the first-person gun
+/// and arms, players, grenades, marks) on a map from another game. A Black
+/// Ops II map installs these in its own lane; a foreign one installed none,
+/// so the gun and players read the previous Black Ops II map's light grid
+/// at this map's points, or none (black), and the fallback shader's
+/// primary-light table was empty (no sun on them). Here: the map's own
+/// light grid read as Black Ops II light, its primary lights in the
+/// table's layout (sun 1, spot 2, omni 5), and the last Black Ops II
+/// map's lightmaps and probe origins dropped.
+fn foreign_t6_lighting(loaded: &mut LoadedWorld, map: &str) {
+    let lights: Vec<[f32; 16]> = loaded.world.draw.as_ref().map_or_else(Vec::new, |draw| {
+        draw.primary_lights
+            .iter()
+            .take(SUN_FOG_SLOT)
+            .map(|p| {
+                let kind = match p.light_type {
+                    1 => 1.0,
+                    2 => 2.0,
+                    3 => 5.0,
+                    _ => 0.0,
+                };
+                [
+                    p.origin[0],
+                    p.origin[1],
+                    p.origin[2],
+                    kind,
+                    p.color[0],
+                    p.color[1],
+                    p.color[2],
+                    p.radius,
+                    p.direction[0],
+                    p.direction[1],
+                    p.direction[2],
+                    p.cos_outer,
+                    // Full strength inside its radius (the shader's
+                    // dAttenuation / d^2, clamped), fading to its edge.
+                    p.radius * p.radius,
+                    p.cos_inner,
+                    0.0,
+                    0.0,
+                ]
+            })
+            .collect()
+    });
+    let sun = lights.iter().position(|l| l[3] == 1.0);
+    // Only where the world itself is drawn by its own game's path (MW2,
+    // MW3: no exposure carrier). A Black Ops or CoD4 world is drawn by the
+    // fallback pass, whose world surfaces read this table too; theirs stays
+    // as it was.
+    let table = loaded
+        .world
+        .draw
+        .as_mut()
+        .filter(|draw| draw.t6_lights.is_empty() && draw.t5_sun_parse_exposure.is_none());
+    let table_filled = table.is_some();
+    if let Some(draw) = table {
+        draw.t6_lights = lights.clone();
+    }
+    let grid = loaded.world.light_grid.clone();
+    let sun_primary = grid
+        .as_ref()
+        .map(|g| g.sun_primary_light_index as u8)
+        .filter(|&i| i != 0)
+        .or(sun.map(|i| i as u8))
+        .unwrap_or(0);
+    let scale = match grid.as_ref().map(|g| g.color_encoding) {
+        Some(asset_model::LightGridColorEncoding::T5Y12U6W6) => 255.0 / 8.0,
+        _ => 4.0,
+    };
+    let foreign = asset_world::ForeignGridLight {
+        scale,
+        outside: asset_world::T6PointLight {
+            light: [0.5; 3],
+            primary: sun_primary,
+            visibility: if sun_primary != 0 { 1.0 } else { 0.0 },
+        },
+    };
+    let line = format!(
+        "bo2 rules: {map} moving-thing lighting: light grid {} (scale {scale:.2}), {} primary lights (sun {:?}, grid sun {sun_primary}, table {}), collision {}",
+        if grid.is_some() { "READY" } else { "absent (ambient + sun)" },
+        lights.len(),
+        sun,
+        if table_filled { "filled" } else { "kept" },
+        loaded.collision.is_some(),
+    );
+    asset_world::install_t6_light_sampler(Some(asset_world::T6LightSampler {
+        mins: grid.as_ref().map_or([0; 3], |g| g.mins),
+        maxs: grid.as_ref().map_or([0; 3], |g| g.maxs),
+        grid,
+        sky: Vec::new(),
+        scale: 1.0,
+        sun_primary,
+        clip: loaded.collision.as_ref().map(|c| std::sync::Arc::new(c.clone())),
+        cache: Default::default(),
+        foreign: Some(foreign),
+    }));
+    asset_world::install_t6_lightmaps(Vec::new());
+    asset_world::install_t6_probe_origins(Vec::new());
+    diag::info!(World, "{line}");
+    loaded.report.push(line);
+}
+
 /// bo2mp: Black Ops II's rules on a map from another game (MW2, MW3, Black
 /// Ops). The map's own lane has walked its world, collision, entities and
 /// ambience into `loaded`; Black Ops II's guns, arms, animations, effects,
@@ -1255,6 +1358,7 @@ pub(crate) fn attach_t6_rules(
     map: &str,
     source: asset_world::ForeignEntityGame,
 ) {
+    foreign_t6_lighting(loaded, map);
     let mut report = Vec::new();
     let dir = match asset_transport::games_root_from_env()
         .and_then(|root| asset_transport::find_zone_file(&root, "t6:patch_mp"))

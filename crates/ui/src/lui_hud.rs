@@ -1098,6 +1098,16 @@ fn send_changes(host: &mut Host, old: Option<&Values>, new: &Values) {
     }
 }
 
+/// bo2mp: a picture of BO2's scorestreak column (rewardselection.lua): the
+/// streak icons (`hud_ks_*`), the slanted boxes and brackets
+/// (`hud_mp_vis_ks_dpad_*`, `mp_hud_scorestreak_bracket`), the momentum bar
+/// and its arrows (`hud_mp_vis_ks_bar*`, `hud_mp_ks_arrow`,
+/// `hud_momentum_meter*`).
+fn is_bo2_streak_material(m: &str) -> bool {
+    const PREFIXES: [&str; 5] = ["hud_ks_", "hud_mp_vis_ks_", "hud_mp_ks_", "hud_momentum_meter", "mp_hud_scorestreak"];
+    PREFIXES.iter().any(|p| m.starts_with(p))
+}
+
 /// Text without Black Ops II's colour codes (`^1`..`^9`) and button
 /// pictures (`^BBUTTON_CYCLE_LEFT^`: a pad glyph, not drawn yet).
 fn plain(text: &str) -> String {
@@ -1937,10 +1947,10 @@ fn lui_hud(
         .map(button_glyph)
         // bo2mp: BO2's Global (the globe) is gone with the shell.
         .filter(|d| !(crate::shell::enabled() && d.kind == "globe"))
-        // bo2mp: BO2's scorestreak icons are not drawn under the modern
-        // HUD's own streak column (hiding its widget by its events missed
-        // some of them).
-        .filter(|d| !(hud.match_mp && crate::hud_modern::modern_hud_enabled() && d.material.as_deref().is_some_and(|m| m.starts_with("hud_ks_"))))
+        // bo2mp: nothing of BO2's scorestreak column is drawn under the
+        // modern HUD's own (its widget is hidden where it is built; these
+        // are its pictures, should any piece be drawn from elsewhere).
+        .filter(|d| !(hud.match_mp && crate::hud_modern::modern_hud_enabled() && d.material.as_deref().is_some_and(is_bo2_streak_material)))
         .filter(|d| {
             d.alpha > 0.004
                 && (d.material.is_some()
@@ -3978,6 +3988,30 @@ fn hide_under_shell(mut roots: Query<(&LuiRoot, &mut Node)>) {
         let hide = if root.0 { crate::shell::covers_loading() } else { crate::shell::covers_lui() };
         if hide && node.display != Display::None {
             node.display = Display::None;
+        }
+    }
+}
+
+#[cfg(test)]
+mod streak_material_tests {
+    use super::is_bo2_streak_material;
+
+    #[test]
+    fn bo2_streak_column_pictures_are_known() {
+        for m in [
+            "hud_ks_spy_sat",
+            "hud_ks_lit_glow",
+            "hud_mp_vis_ks_dpad_box",
+            "hud_mp_vis_ks_dpad_box_back_lit",
+            "hud_mp_vis_ks_bar_backing",
+            "hud_mp_ks_arrow",
+            "hud_momentum_meter_streak",
+            "mp_hud_scorestreak_bracket",
+        ] {
+            assert!(is_bo2_streak_material(m), "{m}");
+        }
+        for m in ["hud_grenadeicon", "hud_mp_firerate_auto", "white", "menu_mp_weapons_ksg"] {
+            assert!(!is_bo2_streak_material(m), "{m}");
         }
     }
 }

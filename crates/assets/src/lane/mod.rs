@@ -1,5 +1,6 @@
 mod helpers;
 mod iw4;
+pub use iw4::check_iw4_map;
 mod iw5;
 // bo2mp: Call of Duty 4 maps (no ZoneGame of their own).
 mod cod4;

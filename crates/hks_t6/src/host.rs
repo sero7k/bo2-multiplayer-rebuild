@@ -1266,9 +1266,11 @@ fn extend_map_categories(vm: &mut Vm) {
 }
 
 /// bo2mp: Black Ops' in-game HUD is drawn in place of these BO2 widgets
-/// (ammo, weapon and grenades; the team scores and the clock). Set
-/// `BO2_HUD=bo2` to keep BO2's own.
-const BO1_HUD_REPLACES: [&str; 2] = ["AmmoArea", "ScoreBottomLeft"];
+/// (ammo, weapon and grenades; the team scores and the clock; the
+/// scorestreak column, its slanted boxes and momentum bar: hud.lua builds
+/// it as `LUI.createMenu.RewardSelection(controller)`). Set `BO2_HUD=bo2`
+/// to keep BO2's own.
+const BO1_HUD_REPLACES: [&str; 3] = ["AmmoArea", "ScoreBottomLeft", "RewardSelection"];
 
 /// bo2mp: Black Ops' HUD is on (the default; `BO2_HUD=bo2` turns it off).
 pub fn bo1_hud_on() -> bool {
@@ -1305,7 +1307,14 @@ fn hide_for_bo1_hud(vm: &mut Vm) {
                 _ => false,
             };
             if !zombies && let Some(u) = out.first().and_then(lui::element) {
-                lui::with(&u, |e| e.fields.borrow_mut().set_str("bo1Hidden", Value::Bool(true)));
+                let id = lui::with(&u, |e| {
+                    let was = e.fields.borrow().get_str("bo1Hidden").truthy();
+                    e.fields.borrow_mut().set_str("bo1Hidden", Value::Bool(true));
+                    (!was).then_some(e.id)
+                });
+                if let Some(id) = id {
+                    eprintln!("bo2mp modern hud: BO2's {name} hidden (element #{id})");
+                }
             }
             Ok(out)
         });
@@ -1361,9 +1370,10 @@ const SCORESTREAK_EVENTS: [&str; 2] = ["hud_update_rewards", "hud_update_momentu
 /// bo2mp: the modern HUD draws his scorestreak column itself, so BO2's is
 /// built and fed as before but never drawn: whichever element takes the
 /// column's events (`registerEventHandler("hud_update_rewards", ...)`) is
-/// marked `bo1Hidden`, whatever the script names the widget. A menu (the
-/// HUD itself, should it ever take them) is left alone; Zombies keeps its
-/// own. `LUI.UIElement.registerEventHandler` is wrapped once, as soon as
+/// marked `bo1Hidden`, whatever the script names the widget (its root,
+/// `RewardSelection`, is also hidden where it is created: see
+/// `BO1_HUD_REPLACES`). The HUD menu itself, should it ever take them, is
+/// left alone; Zombies keeps its own. `LUI.UIElement.registerEventHandler` is wrapped once, as soon as
 /// LUI's element class is in.
 fn hide_bo2_scorestreaks(vm: &mut Vm) {
     let Value::Table(lui) = vm.global("LUI") else {
@@ -1393,8 +1403,10 @@ fn hide_bo2_scorestreaks(vm: &mut Vm) {
                 }
                 _ => false,
             };
-            let is_menu = lui::with(&u, |e| e.fields.borrow().get_str("menuName").truthy());
-            if !zombies && !is_menu {
+            // (RewardSelection is itself a menu, `menuName` set: only the
+            // HUD's own root is spared.)
+            let is_hud = lui::with(&u, |e| e.fields.borrow().get_str("menuName").as_str() == Some("HUD"));
+            if !zombies && !is_hud {
                 let id = lui::with(&u, |e| {
                     let was = e.fields.borrow().get_str("bo1Hidden").truthy();
                     e.fields.borrow_mut().set_str("bo1Hidden", Value::Bool(true));

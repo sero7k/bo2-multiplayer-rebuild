@@ -7,11 +7,12 @@
 //!   reaching right, and WINNING / LOSING / TIED under it.
 //! - Bottom left: his name over a thin progress bar (his score toward the
 //!   limit).
-//! - Bottom right: his three scorestreaks in a column of squares on the
-//!   right edge (the earned one lit and pulsing, the next one filling up,
-//!   used ones dimmed), the gun's name (his grenades beside it), then the
-//!   gun's attachments in gold, one per line, left of a dark box with the
-//!   clip in big figures, the rest of the ammo and the gun's picture.
+//! - Bottom right, as Modern Warfare 3's: his three scorestreaks in a
+//!   column of squares on the right edge (the earned one lit and pulsing,
+//!   the next one filling up, used ones dimmed), the gun's name
+//!   right-aligned under it, then the gun's attachments in gold, one per
+//!   line, left of a dark box with the clip in big figures, the rest of the
+//!   ammo, his grenades and the gun's picture.
 //!
 //! BO2's own ammo area, score corner, square minimap and scorestreak column
 //! are still built but never drawn (`hks_t6::host`'s `hide_for_bo1_hud`);
@@ -44,15 +45,33 @@ const RED: Color = Color::srgb(0.90, 0.26, 0.22);
 const PANEL: Color = Color::srgba(0.04, 0.05, 0.06, 0.62);
 const TRACK: Color = Color::srgba(0.0, 0.0, 0.0, 0.45);
 
-/// A scorestreak square's side on a 1080-line screen.
-const STREAK_PX: f32 = 62.0;
+/// The scorestreak column on a 1080-line screen (scaled by the screen's
+/// height, as the rest of the HUD; each rounded to whole pixels so the
+/// squares and their edges land on the same pixels at every size): a
+/// square's side, the gap between two squares, the corner's distance from
+/// the screen's right and bottom edges, the gap between the column and the
+/// gun's name.
+const STREAK_PX: f32 = 56.0;
+const STREAK_GAP_PX: f32 = 3.0;
+const CORNER_RIGHT_PX: f32 = 22.0;
+const CORNER_BOTTOM_PX: f32 = 26.0;
+const COLUMN_TO_NAME_PX: f32 = 4.0;
+/// The ammo box's height, the gun's name's line and the gap between them;
+/// the grenades' box when he holds no gun.
+const AMMO_BOX_PX: f32 = 54.0;
+const NAME_PX: f32 = 26.0;
+const NAME_TO_BOX_PX: f32 = 2.0;
+const OFFHAND_BOX_PX: f32 = 36.0;
+/// The picture's share of a square's side.
+const STREAK_ICON_SHARE: f32 = 0.74;
 
 /// Where one of his scorestreaks stands.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum StreakState {
     /// Earned and not used yet: lit, pulsing.
     Ready,
-    /// The next one he earns, and how far he is toward it (0 to 1).
+    /// The next one he earns, and how far he is toward it (0 to 1) from the
+    /// last cost he passed.
     Next(f32),
     /// Further off than the next one.
     Locked,
@@ -70,24 +89,36 @@ struct Streak {
 }
 
 /// His scorestreaks as the server publishes them (`bo2mp_streaks`:
-/// `icon:cost[:held]` by `;`, dearest first, `held` 1 while his streak
-/// weapon has one to use) against his momentum (`bo2mp_momentum`). Without
-/// `held` (the default picks, before his class script gave him his own)
-/// one is ready once his momentum reaches its cost, as BO2's column shows.
+/// `icon:cost[:held]` by `;`, `held` 1 while he has one of it to use)
+/// against his momentum (`bo2mp_momentum`), dearest first (the column
+/// lists it top down; equal costs keep the list's order).
+///
+/// BO2's momentum rules (`_globallogic_score::_setplayermomentum`): score
+/// fills it, each streak is earned as it passes the streak's cost, past
+/// the dearest it starts over from what is left, and it is 0 again at each
+/// spawn; an earned streak is held (its quantity) until used, through
+/// deaths. So: held, ready; past its cost this run and not held, used; the
+/// cheapest one still ahead, next (filling from the last cost he passed,
+/// or 0); the rest, locked. Without `held` (the default picks, before his
+/// class script gave him his own) one is ready once his momentum is in.
 fn parse_streaks(list: &str, momentum: i32) -> Vec<Streak> {
-    let picks: Vec<(String, i32, Option<bool>)> = list
+    let mut picks: Vec<(String, i32, Option<bool>)> = list
         .split(';')
         .filter_map(|e| {
             let mut p = e.split(':');
             let icon = p.next()?.trim();
             let cost: i32 = p.next()?.trim().parse().ok()?;
             let held = p.next().map(|h| h.trim() == "1");
-            (!icon.is_empty()).then(|| (icon.to_owned(), cost, held))
+            (!icon.is_empty() && cost > 0).then(|| (icon.to_owned(), cost, held))
         })
         .collect();
+    picks.sort_by_key(|p| std::cmp::Reverse(p.1));
+    let momentum = momentum.max(0);
     let ready = |cost: i32, held: Option<bool>| held.unwrap_or(momentum >= cost);
     // The next one: the cheapest he has not reached yet.
     let next = picks.iter().filter(|(_, c, h)| !ready(*c, *h) && momentum < *c).map(|(_, c, _)| *c).min();
+    // Where its fill starts: the dearest cost below it he has passed.
+    let from = next.map_or(0, |n| picks.iter().map(|(_, c, _)| *c).filter(|c| *c < n && *c <= momentum).max().unwrap_or(0));
     picks
         .into_iter()
         .map(|(icon, cost, held)| {
@@ -96,13 +127,60 @@ fn parse_streaks(list: &str, momentum: i32) -> Vec<Streak> {
             } else if momentum >= cost {
                 StreakState::Used
             } else if Some(cost) == next {
-                StreakState::Next((momentum.max(0) as f32 / cost.max(1) as f32).clamp(0.0, 1.0))
+                StreakState::Next(((momentum - from) as f32 / (cost - from).max(1) as f32).clamp(0.0, 1.0))
             } else {
                 StreakState::Locked
             };
             Streak { icon, cost, state }
         })
         .collect()
+}
+
+/// The part of a picture that shows (its pixels above a faint alpha), so
+/// an icon drawn off-centre on its canvas sits centred in its square, and
+/// that part's width over its height. The whole picture when its pixels
+/// are not at hand.
+fn visible_part(img: &Image) -> (Option<Rect>, f32) {
+    let size = img.texture_descriptor.size;
+    let (w, h) = (size.width as usize, size.height as usize);
+    let whole = (None, w.max(1) as f32 / h.max(1) as f32);
+    let rgba8 = matches!(img.texture_descriptor.format, TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb);
+    let Some(data) = img.data.as_deref().filter(|d| rgba8 && d.len() >= w * h * 4) else {
+        return whole;
+    };
+    let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            if data[(y * w + x) * 4 + 3] > 24 {
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x + 1);
+                y1 = y1.max(y + 1);
+            }
+        }
+    }
+    if x0 >= x1 || y0 >= y1 {
+        return whole;
+    }
+    let r = Rect::new(x0 as f32, y0 as f32, x1 as f32, y1 as f32);
+    (Some(r), r.width() / r.height())
+}
+
+/// A scorestreak's picture as its square draws it.
+#[derive(Clone)]
+struct StreakPic {
+    image: Handle<Image>,
+    /// The part that shows (`visible_part`) and its width over its height.
+    rect: Option<Rect>,
+    aspect: f32,
+}
+
+/// The picture's size inside a square of `side`: the longer edge
+/// `STREAK_ICON_SHARE` of the side, the other by its shape, whole pixels.
+fn icon_size(side: f32, aspect: f32) -> (f32, f32) {
+    let edge = (side * STREAK_ICON_SHARE).round();
+    let aspect = if aspect.is_finite() && aspect > 0.0 { aspect } else { 1.0 };
+    if aspect >= 1.0 { (edge, (edge / aspect).round().max(1.0)) } else { ((edge * aspect).round().max(1.0), edge) }
 }
 
 /// An attachment's name when BO2's tables do not give one (its
@@ -459,8 +537,15 @@ fn modern_hud(
             Some((*lethal, picture(&mut cache, icons, &mut images, name), *n))
         })
         .collect();
-    let streak_pics: Vec<Option<Handle<Image>>> =
-        values.streaks.iter().map(|s| picture(&mut cache, icons, &mut images, &s.icon)).collect();
+    let streak_pics: Vec<Option<StreakPic>> = values
+        .streaks
+        .iter()
+        .map(|s| {
+            let image = picture(&mut cache, icons, &mut images, &s.icon)?;
+            let (rect, aspect) = images.get(&image).map_or((None, 1.0), visible_part);
+            Some(StreakPic { image, rect, aspect })
+        })
+        .collect();
 
     // The two sides' Black Ops emblems (Black Ops and Spetsnaz, read from
     // Black Ops' own files; plain squares until they are in).
@@ -672,16 +757,29 @@ struct Corner<'a> {
     gun: Option<(Handle<Image>, f32)>,
     offhands: Vec<(bool, Option<Handle<Image>>, u32)>,
     /// Each scorestreak's picture, in `values.streaks`' order.
-    streak_pics: Vec<Option<Handle<Image>>>,
+    streak_pics: Vec<Option<StreakPic>>,
 }
 
 /// The ready scorestreak's square: its glow pulses (`pulse_ready`).
 #[derive(Component)]
 struct ReadyPulse;
 
-/// The bottom right corner: his scorestreak column on the right edge, the
-/// gun's name (his grenades beside it), then its attachments in gold, one
-/// per line, left of the ammo box.
+/// A length on a 1080-line screen at the screen's scale, in whole pixels.
+fn whole_px(v: f32, k: f32) -> f32 {
+    (v * k).round()
+}
+
+/// The bottom right corner, as Modern Warfare 3 lays it out: his
+/// scorestreak column (squares stacked on the right edge, dearest at the
+/// top), the gun's name right-aligned under it, then the ammo box (the
+/// clip in big figures, the rest of the ammo, his grenades, the gun's
+/// picture) with its attachments in gold, one per line, to its left.
+///
+/// The column, the name and the ammo box are each placed from the screen's
+/// right and bottom edges in whole pixels, one level under the HUD's root
+/// (each of a fixed height, stacked bottom up): the layout rounds a node's
+/// place relative to its parent, so right-aligning them inside one box of
+/// a fractional width put their right edges a pixel apart at some sizes.
 fn spawn_corner(
     root: &mut ChildSpawnerCommands,
     bo2: Option<&crate::bo2_font::Bo2Fonts>,
@@ -690,113 +788,125 @@ fn spawn_corner(
     c: &Corner,
 ) {
     let px = |v: f32| Val::Px(v * k);
+    let right = Val::Px(whole_px(CORNER_RIGHT_PX, k));
     let values = c.values;
     let shows_ammo = !values.not_a_gun && (values.clip > 0 || values.stock > 0 || values.clip_left.is_some());
-    root.spawn(Node {
-        position_type: PositionType::Absolute,
-        right: Val::Percent(1.2),
-        bottom: Val::Percent(2.6),
-        flex_direction: FlexDirection::Column,
-        align_items: AlignItems::FlexEnd,
-        row_gap: px(6.0),
-        ..default()
-    })
-    .with_children(|corner| {
-        // The scorestreak column: dearest at the top, as BO2's.
-        if !values.streaks.is_empty() {
-            corner
-                .spawn(Node {
+    // Stacked bottom up: how high the next piece starts.
+    let mut bottom = whole_px(CORNER_BOTTOM_PX, k);
+    if shows_ammo {
+        let box_h = whole_px(AMMO_BOX_PX, k);
+        root.spawn((
+            BackgroundColor(PANEL),
+            Node {
+                position_type: PositionType::Absolute,
+                right,
+                bottom: Val::Px(bottom),
+                height: Val::Px(box_h),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: px(14.0),
+                padding: UiRect::horizontal(px(12.0)),
+                ..default()
+            },
+        ))
+        .with_children(|row| {
+            // The attachments (gold, one per line, right-aligned) to the
+            // box's left, centred on it.
+            if !values.attachments.is_empty() {
+                row.spawn(Node {
+                    position_type: PositionType::Absolute,
+                    right: Val::Percent(100.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    margin: UiRect::right(px(12.0)),
                     flex_direction: FlexDirection::Column,
+                    justify_content: JustifyContent::Center,
                     align_items: AlignItems::FlexEnd,
-                    row_gap: px(5.0),
-                    margin: UiRect::bottom(px(4.0)),
+                    row_gap: px(1.0),
                     ..default()
                 })
-                .with_children(|col| {
-                    for (s, pic) in values.streaks.iter().zip(c.streak_pics.iter()) {
-                        streak_square(col, k, s, pic.clone());
-                    }
-                });
-        }
-        // The gun's name, his grenades to its left.
-        let name = shows_ammo && !values.weapon_label.is_empty();
-        if name || !c.offhands.is_empty() {
-            corner
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: px(12.0),
-                    ..default()
-                })
-                .with_children(|line| {
-                    if !c.offhands.is_empty() {
-                        offhand_row(line, bo2, font, k, &c.offhands);
-                    }
-                    if name {
-                        line.spawn(Node::default()).with_children(|n| {
-                            text(n, bo2, font, "Default", &values.weapon_label, 22.0 * k, WHITE);
+                .with_children(|list| {
+                    for a in &values.attachments {
+                        list.spawn(Node { flex_shrink: 0.0, ..default() }).with_children(|n| {
+                            text(n, bo2, font, "Default", a, 19.0 * k, GOLD);
                         });
                     }
                 });
-        }
-        if !shows_ammo {
-            return;
-        }
-        // The attachments (gold, one per line, right-aligned) beside the
-        // ammo box.
-        corner
-            .spawn(Node {
-                flex_direction: FlexDirection::Row,
+            }
+            let clip_color = if values.low_clip || values.clip == 0 { LOW } else { WHITE };
+            if let Some(left) = values.clip_left {
+                text(row, bo2, font, "Default", &left.to_string(), 44.0 * k, if left == 0 { LOW } else { WHITE });
+            }
+            text(row, bo2, font, "Default", &values.clip.to_string(), 44.0 * k, clip_color);
+            let stock_color = if values.stock == 0 { LOW } else { DIM };
+            text(row, bo2, font, "Default", &values.stock.to_string(), 26.0 * k, stock_color);
+            if !c.offhands.is_empty() {
+                offhand_row(row, bo2, font, k, &c.offhands);
+            }
+            if let Some((image, wide)) = c.gun.clone() {
+                row.spawn((
+                    ImageNode::new(image),
+                    Node { width: px(36.0 * wide), height: px(36.0), ..default() },
+                ));
+            }
+        });
+        bottom += box_h + whole_px(NAME_TO_BOX_PX, k);
+        // The gun's name, right-aligned over the box.
+        if !values.weapon_label.is_empty() {
+            let name_h = whole_px(NAME_PX, k);
+            root.spawn(Node {
+                position_type: PositionType::Absolute,
+                right,
+                bottom: Val::Px(bottom),
+                height: Val::Px(name_h),
                 align_items: AlignItems::Center,
-                column_gap: px(12.0),
                 ..default()
             })
-            .with_children(|row| {
-                if !values.attachments.is_empty() {
-                    row.spawn(Node {
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::FlexEnd,
-                        row_gap: px(1.0),
-                        ..default()
-                    })
-                    .with_children(|list| {
-                        for a in &values.attachments {
-                            list.spawn(Node::default()).with_children(|n| {
-                                text(n, bo2, font, "Default", a, 19.0 * k, GOLD);
-                            });
-                        }
-                    });
-                }
-                row.spawn((
-                    BackgroundColor(PANEL),
-                    Node {
-                        flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Center,
-                        column_gap: px(14.0),
-                        padding: UiRect::axes(px(12.0), px(6.0)),
-                        ..default()
-                    },
-                ))
-                .with_children(|row| {
-                    let clip_color = if values.low_clip || values.clip == 0 { LOW } else { WHITE };
-                    if let Some(left) = values.clip_left {
-                        text(row, bo2, font, "Default", &left.to_string(), 44.0 * k, if left == 0 { LOW } else { WHITE });
-                    }
-                    text(row, bo2, font, "Default", &values.clip.to_string(), 44.0 * k, clip_color);
-                    let stock_color = if values.stock == 0 { LOW } else { DIM };
-                    text(row, bo2, font, "Default", &values.stock.to_string(), 26.0 * k, stock_color);
-                    if let Some((image, wide)) = c.gun.clone() {
-                        row.spawn((
-                            ImageNode::new(image),
-                            Node { width: px(36.0 * wide), height: px(36.0), ..default() },
-                        ));
-                    }
-                });
+            .with_children(|n| {
+                text(n, bo2, font, "Default", &values.weapon_label, 22.0 * k, WHITE);
             });
-    });
+            bottom += name_h;
+        }
+        bottom += whole_px(COLUMN_TO_NAME_PX, k);
+    } else if !c.offhands.is_empty() {
+        // A grenade or a scorestreak in his hands: his grenades alone.
+        let box_h = whole_px(OFFHAND_BOX_PX, k);
+        root.spawn((
+            BackgroundColor(PANEL),
+            Node {
+                position_type: PositionType::Absolute,
+                right,
+                bottom: Val::Px(bottom),
+                height: Val::Px(box_h),
+                align_items: AlignItems::Center,
+                padding: UiRect::horizontal(px(10.0)),
+                ..default()
+            },
+        ))
+        .with_children(|p| offhand_row(p, bo2, font, k, &c.offhands));
+        bottom += box_h + whole_px(COLUMN_TO_NAME_PX, k);
+    }
+    // The scorestreak column: dearest at the top.
+    if !values.streaks.is_empty() {
+        root.spawn(Node {
+            position_type: PositionType::Absolute,
+            right,
+            bottom: Val::Px(bottom),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::FlexEnd,
+            row_gap: Val::Px(whole_px(STREAK_GAP_PX, k).max(2.0)),
+            ..default()
+        })
+        .with_children(|col| {
+            for (i, s) in values.streaks.iter().enumerate() {
+                streak_square(col, k, s, c.streak_pics.get(i).cloned().flatten());
+            }
+        });
+    }
 }
 
-/// His grenades and equipment: each picture and its count.
+/// His grenades and equipment: each picture and its count, tactical then
+/// lethal.
 fn offhand_row(
     line: &mut ChildSpawnerCommands,
     bo2: Option<&crate::bo2_font::Bo2Fonts>,
@@ -805,23 +915,19 @@ fn offhand_row(
     offhands: &[(bool, Option<Handle<Image>>, u32)],
 ) {
     let px = |v: f32| Val::Px(v * k);
-    line.spawn((
-        BackgroundColor(PANEL),
-        Node {
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            column_gap: px(10.0),
-            padding: UiRect::axes(px(10.0), px(4.0)),
-            ..default()
-        },
-    ))
+    line.spawn(Node {
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        column_gap: px(8.0),
+        ..default()
+    })
     .with_children(|row| {
         for lethal in [false, true] {
             for (_, pic, n) in offhands.iter().filter(|(l, _, _)| *l == lethal) {
                 row.spawn(Node {
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
-                    column_gap: px(3.0),
+                    column_gap: px(2.0),
                     ..default()
                 })
                 .with_children(|g| {
@@ -830,43 +936,51 @@ fn offhand_row(
                         Some(image) => {
                             g.spawn((
                                 ImageNode { image, color: tint, ..default() },
-                                Node { width: px(30.0), height: px(30.0), ..default() },
+                                Node { width: px(26.0), height: px(26.0), ..default() },
                             ));
                         }
                         None => {
                             g.spawn((
                                 BackgroundColor(tint.with_alpha(0.4)),
-                                Node { width: px(22.0), height: px(22.0), ..default() },
+                                Node { width: px(18.0), height: px(18.0), ..default() },
                             ));
                         }
                     }
-                    text(g, bo2, font, "Default", &n.to_string(), 18.0 * k, DIM);
+                    text(g, bo2, font, "Default", &n.to_string(), 16.0 * k, DIM);
                 });
             }
         }
     });
 }
 
-/// One scorestreak's square: a dark translucent square with its picture.
-/// Ready: lit, an accent edge and a pulsing accent glow. Next: a pale fill
-/// rising from the bottom as he earns toward it, and a thin accent bar
-/// along the bottom. Further off: faint. Used: fainter still.
-fn streak_square(col: &mut ChildSpawnerCommands, k: f32, s: &Streak, pic: Option<Handle<Image>>) {
-    let px = |v: f32| Val::Px(v * k);
-    let side = STREAK_PX * k;
-    let (icon_alpha, edge) = match s.state {
-        StreakState::Ready => (1.0, ACCENT),
-        StreakState::Next(_) => (0.62, Color::srgba(1.0, 1.0, 1.0, 0.16)),
-        StreakState::Locked => (0.32, Color::srgba(1.0, 1.0, 1.0, 0.08)),
-        StreakState::Used => (0.16, Color::NONE),
-    };
+/// How a square of each state looks: its picture's alpha, its edge, its
+/// ground.
+fn square_look(state: StreakState) -> (f32, Color, Color) {
+    match state {
+        StreakState::Ready => (1.0, ACCENT, Color::srgba(0.04, 0.05, 0.06, 0.70)),
+        StreakState::Next(_) => (0.80, Color::srgba(1.0, 1.0, 1.0, 0.30), PANEL),
+        StreakState::Locked => (0.42, Color::srgba(1.0, 1.0, 1.0, 0.16), Color::srgba(0.04, 0.05, 0.06, 0.48)),
+        StreakState::Used => (0.16, Color::srgba(1.0, 1.0, 1.0, 0.07), Color::srgba(0.04, 0.05, 0.06, 0.30)),
+    }
+}
+
+/// One scorestreak's square (Modern Warfare 3's): a dark translucent
+/// square with a thin pale edge and its picture centred in it. Ready: the
+/// picture at full strength, an accent edge and a pulsing accent glow.
+/// Next: a pale fill rising from the bottom as he earns toward it, an
+/// accent line at its top. Further off: faint. Used: fainter still.
+fn streak_square(col: &mut ChildSpawnerCommands, k: f32, s: &Streak, pic: Option<StreakPic>) {
+    let side = whole_px(STREAK_PX, k);
+    let edge_w = if s.state == StreakState::Ready { whole_px(2.0, k).max(2.0) } else { 1.0 };
+    let (icon_alpha, edge, ground) = square_look(s.state);
     let mut square = col.spawn((
-        BackgroundColor(PANEL),
+        BackgroundColor(ground),
         BorderColor::all(edge),
         Node {
             width: Val::Px(side),
             height: Val::Px(side),
-            border: UiRect::all(px(if s.state == StreakState::Ready { 2.0 } else { 1.0 })),
+            flex_shrink: 0.0,
+            border: UiRect::all(Val::Px(edge_w)),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             overflow: Overflow::clip(),
@@ -891,28 +1005,19 @@ fn streak_square(col: &mut ChildSpawnerCommands, k: f32, s: &Streak, pic: Option
                 ));
             }
             StreakState::Next(part) => {
+                let inner = side - 2.0 * edge_w;
+                let line = whole_px(2.0, k).max(1.0);
+                let fill = (inner * part).round().max(line);
                 sq.spawn((
-                    BackgroundGradient::from(LinearGradient::to_top(vec![
-                        ColorStop::new(Color::srgba(1.0, 1.0, 1.0, 0.24), Val::Percent(0.0)),
-                        ColorStop::new(Color::srgba(1.0, 1.0, 1.0, 0.08), Val::Percent(100.0)),
-                    ])),
+                    BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.22)),
+                    BorderColor::all(ACCENT),
                     Node {
                         position_type: PositionType::Absolute,
                         left: Val::Px(0.0),
                         bottom: Val::Px(0.0),
                         width: Val::Percent(100.0),
-                        height: Val::Percent(part * 100.0),
-                        ..default()
-                    },
-                ));
-                sq.spawn((
-                    BackgroundColor(ACCENT),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(0.0),
-                        bottom: Val::Px(0.0),
-                        width: Val::Percent(part * 100.0),
-                        height: px(3.0),
+                        height: Val::Px(fill),
+                        border: UiRect::top(Val::Px(line)),
                         ..default()
                     },
                 ));
@@ -921,16 +1026,19 @@ fn streak_square(col: &mut ChildSpawnerCommands, k: f32, s: &Streak, pic: Option
         }
         let tint = Color::srgba(1.0, 1.0, 1.0, icon_alpha);
         match pic {
-            Some(image) => {
+            Some(p) => {
+                let (w, h) = icon_size(side, p.aspect);
                 sq.spawn((
-                    ImageNode { image, color: tint, ..default() },
-                    Node { width: Val::Percent(84.0), height: Val::Percent(84.0), ..default() },
+                    ImageNode { image: p.image, color: tint, rect: p.rect, ..default() },
+                    Node { width: Val::Px(w), height: Val::Px(h), flex_shrink: 0.0, ..default() },
                 ));
             }
             None => {
+                let (w, _) = icon_size(side, 1.0);
+                let w = (w * 0.6).round();
                 sq.spawn((
                     BackgroundColor(tint.with_alpha(icon_alpha * 0.35)),
-                    Node { width: Val::Percent(46.0), height: Val::Percent(46.0), ..default() },
+                    Node { width: Val::Px(w), height: Val::Px(w), ..default() },
                 ));
             }
         }
@@ -941,7 +1049,7 @@ fn streak_square(col: &mut ChildSpawnerCommands, k: f32, s: &Streak, pic: Option
 fn pulse_ready(time: Res<Time<Real>>, mut q: Query<&mut BackgroundColor, With<ReadyPulse>>) {
     let beat = (time.elapsed_secs() * std::f32::consts::TAU / 1.2).sin() * 0.5 + 0.5;
     for mut bg in &mut q {
-        bg.0 = ACCENT.with_alpha(0.14 + 0.30 * beat);
+        bg.0 = ACCENT.with_alpha(0.12 + 0.26 * beat);
     }
 }
 
@@ -1334,7 +1442,27 @@ pub mod preview {
         Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, px, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default())
     }
 
-    fn values(i: usize) -> HudValues {
+    /// A stand-in drawn off-centre on a wide canvas (a plane in its top
+    /// left, the rest clear), as some of BO2's streak icons are: its square
+    /// must still show it centred.
+    fn stand_in_off_centre(w: u32, h: u32) -> Image {
+        let inner = stand_in(0, h * 3 / 4, h * 3 / 4);
+        let src = inner.data.clone().unwrap_or_default();
+        let iw = h * 3 / 4;
+        let mut px = vec![0u8; (w * h * 4) as usize];
+        for y in 0..iw {
+            for x in 0..iw {
+                let (s, d) = (((y * iw + x) * 4) as usize, (((y + 2) * w + x + 3) * 4) as usize);
+                px[d..d + 4].copy_from_slice(&src[s..s + 4]);
+            }
+        }
+        Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, px, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default())
+    }
+
+    /// The pictures' cases: (file name, values). The streak lists are as
+    /// the server sends them (`icon:cost:held`, dearest first) with BO2's
+    /// own costs (UAV 425, Hunter Killer 525, Lightning Strike 750).
+    fn values(i: usize) -> Option<(&'static str, HudValues)> {
         let base = HudValues {
             weapon: "m8a1_mp".into(),
             weapon_label: "M8A1".into(),
@@ -1344,36 +1472,56 @@ pub mod preview {
             attachments: vec!["Suppressor".into(), "Extended Clip".into()],
             ..default()
         };
-        match i {
-            // Earning toward the first one.
-            0 => HudValues { streaks: parse_streaks("ks_c:750:0;ks_b:525:0;ks_a:425:0", 300), ..base },
-            // The first ready, the second filling up.
-            1 => HudValues {
-                streaks: parse_streaks("ks_c:750:0;ks_b:525:0;ks_a:425:1", 480),
-                attachments: vec!["Reflex Sight".into(), "Fast Mag".into(), "Fore Grip".into()],
-                ..base
-            },
-            // Two used, the dearest ready; a low clip.
-            2 => HudValues {
-                streaks: parse_streaks("ks_c:750:1;ks_b:525:0;ks_a:425:0", 800),
-                clip: 6,
-                low_clip: true,
-                ..base
-            },
-            // Holding a scorestreak's remote: no ammo, the column stays.
-            _ => HudValues {
-                streaks: parse_streaks("ks_c:750:0;ks_b:525:1;ks_a:425:0", 610),
-                not_a_gun: true,
-                weapon: "killstreak_remote_turret_mp".into(),
-                ..base
-            },
-        }
+        Some(match i {
+            // A new life: earning toward the cheapest.
+            0 => ("01_earning", HudValues { streaks: parse_streaks("ks_c:750:0;ks_b:525:0;ks_a:425:0", 300), ..base }),
+            // The cheapest earned (held), the next filling from its cost.
+            1 => (
+                "02_ready_and_next",
+                HudValues {
+                    streaks: parse_streaks("ks_c:750:0;ks_b:525:0;ks_a:425:1", 480),
+                    attachments: vec!["Reflex Sight".into(), "Fast Mag".into(), "Fore Grip".into()],
+                    ..base
+                },
+            ),
+            // The cheapest used, the middle one held, the dearest next; a
+            // low clip.
+            2 => (
+                "03_used_held_next_low_clip",
+                HudValues { streaks: parse_streaks("ks_c:750:0;ks_b:525:1;ks_a:425:0", 610), clip: 6, low_clip: true, ..base },
+            ),
+            // Past the dearest his momentum started over (750 -> 120): the
+            // dearest held, the cheapest next again. Holding a scorestreak's
+            // remote: no ammo, the column stays.
+            3 => (
+                "04_wrapped_holding_streak",
+                HudValues {
+                    streaks: parse_streaks("ks_c:750:1;ks_b:525:0;ks_a:425:0", 120),
+                    not_a_gun: true,
+                    weapon: "killstreak_remote_turret_mp".into(),
+                    ..base
+                },
+            ),
+            // After a death: momentum 0 again, one still held from the last
+            // life; no attachments.
+            4 => (
+                "05_new_life_one_held",
+                HudValues {
+                    streaks: parse_streaks("ks_c:750:0;ks_b:525:1;ks_a:425:0", 0),
+                    attachments: Vec::new(),
+                    weapon_label: "MTAR".into(),
+                    ..base
+                },
+            ),
+            _ => return None,
+        })
     }
 
     fn step(
         mut commands: Commands,
         mut plan: ResMut<Plan>,
         fonts: Option<Res<crate::shell::theme::ShellFonts>>,
+        window: Query<&Window, With<PrimaryWindow>>,
         shots: Query<Entity, With<Shot>>,
         mut images: ResMut<Assets<Image>>,
         mut exit: MessageWriter<AppExit>,
@@ -1385,13 +1533,13 @@ pub mod preview {
         }
         plan.frames = 0;
         let i = plan.step / 2;
-        let names = ["01_earning", "02_ready_and_next", "03_used_and_low_clip", "04_holding_streak"];
-        if i >= names.len() {
+        let Some((name, values)) = values(i) else {
             exit.write(AppExit::Success);
             return;
-        }
+        };
+        let height = window.single().map_or(1080.0, Window::height);
         if plan.step % 2 == 1 {
-            let path = plan.out.join(format!("{}.png", names[i]));
+            let path = plan.out.join(format!("{}_{}p.png", name, height as u32));
             commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
             plan.step += 1;
             return;
@@ -1400,35 +1548,42 @@ pub mod preview {
             commands.entity(e).despawn();
         }
         let font = GameUiFont(fonts.bold.clone());
-        let values = values(i);
-        let pic = |images: &mut Assets<Image>, kind: u8| Some(images.add(stand_in(kind, 64, 64)));
+        let mut pic = |kind: u8| {
+            let img = if kind == 0 { stand_in_off_centre(128, 64) } else { stand_in(kind, 64, 64) };
+            let (rect, aspect) = visible_part(&img);
+            StreakPic { image: images.add(img), rect, aspect }
+        };
         let streak_pics = values
             .streaks
             .iter()
-            .map(|s| match s.icon.as_str() {
-                "ks_a" => pic(&mut images, 0),
-                "ks_b" => pic(&mut images, 1),
-                _ => pic(&mut images, 2),
+            .map(|s| {
+                Some(match s.icon.as_str() {
+                    "ks_a" => pic(0),
+                    "ks_b" => pic(1),
+                    _ => pic(2),
+                })
             })
             .collect();
         let corner = Corner {
             values: &values,
             gun: Some((images.add(stand_in(3, 128, 64)), 2.0)),
-            offhands: values.offhand.iter().map(|(l, _, n)| (*l, pic(&mut images, 1), *n)).collect(),
+            offhands: values.offhand.iter().map(|(l, _, n)| (*l, Some(images.add(stand_in(1, 64, 64))), *n)).collect(),
             streak_pics,
         };
         let bg = images.add(scene());
+        let k = (height / 1080.0).max(0.4);
         commands
             .spawn((
                 Shot,
                 ImageNode::new(bg),
                 Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
             ))
-            .with_children(|root| spawn_corner(root, None, &font, 1.0, &corner));
+            .with_children(|root| spawn_corner(root, None, &font, k, &corner));
         plan.step += 1;
     }
 
-    /// The corner with stand-in values, a picture of each saved in `out`.
+    /// The corner with stand-in values, a picture of each saved in `out`
+    /// (named for the case and the window's height).
     pub fn install(app: &mut App, out: PathBuf) {
         app.add_systems(Startup, crate::shell::theme::load_fonts);
         app.insert_resource(Plan { out, step: 0, frames: 0 });
@@ -1440,24 +1595,120 @@ pub mod preview {
 mod tests {
     use super::*;
 
+    fn states(s: &[Streak]) -> Vec<StreakState> {
+        s.iter().map(|s| s.state).collect()
+    }
+
+    fn next_part(s: &Streak) -> f32 {
+        match s.state {
+            StreakState::Next(p) => p,
+            other => panic!("{} is {other:?}, not next", s.icon),
+        }
+    }
+
     #[test]
     fn streaks_read_ready_next_used() {
-        // Dearest first; the cheapest held, the middle one next.
+        // Dearest first; the cheapest held, the middle one next, filling
+        // from the cheapest's cost (480 of 425..525).
         let s = parse_streaks("hud_ks_c:750:0;hud_ks_b:525:0;hud_ks_a:425:1", 480);
         assert_eq!(s.len(), 3);
         assert_eq!(s[0].state, StreakState::Locked);
-        assert!(matches!(s[1].state, StreakState::Next(p) if (p - 480.0 / 525.0).abs() < 1e-4));
+        assert!((next_part(&s[1]) - 55.0 / 100.0).abs() < 1e-4);
         assert_eq!(s[2].state, StreakState::Ready);
-        // Earned and used: past its cost and not held.
-        let s = parse_streaks("c:750:1;b:525:0;a:425:0", 800);
-        assert_eq!(s[0].state, StreakState::Ready);
-        assert_eq!(s[1].state, StreakState::Used);
+        // Earned and used: past its cost and not held; the dearest next.
+        let s = parse_streaks("c:750:0;b:525:1;a:425:0", 610);
+        assert_eq!(s[1].state, StreakState::Ready);
         assert_eq!(s[2].state, StreakState::Used);
+        assert!((next_part(&s[0]) - 85.0 / 225.0).abs() < 1e-4);
         // The default picks (no `held`): ready once his momentum is in.
         let s = parse_streaks("c:750;b:525;a:425", 500);
         assert_eq!(s[2].state, StreakState::Ready);
         assert!(matches!(s[1].state, StreakState::Next(_)));
         assert!(parse_streaks("", 0).is_empty());
+    }
+
+    #[test]
+    fn streaks_new_life_and_wrap() {
+        // A new life: momentum 0 (BO2 resets it at each spawn), nothing
+        // held: the cheapest next and empty, the rest locked.
+        let s = parse_streaks("c:750:0;b:525:0;a:425:0", 0);
+        assert_eq!(states(&s)[..2], [StreakState::Locked, StreakState::Locked]);
+        assert_eq!(next_part(&s[2]), 0.0);
+        // One held through the death: still ready at momentum 0; the next
+        // is the cheapest not held, filling from 0 (not from the held one's
+        // cost, which he has not passed this life).
+        let s = parse_streaks("c:750:0;b:525:0;a:425:1", 300);
+        assert_eq!(s[2].state, StreakState::Ready);
+        assert!((next_part(&s[1]) - 300.0 / 525.0).abs() < 1e-4);
+        assert_eq!(s[0].state, StreakState::Locked);
+        // Past the dearest momentum starts over (750 + 120 -> 120): the
+        // dearest held, the others ahead again, not "used".
+        let s = parse_streaks("c:750:1;b:525:0;a:425:0", 120);
+        assert_eq!(s[0].state, StreakState::Ready);
+        assert_eq!(s[1].state, StreakState::Locked);
+        assert!((next_part(&s[2]) - 120.0 / 425.0).abs() < 1e-4);
+        // Used up after the wrap: all ahead again.
+        let s = parse_streaks("c:750:0;b:525:0;a:425:0", 120);
+        assert_eq!(s[0].state, StreakState::Locked);
+        // A negative or bad momentum reads 0.
+        let s = parse_streaks("a:425:0", -40);
+        assert_eq!(next_part(&s[0]), 0.0);
+    }
+
+    #[test]
+    fn streaks_are_put_in_cost_order() {
+        // Whatever order they come in (pick order, an older server), the
+        // column lists the dearest at the top; equal costs keep the list's
+        // order; a broken entry or a free one is dropped.
+        let s = parse_streaks("a:425:0;c:750:0; b :525:1;bad;x:0:0;y:abc;d:525:0", 450);
+        let icons: Vec<&str> = s.iter().map(|s| s.icon.as_str()).collect();
+        assert_eq!(icons, ["c", "b", "d", "a"]);
+        assert_eq!(s[1].state, StreakState::Ready);
+        assert!((next_part(&s[2]) - 25.0 / 100.0).abs() < 1e-4);
+        assert_eq!(s[3].state, StreakState::Used);
+        assert!(s.iter().all(|s| s.cost > 0));
+    }
+
+    #[test]
+    fn streak_icons_fit_and_centre() {
+        // Square: 74% of the side; wide: its long edge so; whole pixels.
+        assert_eq!(icon_size(56.0, 1.0), (41.0, 41.0));
+        assert_eq!(icon_size(56.0, 2.0), (41.0, 21.0));
+        assert_eq!(icon_size(56.0, 0.5), (21.0, 41.0));
+        assert_eq!(icon_size(40.0, f32::NAN), (30.0, 30.0));
+        // The part of a picture that shows: an icon in a canvas's corner.
+        let (w, h) = (16u32, 8u32);
+        let mut px = vec![0u8; (w * h * 4) as usize];
+        for y in 1..5 {
+            for x in 2..10 {
+                px[((y * w + x) * 4 + 3) as usize] = 255;
+            }
+        }
+        let img = Image::new(
+            Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            TextureDimension::D2,
+            px,
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::default(),
+        );
+        let (rect, aspect) = visible_part(&img);
+        assert_eq!(rect, Some(Rect::new(2.0, 1.0, 10.0, 5.0)));
+        assert!((aspect - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn streak_column_lands_on_whole_pixels() {
+        // 1080, 768 and 720 lines: the square and gap whole, the column's
+        // height the sum of its parts.
+        for h in [1080.0f32, 768.0, 720.0, 1440.0] {
+            let k = (h / 1080.0).max(0.4);
+            let side = whole_px(STREAK_PX, k);
+            assert_eq!(side, side.round());
+            assert!(side >= 30.0);
+            let gap = whole_px(STREAK_GAP_PX, k).max(2.0);
+            assert_eq!(gap, gap.round());
+        }
+        assert_eq!(whole_px(STREAK_PX, 768.0 / 1080.0), 40.0);
     }
 
     #[test]
