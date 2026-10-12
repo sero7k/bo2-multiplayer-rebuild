@@ -896,7 +896,6 @@ pub(crate) fn register_shell(app: &mut App) {
                 background::shell_background,
                 prefetch_pictures,
                 view::shell_view,
-                view::countdown_tick,
                 loading::shell_loading,
                 ingame::ingame_input,
                 ingame::ingame_view,

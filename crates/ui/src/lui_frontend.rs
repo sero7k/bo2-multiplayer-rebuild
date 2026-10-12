@@ -1239,7 +1239,10 @@ pub(crate) fn match_events(host: &mut Host, seen: &mut MatchSeen, old: Option<&M
         // sends `player_obituary_callout` with the killer's name card and
         // "Killed By" (notificationpopups.lua PlayerObituaryCallout); the
         // HUD stays, and the card goes after 2.5 s or as the killcam starts.
+        // (With the modern HUD, `hud_match` draws its own Killed By card:
+        // BO2's is not sent, so only one shows.)
         if kind == 3
+            && !crate::hud_modern::modern_hud_enabled()
             && let Some(killer) = killer
         {
             let data = host.field("Engine", "GetCalloutPlayerData");

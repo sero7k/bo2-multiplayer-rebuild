@@ -486,6 +486,14 @@ matchstarttimer()
     timer.foreground = 0;
     timer.hidewheninmenu = 1;
     timer maps/mp/gametypes/_hud::fontpulseinit();
+    // bo2mp: the modern HUD draws its own countdown (hud_prematch); BO2's
+    // text and number stay unseen so only one shows (BO2_HUD=bo2 sets
+    // bo2mp_bo2hud and brings them back).
+    if ( getdvar( "bo2mp_bo2hud" ) != "1" )
+    {
+        text.alpha = 0;
+        timer.alpha = 0;
+    }
     left = int( level.prematchperiod );
     if ( left >= 2 )
     {

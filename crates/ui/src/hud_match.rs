@@ -1083,7 +1083,8 @@ pub(crate) fn spawn_banner(commands: &mut Commands, faces: &Faces, m: &BannerMod
                     card.spawn((
                         Text::new(title.to_uppercase()),
                         font(&faces.bold, 19.0 * k),
-                        TextColor(ACCENT),
+                        // ("KILLED BY" in red.)
+                        TextColor(Color::srgb(0.92, 0.22, 0.20)),
                         shadow(19.0 * k),
                         TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
                         Node { position_type: PositionType::Absolute, left: Val::Px(0.0), bottom: Val::Px(h + 3.0 * k), ..default() },

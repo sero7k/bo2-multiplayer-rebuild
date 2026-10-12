@@ -562,6 +562,10 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
         ] {
             vm.dvars.insert(k.to_owned(), v.to_owned());
         }
+        // bo2mp: BO2's own HUD asked for (`BO2_HUD=bo2`): its prematch
+        // countdown shows instead of the modern HUD's.
+        let bo2_hud = std::env::var("BO2_HUD").is_ok_and(|v| v.trim().eq_ignore_ascii_case("bo2"));
+        vm.dvars.insert("bo2mp_bo2hud".to_owned(), if bo2_hud { "1" } else { "0" }.to_owned());
         // Combat Training (ranked, lane C): BO2's public basic-training
         // match. BO2's ranked bot branch (_bot.gsc: one bot per human
         // player, "comp stomp") stays off (sv_botsoak, its own switch): the

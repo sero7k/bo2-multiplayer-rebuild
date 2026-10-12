@@ -916,118 +916,6 @@ fn look_strip(p: &mut Kids, cx: &mut Ctx, kind: Kind, stat: &str) {
     p.spawn((Text::new("A / D or the arrows: the previous or next one. It is saved at once."), cx.regular(19.0), TextColor(DIM)));
 }
 
-/// The lobby's countdown ring: the arc's colour and the track's.
-#[derive(Component, Clone, Copy)]
-pub(crate) struct CountdownRing {
-    arc: Color,
-    track: Color,
-}
-
-/// What is left of the second under way, 1 at its start, 0 at its end
-/// (the ring sweeps it each second).
-pub(crate) fn second_left(ms: f64) -> f32 {
-    let r = ms.max(0.0) % 1000.0;
-    if ms > 0.0 && r == 0.0 { 1.0 } else { (r / 1000.0) as f32 }
-}
-
-/// The number the countdown shows (whole seconds left, rounded up).
-pub(crate) fn seconds_shown(ms: f64) -> i32 {
-    (ms.max(0.0) / 1000.0).ceil() as i32
-}
-
-fn ring_gradient(ring: &CountdownRing, left: f32) -> BackgroundGradient {
-    let turn = std::f32::consts::TAU * left.clamp(0.0, 1.0);
-    BackgroundGradient::from(ConicGradient::new(
-        UiPosition::CENTER,
-        vec![
-            AngularColorStop::new(ring.arc, 0.0),
-            AngularColorStop::new(ring.arc, turn),
-            AngularColorStop::new(ring.track, turn),
-            AngularColorStop::new(ring.track, std::f32::consts::TAU),
-        ],
-    ))
-}
-
-/// The ring follows the start timer every frame (the view itself is drawn
-/// again only when the number changes).
-pub(crate) fn countdown_tick(mut rings: Query<(&CountdownRing, &mut BackgroundGradient)>) {
-    let Some(ms) = bridge::starting_in() else { return };
-    for (ring, mut g) in &mut rings {
-        *g = ring_gradient(ring, second_left(ms));
-    }
-}
-
-/// "Match starting": Ghosts' lobby countdown - thin numerals in a ring that
-/// sweeps each second, the map and mode under it - over the screen.
-fn countdown(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, ms: f64) {
-    let map = cat.map(&shell.map).map_or_else(|| shell.map.to_uppercase(), |m| m.title.clone());
-    let mode = cat.mode(&shell.mode).map_or_else(|| shell.mode.to_uppercase(), |m| m.title.clone());
-    let players = 1 + shell.friends + shell.enemies;
-    let ring = CountdownRing { arc: cx.pal.accent, track: cx.pal.accent_a(0.14) };
-    let size = 280.0;
-    let thick = 5.0;
-    c.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            row_gap: cx.px(18.0),
-            ..default()
-        },
-        BackgroundGradient::from(RadialGradient::new(
-            UiPosition::CENTER,
-            RadialGradientShape::FarthestCorner,
-            vec![
-                ColorStop::new(Color::srgba(0.004, 0.012, 0.03, 0.90), Val::Percent(0.0)),
-                ColorStop::new(Color::srgba(0.004, 0.012, 0.03, 0.62), Val::Percent(100.0)),
-            ],
-        )),
-        GlobalZIndex(20),
-    ))
-    .with_children(|o| {
-        o.spawn(Node { column_gap: cx.px(18.0), align_items: AlignItems::Center, ..default() }).with_children(|t| {
-            t.spawn((Node { width: cx.px(64.0), height: Val::Px(1.0), ..default() }, BackgroundColor(cx.pal.accent_a(0.6))));
-            t.spawn((Text::new("MATCH STARTING"), cx.bold(24.0), TextColor(cx.pal.accent), TextLayout::linebreak(LineBreak::NoWrap)));
-            t.spawn((Node { width: cx.px(64.0), height: Val::Px(1.0), ..default() }, BackgroundColor(cx.pal.accent_a(0.6))));
-        });
-        o.spawn((
-            ring,
-            Node {
-                width: cx.px(size),
-                height: cx.px(size),
-                border_radius: BorderRadius::all(Val::Percent(50.0)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            ring_gradient(&ring, second_left(ms)),
-        ))
-        .with_children(|r| {
-            r.spawn((
-                Node {
-                    width: cx.px(size - thick * 2.0),
-                    height: cx.px(size - thick * 2.0),
-                    border_radius: BorderRadius::all(Val::Percent(50.0)),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.012, 0.022, 0.045)),
-            ))
-            .with_child((Text::new(seconds_shown(ms).to_string()), cx.light(176.0), TextColor(WHITE)));
-        });
-        o.spawn((Text::new(map), cx.light(72.0), TextColor(WHITE), Node { margin: UiRect::top(cx.px(8.0)), ..default() }));
-        o.spawn((Text::new(format!("{mode}  ·  {players} PLAYERS")), cx.bold(22.0), TextColor(DIM)));
-        if shell.screen == Screen::Lobby {
-            o.spawn(Node { column_gap: cx.px(8.0), align_items: AlignItems::Center, margin: UiRect::top(cx.px(18.0)), ..default() }).with_children(|h| {
-                hint(h, cx, "ESC", "xenonbutton_b", "CANCEL");
-            });
-        }
-    });
-}
 
 fn main_menu(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row]) {
     c.spawn(Node {
@@ -1145,9 +1033,6 @@ pub(crate) fn shell_view(
             }
             player_card(c, &mut cx, &cat.player);
             footer(c, &mut cx, &shell, &cat, &online);
-            if let Some(ms) = bridge::starting_in().filter(|_| !shell.screen.is_zombies()) {
-                countdown(c, &mut cx, &shell, &cat, ms);
-            }
             if let Some((note, _)) = &shell.note {
                 c.spawn((
                     Node { padding: UiRect::axes(cx.px(22.0), cx.px(10.0)), border: UiRect::left(cx.px(3.0)), ..abs(Some(72.0), None, None, Some(84.0), &cx) },
