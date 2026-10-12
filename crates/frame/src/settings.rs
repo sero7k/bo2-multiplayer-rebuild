@@ -61,6 +61,9 @@ pub struct GameSettings {
     /// bo2zm: Controls > Move > "Omni Movement": sprint in any direction.
     /// Not Black Ops II's (it sprints forward only), so off by default.
     pub omni_movement: bool,
+    /// bo2mp: Graphics > "Player Models": on another game's map, its own
+    /// soldiers and animations (true), or Black Ops II's characters.
+    pub map_game_bodies: bool,
 
     pub revision: u64,
 }
@@ -95,6 +98,7 @@ impl Default for GameSettings {
             pad_deadzone_right: 0.12,
             bo2_fast: false,
             omni_movement: false,
+            map_game_bodies: true,
             revision: 0,
         }
     }

@@ -69,6 +69,12 @@ pub(crate) fn rows(tab: usize, s: &GameSettings) -> Vec<Row> {
                 "Performance halves texture sizes and draws less far on Black Ops II maps (textures from the next map on).",
                 8,
             ),
+            row(
+                "PLAYER MODELS",
+                if s.map_game_bodies { "MAP'S GAME" } else { "BLACK OPS II" }.to_owned(),
+                "On another game's map: that game's soldiers and animations, or Black Ops II's characters.",
+                9,
+            ),
         ],
         1 => vec![
             row("MASTER VOLUME", percent(s.master_volume), "Every sound in the game.", 0),
@@ -147,6 +153,7 @@ pub(crate) fn change(tab: usize, k: u8, by: i32, s: &mut GameSettings) {
         (0, 6) => s.depth_of_field = !s.depth_of_field,
         (0, 7) => s.bloom = !s.bloom,
         (0, 8) => s.bo2_fast = !s.bo2_fast,
+        (0, 9) => s.map_game_bodies = !s.map_game_bodies,
         (1, 0) => s.master_volume = step(s.master_volume, by, 0.05, 0.0, 1.0),
         (1, 1) => s.music_volume = step(s.music_volume, by, 0.05, 0.0, 1.0),
         (1, 2) => s.match_music = !s.match_music,
@@ -221,6 +228,8 @@ pub(crate) fn sync_settings(settings: Option<bevy::prelude::ResMut<GameSettings>
         }
         *fast = Some(s.bo2_fast);
     }
+    // (Player models: the body path reads it as it draws.)
+    assets::set_map_game_bodies(s.map_game_bodies);
     if let Ok(mut g) = NOW.lock()
         && g.as_ref().is_none_or(|old| old.revision != s.revision || old != &*s)
     {

@@ -378,6 +378,7 @@ fn serialize_settings(settings: &frame::GameSettings, binds: &KeyBinds) -> Strin
             if settings.bo2_fast { "fast" } else { "full" }
         ),
         format!("omni_movement={}", settings.omni_movement),
+        format!("map_game_bodies={}", settings.map_game_bodies),
         format!("binds_layout={BINDS_LAYOUT}"),
         "unbindall".to_owned(),
     ];
@@ -507,6 +508,7 @@ fn parse_settings(source: &str, settings: &mut frame::GameSettings, binds: &mut 
             "pad_prompts" => parse_into(value, &mut settings.pad_prompts),
             "pad_vibration" => parse_into(value, &mut settings.pad_vibration),
             "omni_movement" => parse_into(value, &mut settings.omni_movement),
+            "map_game_bodies" => parse_into(value, &mut settings.map_game_bodies),
             "pad_deadzone_left" => parse_into(value, &mut settings.pad_deadzone_left),
             "pad_deadzone_right" => parse_into(value, &mut settings.pad_deadzone_right),
             // bo2zm: Black Ops II quality, `full` or `fast`.

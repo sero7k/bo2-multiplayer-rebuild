@@ -1,6 +1,7 @@
 pub mod body_path;
 pub mod dyn_ent;
 pub mod dyn_ent_phys;
+pub mod foreign_body;
 pub mod fpv_present;
 pub mod held_sync;
 pub mod item;

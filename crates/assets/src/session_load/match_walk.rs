@@ -139,6 +139,7 @@ pub(super) async fn walk_prepared_match(
     }
     let (loaded, map_namespace) = match (legacy, zone_ff.as_ref(), opened_map) {
         (Some(game), Ok(path), _) => {
+            crate::set_map_game(asset_core::AssetNamespace::parse(game));
             drop(shared_surfaces);
             drop(iw5_shared_surfaces);
             let mut loaded = match game {
@@ -168,6 +169,7 @@ pub(super) async fn walk_prepared_match(
         }
         (_, _, Ok((path, image))) => {
             let game = image.game;
+            crate::set_map_game(Some(asset_core::AssetNamespace::from_zone_game(game)));
             let shared_surfaces = match game {
                 asset_core::ZoneGame::Iw5 => iw5_shared_surfaces,
                 _ => shared_surfaces,
@@ -198,6 +200,7 @@ pub(super) async fn walk_prepared_match(
             (loaded, Some(asset_core::AssetNamespace::from_zone_game(game)))
         }
         (_, _, Err(gap)) => {
+            crate::set_map_game(None);
             drop(material_seed);
             (
                 LoadedWorld::with_gap(
