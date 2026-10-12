@@ -12,7 +12,7 @@
 use std::sync::OnceLock;
 
 /// The most maps a category lists before the next page starts.
-const PAGE: usize = 10;
+const PAGE: usize = 14;
 
 /// The first mapPackTypeIndex the extra categories use (BO2's own run to
 /// its DLC5 and development indices).
@@ -220,6 +220,8 @@ pub(crate) struct ForeignMap {
     pub game: &'static str,
     pub stem: String,
     pub title: String,
+    /// The game it comes from (`Modern Warfare 2 (DLC)`).
+    pub origin: String,
 }
 
 /// A category in the Change Map popup.
@@ -294,8 +296,9 @@ fn discover() -> Vec<Category> {
     installed.sort();
     installed.dedup();
     let shared = |stem: &str| installed.iter().filter(|(_, s)| s == stem).count() > 1;
-    let mut out = Vec::new();
-    let mut pack = FIRST_PACK;
+    // Every game's maps in one list (base maps, then DLC, game by game),
+    // split into sections of at most `PAGE` so no list runs off the screen.
+    let mut all: Vec<ForeignMap> = Vec::new();
     for game in GAMES {
         let mine: Vec<&String> = installed.iter().filter(|(g, _)| g == game.prefix).map(|(_, s)| s).collect();
         if mine.is_empty() {
@@ -316,35 +319,40 @@ fn discover() -> Vec<Category> {
                 dlc.push(((*stem).clone(), title_of(stem)));
             }
         }
-        for (part, maps, label) in [(0, base, ""), (1, dlc, " DLC")] {
-            let pages: Vec<&[(String, String)]> = maps.chunks(PAGE).collect();
-            for (page, chunk) in pages.iter().enumerate() {
-                let suffix = if pages.len() > 1 { format!(" {}", page + 1) } else { String::new() };
-                out.push(Category {
-                    name: format!("BO2RB_{}{}{}", game.key, if part == 1 { "_DLC" } else { "" }, page + 1),
-                    title: format!("{}{label}{suffix}", game.title.to_uppercase()),
-                    description: format!(
-                        "{}{}: {} maps.",
-                        game.title,
-                        if part == 1 { " downloadable content" } else { "" },
-                        chunk.len()
-                    ),
-                    pack,
-                    maps: chunk
-                        .iter()
-                        .map(|(stem, title)| ForeignMap {
-                            ui_name: if shared(stem) { format!("{stem}_{}", game.prefix) } else { stem.clone() },
-                            game: game.prefix,
-                            stem: stem.clone(),
-                            title: title.clone(),
-                        })
-                        .collect(),
+        for (maps, dlc) in [(base, false), (dlc, true)] {
+            for (stem, title) in maps {
+                all.push(ForeignMap {
+                    ui_name: if shared(&stem) { format!("{stem}_{}", game.prefix) } else { stem.clone() },
+                    game: game.prefix,
+                    stem,
+                    title,
+                    origin: format!("{}{}", game.title, if dlc { " (DLC)" } else { "" }),
                 });
-                pack += 1;
             }
         }
     }
-    out
+    let pages: Vec<&[ForeignMap]> = all.chunks(PAGE).collect();
+    let numerals = ["", " II", " III", " IV", " V", " VI", " VII", " VIII", " IX", " X"];
+    pages
+        .iter()
+        .enumerate()
+        .map(|(i, chunk)| {
+            let mut games: Vec<&str> = Vec::new();
+            for m in chunk.iter() {
+                let g = GAMES.iter().find(|g| g.prefix == m.game).map_or("", |g| g.title);
+                if !games.contains(&g) {
+                    games.push(g);
+                }
+            }
+            Category {
+                name: format!("BO2RB_CLASSIC{}", i + 1),
+                title: format!("CLASSIC MAPS{}", numerals.get(i).copied().unwrap_or("")),
+                description: format!("{}: {} maps.", games.join(", "), chunk.len()),
+                pack: FIRST_PACK + i as u32,
+                maps: chunk.to_vec(),
+            }
+        })
+        .collect()
 }
 
 /// The text key of a foreign map's name and description.
@@ -368,7 +376,7 @@ pub(crate) fn inject(values: &mut hks_t6::host::EngineValues) {
             .insert(format!("MPUI_MAP_CATEGORY_{}_DESC", c.name), c.description.clone());
         for m in &c.maps {
             values.localize.insert(name_key(m), m.title.to_uppercase());
-            values.localize.insert(format!("{}_DESC", name_key(m)), format!("{}: {}.", c.title, m.title));
+            values.localize.insert(format!("{}_DESC", name_key(m)), format!("{} from {}.", m.title, m.origin));
         }
     }
     let Some(rows) = values.tables.get_mut("mp/mapstable.csv") else {
@@ -394,4 +402,89 @@ pub(crate) fn inject(values: &mut hks_t6::host::EngineValues) {
             rows.push(row);
         }
     }
+}
+
+/// A picture read off the main thread once and kept by `key`: `None` while
+/// it is being read (and for good when nothing was found).
+pub(crate) fn picture_async(
+    key: &str,
+    srgb: bool,
+    read: impl FnOnce() -> Option<(u32, u32, Vec<u8>)> + Send + 'static,
+) -> Option<std::sync::Arc<bevy::prelude::Image>> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+    type Read = HashMap<String, Option<Arc<bevy::prelude::Image>>>;
+    static READ: Mutex<Option<Read>> = Mutex::new(None);
+    let mut guard = READ.lock().ok()?;
+    let done = guard.get_or_insert_with(HashMap::new);
+    if let Some(found) = done.get(key) {
+        return found.clone();
+    }
+    done.insert(key.to_owned(), None);
+    let key = key.to_owned();
+    std::thread::Builder::new()
+        .name("ui-picture".into())
+        .spawn(move || {
+            let image = read().map(|(w, h, rgba)| {
+                use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+                Arc::new(bevy::prelude::Image::new(
+                    Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                    TextureDimension::D2,
+                    rgba,
+                    if srgb { TextureFormat::Rgba8UnormSrgb } else { TextureFormat::Rgba8Unorm },
+                    bevy::asset::RenderAssetUsages::default(),
+                ))
+            });
+            diag::info!(Ui, "picture `{key}`: {}", if image.is_some() { "read from its game" } else { "not found" });
+            if let Ok(mut guard) = READ.lock()
+                && let Some(done) = guard.as_mut()
+            {
+                done.insert(key, image);
+            }
+        })
+        .ok();
+    None
+}
+
+/// The namespace of a game prefix (`iw4` -> MW2).
+fn namespace_of(prefix: &str) -> Option<asset_core::AssetNamespace> {
+    Some(match prefix {
+        "iw4" => asset_core::AssetNamespace::Iw4,
+        "iw5" => asset_core::AssetNamespace::Iw5,
+        "t5" => asset_core::AssetNamespace::T5,
+        _ => return None,
+    })
+}
+
+/// An image from a game's own IWDs (the first of `names` it has).
+pub(crate) fn read_game_image(prefix: &str, names: &[String]) -> Option<(u32, u32, Vec<u8>)> {
+    let root = asset_transport::games_root_from_env().ok()?;
+    let trees = asset_transport::NamespaceTrees::discover(&root);
+    let main = trees.main_for(namespace_of(prefix)?)?.to_path_buf();
+    names
+        .iter()
+        .find_map(|n| asset_material::decode_ui_image_from_main(&main, n).ok().flatten())
+}
+
+/// A foreign map's picture where BO2's menus ask for one: its map-select
+/// picture (`menu_<map>_map_select_final`), its loading picture
+/// (`loadscreen_<map>`) or its preview, read from the map's own game (its
+/// loading screen, else its preview).
+pub(crate) fn map_picture(material: &str) -> Option<std::sync::Arc<bevy::prelude::Image>> {
+    let ui_name = material
+        .strip_prefix("menu_")
+        .and_then(|m| m.strip_suffix("_map_select_final"))
+        .or_else(|| material.strip_prefix("loadscreen_"))
+        .or_else(|| material.strip_prefix("menu_mp_map_select_").and_then(|m| m.strip_suffix("_big")))?;
+    let map = categories().iter().flat_map(|c| c.maps.iter()).find(|m| m.ui_name == ui_name)?.clone();
+    picture_async(material, true, move || {
+        read_game_image(
+            map.game,
+            &[
+                format!("loadscreen_{}", map.stem),
+                format!("preview_{}", map.stem),
+                format!("{}_load", map.stem),
+            ],
+        )
+    })
 }

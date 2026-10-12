@@ -3724,7 +3724,11 @@ fn picture(
         cache.insert(key.into_owned(), h.clone());
         return Some(h);
     }
-    let Some(img) = icons?.0.iter().find(|(k, _)| k == name).map(|(_, i)| i.clone()) else {
+    // bo2mp: a map from another game: its pictures from its own game.
+    let found = icons
+        .and_then(|i| i.0.iter().find(|(k, _)| k == name).map(|(_, i)| i.clone()))
+        .or_else(|| crate::foreign_maps::map_picture(name));
+    let Some(img) = found else {
         // (Once per name: a picture the scripts name that was not loaded.)
         static MISSING: std::sync::Mutex<std::collections::BTreeSet<String>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
         if MISSING.lock().is_ok_and(|mut m| m.insert(name.to_owned())) {

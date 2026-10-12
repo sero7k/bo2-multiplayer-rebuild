@@ -72,6 +72,7 @@ fn offhand_picture(weapon: &str) -> Option<(bool, &'static str)> {
 #[derive(Clone, Debug, Default, PartialEq)]
 struct HudValues {
     ffa: bool,
+    axis: bool,
     yours: i32,
     enemy: i32,
     limit: i32,
@@ -196,6 +197,7 @@ fn read_values(
         .collect();
     Some(HudValues {
         ffa,
+        axis: mp.team == "axis",
         yours,
         enemy,
         limit,
@@ -338,6 +340,27 @@ fn modern_hud(
         })
         .collect();
 
+    // The two sides' Black Ops emblems (Black Ops and Spetsnaz, read from
+    // Black Ops' own files; plain squares until they are in).
+    let mut emblem = |name: &str| -> Option<Handle<Image>> {
+        if let Some(Some(h)) = cache.get(name) {
+            return Some(h.clone());
+        }
+        let owned = name.to_owned();
+        let img = crate::foreign_maps::picture_async(name, true, move || {
+            crate::foreign_maps::read_game_image("t5", &[owned])
+        })?;
+        let h = images.add((*img).clone());
+        cache.insert(name.to_owned(), Some(h.clone()));
+        Some(h)
+    };
+    let emblems = if values.ffa {
+        (None, None)
+    } else if values.axis {
+        (emblem("faction_128_spetsnaz"), emblem("faction_128_specops"))
+    } else {
+        (emblem("faction_128_specops"), emblem("faction_128_spetsnaz"))
+    };
     commands
         .spawn((
             HudRoot,
@@ -351,21 +374,24 @@ fn modern_hud(
             },
         ))
         .with_children(|root| {
-            // --- Top centre: the score bar. ---
+            // --- Top centre: the score bar. His side on the left, theirs on
+            // the right: score, bar (filling from the middle out), team name
+            // over it, the team's Black Ops emblem, and the clock between
+            // the emblems with WINNING / LOSING / TIED under it. ---
             root.spawn(Node {
                 position_type: PositionType::Absolute,
-                top: Val::Percent(1.6),
+                top: Val::Percent(1.4),
                 width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
-                row_gap: px(2.0),
+                row_gap: px(4.0),
                 ..default()
             })
             .with_children(|top| {
                 top.spawn(Node {
                     flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: px(6.0),
+                    align_items: AlignItems::FlexEnd,
+                    column_gap: px(8.0),
                     ..default()
                 })
                 .with_children(|bar| {
@@ -373,78 +399,100 @@ fn modern_hud(
                     let part = |score: i32| {
                         if values.limit > 0 { (score as f32 / limit).clamp(0.0, 1.0) } else { 0.0 }
                     };
-                    // His bar fills from the middle outward (to the left).
-                    bar.spawn((
-                        BackgroundColor(TRACK),
-                        Node {
-                            width: px(220.0),
-                            height: px(6.0),
-                            justify_content: JustifyContent::FlexEnd,
+                    let (mine_name, theirs_name) = if values.ffa {
+                        ("YOU", "LEADER")
+                    } else if values.axis {
+                        ("SPETSNAZ", "BLACK OPS")
+                    } else {
+                        ("BLACK OPS", "SPETSNAZ")
+                    };
+                    let side = |bar: &mut ChildSpawnerCommands, mine: bool| {
+                        let (score, name, color) = if mine {
+                            (values.yours, mine_name, BLUE)
+                        } else {
+                            (values.enemy, theirs_name, RED)
+                        };
+                        bar.spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            align_items: if mine { AlignItems::FlexEnd } else { AlignItems::FlexStart },
+                            row_gap: px(4.0),
                             ..default()
-                        },
-                    ))
-                    .with_children(|t| {
-                        t.spawn((
-                            BackgroundColor(BLUE),
+                        })
+                        .with_children(|col| {
+                            col.spawn(Node::default()).with_children(|n| {
+                                text(n, bo2, &font, "Default", name, 22.0 * k, WHITE);
+                            });
+                            col.spawn(Node {
+                                flex_direction: if mine { FlexDirection::Row } else { FlexDirection::RowReverse },
+                                align_items: AlignItems::Center,
+                                column_gap: px(10.0),
+                                ..default()
+                            })
+                            .with_children(|row| {
+                                row.spawn(Node::default()).with_children(|n| {
+                                    text(n, bo2, &font, "Default", &score.to_string(), 22.0 * k, WHITE);
+                                });
+                                row.spawn((
+                                    BackgroundColor(Color::srgba(0.35, 0.37, 0.4, 0.75)),
+                                    Node {
+                                        width: px(260.0),
+                                        height: px(12.0),
+                                        justify_content: if mine { JustifyContent::FlexEnd } else { JustifyContent::FlexStart },
+                                        ..default()
+                                    },
+                                ))
+                                .with_children(|t| {
+                                    t.spawn((
+                                        BackgroundColor(color),
+                                        Node {
+                                            width: Val::Percent(part(score) * 100.0),
+                                            height: Val::Percent(100.0),
+                                            ..default()
+                                        },
+                                    ));
+                                });
+                            });
+                        });
+                    };
+                    let emblem = |bar: &mut ChildSpawnerCommands, pic: Option<Handle<Image>>, color: Color| {
+                        bar.spawn((
+                            BackgroundColor(PANEL),
                             Node {
-                                width: Val::Percent(part(values.yours) * 100.0),
-                                height: Val::Percent(100.0),
+                                width: px(58.0),
+                                height: px(58.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
                                 ..default()
                             },
-                        ));
-                    });
+                        ))
+                        .with_children(|b| match pic {
+                            Some(image) => {
+                                b.spawn((ImageNode::new(image), Node { width: px(52.0), height: px(52.0), ..default() }));
+                            }
+                            None => {
+                                b.spawn((BackgroundColor(color), Node { width: px(30.0), height: px(30.0), ..default() }));
+                            }
+                        });
+                    };
+                    side(&mut *bar, true);
+                    emblem(&mut *bar, emblems.0.clone(), BLUE);
                     bar.spawn((
-                        BackgroundColor(BLUE),
+                        BackgroundColor(PANEL),
                         Node {
-                            min_width: px(38.0),
-                            height: px(30.0),
-                            padding: UiRect::horizontal(px(6.0)),
+                            min_width: px(120.0),
+                            height: px(58.0),
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
                             ..default()
                         },
                     ))
-                    .with_children(|b| {
-                        text(b, bo2, &font, "Default", &values.yours.to_string(), 24.0 * k, WHITE);
-                    });
-                    bar.spawn(Node {
-                        min_width: px(70.0),
-                        justify_content: JustifyContent::Center,
-                        ..default()
-                    })
                     .with_children(|c| {
                         let t = values.timeleft.map_or_else(String::new, clock);
                         let color = if values.timeleft.is_some_and(|t| t <= 30) { LOW } else { WHITE };
-                        text(c, bo2, &font, "Default", &t, 28.0 * k, color);
+                        text(c, bo2, &font, "Default", &t, 38.0 * k, color);
                     });
-                    bar.spawn((
-                        BackgroundColor(RED),
-                        Node {
-                            min_width: px(38.0),
-                            height: px(30.0),
-                            padding: UiRect::horizontal(px(6.0)),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                    ))
-                    .with_children(|b| {
-                        text(b, bo2, &font, "Default", &values.enemy.to_string(), 24.0 * k, WHITE);
-                    });
-                    bar.spawn((
-                        BackgroundColor(TRACK),
-                        Node { width: px(220.0), height: px(6.0), ..default() },
-                    ))
-                    .with_children(|t| {
-                        t.spawn((
-                            BackgroundColor(RED),
-                            Node {
-                                width: Val::Percent(part(values.enemy) * 100.0),
-                                height: Val::Percent(100.0),
-                                ..default()
-                            },
-                        ));
-                    });
+                    emblem(&mut *bar, emblems.1.clone(), RED);
+                    side(&mut *bar, false);
                 });
                 let (status, color) = match values.yours.cmp(&values.enemy) {
                     std::cmp::Ordering::Greater => ("WINNING", BLUE),
@@ -452,7 +500,7 @@ fn modern_hud(
                     std::cmp::Ordering::Equal => ("TIED", DIM),
                 };
                 top.spawn(Node::default()).with_children(|c| {
-                    text(c, bo2, &font, "Default", status, 16.0 * k, color);
+                    text(c, bo2, &font, "Default", status, 20.0 * k, color);
                 });
             });
 
