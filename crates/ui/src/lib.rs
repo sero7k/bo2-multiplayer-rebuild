@@ -14,6 +14,7 @@ mod bo2_font;
 mod scope_hint; // bo2mp scope lane
 mod overhead_names; // bo2mp: names over heads in BO2's font
 mod zm_hud;
+mod bo1_hud; // bo2mp: Black Ops' in-game HUD
 mod lui_hud; // bo2zm M4
 mod lui_additive; // bo2mp scope: true additive HUD pictures
 mod lui_frontend; // bo2mp lane C

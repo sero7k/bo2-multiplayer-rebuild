@@ -111,6 +111,11 @@ impl IwdIndex {
         self.archives
     }
 
+    /// Every image name the archives hold (lower case, no extension).
+    pub fn image_names(&self) -> impl Iterator<Item = &str> {
+        self.images.keys().map(String::as_str)
+    }
+
     pub fn image_candidates(&self, name: &str) -> Option<&[IwdFile]> {
         self.images
             .get(&name.to_ascii_lowercase())

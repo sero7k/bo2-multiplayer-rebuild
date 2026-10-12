@@ -140,6 +140,15 @@ static FRONT_BUILDS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32
 #[derive(Default)]
 pub(crate) struct LuiHudSlot(Option<LuiHud>);
 
+impl LuiHudSlot {
+    /// BO2's text for a localization key (`Engine.Localize`), once its
+    /// strings are loaded.
+    pub(crate) fn localize(&self, key: &str) -> Option<String> {
+        let hud = self.0.as_ref()?;
+        hud.host.values.borrow().localize.get(&key.to_ascii_uppercase()).cloned()
+    }
+}
+
 /// The LUI root node (true: BO2's loading screen's, on the loading layer).
 #[derive(Component)]
 struct LuiRoot(bool);

@@ -765,6 +765,7 @@ impl Host {
             let f = vm.load(chunk.main);
             let r = vm.call(f, vec![])?;
             allow_bots_in_every_mode(vm);
+            hide_for_bo1_hud(vm);
             let v = r.into_iter().next().filter(Value::truthy).unwrap_or(Value::Bool(true));
             loaded.borrow_mut().set_str(&module, v.clone());
             Ok(vec![v])
@@ -1186,6 +1187,53 @@ fn stub_table(vm: &mut Vm, name: &'static str, asked: Rc<RefCell<BTreeMap<String
     meta.borrow_mut().set_str("__index", index);
     t.borrow_mut().meta = Some(meta);
     Value::Table(t)
+}
+
+/// bo2mp: Black Ops' in-game HUD is drawn in place of these BO2 widgets
+/// (ammo, weapon and grenades; the team scores and the clock). Set
+/// `BO2_HUD=bo2` to keep BO2's own.
+const BO1_HUD_REPLACES: [&str; 2] = ["AmmoArea", "ScoreBottomLeft"];
+
+/// bo2mp: Black Ops' HUD is on (the default; `BO2_HUD=bo2` turns it off).
+pub fn bo1_hud_on() -> bool {
+    !std::env::var("BO2_HUD").is_ok_and(|v| v.trim().eq_ignore_ascii_case("bo2"))
+}
+
+/// bo2mp: the widgets Black Ops' HUD replaces are still built and still get
+/// their events (BO2's HUD script expects them), but each one is marked
+/// `bo1Hidden` and the layout never draws it. Zombies keeps its own.
+fn hide_for_bo1_hud(vm: &mut Vm) {
+    if !bo1_hud_on() {
+        return;
+    }
+    let Value::Table(lui) = vm.global("LUI") else {
+        return;
+    };
+    let menus = lui.borrow().get_str("createMenu");
+    let Value::Table(menus) = menus else {
+        return;
+    };
+    for name in BO1_HUD_REPLACES {
+        let original = menus.borrow().get_str(name);
+        if !matches!(original, Value::Func(_)) {
+            continue;
+        }
+        let wrapped = vm.native(name, move |vm, args| {
+            let out = vm.call(original.clone(), args)?;
+            let zombies = match vm.global("CoD") {
+                Value::Table(cod) => {
+                    let on = cod.borrow().get_str("isZombie").truthy();
+                    on
+                }
+                _ => false,
+            };
+            if !zombies && let Some(u) = out.first().and_then(lui::element) {
+                lui::with(&u, |e| e.fields.borrow_mut().set_str("bo1Hidden", Value::Bool(true)));
+            }
+            Ok(out)
+        });
+        menus.borrow_mut().set_str(name, wrapped);
+    }
 }
 
 /// BO2's custom-games lobby offers Setup Bots only in its own list of game

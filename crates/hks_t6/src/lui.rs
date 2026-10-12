@@ -380,11 +380,19 @@ thread_local! {
     /// The layout walk's field names, made once: `get_str` makes a new key
     /// string on every call, and the walk reads these for every element of
     /// every menu every frame.
-    static WALK_KEYS: [Value; 3] = [Value::str("occludedBy"), Value::str("menuName"), Value::str("darkenElement")];
+    static WALK_KEYS: [Value; 4] = [
+        Value::str("occludedBy"),
+        Value::str("menuName"),
+        Value::str("darkenElement"),
+        Value::str("bo1Hidden"),
+    ];
 }
 const OCCLUDED_BY: usize = 0;
 const MENU_NAME: usize = 1;
 const DARKEN: usize = 2;
+/// bo2mp BO1 HUD: a BO2 HUD widget the Black Ops HUD replaces (see
+/// `host::hide_for_bo1_hud`): never drawn.
+const BO1_HIDDEN: usize = 3;
 
 /// One of the walk's fields (`WALK_KEYS`) of an element's field table.
 fn walk_field(t: &TableRef, k: usize) -> Value {
@@ -744,6 +752,7 @@ pub fn layout_clipped(root: &Rc<UserData>, rect: Rect) -> Vec<(Rc<UserData>, Rec
                 ROT.set(Some((t + off, (shown[0] + shown[2]) * 0.5, (shown[1] + shown[3]) * 0.5)));
             }
             let a = alpha * e.state.alpha * e.state.alpha_multiplier;
+            let a = if walk_field(&e.fields, BO1_HIDDEN).truthy() { 0.0 } else { a };
             // bo2mp: a menu another menu covers (`occludedBy`, set by
             // CoD.Menu's occlusion_change) is not drawn (`set_hide_occluded`).
             // An in-game popup (End Game?) keeps what it covers drawn: the
