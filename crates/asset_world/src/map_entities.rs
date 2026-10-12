@@ -1066,7 +1066,12 @@ pub fn iw5_entity_string_named(text: &str) -> String {
     for line in text.lines() {
         let trimmed = line.trim();
         match trimmed.split_once(' ') {
-            Some((key, value)) if key.bytes().all(|b| b.is_ascii_digit()) && !key.is_empty() => {
+            // bo2mp: the key number bare (`1668 "value"`) or in quotes.
+            Some((key, value))
+                if !key.trim_matches('"').is_empty()
+                    && key.trim_matches('"').bytes().all(|b| b.is_ascii_digit()) =>
+            {
+                let key = key.trim_matches('"');
                 let name = iw5_key_name(key).unwrap_or(key);
                 out.push('"');
                 out.push_str(name);
@@ -1113,6 +1118,10 @@ fn named_key(key: &str) -> EntityKey {
         "script_destructable_area" => EntityKey::ScriptDestructableArea,
         "script_fxid" => EntityKey::ScriptFxid,
         "script_int" => EntityKey::ScriptInt,
+        // bo2mp: an IW5 key number written in quotes.
+        _ if !key.is_empty() && key.bytes().all(|b| b.is_ascii_digit()) => {
+            iw5_key_name(key).map_or(EntityKey::Other, named_key)
+        }
         _ => EntityKey::Other,
     }
 }

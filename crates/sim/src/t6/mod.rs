@@ -34,6 +34,7 @@ mod hud;
 mod items;
 mod killstreaks;
 mod loadout;
+mod map_natives;
 mod movers;
 mod mp;
 mod natives_ai;
@@ -203,6 +204,10 @@ pub(crate) struct Ent {
     pub solid: bool,
     /// From the map (not spawned by a script).
     pub map: bool,
+    /// bo2mp: the block's place in the map's entity text (a map from
+    /// another game: its own drawn model or brush, installed by the
+    /// session under this place, follows this entity: `map_natives`).
+    pub map_ordinal: Option<u32>,
     /// Brush model (`*N`) a map entity uses.
     pub brush: Option<String>,
     /// Trigger radius/height (`trigger_radius*`) or brush extents.
@@ -421,6 +426,14 @@ pub(crate) struct Zm {
     pub rejoin: BTreeMap<u32, (Value, bool)>,
     /// The map's entities (their text), spawned again at a round restart.
     pub map_entities: Vec<String>,
+    /// bo2mp: the map's entities by their place in its text (see
+    /// `map_natives`), filled as they spawn.
+    pub map_natives: BTreeMap<u32, map_natives::MapNative>,
+    /// bo2mp: what `map_natives` last did to each one (kept over a round
+    /// restart: the session's rows are not put back by one).
+    pub map_natives_applied: BTreeMap<u32, map_natives::Applied>,
+    /// bo2mp: the summary of `map_natives` was logged.
+    pub map_natives_reported: bool,
 }
 
 /// Entity numbers: players are their client number; the rest start here.
@@ -1029,6 +1042,9 @@ pub(crate) fn start(world: &mut World) {
     let mut zm = world.resource_mut::<Zm>();
     zm.started = true;
     zm.map_entities = texts;
+    if mp_map {
+        map_natives::report_spawns(world, &gametype);
+    }
     report(world);
 }
 
@@ -1118,6 +1134,8 @@ fn restart(world: &mut World, tick: crate::Tick, persist: bool) {
         now_ms: old.now_ms,
         next_thread_dump: old.next_thread_dump,
         destructibles: old.destructibles,
+        map_natives_applied: old.map_natives_applied,
+        map_natives_reported: old.map_natives_reported,
         next_entnum: FIRST_ENTNUM,
         rejoin,
         map_entities: old.map_entities,
@@ -1330,6 +1348,7 @@ fn advance_inner(world: &mut World) {
         presence::sync(world, now);
         destructible::flush(world);
         brushes::sync(world, now);
+        map_natives::sync(world, now);
     });
     timed("loops+fx", world, |world| {
         presence::publish_loops(world);

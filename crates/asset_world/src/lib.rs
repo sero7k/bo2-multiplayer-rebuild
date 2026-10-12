@@ -7,9 +7,11 @@ mod compass_map;
 mod createart;
 mod draw_policy;
 mod dyn_ents;
+mod foreign_t6_entities; // bo2mp: other games' maps under BO2's rules
 mod glass_catalog;
 mod map_declarations;
 mod map_entities;
+mod nonplayer_clip; // bo2mp
 pub mod model_mesh;
 pub mod model_t6; // bo2zm
 pub mod t6_grade; // bo2mp
@@ -36,9 +38,11 @@ pub use compass_map::*;
 pub use createart::*;
 pub use draw_policy::WorldDrawPolicy;
 pub use dyn_ents::*;
+pub use foreign_t6_entities::*;
 pub use glass_catalog::*;
 pub use map_declarations::{MapDeclarations, stack_literals as iw5_stack_literals};
 pub use map_entities::*;
+pub use nonplayer_clip::*;
 pub use model_mesh::*;
 pub use model_t6::*;
 pub use t6_grade::*;

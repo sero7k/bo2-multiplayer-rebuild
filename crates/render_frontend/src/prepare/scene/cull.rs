@@ -514,7 +514,8 @@ pub(crate) fn log_script_model_gaps_once(
     names.dedup();
     diag::info!(
         World,
-        "script_model gameobjects after _gameobjects::main: {} props kept, tags={:?}",
+        "script_model gameobjects: {} tagged props installed, tags={:?} (under BO2 rules the \
+         ones the game type deletes are hidden: `bo2mp map entities under`)",
         props.iter().count(),
         names
     );

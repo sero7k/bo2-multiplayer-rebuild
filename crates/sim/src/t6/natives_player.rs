@@ -130,6 +130,41 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             .players
             .get(&id.0)
             .map_or_else(|| "playing".to_owned(), |p| p.sessionstate.clone());
+        // bo2mp: where players come in, for maps from other games (a game
+        // type without its spawn classes put them at the world origin):
+        // the first few spawns, every one at the origin, every one in solid.
+        if state == "playing" && world.resource::<Zm>().mp {
+            use crate::bullet_collision::{MASK_PLAYER_SOLID, PLAYER_MAXS, PLAYER_MINS};
+            static SEEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let seen = SEEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let at_origin = origin.iter().all(|v| v.abs() < 1.0);
+            let in_solid = frame(world)
+                .trace_clip(origin, origin, PLAYER_MINS, PLAYER_MAXS, MASK_PLAYER_SOLID)
+                .startsolid
+                != 0;
+            if at_origin || in_solid {
+                diag::warn!(
+                    Sim,
+                    "bo2mp spawn: client {} at ({:.0} {:.0} {:.0}){}{}",
+                    id.0,
+                    origin[0],
+                    origin[1],
+                    origin[2],
+                    if at_origin { " — the world origin (no spawn point found)" } else { "" },
+                    if in_solid { " — inside solid" } else { "" }
+                );
+            } else if seen < 12 {
+                diag::info!(
+                    Sim,
+                    "bo2mp spawn: client {} at ({:.0} {:.0} {:.0}) yaw {:.0}",
+                    id.0,
+                    origin[0],
+                    origin[1],
+                    origin[2],
+                    angles[1]
+                );
+            }
+        }
         let t = tick(world);
         script_player::spawn(&mut frame(world), t, id, origin, angles, &state);
         Ok(Value::Undefined)
