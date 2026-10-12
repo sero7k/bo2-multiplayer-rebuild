@@ -31,6 +31,9 @@ use crate::pcm::PcmAudio;
 /// The biggest music file read (they are held in memory while they play).
 const MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
 /// A voice whose sink runs dry this soon after starting never really played.
+/// How long a new voice may go without its entity or sink before it counts
+/// as gone.
+const SINK_GRACE_S: f64 = 5.0;
 const DEAD_ON_ARRIVAL_S: f64 = 1.0;
 /// The manifest is rewritten at most this often.
 const MANIFEST_EVERY_S: f64 = 2.0;
@@ -737,6 +740,11 @@ pub(crate) fn update_director(
     let mut ended = Vec::new();
     for (&id, live) in &mut director.voices {
         let Ok(sink) = sinks.get_mut(live.entity) else {
+            // (Spawned this frame: its entity only exists once the
+            // commands run, so it is not missing yet.)
+            if !live.had_sink && now - live.started < SINK_GRACE_S {
+                continue;
+            }
             // Despawned behind the director's back (a teardown).
             ended.push((id, live.track, now - live.started));
             continue;
