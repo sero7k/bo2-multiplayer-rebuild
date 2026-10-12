@@ -1359,11 +1359,16 @@ pub(crate) fn attach_t6_rules(
     source: asset_world::ForeignEntityGame,
 ) {
     foreign_t6_lighting(loaded, map);
-    // No Black Ops II vision for this map: its colours as they are, and the
+    // No Black Ops II vision for this map: its own game's film vision when
+    // it has one (CoD4's, World at War's: drawn as the colour table of
+    // Black Ops II's final pass), else its colours as they are. The
     // scripts' `visionsetnaked <map>` after `mpIntro` (greyscale) comes back
     // to that, not to the grey (nor to a Black Ops II map's grade before it).
-    asset_world::install_foreign_map_grade();
-    loaded.report.push(format!("bo2 rules grade: {map} has no Black Ops II vision; drawn ungraded after mpIntro"));
+    if asset_world::install_film_map_grade(loaded.world.film_vision.as_ref()) {
+        loaded.report.push(format!("bo2 rules grade: {map} graded by its own game's film vision"));
+    } else {
+        loaded.report.push(format!("bo2 rules grade: {map} has no Black Ops II vision; drawn ungraded after mpIntro"));
+    }
     let mut report = Vec::new();
     let dir = match asset_transport::games_root_from_env()
         .and_then(|root| asset_transport::find_zone_file(&root, "t6:patch_mp"))

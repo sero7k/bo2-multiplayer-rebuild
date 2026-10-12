@@ -453,6 +453,39 @@ pub fn read_iwd_named(games_root: &Path, want: &str) -> Option<Vec<u8>> {
     None
 }
 
+/// bo2mp: one file from a game's own IWDs (`<main>/*.iwd`, the game's
+/// load order: a later archive's copy wins), by its path inside them
+/// (`vision/mp_shipment.vision`); `None` when none holds it.
+pub fn read_main_iwd_file(main: &Path, want: &str) -> Option<Vec<u8>> {
+    let want = want.replace('\\', "/");
+    let mut iwds: Vec<PathBuf> = std::fs::read_dir(main)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("iwd")))
+        .collect();
+    iwds.sort_by_key(|p| p.file_name().map(|n| n.to_ascii_lowercase()));
+    for path in iwds.iter().rev() {
+        let Ok(file) = std::fs::File::open(path) else { continue };
+        let Ok(mut archive) = zip::ZipArchive::new(file) else { continue };
+        // (The names come from the central directory: no entry is opened
+        // until the one wanted.)
+        let Some(name) = archive
+            .file_names()
+            .find(|n| n.replace('\\', "/").eq_ignore_ascii_case(&want))
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        let Ok(mut entry) = archive.by_name(&name) else { continue };
+        let mut bytes = Vec::new();
+        if entry.read_to_end(&mut bytes).is_ok() {
+            return Some(bytes);
+        }
+    }
+    None
+}
+
 pub fn read_text(path: &Path) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|error| format!("read {}: {error}", path.display()))
 }
@@ -554,5 +587,30 @@ impl IwdSoundIndex {
     pub fn read_sound(&self, relative: &str) -> Option<Result<Vec<u8>, String>> {
         let (archive, entry) = self.sounds.get(&sound_key(relative))?;
         Some(read_pooled_entry(archive, entry, None))
+    }
+}
+
+#[cfg(test)]
+mod main_iwd_tests {
+    use super::read_main_iwd_file;
+    use std::io::Write;
+
+    fn iwd(path: &std::path::Path, name: &str, text: &str) {
+        let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        z.start_file(name, opts).unwrap();
+        z.write_all(text.as_bytes()).unwrap();
+        z.finish().unwrap();
+    }
+
+    #[test]
+    fn the_later_archive_wins_and_names_ignore_case() {
+        let dir = std::env::temp_dir().join(format!("iwdtest{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        iwd(&dir.join("iw_00.iwd"), "vision/mp_x.vision", "old");
+        iwd(&dir.join("iw_05.iwd"), "Vision/MP_X.vision", "new");
+        assert_eq!(read_main_iwd_file(&dir, "vision/mp_x.vision").as_deref(), Some(&b"new"[..]));
+        assert!(read_main_iwd_file(&dir, "vision/mp_y.vision").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

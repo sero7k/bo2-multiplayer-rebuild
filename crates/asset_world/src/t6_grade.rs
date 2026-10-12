@@ -262,6 +262,69 @@ pub fn install_foreign_map_grade() {
     install_t6_grade(None);
 }
 
+/// bo2mp: one colour (gamma values) through an Infinity Ward / Treyarch
+/// film vision (`r_film*`, CoD4 to MW3), as their film shaders draw it.
+/// CoD4's `vertcol_film` (disassembled from its code_post_gfx_mp zone) and
+/// the MW2 constants the native path packs (`postfx_plan::film_sources`):
+/// luminance L (0.299, 0.587, 0.114); desaturation by L from its dark
+/// value to its full one; times the contrast and the tint, a quadratic
+/// Bezier from the dark tint through the medium to the light by L (CoD4
+/// has no medium: the midpoint, a straight line); plus brightness + 0.5 -
+/// 0.5 * contrast; inverted when asked. Clamped to 0..1.
+pub fn iw_film_colour(v: &crate::FilmVision, c: [f32; 3]) -> [f32; 3] {
+    let l = c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114;
+    let s = v.desaturation_dark + (v.desaturation - v.desaturation_dark) * l;
+    let (mut contrast, mut offset) = (v.contrast, v.brightness + 0.5 - 0.5 * v.contrast);
+    if v.invert {
+        contrast = -contrast;
+        offset += 1.0;
+    }
+    std::array::from_fn(|i| {
+        let grey = c[i] + (l - c[i]) * s;
+        let tint = v.dark_tint[i]
+            + 2.0 * l * (v.medium_tint[i] - v.dark_tint[i])
+            + l * l * (v.light_tint[i] - 2.0 * v.medium_tint[i] + v.dark_tint[i]);
+        (grey * contrast * tint + offset).clamp(0.0, 1.0)
+    })
+}
+
+/// bo2mp: a film vision as the frame's colour table (the layout of
+/// [`t6_grade_lut`]): the identity table through [`iw_film_colour`].
+pub fn iw_film_lut(v: &crate::FilmVision) -> Vec<u8> {
+    let n = T6_LUT_SIZE;
+    let mut out = Vec::with_capacity(n * n * n * 4);
+    for b in 0..n {
+        for g in 0..n {
+            for r in 0..n {
+                let c = [r, g, b].map(|x| x as f32 / (n - 1) as f32);
+                for x in iw_film_colour(v, c) {
+                    out.push((x * 255.0).round() as u8);
+                }
+                out.push(255);
+            }
+        }
+    }
+    out
+}
+
+/// bo2mp: a map from another game under Black Ops II's rules, with its own
+/// game's film vision (`vision/<map>.vision`): that vision is its grade
+/// (no bloom: those games' visions tint no bloom levels). Without one, or
+/// with the film off, as [`install_foreign_map_grade`].
+pub fn install_film_map_grade(vision: Option<&crate::FilmVision>) -> bool {
+    match vision.filter(|v| v.enable) {
+        Some(v) => {
+            set_t6_vision_base(None);
+            install_t6_grade(Some(T6Grade { lut: iw_film_lut(v), vision: T6Vision::default() }));
+            true
+        }
+        None => {
+            install_foreign_map_grade();
+            false
+        }
+    }
+}
+
 fn put_grade(grade: Option<Arc<T6Grade>>) {
     if let Ok(mut s) = grade_slot().write() {
         s.0 += 1;
@@ -367,6 +430,31 @@ vc_RS \"0.000000 0.000000 0.000000 0.500000\"\n\
 vc_RE \"1.000000 1.000000 0.500000 1.000000\"\n\
 vc_SMR \"1.164402 0.000000 0.000000 0.002557\"\n\
 vc_FSM \"0.212585 0.715195 0.072220 0.880859\"\n";
+
+    #[test]
+    fn iw_film_reads_as_the_games_draw_it() {
+        let off = crate::FilmVision { enable: true, ..Default::default() };
+        // Contrast 1, no brightness, white tints, no desaturation: unchanged.
+        for c in [[0.2, 0.5, 0.8], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]] {
+            let out = iw_film_colour(&off, c);
+            for i in 0..3 {
+                assert!((out[i] - c[i]).abs() < 1e-5, "{c:?} -> {out:?}");
+            }
+        }
+        // Full desaturation: grey at its luminance.
+        let grey = crate::FilmVision { desaturation: 1.0, desaturation_dark: 1.0, ..off };
+        let out = iw_film_colour(&grey, [1.0, 0.0, 0.0]);
+        assert!((out[0] - 0.299).abs() < 1e-5 && (out[1] - 0.299).abs() < 1e-5);
+        // Contrast about the middle, brightness on top.
+        let punch = crate::FilmVision { contrast: 1.5, brightness: 0.1, ..off };
+        let out = iw_film_colour(&punch, [0.5, 0.5, 0.5]);
+        assert!((out[0] - 0.6).abs() < 1e-5);
+        // The table is the right size and its corners follow the function.
+        let lut = iw_film_lut(&punch);
+        assert_eq!(lut.len(), T6_LUT_SIZE.pow(3) * 4);
+        assert_eq!(lut[0], 0);
+        assert_eq!(*lut.last().unwrap(), 255);
+    }
 
     #[test]
     fn parses_rows() {

@@ -334,6 +334,30 @@ pub(crate) fn build_legacy_world(
         link_world_materials(tag, zone, world, main.as_deref(), &mut materials, &map, &mut report);
     stage.done();
 
+    // The map's film vision (`vision/<map>.vision` in the game's IWDs): its
+    // colour grade, drawn under Black Ops II's rules as the colour table.
+    let vision_name = format!("vision/{}.vision", map.to_ascii_lowercase());
+    let film_vision = match main.as_deref().and_then(|m| asset_transport::read_main_iwd_file(m, &vision_name)) {
+        Some(bytes) => match asset_world::parse_film_vision_rawfile(&vision_name, &bytes, false) {
+            Ok(Some(v)) => {
+                report.push(format!(
+                    "film vision: READY source=iwd enable={} contrast={:.4} brightness={:.4} desaturation={:.5}",
+                    v.enable, v.contrast, v.brightness, v.desaturation
+                ));
+                Some(v)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                report.push(format!("film vision: {vision_name} unreadable ({e:?})"));
+                None
+            }
+        },
+        None => {
+            report.push(format!("film vision: {vision_name} not in the game's IWDs"));
+            None
+        }
+    };
+
     // The sun (the fallback pass's IW3 branch adds it by its baked
     // visibility, as CoD4's lit shaders do).
     let sun = &world.sun;
@@ -397,6 +421,7 @@ pub(crate) fn build_legacy_world(
                     draw: Some(draw),
                     min,
                     max,
+                    film_vision,
                     policy: WorldDrawPolicy::t5(),
                     ..Default::default()
                 },
