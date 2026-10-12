@@ -91,6 +91,8 @@ enum Command {
     Status(ClientTarget),
     List(ClientTarget),
     PrintUnit(UnitSpec),
+    /// bo2mp: a private CA and the master's certificate, into this folder.
+    GenCerts(PathBuf),
 }
 
 /// Everything `serve` will be started with. Kept next to the `serve` parser so
@@ -405,14 +407,55 @@ async fn main() -> Result<()> {
             .await
             .map_err(|_| "master list deadline (connect + RPC)")?,
         Command::PrintUnit(spec) => print_unit(&spec),
+        Command::GenCerts(out) => gen_certs(&out),
     }
+}
+
+/// bo2mp: `gen-certs --out DIR`: a private CA (`ca.pem`, to hand to the
+/// players) and the master's identity it signs (`server.pem`,
+/// `server.key`, for `serve`). The server certificate names only the fixed
+/// labels clients check (`iw4l-prod`, `iw4l-dev`; docs/MASTER.md), so it
+/// holds for any address the master moves to. Pure Rust (no openssl), so a
+/// Windows PC can host. An existing set is kept.
+fn gen_certs(out: &Path) -> Result<()> {
+    let (ca_path, cert_path, key_path) = (out.join("ca.pem"), out.join("server.pem"), out.join("server.key"));
+    if ca_path.exists() && cert_path.exists() && key_path.exists() {
+        writeln!(std::io::stderr(), "certificates already in {} (kept)", out.display())?;
+        return Ok(());
+    }
+    std::fs::create_dir_all(out)?;
+    let (ca, cert, key) = mint_certs()?;
+    std::fs::write(&ca_path, ca)?;
+    std::fs::write(&cert_path, cert)?;
+    std::fs::write(&key_path, key)?;
+    writeln!(std::io::stderr(), "wrote {}, {} and {}", ca_path.display(), cert_path.display(), key_path.display())?;
+    Ok(())
+}
+
+/// The CA certificate, the server certificate and the server key, as PEM.
+fn mint_certs() -> Result<(String, String, String)> {
+    use rcgen::{BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose};
+    let ca_key = KeyPair::generate()?;
+    let mut ca_params = CertificateParams::new(Vec::<String>::new())?;
+    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    ca_params.distinguished_name.push(DnType::CommonName, "iw4l private CA");
+    ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign, KeyUsagePurpose::DigitalSignature];
+    let ca = ca_params.self_signed(&ca_key)?;
+    let key = KeyPair::generate()?;
+    let names: Vec<String> = Channel::ALL.iter().map(|c| c.server_name().to_owned()).collect();
+    let mut params = CertificateParams::new(names)?;
+    params.distinguished_name.push(DnType::CommonName, "iw4l-master");
+    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+    params.key_usages = vec![KeyUsagePurpose::DigitalSignature, KeyUsagePurpose::KeyEncipherment];
+    let cert = params.signed_by(&key, &ca, &ca_key)?;
+    Ok((ca.pem(), cert.pem(), key.serialize_pem()))
 }
 
 fn parse_args() -> Result<Command> {
     let mut args = std::env::args().skip(1);
     let command = args
         .next()
-        .ok_or("usage: iw4l-master serve|status|list|print-unit ...")?;
+        .ok_or("usage: iw4l-master serve|status|list|print-unit|gen-certs ...")?;
     let mut bind = None;
     let mut cert = None;
     let mut key = None;
@@ -423,6 +466,7 @@ fn parse_args() -> Result<Command> {
     let mut exec = None;
     let mut user = None;
     let mut group = None;
+    let mut out = None;
     while let Some(flag) = args.next() {
         let value = args
             .next()
@@ -438,6 +482,7 @@ fn parse_args() -> Result<Command> {
             "--exec" => exec = Some(PathBuf::from(value)),
             "--user" => user = Some(value),
             "--group" => group = Some(value),
+            "--out" => out = Some(PathBuf::from(value)),
             _ => return Err(format!("unknown option {flag}").into()),
         }
     }
@@ -467,6 +512,7 @@ fn parse_args() -> Result<Command> {
             user: user.unwrap_or_else(|| "iw4l".to_string()),
             group: group.unwrap_or_else(|| "iw4l".to_string()),
         })),
+        "gen-certs" => Ok(Command::GenCerts(out.ok_or("gen-certs requires --out DIR")?)),
         _ => Err(format!("unknown command {command}").into()),
     }
 }
@@ -1541,6 +1587,47 @@ fn friend_statuses<'a>(
 mod friends_tests {
     use super::*;
     use master_protocol::ContentFlags;
+    use rustls::client::danger::ServerCertVerifier;
+
+    /// The minted server certificate verifies against the minted CA for the
+    /// label clients check (as `IW4L_MASTER_CA_CERT` + `_SERVER_NAME` do),
+    /// and `serve` can load the pair.
+    #[test]
+    fn minted_certificates_verify_as_the_client_checks() {
+        let (ca, cert, key) = mint_certs().unwrap();
+        let dir = std::env::temp_dir().join(format!("iw4lcerts{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (ca_path, cert_path, key_path) = (dir.join("ca.pem"), dir.join("server.pem"), dir.join("server.key"));
+        std::fs::write(&ca_path, &ca).unwrap();
+        std::fs::write(&cert_path, &cert).unwrap();
+        std::fs::write(&key_path, &key).unwrap();
+        let chain = load_certificates(&cert_path).unwrap();
+        let private = load_private_key(&key_path).unwrap();
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        rustls::ServerConfig::builder_with_provider(provider.clone())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(chain.clone(), private)
+            .expect("serve can use the pair");
+        let mut roots = rustls::RootCertStore::empty();
+        for c in load_certificates(&ca_path).unwrap() {
+            roots.add(c).unwrap();
+        }
+        let verifier = rustls::client::WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider).build().unwrap();
+        for label in ["iw4l-prod", "iw4l-dev"] {
+            verifier
+                .verify_server_cert(
+                    &chain[0],
+                    &[],
+                    &rustls::pki_types::ServerName::try_from(label).unwrap(),
+                    &[],
+                    rustls::pki_types::UnixTime::now(),
+                )
+                .unwrap_or_else(|e| panic!("{label}: {e}"));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn friends_are_found_by_code_with_their_lobby() {
