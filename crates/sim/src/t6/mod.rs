@@ -31,6 +31,7 @@ mod engine_sounds;
 mod fields;
 mod globallogic;
 mod hud;
+mod hurt;
 mod items;
 mod killstreaks;
 mod loadout;
@@ -1307,6 +1308,8 @@ fn advance_inner(world: &mut World) {
         timed("items", world, items::settle);
     }
     timed("triggers", world, triggers::dispatch);
+    // Death barriers: the map's trigger_hurt volumes and the fall kill plane.
+    timed("barriers", world, |world| hurt::advance(world, now));
     timed("hud", world, |world| {
         publish_hud(world);
         hud::publish(world);

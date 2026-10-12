@@ -73,7 +73,7 @@ pub(crate) struct Faces {
 }
 
 impl Faces {
-    fn of(shell: Option<&ShellFonts>, game: Option<&GameUiFont>) -> Option<Faces> {
+    pub(crate) fn of(shell: Option<&ShellFonts>, game: Option<&GameUiFont>) -> Option<Faces> {
         match (shell, game) {
             (Some(s), _) => Some(Faces { regular: s.regular.clone(), bold: s.bold.clone() }),
             (None, Some(g)) => Some(Faces { regular: g.0.clone(), bold: g.0.clone() }),
@@ -318,16 +318,16 @@ fn parse_feed(feed: &str) -> Vec<Kill> {
 }
 
 /// The match as his screen needs it this frame.
-struct Seen {
+pub(crate) struct Seen {
     me: String,
     my_team: String,
     ffa: bool,
-    gametype: String,
+    pub(crate) gametype: String,
     kills: Vec<Kill>,
     /// The HUD is up (no killcam, no menu, not taken away).
-    hud: bool,
+    pub(crate) hud: bool,
     /// The match is over or ending on this frame.
-    ended: bool,
+    pub(crate) ended: bool,
     timeleft: Option<i32>,
     scores: (i32, i32),
     limit: i32,
@@ -336,7 +336,7 @@ struct Seen {
     marker_alpha: f32,
 }
 
-fn read_seen(presented: &PresentedSnapshot, local: &LocalPresentClient, menus: Option<&frame::LuiMenus>) -> Option<Seen> {
+pub(crate) fn read_seen(presented: &PresentedSnapshot, local: &LocalPresentClient, menus: Option<&frame::LuiMenus>) -> Option<Seen> {
     let snap = presented.snapshot()?;
     let dvars = snap.meta.script_dvars(local.0);
     let s = |k: &str| dvars.string(k).unwrap_or_default().to_owned();

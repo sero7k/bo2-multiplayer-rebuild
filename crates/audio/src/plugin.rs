@@ -10,6 +10,7 @@ impl Plugin for AudioPlugin {
         app.add_plugins(PlayerSoundPlugin);
         crate::match_set::register(app);
         crate::frontend::register_frontend_audio(app);
+        crate::music::register(app);
         crate::entity_events::register_entity_event_audio(app);
         crate::rumble::register(app);
     }

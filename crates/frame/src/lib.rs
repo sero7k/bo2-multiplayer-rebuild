@@ -30,7 +30,7 @@ pub use session::{
 };
 pub use settings::{DisplayResolution, GameSettings};
 pub use ui::{
-    GamePaused, HostMatchRules, LuiMenus, MenuDims, WorldBlur, WorldDim, UiBindRequest, UiBindingCapture, UiExecCommand,
+    GamePaused, HostMatchRules, LuiMenus, MenuDims, MenuMusicScreen, WorldBlur, WorldDim, UiBindRequest, UiBindingCapture, UiExecCommand,
     UiMenuDvars, UiMenuKey, UiMenuRequest, UiPartyState, UiPlayMusic, UiPlaySound, UiStopMusic,
     register_ui_contracts,
 };

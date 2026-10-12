@@ -4,20 +4,19 @@ use asset_audio::{SoundCatalog, load_mp_sound_bank};
 use asset_transport::GamesRoot;
 use assets::{NamespaceSoundIwd, NamespaceTrees};
 use bevy::{
-    audio::Volume,
     prelude::*,
     tasks::{AsyncComputeTaskPool, Task, TaskPool, futures_lite::future},
 };
 use frame::{
-    ClientSet, LaunchIdentity, ReturnedToMenu, UiPlayMusic, UiPlaySound, UiStopMusic,
+    ClientSet, LaunchIdentity, ReturnedToMenu, UiPlaySound,
     register_ui_contracts,
 };
 
 use crate::{
     ClipStore, SoundClass,
     ambient::SoundIwd,
-    clip_store::{PendingStarts, clip_keys_for_alias},
-    pcm::{LoopingPcmAudio, PcmAudio},
+    clip_store::PendingStarts,
+    pcm::PcmAudio,
     playback::{MissingAliasGaps, SharedPlayAssets, SoundBank, SoundPickState, play_alias_oneshot},
     start::StartDecisions,
 };
@@ -44,21 +43,11 @@ struct FrontendAudioWalked {
     lines: Vec<String>,
 }
 
-#[derive(Component)]
-struct MenuMusicBed {
-    alias: String,
-}
-
-#[derive(Resource, Default)]
-struct PendingMenuBed {
-    alias: Option<String>,
-}
-
 pub(crate) fn register_frontend_audio(app: &mut App) {
     register_ui_contracts(app);
-    app.init_resource::<PendingMenuBed>()
-        .init_resource::<crate::menu_music::MenuMusic>()
-        .add_message::<ReturnedToMenu>()
+    // Music (the menus' own beds included) is the music director's
+    // (`crate::music`).
+    app.add_message::<ReturnedToMenu>()
         .add_systems(
             Update,
             (
@@ -74,8 +63,6 @@ pub(crate) fn register_frontend_audio(app: &mut App) {
             Update,
             (
                 play_ui_sound_messages.after(crate::voice::reclaim_finished_voices),
-                play_ui_music_messages,
-                crate::menu_music::update,
             )
                 .in_set(ClientSet::Effects),
         );
@@ -267,75 +254,4 @@ fn play_ui_sound_messages(
             gaps.record(&event.alias);
         }
     }
-}
-
-fn play_ui_music_messages(
-    mut play_events: MessageReader<UiPlayMusic>,
-    mut stop_events: MessageReader<UiStopMusic>,
-    mut commands: Commands,
-    mut looping_assets: ResMut<Assets<LoopingPcmAudio>>,
-    mut gaps: ResMut<MissingAliasGaps>,
-    mut desired: ResMut<PendingMenuBed>,
-    mut clips: Option<ResMut<ClipStore>>,
-    bank: Option<Res<SoundBank>>,
-    playing: Query<(Entity, &MenuMusicBed)>,
-) {
-    let stopped = stop_events.read().count() > 0;
-    if stopped {
-        desired.alias = None;
-        for (entity, _) in &playing {
-            crate::backend::stop(&mut commands, entity);
-        }
-        diag::info!(Audio, "audio: menu bed stopped");
-    }
-    for event in play_events.read() {
-        if event.alias.is_empty() {
-            continue;
-        }
-        desired.alias = Some(event.alias.clone());
-    }
-    let Some(alias) = desired.alias.clone() else {
-        return;
-    };
-    let Some(bank) = bank else {
-        return;
-    };
-    let Some(clips) = clips.as_mut() else {
-        return;
-    };
-    if playing.iter().any(|(_, bed)| bed.alias == alias) {
-        return;
-    }
-    for (entity, _) in playing.iter() {
-        crate::backend::stop(&mut commands, entity);
-    }
-    let Some(key) = clip_keys_for_alias(&bank.0, alias_namespace(&bank.0, &alias), &alias)
-        .into_iter()
-        .next()
-    else {
-        gaps.record(&alias);
-        desired.alias = None;
-        return;
-    };
-    clips.request(key.clone());
-    let Some(pcm) = clips.ready(&key) else {
-        return;
-    };
-    let Ok(pcm) = pcm else {
-        gaps.record(&alias);
-        desired.alias = None;
-        return;
-    };
-    let handle = looping_assets.add(pcm.into_looping());
-    let entity = crate::backend::spawn_loop(
-        &mut commands,
-        handle,
-        Volume::Linear(0.55),
-        0,
-        crate::backend::AudioScope::Menu,
-    );
-    commands.entity(entity).insert(MenuMusicBed {
-        alias: alias.clone(),
-    });
-    diag::info!(Audio, "audio: menu bed `{alias}`");
 }

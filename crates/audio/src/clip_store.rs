@@ -480,6 +480,16 @@ impl ClipStore {
         true
     }
 
+    /// Drops a prepared clip (the music director's long tracks: once one is
+    /// playing its asset holds the samples, and the store need not).
+    pub(crate) fn forget(&mut self, key: &ClipKey) {
+        self.queued.remove(key);
+        self.outcomes
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .remove(key);
+    }
+
     pub(crate) fn ready(&self, key: &ClipKey) -> Option<Result<PcmAudio, ClipError>> {
         let guard = self
             .outcomes

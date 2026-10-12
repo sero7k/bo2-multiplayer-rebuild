@@ -2256,17 +2256,29 @@ pub(crate) fn omni_movement_setting() -> bool {
     OMNI_SETTING.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// A dvar's number by its name in any case (the lower-case key the VM
+/// stores first, then the name as written).
+fn dvar_number<S: std::hash::BuildHasher>(
+    dvars: &std::collections::HashMap<String, String, S>,
+    name: &str,
+) -> Option<f32> {
+    dvars
+        .get(&name.to_ascii_lowercase())
+        .or_else(|| dvars.get(name))
+        .and_then(|v| v.trim().parse::<f32>().ok())
+}
+
 fn bo2_feel_from(t6: &crate::t6::T6Runtime) -> movement_iw4::Bo2Feel {
     if bo2_feel_mw2() {
         return movement_iw4::Bo2Feel::IW4;
     }
-    let number = |name: &str, default: f32| {
-        t6.vm
-            .dvars
-            .get(name)
-            .and_then(|v| v.trim().parse::<f32>().ok())
-            .unwrap_or(default)
-    };
+    // Dvar names are case-blind: the VM keeps what the scripts set (and the
+    // engine defaults it seeds) under lower case (`Vm::dvar_name`), so a
+    // look-up by the engine's mixed-case name never found them and every
+    // script-set value here (jump_slowdownEnable, bg_fallDamage*,
+    // perk_*Multiplier, player_sprintStrafeSpeedScale) fell back to the
+    // default.
+    let number = |name: &str, default: f32| dvar_number(&t6.vm.dvars, name).unwrap_or(default);
     let zombies = t6
         .vm
         .dvars
@@ -2582,5 +2594,23 @@ mod body_clip_tests {
         assert_eq!(hit.allsolid, 0);
         assert_eq!(hit.fraction, 0.0);
         assert!(hit.normal[0] < -0.99, "plane faces away from him: {hit:?}");
+    }
+}
+
+#[cfg(test)]
+mod dvar_case_tests {
+    use super::dvar_number;
+
+    #[test]
+    fn script_set_dvars_are_found_by_their_mixed_case_name() {
+        // The VM stores `setdvar("jump_slowdownEnable", 0)` as lower case.
+        let mut dvars = std::collections::HashMap::new();
+        dvars.insert("jump_slowdownenable".to_owned(), "0".to_owned());
+        dvars.insert("perk_weapadsmultiplier".to_owned(), "0.5".to_owned());
+        assert_eq!(dvar_number(&dvars, "jump_slowdownEnable"), Some(0.0));
+        assert_eq!(dvar_number(&dvars, "perk_weapAdsMultiplier"), Some(0.5));
+        assert_eq!(dvar_number(&dvars, "bg_gravity"), None);
+        dvars.insert("bg_gravity".to_owned(), " 600 ".to_owned());
+        assert_eq!(dvar_number(&dvars, "bg_gravity"), Some(600.0));
     }
 }

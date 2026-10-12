@@ -32,6 +32,11 @@ pub(super) fn brush_index(e: &Ent) -> Option<u32> {
     e.brush.as_deref()?.strip_prefix('*')?.parse().ok()
 }
 
+/// An IW4/IW5 map's trigger model (`"model" "?N"`).
+pub(super) fn trigger_hull_index(e: &Ent) -> Option<u32> {
+    e.model.strip_prefix('?')?.parse().ok()
+}
+
 fn cylinder(e: &Ent) -> Option<(f32, f32)> {
     (e.radius > 0.0).then_some((e.radius, e.height.max(1.0)))
 }
@@ -52,6 +57,17 @@ pub(super) fn touches(world: &mut World, e: &Ent, mins: [f32; 3], maxs: [f32; 3]
             && dot(u).abs() <= h * 0.5 + reach(u);
     }
     let f = frame(world);
+    // A map from IW4/IW5 names its trigger brushes `?N`: the map entities'
+    // own trigger hulls (MapEnts trigger models), not clip brushes; the
+    // IW4 script host reads them the same way (`script/host/triggers.rs`).
+    if let Some(n) = trigger_hull_index(e) {
+        return match f.clip_cmodels().triggers.get(n as usize) {
+            Some(hulls) if !hulls.is_empty() => {
+                Volume::Hulls { origin: e.origin, hulls }.touches(mins, maxs)
+            }
+            _ => false,
+        };
+    }
     match t6_volume(&f, e.origin, cylinder(e), brush_index(e)) {
         Some(v) => v.touches(mins, maxs),
         None => false,
@@ -325,5 +341,3 @@ pub(super) fn dispatch(world: &mut World) {
     });
 }
 
-#[allow(dead_code)]
-fn _volume_type(_: Volume<'_>) {}

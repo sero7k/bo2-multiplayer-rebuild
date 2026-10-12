@@ -258,6 +258,12 @@ impl ZoneLane for T5Lane {
                 if let Some(gap) = stats.first_gap {
                     report.push(format!("IWD material-map gap: {gap}"));
                 }
+                // Unsupported images (a format the decoder refuses) were
+                // counted but never named for Black Ops; they are the ones
+                // whose surfaces fell back to the untextured pass.
+                if let Some(gap) = stats.first_unsupported {
+                    report.push(format!("IWD material-map unsupported: {gap}"));
+                }
             }
             Err(error) => report.push(format!("IWD material-map gap: {error}")),
         }

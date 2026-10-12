@@ -189,6 +189,11 @@ pub struct MaterialImageStats {
     pub archives: usize,
     pub first_gap: Option<String>,
     pub first_unsupported: Option<String>,
+    /// Every image this decode asked for and did not get, by catalog image
+    /// index, with the reason (absent from the archives, a format the decoder
+    /// refuses, a truncated file ...). What `unresolved_material_images`
+    /// names a failed slot by.
+    pub gaps: Vec<(usize, String)>,
 }
 
 #[derive(Debug)]
@@ -242,7 +247,9 @@ impl IwdIndex {
         for candidate in candidates {
             if map_type != 5 {
                 match candidate.read_header(IWI_V8_HEADER_LEN) {
-                    Ok(header) if IwiHeader::parse(&header).is_ok_and(|h| h.is_skybox()) => {}
+                    Ok(header)
+                        if IwiHeader::parse(&header).is_ok_and(|h| h.is_skybox())
+                            || iwi13_declares_cubemap(&header) => {}
                     Ok(_) => continue,
                     Err(error) => {
                         if first_error.is_none() {
@@ -267,6 +274,15 @@ impl IwdIndex {
         }
         saw_skybox.then(|| Err(first_error.unwrap_or_else(|| "empty IWD candidate list".into())))
     }
+}
+
+/// IWi 13's flags byte (offset 5) marks a cube file with IMG_FLAG_CUBEMAP
+/// (bit 2). Black Ops names such a file from material slots whose image stub
+/// does not say `MAPTYPE_CUBE`; read as 2D its mip walk never lands, so the
+/// face 0 bytes came out as a flat 2D image the cube sampler then refused.
+fn iwi13_declares_cubemap(header: &[u8]) -> bool {
+    const IMG_FLAG_CUBEMAP: u8 = 1 << 2;
+    header.len() >= 6 && header[..3] == *b"IWi" && header[3] == 13 && header[5] & IMG_FLAG_CUBEMAP != 0
 }
 
 fn color_map_force_linear(
@@ -305,7 +321,9 @@ pub fn decode_material_color_maps(
     let images = &catalog.images;
     let decoded = decode_requests_in_parallel(images, index.as_ref(), &work, stage, pool);
 
-    for outcome in decoded {
+    // The pool hands results back in the order the work was spawned, so the
+    // n-th outcome answers the n-th request.
+    for ((requested_index, _), outcome) in work.iter().zip(decoded) {
         match outcome {
             ImageOutcome::Decoded {
                 image_index,
@@ -322,15 +340,119 @@ pub fn decode_material_color_maps(
             }
             ImageOutcome::Missing { gap } => {
                 stats.missing += 1;
+                stats.gaps.push((*requested_index, gap.clone()));
                 stats.first_gap.get_or_insert(gap);
             }
             ImageOutcome::Unsupported { gap } => {
                 stats.unsupported += 1;
+                stats.gaps.push((*requested_index, gap.clone()));
                 stats.first_unsupported.get_or_insert(gap);
             }
         }
     }
     Ok(stats)
+}
+
+/// One material whose technique samples an image this load could not
+/// produce, and why for each such slot.
+#[derive(Clone, Debug)]
+pub struct UnresolvedMaterialImages {
+    pub material: String,
+    /// `(image name or texture hash, reason)` per failed slot.
+    pub slots: Vec<(String, String)>,
+}
+
+/// Materials of `namespace` whose textures are not all decoded: the slots the
+/// exact pass would refuse, which then fall back to the untextured pass.
+///
+/// `reasons` names a failed image by catalog index (a decode's
+/// `MaterialImageStats::gaps`); a slot with no reason there is reported as
+/// never requested. Function and water slots are left out — the first are
+/// code lookups and the second carries no image by design.
+pub fn unresolved_material_images(
+    catalog: &MaterialDefinitions,
+    namespace: crate::AssetNamespace,
+    reasons: &[(usize, String)],
+) -> Vec<UnresolvedMaterialImages> {
+    let reasons: HashMap<usize, &str> = reasons
+        .iter()
+        .map(|(index, reason)| (*index, reason.as_str()))
+        .collect();
+    let mut out = Vec::new();
+    for material in &catalog.materials {
+        if material.namespace != namespace
+            || material.technique_set.is_empty()
+            || !material.name.is_real()
+        {
+            continue;
+        }
+        let mut slots = Vec::new();
+        for texture in &material.textures {
+            if matches!(texture.semantic, TS_FUNCTION | TS_WATER_MAP) {
+                continue;
+            }
+            match texture.image {
+                None => slots.push((
+                    format!("{:#010x}", texture.name_hash),
+                    "image pointer unresolved in the zone".to_owned(),
+                )),
+                Some(index) => {
+                    let Some(image) = catalog.images.get(index) else {
+                        slots.push((
+                            format!("{:#010x}", texture.name_hash),
+                            format!("image index {index} out of range"),
+                        ));
+                        continue;
+                    };
+                    if image.decoded.is_some() || image.pending_decode.is_some() {
+                        continue;
+                    }
+                    let reason = reasons
+                        .get(&index)
+                        .map_or_else(|| "not requested by any decode".to_owned(), |r| (*r).to_owned());
+                    slots.push((image.name.to_string(), reason));
+                }
+            }
+        }
+        if !slots.is_empty() {
+            out.push(UnresolvedMaterialImages {
+                material: material.name.to_string(),
+                slots,
+            });
+        }
+    }
+    out.sort_by(|a, b| a.material.cmp(&b.material));
+    out
+}
+
+/// One report line naming every unresolved material (and its failed images)
+/// for a map, so the next run's log says exactly what drew as the fallback.
+pub fn unresolved_material_images_line(map: &str, rows: &[UnresolvedMaterialImages]) -> String {
+    if rows.is_empty() {
+        return format!("unresolved material images ({map}): none");
+    }
+    let images: HashSet<&str> = rows
+        .iter()
+        .flat_map(|row| row.slots.iter().map(|(image, _)| image.as_str()))
+        .collect();
+    let listed = rows
+        .iter()
+        .map(|row| {
+            let slots = row
+                .slots
+                .iter()
+                .map(|(image, reason)| format!("{image}: {reason}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{} [{slots}]", row.material)
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!(
+        "unresolved material images ({map}): {} materials, {} images draw as the neutral fallback — {listed}",
+        rows.len(),
+        images.len()
+    )
 }
 
 fn requested_color_map_slots(catalog: &MaterialDefinitions) -> Vec<ImageRequest> {
@@ -1787,6 +1909,11 @@ fn iwi_pixel_format(format: u8) -> Result<PixelFormat, String> {
         11 => Ok(PixelFormat::Bc1),
         12 => Ok(PixelFormat::Bc2),
         13 => Ok(PixelFormat::Bc3),
+        // IMG_FORMAT_DXN (IWi 8 and 13): two BC4 blocks per 4x4, D3D9's
+        // `ATI2`. Black Ops ships some of its normal maps this way; before
+        // this arm every one of them failed to decode, its material refused
+        // the exact pass, and the surface drew as the debug checker.
+        14 => Ok(PixelFormat::Bc5),
         format => Err(format!("unsupported IWI format {format}")),
     }
 }
@@ -1797,12 +1924,20 @@ fn mip_level_count(width: u32, height: u32) -> u32 {
 
 fn compressed_mip_bytes(width: u32, height: u32, format: PixelFormat) -> usize {
     match format {
-        PixelFormat::Bgra8 | PixelFormat::Bgrx8 => width as usize * height as usize * 4,
+        PixelFormat::Bgra8 | PixelFormat::Bgrx8 | PixelFormat::Rgba8 | PixelFormat::Rgbx8 => {
+            width as usize * height as usize * 4
+        }
         PixelFormat::Rgb8 => width as usize * height as usize * 3,
-        PixelFormat::La8 => width as usize * height as usize * 2,
+        PixelFormat::La8
+        | PixelFormat::R5G6B5
+        | PixelFormat::X1R5G5B5
+        | PixelFormat::A1R5G5B5
+        | PixelFormat::A4R4G4B4 => width as usize * height as usize * 2,
         PixelFormat::L8 | PixelFormat::A8 => width as usize * height as usize,
-        PixelFormat::Bc1 => width.div_ceil(4) as usize * height.div_ceil(4) as usize * 8,
-        PixelFormat::Bc2 | PixelFormat::Bc3 => {
+        PixelFormat::Bc1 | PixelFormat::Bc4 => {
+            width.div_ceil(4) as usize * height.div_ceil(4) as usize * 8
+        }
+        PixelFormat::Bc2 | PixelFormat::Bc3 | PixelFormat::Bc5 => {
             width.div_ceil(4) as usize * height.div_ceil(4) as usize * 16
         }
     }
@@ -1818,9 +1953,20 @@ fn decode_gfx_image(
         value if value == u32::from_le_bytes(*b"DXT1") => PixelFormat::Bc1,
         value if value == u32::from_le_bytes(*b"DXT3") => PixelFormat::Bc2,
         value if value == u32::from_le_bytes(*b"DXT5") => PixelFormat::Bc3,
+        // bo2mp: Black Ops zones carry these loadDef bodies too (normal
+        // maps as `ATI2`, masks as `ATI1`, a few 16-bit and ABGR UI
+        // images); each used to fail here and leave its material unbound.
+        value if value == u32::from_le_bytes(*b"ATI2") => PixelFormat::Bc5,
+        value if value == u32::from_le_bytes(*b"ATI1") => PixelFormat::Bc4,
         21 => PixelFormat::Bgra8,
         22 => PixelFormat::Bgrx8,
+        23 => PixelFormat::R5G6B5,
+        24 => PixelFormat::X1R5G5B5,
+        25 => PixelFormat::A1R5G5B5,
+        26 => PixelFormat::A4R4G4B4,
         28 => PixelFormat::A8,
+        32 => PixelFormat::Rgba8,
+        33 => PixelFormat::Rgbx8,
         50 => PixelFormat::L8,
         51 => PixelFormat::La8,
         format => return Err(format!("unsupported D3D format {format}")),
@@ -1832,17 +1978,32 @@ fn decode_gfx_image(
     })
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PixelFormat {
     Rgb8,
     Bgra8,
     Bgrx8,
+    /// D3DFMT_A8B8G8R8: bytes in R, G, B, A order.
+    Rgba8,
+    /// D3DFMT_X8B8G8R8.
+    Rgbx8,
     L8,
     La8,
     A8,
+    R5G6B5,
+    X1R5G5B5,
+    A1R5G5B5,
+    A4R4G4B4,
     Bc1,
     Bc2,
     Bc3,
+    /// One BC4 block (`ATI1`): expanded to (x, x, x, 1), as D3D9 returns
+    /// a luminance-style single channel.
+    Bc4,
+    /// Two BC4 blocks (`ATI2` / IMG_FORMAT_DXN): expanded to (x, y, 1, 1),
+    /// the first block in red and the second in green — what the sampler
+    /// returns — with D3D9's 1 for the channels the format does not store.
+    Bc5,
 }
 
 fn decode_pixels(
@@ -1857,6 +2018,25 @@ fn decode_pixels(
     let pixels = match format {
         PixelFormat::Bgra8 => take_rgba(data, width, height, true, false)?,
         PixelFormat::Bgrx8 => take_rgba(data, width, height, true, true)?,
+        PixelFormat::Rgba8 => take_rgba(data, width, height, false, false)?,
+        PixelFormat::Rgbx8 => take_rgba(data, width, height, false, true)?,
+        PixelFormat::R5G6B5
+        | PixelFormat::X1R5G5B5
+        | PixelFormat::A1R5G5B5
+        | PixelFormat::A4R4G4B4 => {
+            let needed = width as usize * height as usize * 2;
+            let source = data
+                .get(..needed)
+                .ok_or_else(|| "truncated 16-bit image".to_owned())?;
+            let mut out = Vec::with_capacity(width as usize * height as usize * 4);
+            for pixel in source.chunks_exact(2) {
+                out.extend_from_slice(&expand_16bit(
+                    u16::from_le_bytes([pixel[0], pixel[1]]),
+                    format,
+                ));
+            }
+            out
+        }
         PixelFormat::Rgb8 => {
             let needed = width as usize * height as usize * 3;
             let source = data
@@ -1894,11 +2074,36 @@ fn decode_pixels(
             }
             out
         }
-        PixelFormat::Bc1 | PixelFormat::Bc2 | PixelFormat::Bc3 => {
-            decode_blocks(data, width, height, format)?
-        }
+        PixelFormat::Bc1
+        | PixelFormat::Bc2
+        | PixelFormat::Bc3
+        | PixelFormat::Bc4
+        | PixelFormat::Bc5 => decode_blocks(data, width, height, format)?,
     };
     Ok((width, height, pixels))
+}
+
+/// One 16-bit D3D texel as RGBA8, each field widened by bit replication.
+fn expand_16bit(texel: u16, format: PixelFormat) -> [u8; 4] {
+    let field = |shift: u32, bits: u32| -> u8 {
+        let value = u32::from(texel >> shift) & ((1 << bits) - 1);
+        // Replicate the top bits into the low ones: 0 stays 0, all ones
+        // becomes 255.
+        let widened = value << (8 - bits);
+        (widened | (widened >> bits)) as u8
+    };
+    match format {
+        PixelFormat::R5G6B5 => [field(11, 5), field(5, 6), field(0, 5), 255],
+        PixelFormat::X1R5G5B5 => [field(10, 5), field(5, 5), field(0, 5), 255],
+        PixelFormat::A1R5G5B5 => [
+            field(10, 5),
+            field(5, 5),
+            field(0, 5),
+            if texel & 0x8000 != 0 { 255 } else { 0 },
+        ],
+        PixelFormat::A4R4G4B4 => [field(8, 4), field(4, 4), field(0, 4), field(12, 4)],
+        _ => unreachable!("expand_16bit takes only the 16-bit formats"),
+    }
 }
 
 fn take_rgba(
@@ -1963,7 +2168,7 @@ fn decode_blocks(
     height: u32,
     format: PixelFormat,
 ) -> Result<Vec<u8>, String> {
-    let block_size = if matches!(format, PixelFormat::Bc1) {
+    let block_size = if matches!(format, PixelFormat::Bc1 | PixelFormat::Bc4) {
         8
     } else {
         16
@@ -1983,6 +2188,20 @@ fn decode_blocks(
                 PixelFormat::Bc1 => bcdec_rs::bc1(&data[offset..offset + 8], &mut tile, 16),
                 PixelFormat::Bc2 => bcdec_rs::bc2(&data[offset..offset + 16], &mut tile, 16),
                 PixelFormat::Bc3 => bcdec_rs::bc3(&data[offset..offset + 16], &mut tile, 16),
+                PixelFormat::Bc4 => {
+                    let mut x = [0u8; 16];
+                    bcdec_rs::bc4(&data[offset..offset + 8], &mut x, 4, false);
+                    for (texel, value) in tile.chunks_exact_mut(4).zip(x) {
+                        texel.copy_from_slice(&[value, value, value, 255]);
+                    }
+                }
+                PixelFormat::Bc5 => {
+                    let mut xy = [0u8; 32];
+                    bcdec_rs::bc5(&data[offset..offset + 16], &mut xy, 8, false);
+                    for (texel, pair) in tile.chunks_exact_mut(4).zip(xy.chunks_exact(2)) {
+                        texel.copy_from_slice(&[pair[0], pair[1], 255, 255]);
+                    }
+                }
                 _ => unreachable!(),
             }
             for y in 0..4 {
@@ -2016,12 +2235,13 @@ fn decode_iwi_cubemap(bytes: &[u8]) -> Result<(u32, CubemapFaces), String> {
         ));
     }
     let face_bytes = match header.format {
-        PixelFormat::Bgra8 | PixelFormat::Bgrx8 => (header.width * header.height * 4) as usize,
-        PixelFormat::Rgb8 => (header.width * header.height * 3) as usize,
-        PixelFormat::Bc1 => (header.width.div_ceil(4) * header.height.div_ceil(4) * 8) as usize,
-        PixelFormat::Bc2 | PixelFormat::Bc3 => {
-            (header.width.div_ceil(4) * header.height.div_ceil(4) * 16) as usize
-        }
+        PixelFormat::Bgra8
+        | PixelFormat::Bgrx8
+        | PixelFormat::Rgb8
+        | PixelFormat::Bc1
+        | PixelFormat::Bc2
+        | PixelFormat::Bc3
+        | PixelFormat::Bc5 => compressed_mip_bytes(header.width, header.height, header.format),
         _ => return Err("unsupported cubemap pixel layout".into()),
     };
 
@@ -3005,4 +3225,187 @@ fn decode_inline(
         }
     }
     stats
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An IWi 13 (Black Ops) file: the 48-byte header, then the mip chain
+    /// smallest level first; `fileSizeForPicmip[0]` is where mip 0 ends and
+    /// `[1]` where it starts.
+    fn iwi13(format: u8, flags: u8, width: u16, height: u16, levels_small_first: &[Vec<u8>]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"IWi");
+        out.push(13);
+        out.push(format);
+        out.push(flags);
+        out.extend_from_slice(&width.to_le_bytes());
+        out.extend_from_slice(&height.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&1.0f32.to_le_bytes());
+        let body: usize = levels_small_first.iter().map(Vec::len).sum();
+        let end = 48 + body;
+        let top = levels_small_first.last().map_or(0, Vec::len);
+        let mut picmip = [end as u32; 8];
+        picmip[1] = (end - top) as u32;
+        for size in picmip {
+            out.extend_from_slice(&size.to_le_bytes());
+        }
+        assert_eq!(out.len(), 48);
+        for level in levels_small_first {
+            out.extend_from_slice(level);
+        }
+        out
+    }
+
+    /// A BC4 block whose every texel is `value` (both endpoints equal, all
+    /// indices 0).
+    fn bc4_flat(value: u8) -> [u8; 8] {
+        [value, value, 0, 0, 0, 0, 0, 0]
+    }
+
+    fn bc5_flat(x: u8, y: u8) -> Vec<u8> {
+        let mut block = bc4_flat(x).to_vec();
+        block.extend_from_slice(&bc4_flat(y));
+        block
+    }
+
+    /// A BC1 block of one 565 colour.
+    fn bc1_flat(colour: u16) -> Vec<u8> {
+        let mut block = colour.to_le_bytes().to_vec();
+        block.extend_from_slice(&0u16.to_le_bytes());
+        block.extend_from_slice(&[0; 4]);
+        block
+    }
+
+    #[test]
+    fn iwi13_dxn_decodes_as_two_channel_normal_map() {
+        // 4x4: levels 1x1, 2x2, 4x4 — one block each.
+        let file = iwi13(
+            14,
+            0,
+            4,
+            4,
+            &[bc5_flat(1, 2), bc5_flat(3, 4), bc5_flat(200, 50)],
+        );
+        let mips = decode_iwi_mips(&file).expect("DXN decodes");
+        assert_eq!(mips.level_count(), 3);
+        assert_eq!(mips.storage, MipStorage::Rgba8);
+        let (w, h, pixels) = mips.into_top_level_rgba8().unwrap();
+        assert_eq!((w, h), (4, 4));
+        for texel in pixels.chunks_exact(4) {
+            assert_eq!(texel, [200, 50, 255, 255]);
+        }
+    }
+
+    #[test]
+    fn iwi13_dxt1_mip_chain_reads_mip0_from_the_end() {
+        let red = bc1_flat(0xF800);
+        let blue = bc1_flat(0x001F);
+        // 8x8: 1x1, 2x2, 4x4 (one block each, blue), 8x8 (four blocks, red).
+        let top = [red.clone(), red.clone(), red.clone(), red].concat();
+        let file = iwi13(11, 0, 8, 8, &[blue.clone(), blue.clone(), blue, top]);
+        let mips = decode_iwi_mips(&file).expect("DXT1 decodes");
+        assert_eq!(mips.level_count(), 4);
+        assert_eq!(mips.storage, MipStorage::Bc1);
+        let (_, _, pixels) = mips.into_top_level_rgba8().unwrap();
+        assert_eq!(&pixels[..4], &[255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn iwi_format_codes_cover_dxn_and_refuse_unknown() {
+        assert_eq!(iwi_pixel_format(14).unwrap(), PixelFormat::Bc5);
+        assert!(iwi_pixel_format(0x13).is_err());
+        assert_eq!(compressed_mip_bytes(4, 4, PixelFormat::Bc5), 16);
+        assert_eq!(compressed_mip_bytes(1, 1, PixelFormat::Bc4), 8);
+        assert_eq!(compressed_mip_bytes(3, 2, PixelFormat::R5G6B5), 12);
+    }
+
+    #[test]
+    fn iwi13_cube_flag_is_read_from_the_flags_byte() {
+        let cube = iwi13(11, 1 << 2, 4, 4, &[bc1_flat(0)]);
+        let flat = iwi13(11, 1 << 1, 4, 4, &[bc1_flat(0)]);
+        assert!(iwi13_declares_cubemap(&cube[..32]));
+        assert!(!iwi13_declares_cubemap(&flat[..32]));
+        // Another version's byte 5 means something else.
+        let mut v8 = cube.clone();
+        v8[3] = 8;
+        assert!(!iwi13_declares_cubemap(&v8[..32]));
+    }
+
+    #[test]
+    fn iwi13_dxn_cubemap_faces_decode() {
+        let faces: Vec<u8> = (0..6u8).flat_map(|face| bc5_flat(face * 10, 7)).collect();
+        let file = iwi13(14, 1 << 2, 4, 4, &[faces]);
+        let (size, decoded) = decode_iwi_cubemap(&file).expect("DXN cube decodes");
+        assert_eq!(size, 4);
+        for (face, pixels) in decoded.iter().enumerate() {
+            assert_eq!(&pixels[..4], &[face as u8 * 10, 7, 255, 255]);
+        }
+    }
+
+    #[test]
+    fn zone_load_def_ati_and_16bit_formats_decode() {
+        let ati2 = u32::from_le_bytes(*b"ATI2");
+        let (_, _, pixels) = decode_gfx_image(&bc5_flat(9, 99), 4, 4, ati2)
+            .unwrap()
+            .into_top_level_rgba8()
+            .unwrap();
+        assert_eq!(&pixels[..4], &[9, 99, 255, 255]);
+
+        let ati1 = u32::from_le_bytes(*b"ATI1");
+        let (_, _, pixels) = decode_gfx_image(&bc4_flat(77), 4, 4, ati1)
+            .unwrap()
+            .into_top_level_rgba8()
+            .unwrap();
+        assert_eq!(&pixels[..4], &[77, 77, 77, 255]);
+
+        // R5G6B5: pure green, then white.
+        let texels = [0x07E0u16, 0xFFFF].iter().flat_map(|t| t.to_le_bytes()).collect::<Vec<_>>();
+        let (_, _, pixels) = decode_gfx_image(&texels, 2, 1, 23)
+            .unwrap()
+            .into_top_level_rgba8()
+            .unwrap();
+        assert_eq!(pixels, [0, 255, 0, 255, 255, 255, 255, 255]);
+
+        // A4R4G4B4: half alpha, red only.
+        let (_, _, pixels) = decode_gfx_image(&0x8F00u16.to_le_bytes(), 1, 1, 26)
+            .unwrap()
+            .into_top_level_rgba8()
+            .unwrap();
+        assert_eq!(pixels, [255, 0, 0, 0x88]);
+
+        // A1R5G5B5 with the alpha bit clear.
+        let (_, _, pixels) = decode_gfx_image(&0x001Fu16.to_le_bytes(), 1, 1, 25)
+            .unwrap()
+            .into_top_level_rgba8()
+            .unwrap();
+        assert_eq!(pixels, [0, 0, 255, 0]);
+
+        // A8B8G8R8 is already in R, G, B, A byte order.
+        let (_, _, pixels) = decode_gfx_image(&[1, 2, 3, 4], 1, 1, 32)
+            .unwrap()
+            .into_top_level_rgba8()
+            .unwrap();
+        assert_eq!(pixels, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn unresolved_line_names_materials_and_images() {
+        assert_eq!(
+            unresolved_material_images_line("mp_x, t5", &[]),
+            "unresolved material images (mp_x, t5): none"
+        );
+        let rows = vec![UnresolvedMaterialImages {
+            material: "mtl_crate".into(),
+            slots: vec![
+                ("~crate_n".into(), "~crate_n: unsupported IWI format 19".into()),
+                ("0x00000001".into(), "image pointer unresolved in the zone".into()),
+            ],
+        }];
+        let line = unresolved_material_images_line("mp_x, t5", &rows);
+        assert!(line.starts_with("unresolved material images (mp_x, t5): 1 materials, 2 images"));
+        assert!(line.contains("mtl_crate [~crate_n: ~crate_n: unsupported IWI format 19, 0x00000001: image pointer unresolved in the zone]"));
+    }
 }

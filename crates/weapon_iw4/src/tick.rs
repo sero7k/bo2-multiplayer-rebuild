@@ -11,6 +11,28 @@ pub fn perk_fastreload_eligible(perks0: u32, inherits_perks: bool) -> bool {
     (perks0 & PERK_FASTRELOAD) != 0 && inherits_perks
 }
 
+/// bo2mp: Black Ops II's Fast Hands (`specialty_fastweaponswitch`), a bit
+/// IW4 leaves free. Its scripts give it (`setperk`); without an engine side
+/// the swap ran at full length.
+pub const PERK_FASTWEAPONSWITCH: u32 = 1 << 12;
+
+/// BO2's `perk_weapSwitchMultiplier` default (0.5, the engine's registered
+/// value, as `t6::install` seeds it): raise and drop take this share of the
+/// gun's own `iRaiseTime` / `iDropTime` / quick times, the way Fast Mag
+/// (`perk_weapReloadMultiplier`) shortens the reload states.
+pub const PERK_WEAP_SWITCH_MULTIPLIER_DEFAULT: f32 = 0.5;
+
+/// Off: Fast Hands leaves the swap alone (the pre-fix behaviour).
+pub const FAST_WEAPON_SWITCH_ENABLED: bool = true;
+
+/// The weapon states Fast Hands shortens: raising and dropping (plain and
+/// quick). Not the Hybrid Optic / underbarrel alt-switch, not sprint.
+pub fn perk_fastweaponswitch_applies(perks0: u32, weaponstate: i32) -> bool {
+    FAST_WEAPON_SWITCH_ENABLED
+        && (perks0 & PERK_FASTWEAPONSWITCH) != 0
+        && matches!(weaponstate, 0x1 | 0x3 | 0x4)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MissingCombatFacts {
     BurstCooldown,
@@ -798,6 +820,9 @@ pub fn weapon_time_adjust(
     cmd: &WeaponCmd,
 ) -> i32 {
     let reload_family = matches!(hand.weaponstate, 0x8 | 0x9 | 0xA | 0xB | 0xC);
+    if perk_fastweaponswitch_applies(cmd.perks0, hand.weaponstate) {
+        return ((cmd.msec as f32 / PERK_WEAP_SWITCH_MULTIPLIER_DEFAULT) + 0.5) as i32;
+    }
     if !(reload_family && perk_fastreload_eligible(cmd.perks0, facts.inherits_perks)) {
         return cmd.msec;
     }
@@ -1667,5 +1692,45 @@ mod intro_fire_tests {
         let pull = hold(&mut hand, &facts, true, 1000);
         assert!(gaps(&pull).iter().all(|&g| g == 96), "{:?}", gaps(&pull));
         assert_eq!(hand.shot_count, 0);
+    }
+}
+
+#[cfg(test)]
+mod fast_switch_tests {
+    use super::*;
+
+    fn decay(state: WeaponState, perks0: u32) -> i32 {
+        let hand = WeaponHandState {
+            weaponstate: state as i32,
+            weapon_time: 600,
+            ..WeaponHandState::default()
+        };
+        let cmd = WeaponCmd {
+            msec: 50,
+            perks0,
+            ..WeaponCmd::default()
+        };
+        weapon_time_adjust(&hand, &WeaponCombatFacts::default(), &cmd)
+    }
+
+    #[test]
+    fn fast_hands_halves_raise_and_drop_only() {
+        let fh = PERK_FASTWEAPONSWITCH;
+        // perk_weapSwitchMultiplier 0.5: the timers run twice as fast.
+        assert_eq!(decay(WeaponState::Raising, fh), 100);
+        assert_eq!(decay(WeaponState::Dropping, fh), 100);
+        assert_eq!(decay(WeaponState::DroppingQuick, fh), 100);
+        // Without the perk, and outside the swap, nothing changes.
+        assert_eq!(decay(WeaponState::Raising, 0), 50);
+        assert_eq!(decay(WeaponState::Firing, fh), 50);
+        assert_eq!(decay(WeaponState::RaisingAltswitch, fh), 50);
+        assert_eq!(decay(WeaponState::SprintOut, fh), 50);
+    }
+
+    #[test]
+    fn fast_hands_bit_is_free() {
+        for other in [PERK_FASTRELOAD, crate::PERK_SPRINTRECOVERY, crate::PERK_BULLETACCURACY] {
+            assert_eq!(PERK_FASTWEAPONSWITCH & other, 0);
+        }
     }
 }

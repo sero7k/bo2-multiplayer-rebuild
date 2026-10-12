@@ -50,7 +50,7 @@ mod destructible_loops;
 mod zm_music;
 mod match_set;
 mod match_voices;
-mod menu_music;
+pub mod music;
 mod ui_sounds;
 
 mod ads_sounds;

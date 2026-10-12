@@ -136,9 +136,10 @@ pub use sway::{
 };
 pub use tick::{
     AimAssistRanges, BURST_COOLDOWN_DEFAULT_MS, BUTTON_ATTACK, BUTTON_RELOAD, BUTTON_THROW,
-    CHECK_FIRING_AMMO_DRY_FIRE_MS, CapturedCombatInput, MissingCombatFacts, PERK_FASTRELOAD,
-    PERK_WEAP_RELOAD_MULTIPLIER_DEFAULT, WeaponCmd, WeaponCombatFacts, WeaponHandState,
-    WeaponTickEvent, get_weapon_fire_button, perk_fastreload_eligible, spawn_clip_stock,
+    CHECK_FIRING_AMMO_DRY_FIRE_MS, CapturedCombatInput, FAST_WEAPON_SWITCH_ENABLED,
+    MissingCombatFacts, PERK_FASTRELOAD, PERK_FASTWEAPONSWITCH,
+    PERK_WEAP_RELOAD_MULTIPLIER_DEFAULT, PERK_WEAP_SWITCH_MULTIPLIER_DEFAULT, WeaponCmd, WeaponCombatFacts, WeaponHandState,
+    WeaponTickEvent, get_weapon_fire_button, perk_fastreload_eligible, perk_fastweaponswitch_applies, spawn_clip_stock,
     spawn_weapon_hand, weapon_hands, weapon_ordinary, weapon_time_adjust,
 };
 pub use view_bob::{

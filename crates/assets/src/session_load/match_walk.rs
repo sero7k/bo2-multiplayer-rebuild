@@ -611,16 +611,23 @@ pub(super) async fn walk_prepared_match(
         ));
         merge_image_batch(&mut global, label, batch, job, &mut report);
     }
+    let mut merged_image_gaps = Vec::new();
     if let Ok(path) = &zone_ff {
         let stage = progress.begin_scoped(StageId::Images, "merged", None);
         let decoded =
             asset_material::decode_material_color_maps(path, &mut global, &stage, load_pool());
         stage.finish_from(&decoded);
         match decoded {
-            Ok(stats) => report.push(format!(
-                "merged material images: {}/{} decoded, {} missing, {} unsupported",
-                stats.decoded, stats.requested, stats.missing, stats.unsupported
-            )),
+            Ok(stats) => {
+                report.push(format!(
+                    "merged material images: {}/{} decoded, {} missing, {} unsupported",
+                    stats.decoded, stats.requested, stats.missing, stats.unsupported
+                ));
+                if let Some(gap) = &stats.first_unsupported {
+                    report.push(format!("merged material images: first unsupported: {gap}"));
+                }
+                merged_image_gaps = stats.gaps;
+            }
             Err(error) => report.push(format!("merged material images gap: {error}")),
         }
     }
@@ -639,6 +646,22 @@ pub(super) async fn walk_prepared_match(
     if builtins != 0 {
         report.push(format!(
             "in-zone builtin images: decoded {builtins} leftover $ 2D loadDefs after absorb"
+        ));
+    }
+    // bo2mp: name, per map, every material of the map's own game whose images
+    // this load could not produce. Those surfaces draw through the untextured
+    // fallback (neutral grey); the line is what the next run fixes from.
+    if let Some(namespace) = map_namespace {
+        let map = zone_ff
+            .as_ref()
+            .ok()
+            .and_then(|path| path.file_stem())
+            .map_or_else(|| "?".to_owned(), |stem| stem.to_string_lossy().into_owned());
+        let rows =
+            asset_material::unresolved_material_images(&global, namespace, &merged_image_gaps);
+        report.push(asset_material::unresolved_material_images_line(
+            &format!("{map}, {}", namespace.as_str()),
+            &rows,
         ));
     }
     if let Ok(path) = &zone_ff {

@@ -785,6 +785,8 @@ pub(crate) fn give_start_ammo(world: &mut FrameWorld, id: ClientId, weapon: u32)
 fn perk_bits(name: &str) -> (u32, u32) {
     let perk = match name {
         "specialty_fastreload" => weapon_iw4::PERK_FASTRELOAD,
+        // bo2mp: Fast Hands' swap (see weapon_iw4::PERK_FASTWEAPONSWITCH).
+        "specialty_fastweaponswitch" => weapon_iw4::PERK_FASTWEAPONSWITCH,
         "specialty_coldblooded" => playerstate_iw4::PERK_COLDBLOODED,
         "specialty_lightweight" => weapon_iw4::PERK_LIGHTWEIGHT_VIEW_BOB_BIT,
         "specialty_scavenger" => playerstate_iw4::PERK_SCAVENGER,

@@ -185,12 +185,23 @@ fn vertex_smodel(in: SmodelVertexIn) -> VertexOut {
     return out;
 }
 
+// The untextured fallback: a surface whose material the exact pass refused
+// (most often an image that did not decode). Neutral grey with a little
+// up-facing shade so the shape still reads; the load report names the
+// material ("unresolved material images"). IW4L_DIAG_CHECKER=1 restores the
+// developer checker (normal colour x UV cells).
 @fragment
 fn fragment(in: VertexOut) -> @location(0) vec4<f32> {
+#ifdef DIAG_CHECKER
     let normal_colour = abs(normalize(in.normal)) * 0.72 + vec3(0.08, 0.02, 0.10);
     let cell = i32(floor(in.uv.x * 16.0) + floor(in.uv.y * 16.0)) & 1;
     let diagnostic_tint = select(vec3(0.72, 0.22, 0.78), vec3(0.22, 0.72, 0.78), cell == 0);
     return vec4(mix(normal_colour, diagnostic_tint, 0.28) * max(in.color.rgb, vec3(0.35)), 1.0);
+#else
+    let n = normalize(in.normal);
+    let shade = 0.85 + 0.15 * n.z;
+    return vec4(vec3(0.38) * shade, 1.0);
+#endif
 }
 
 // bo2zm: the colour map's stored texel. The material images decode as sRGB;

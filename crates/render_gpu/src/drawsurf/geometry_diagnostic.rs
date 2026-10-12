@@ -1117,6 +1117,16 @@ struct DiagnosticWorldTextures {
     probe_written: Option<Arc<Vec<[[f32; 4]; 3]>>>,
 }
 
+/// `IW4L_DIAG_CHECKER=1` brings back the normal-coloured checker on surfaces
+/// that fell back to the untextured pass; without it they are neutral grey.
+fn diagnostic_checker_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("IW4L_DIAG_CHECKER")
+            .is_ok_and(|value| !value.trim().is_empty() && value.trim() != "0")
+    })
+}
+
 #[derive(Resource)]
 struct DiagnosticPipeline {
     view_layout: BindGroupLayoutDescriptor,
@@ -1255,6 +1265,15 @@ impl SpecializedRenderPipeline for DiagnosticPipeline {
                             }
                         }
                         defs
+                    }
+                    // bo2mp: the untextured fallback (a surface whose
+                    // material the exact pass refused, usually for an image
+                    // that did not decode) draws neutral grey; the old
+                    // normal-colour checker is a developer view only.
+                    DiagnosticTess::World | DiagnosticTess::Smodel | DiagnosticTess::XModel
+                        if diagnostic_checker_enabled() =>
+                    {
+                        vec!["DIAG_CHECKER".into()]
                     }
                     _ => Vec::new(),
                 };

@@ -794,6 +794,20 @@ impl ViewmodelController {
     }
 
     fn perk_scaled_reload_timer(&self, state: WeaponState, timer_ms: Option<i32>) -> Option<i32> {
+        // bo2mp: Fast Hands shortens the raise and drop as the game does
+        // (weapon_iw4::perk_fastweaponswitch_applies), so the swap
+        // animations play over the shorter time.
+        let switch_state = match state {
+            WeaponState::Raising { .. } => Some(0x1),
+            WeaponState::Dropping => Some(0x3),
+            _ => None,
+        };
+        if let Some(s) = switch_state
+            && weapon_iw4::perk_fastweaponswitch_applies(self.predicted_perks0, s)
+        {
+            let m = weapon_iw4::PERK_WEAP_SWITCH_MULTIPLIER_DEFAULT;
+            return timer_ms.map(|t| ((t as f32) * m).round() as i32);
+        }
         let reload_family = matches!(
             state,
             WeaponState::Reloading { .. } | WeaponState::ReloadStarting | WeaponState::ReloadEnding

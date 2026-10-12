@@ -1398,6 +1398,13 @@ pub(crate) fn match_events(host: &mut Host, seen: &mut MatchSeen, old: Option<&M
         }
         seen.lui = n;
         let Some(name) = parts.next() else { continue };
+        // (bo2mp: with the modern HUD a medal is `hud_medals`' Black Ops
+        // notification; BO2's NotificationPopups never gets it, so no BO2
+        // medal art or popup.)
+        if name == "medal_received" && crate::hud_modern::modern_hud_enabled() {
+            diag::info!(Ui, "bo2mp lui notify: {item} (shown by the modern HUD's medal box)");
+            continue;
+        }
         let data = hks_t6::value::Table::new_ref();
         for (i, a) in parts.enumerate() {
             let v = a.trim().parse::<f32>().map_or_else(|_| Value::str(a), Value::Num);

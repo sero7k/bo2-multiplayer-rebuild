@@ -42,8 +42,10 @@ impl Plugin for UiPlugin {
         crate::lui_hud::register_lui_hud_systems(app);
         crate::hud_modern::register_modern_hud_systems(app);
         crate::hud_match::register_match_hud_systems(app);
+        crate::hud_medals::register_medal_systems(app);
         crate::game_folders::register_game_folders(app);
         crate::shell::register_shell(app);
+        crate::music_screen::register(app);
         crate::pad_glyphs::register_pad_glyphs(app);
         crate::load_info::register_load_info(app);
         crate::bo2mp_damage::register_bo2mp_damage(app);

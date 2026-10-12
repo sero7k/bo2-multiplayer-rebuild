@@ -352,6 +352,8 @@ fn serialize_settings(settings: &frame::GameSettings, binds: &KeyBinds) -> Strin
         format!("fullscreen={}", settings.fullscreen),
         format!("vsync={}", settings.vsync),
         format!("master_volume={:.3}", settings.master_volume),
+        format!("music_volume={:.3}", settings.music_volume),
+        format!("match_music={}", settings.match_music),
         format!("brightness={:.3}", settings.brightness),
         format!("fov={:.0}", settings.fov),
         format!("shadows={}", settings.shadows),
@@ -482,6 +484,8 @@ fn parse_settings(source: &str, settings: &mut frame::GameSettings, binds: &mut 
                     settings.master_volume = value;
                 }
             }
+            "music_volume" => parse_into(value, &mut settings.music_volume),
+            "match_music" => parse_into(value, &mut settings.match_music),
             "sensitivity" => {
                 if let Ok(value) = value.parse() {
                     settings.sensitivity = value;

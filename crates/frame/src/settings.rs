@@ -30,6 +30,11 @@ pub struct GameSettings {
     pub vsync: bool,
     pub fov: f32,
     pub master_volume: f32,
+    /// The music director's level (menu, lobby and match music), under
+    /// `master_volume`.
+    pub music_volume: f32,
+    /// Low ambient music during a match (the music director's match playlist).
+    pub match_music: bool,
     pub brightness: f32,
     pub shadows: bool,
     pub depth_of_field: bool,
@@ -68,6 +73,8 @@ impl Default for GameSettings {
             vsync: true,
             fov: Self::FOV_DEFAULT,
             master_volume: 1.0,
+            music_volume: Self::MUSIC_VOLUME_DEFAULT,
+            match_music: true,
             brightness: 0.0,
             shadows: true,
             depth_of_field: true,
@@ -99,6 +106,7 @@ impl GameSettings {
     pub const FOV_MAX: f32 = 120.0;
     pub const PAD_SENSITIVITY_DEFAULT: f32 = 3.0;
     pub const PAD_LAYOUT_CUSTOM: u8 = 255;
+    pub const MUSIC_VOLUME_DEFAULT: f32 = 0.8;
 
     pub fn touch(&mut self) {
         self.revision = self.revision.wrapping_add(1);
@@ -118,6 +126,11 @@ impl GameSettings {
             0.0
         };
         self.master_volume = self.master_volume.clamp(0.0, 1.0);
+        self.music_volume = if self.music_volume.is_finite() {
+            self.music_volume.clamp(0.0, 1.0)
+        } else {
+            Self::MUSIC_VOLUME_DEFAULT
+        };
         self.sensitivity = self.sensitivity.clamp(0.1, 30.0);
         if self.pad_layout != Self::PAD_LAYOUT_CUSTOM {
             self.pad_layout = self.pad_layout.min(4);

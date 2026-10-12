@@ -148,6 +148,16 @@ impl LuiHudSlot {
         hud.host.values.borrow().localize.get(&key.to_ascii_uppercase()).cloned()
     }
 
+    /// bo2mp: a string table's header (row 0) and one of its rows, as the
+    /// scripts' `tablelookup` rows count them (`hud_medals`: a medal's
+    /// `mp/scoreInfo.csv` row).
+    pub(crate) fn table_row(&self, table: &str, row: usize) -> Option<(Vec<String>, Vec<String>)> {
+        let hud = self.0.as_ref()?;
+        let v = hud.host.values.borrow();
+        let rows = hks_t6::mp::table_rows(&v, table);
+        Some((rows.first()?.clone(), rows.get(row)?.clone()))
+    }
+
     /// bo2mp: his scoreboard is wanted (his scores key held, or the match
     /// is over and its end board is due): `hud_match` draws its own then,
     /// in place of BO2's LUI Scoreboard menu.
