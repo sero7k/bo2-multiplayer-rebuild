@@ -2181,32 +2181,59 @@ pub(crate) fn origin_of(vm: &Vm<World>, world: &mut World, v: &Value) -> Option<
 
 /// Weapon index by script name (`m1911_zm`; IW4L registers `_mp` names).
 pub(crate) fn weapon(world: &mut World, name: &str) -> Result<u32, String> {
+    resolve_weapon(world, name).map(|(w, _)| w)
+}
+
+/// `weapon`, and when the weapon is not the one the name asks for, what
+/// stood in for it and why.
+///
+/// bo2mp: a gun with attachments (`mk48_mp+reflex+fmj`) is that name when
+/// the catalog has it, else its base gun with its sight, if it has one
+/// (`mk48_mp+reflex`, the scope lane's catalog weapon: sight model, ADS,
+/// zoom, overlay; its other attachments are not drawn or modelled yet),
+/// else the base gun. Another game's gun (`bo1_ak74u_mp+reflex+grip`,
+/// `gh_ak12_mp+acog`): its own variant with those attachments, in any
+/// order, else the nearest one, else its base gun. Only weapons a player
+/// can be given (with combat data) stand in.
+pub(crate) fn resolve_weapon(world: &mut World, name: &str) -> Result<(u32, Option<String>), String> {
     if name == "none" || name.is_empty() {
-        return Ok(0);
+        return Ok((0, None));
     }
-    // bo2mp: a gun with attachments (`mk48_mp+reflex+fmj`) is its base gun
-    // with its sight, if it has one (`mk48_mp+reflex`, the scope lane's
-    // catalog weapon: sight model, ADS, zoom, overlay); its other
-    // attachments are not drawn or modelled yet.
-    // bo2mp: another game's gun (`bo1_ak74u_mp+reflex+grip`): its own
-    // variant with those attachments, in any order, else the nearest one.
-    if ["bo1_", "mw2_", "mw3_", "waw_", "cod4_"].iter().any(|p| name.starts_with(p)) {
-        let f = frame(world);
-        if let Some(w) = f.guest_weapon_index(name) {
-            return Ok(w);
-        }
-    }
-    let mut parts = name.split('+');
-    let name = parts.next().unwrap_or(name);
     let f = frame(world);
-    for att in parts {
-        let base = if name.ends_with("_mp") { name.to_owned() } else { format!("{name}_mp") };
-        if let Ok(w) = crate::script_player::weapon_named(&f, &format!("{base}+{att}")) {
-            return Ok(w);
+    let usable = |w: u32| w != 0 && (f.combat_facts_for(w).is_some() || f.weapon_is_melee_only(w));
+    let Some((base, atts)) = name.split_once('+') else {
+        return crate::script_player::weapon_named(&f, &format!("{name}_mp"))
+            .or_else(|_| crate::script_player::weapon_named(&f, name))
+            .map(|w| (w, None));
+    };
+    let exact = crate::script_player::weapon_named(&f, name).ok();
+    if let Some(w) = exact.filter(|w| usable(*w)) {
+        return Ok((w, None));
+    }
+    let base = if base.ends_with("_mp") { base.to_owned() } else { format!("{base}_mp") };
+    let why = match exact {
+        Some(_) => "it has no combat data",
+        None => "the catalog has no such variant",
+    };
+    if bo2_profile::guest::is_guest_name(name) {
+        if let Some(w) = f.guest_weapon_index_where(name, usable) {
+            let stand_in = crate::script_player::weapon_name(&f, w);
+            return Ok((w, Some(format!("`{name}`: {why}; nearest variant `{stand_in}`"))));
+        }
+        return Err(format!("unknown weapon '{name}' (no variant of `{base}` can be given)"));
+    }
+    for att in atts.split('+').filter(|a| !a.is_empty()) {
+        let sight = format!("{base}+{att}");
+        if let Ok(w) = crate::script_player::weapon_named(&f, &sight)
+            && usable(w)
+        {
+            return Ok((w, Some(format!("`{name}`: {why}; its `{att}` variant `{sight}`"))));
         }
     }
-    crate::script_player::weapon_named(&f, &format!("{name}_mp"))
-        .or_else(|_| crate::script_player::weapon_named(&f, name))
+    match crate::script_player::weapon_named(&f, &base).ok().filter(|w| usable(*w)) {
+        Some(w) => Ok((w, Some(format!("`{name}`: {why}; the base gun `{base}`")))),
+        None => Err(format!("unknown weapon '{name}'")),
+    }
 }
 
 /// A weapon's script name: Zombies' `m1911_zm` (the engine's `_mp`

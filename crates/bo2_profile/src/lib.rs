@@ -457,16 +457,34 @@ impl Profile {
     /// the attachment table's order (alphabetical in his table); no weapon
     /// = `weapon_null_mp`.
     pub fn loadout_weapon(&self, class: i32, slot: &str) -> String {
+        self.loadout_weapon_checked(class, slot).0
+    }
+
+    /// `loadout_weapon`, and why it is not his class's when it is not: a
+    /// slot naming an item his tables lack (another game's gun whose game
+    /// is not installed now) gives the default class's weapon for the slot.
+    pub fn loadout_weapon_checked(&self, class: i32, slot: &str) -> (String, Option<String>) {
         let index = self.loadout_item(class, slot);
+        if index == 0 || self.item(index).is_some() {
+            let atts: Vec<i32> = (1..=3).map(|n| self.loadout_item(class, &format!("{slot}attachment{n}"))).collect();
+            return (self.weapon_name(index, &atts), None);
+        }
+        let default = DEFAULT_CLASSES[class.rem_euclid(DEFAULT_CLASSES.len() as i32) as usize];
+        let slots = self.default_class(default);
+        let get = |k: &str| slots.iter().find(|(s, _)| s == k).map_or(0, |(_, v)| *v);
+        let atts: Vec<i32> = (1..=3).map(|n| get(&format!("{slot}attachment{n}"))).collect();
+        let name = self.weapon_name(get(slot), &atts);
+        (name.clone(), Some(format!("item {index} is not in his statstable (its game is not loaded?); {default}'s `{name}` instead")))
+    }
+
+    /// A weapon's name from its item and attachment numbers (see
+    /// `loadout_weapon`).
+    fn weapon_name(&self, index: i32, attachments: &[i32]) -> String {
         let Some(it) = self.item(index).filter(|it| it.reference != "weapon_null") else {
             return "weapon_null_mp".to_owned();
         };
-        let mut atts: Vec<&Attachment> = (1..=3)
-            .filter_map(|n| {
-                let a = self.loadout_item(class, &format!("{slot}attachment{n}"));
-                self.attachment(index, a).filter(|_| a > 0)
-            })
-            .collect();
+        let mut atts: Vec<&Attachment> =
+            attachments.iter().filter(|a| **a > 0).filter_map(|a| self.attachment(index, *a)).collect();
         atts.sort_by(|a, b| a.index.cmp(&b.index).then_with(|| a.reference.cmp(&b.reference)));
         atts.dedup_by(|a, b| a.reference == b.reference);
         let mut name = format!("{}_mp", it.reference);
@@ -824,6 +842,90 @@ mod tests {
         p.set_stat(Profile::class_key(LOCAL_MATCH_SET, 0, "primaryattachment2"), StatValue::Num(2.0));
         assert_eq!(p.loadout_weapon(0, "primary"), "hk416_mp+acog+reflex");
         assert_eq!(p.loadout_item_ref(0, "secondary"), "smaw");
+    }
+
+    /// The class a match gives is the set's he edited: a guest gun with
+    /// attachments (numbered in its own list), a BO2 gun with two, and a
+    /// slot naming an item his tables lack (the default class's instead).
+    #[test]
+    fn guest_and_bo2_guns_with_attachments_name_their_weapons() {
+        let mut p = sample();
+        // A guest row as guest::extend_stats_rows writes it (index >= 300).
+        let ak = row(&[(0, "300"), (2, "weapon_smg"), (4, "bo1_ak74u"), (8, "acog elbit reflex extclip dualclip gl grip rf silencer"), (12, "1"), (13, "primary")]);
+        let mut stats: Vec<Vec<String>> = vec![ak];
+        stats.extend(p.items.iter().filter(|i| !i.reference.is_empty()).map(|i| {
+            row(&[(0, &i.index.to_string()), (2, &i.group), (4, &i.reference), (8, &i.attachments.join(" ")), (11, "class_custom_assault"), (13, &i.slot)])
+        }));
+        let atts = vec![row(&[(0, "1"), (4, "acog")]), row(&[(0, "2"), (4, "dualclip")]), row(&[(0, "12"), (4, "grip")]), row(&[(0, "20"), (4, "reflex")]), row(&[(0, "101"), (4, "elbit")])];
+        p = Profile::from_tables(&stats, &atts, &|_| None, HashMap::new());
+        let key = |c: i32, s: &str| Profile::class_key(LOCAL_MATCH_SET, c, s);
+        // Guest: reflex (3rd in its list), grip (7th).
+        p.set_stat(key(0, "primary"), StatValue::Num(300.0));
+        p.set_stat(key(0, "primaryattachment1"), StatValue::Num(3.0));
+        p.set_stat(key(0, "primaryattachment2"), StatValue::Num(7.0));
+        assert_eq!(p.loadout_weapon_checked(0, "primary"), ("bo1_ak74u_mp+grip+reflex".to_owned(), None));
+        // BO2 gun with two: acog, dualclip.
+        p.set_stat(key(1, "primary"), StatValue::Num(31.0));
+        p.set_stat(key(1, "primaryattachment1"), StatValue::Num(2.0));
+        p.set_stat(key(1, "primaryattachment2"), StatValue::Num(3.0));
+        assert_eq!(p.loadout_weapon(1, "primary"), "hk416_mp+acog+dualclip");
+        // Another set (the public one) holds only the default classes.
+        p.match_set = "cacloadouts".to_owned();
+        assert_eq!(p.loadout_weapon(0, "primary"), "hk416_mp");
+        p.match_set = LOCAL_MATCH_SET.to_owned();
+        // An item his tables lack: the default class's weapon, and why.
+        // (Class 5: the default class_custom_assault again.)
+        p.set_stat(key(5, "primary"), StatValue::Num(512.0));
+        let (name, why) = p.loadout_weapon_checked(5, "primary");
+        assert_eq!(name, "hk416_mp");
+        assert!(why.is_some_and(|w| w.contains("512")));
+    }
+
+    /// Probe with BO2's own tables (`BO2MP_TABLES_DIR` holding
+    /// mp__statstable.csv and mp__attachmenttable.csv, as `t6gsc` with
+    /// `T6GSC_RAW_OUT` writes them from patch_mp.ff); skipped without.
+    #[test]
+    fn real_tables_name_class_weapons() {
+        let Ok(dir) = std::env::var("BO2MP_TABLES_DIR") else { return };
+        let read = |f: &str| -> Vec<Vec<String>> {
+            std::fs::read_to_string(std::path::Path::new(&dir).join(f))
+                .unwrap_or_default()
+                .lines()
+                .map(|l| l.split(',').map(str::to_owned).collect())
+                .collect()
+        };
+        let (mut stats, mut atts) = (read("mp__statstable.csv"), read("mp__attachmenttable.csv"));
+        guest::set_available("t5", true);
+        guest::set_available("iw6", true);
+        guest::extend_stats_rows(&mut stats);
+        guest::extend_attachment_rows(&mut atts);
+        let mut p = Profile::from_tables(&stats, &atts, &|_| None, HashMap::new());
+        // BO2's default class 1 (and the public set's) is the MTAR.
+        assert_eq!(p.loadout_weapon(0, "primary"), "tar21_mp");
+        p.match_set = "cacloadouts".to_owned();
+        assert_eq!(p.loadout_weapon(0, "primary"), "tar21_mp");
+        p.match_set = LOCAL_MATCH_SET.to_owned();
+        let key = |c: i32, s: &str| Profile::class_key(LOCAL_MATCH_SET, c, s);
+        let num = |p: &Profile, r: &str, a: &str| {
+            let it = p.item_by_ref(r).expect(r);
+            (it.index, it.attachments.iter().position(|x| x == a).expect(a) as i32 + 1)
+        };
+        let (an94, grip) = num(&p, "an94", "grip");
+        let (_, reflex) = num(&p, "an94", "reflex");
+        p.set_stat(key(0, "primary"), StatValue::Num(an94 as f32));
+        p.set_stat(key(0, "primaryattachment1"), StatValue::Num(grip as f32));
+        p.set_stat(key(0, "primaryattachment2"), StatValue::Num(reflex as f32));
+        assert_eq!(p.loadout_weapon(0, "primary"), "an94_mp+grip+reflex");
+        let (ak, rf) = num(&p, "bo1_ak74u", "rf");
+        let (_, elbit) = num(&p, "bo1_ak74u", "elbit");
+        assert!(ak >= guest::FIRST_INDEX);
+        p.set_stat(key(1, "primary"), StatValue::Num(ak as f32));
+        p.set_stat(key(1, "primaryattachment1"), StatValue::Num(elbit as f32));
+        p.set_stat(key(1, "primaryattachment2"), StatValue::Num(rf as f32));
+        assert_eq!(p.loadout_weapon(1, "primary"), "bo1_ak74u_mp+rf+elbit");
+        let (gh, _) = num(&p, "gh_ak12", "reflex");
+        p.set_stat(key(2, "primary"), StatValue::Num(gh as f32));
+        assert_eq!(p.loadout_weapon(2, "primary"), "gh_ak12_mp");
     }
 
     #[test]

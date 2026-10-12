@@ -467,6 +467,11 @@ pub(crate) fn tick(
     // (bo2mp: the shell has no Combat Training, so its Custom Games earn
     // XP too - or the levels and prestiges could never be reached.)
     sim::set_local_match_ranked(training.is_some() || crate::shell::enabled());
+    // His classes come from the set the Create-a-Class he used edited: the
+    // shell's always edits the custom match set (its matches are ranked
+    // above only for XP), BO2's own menus the set they chose.
+    let class_set = if crate::shell::enabled() { bo2_profile::LOCAL_MATCH_SET } else { mp.borrow().class_set() };
+    sim::set_local_class_set(Some(class_set));
     // Where to come back to (Custom Games' lobby, or Combat Training's
     // public lobby, as it is now).
     {

@@ -278,6 +278,31 @@ fn his<'w>(vm: &Vm<World>, world: &'w mut World, who: &Value, slot: &str) -> Opt
     (!slot.starts_with("killstreak") || p.has_streak_picks()).then_some(p)
 }
 
+/// bo2mp: what a class's gun becomes when BO2's class script gives it
+/// (`giveloadout` asks once a spawn: its `giveweapon` resolves the same
+/// name the same way), and a warning when it is not his class's gun.
+fn log_loadout_weapon(world: &mut World, client: u32, class: i32, slot: &str, name: &str, why: Option<String>) {
+    if why.is_some() {
+        diag::warn!(Sim, "bo2mp loadout: client {client} class {class} {slot} falls back: {}", why.as_deref().unwrap_or(""));
+    }
+    if name == "weapon_null_mp" {
+        diag::info!(Sim, "bo2mp loadout: client {client} class {class} {slot} `{name}` (none)");
+        return;
+    }
+    match super::resolve_weapon(world, name) {
+        Ok((w, stand_in)) => {
+            let script = super::weapon_text(world, w);
+            diag::info!(Sim, "bo2mp loadout: client {client} class {class} {slot} `{name}` -> weapon {w} `{script}`");
+            // (A BO2 gun's non-sight attachments are not modelled yet: its
+            // base gun or sight variant is expected, not a fallback.)
+            if let Some(s) = stand_in.filter(|_| bo2_profile::guest::is_guest_name(name)) {
+                diag::warn!(Sim, "bo2mp loadout: client {client} class {class} {slot} falls back: {s}");
+            }
+        }
+        Err(e) => diag::warn!(Sim, "bo2mp loadout: client {client} class {class} {slot} `{name}` -> no weapon: {e}"),
+    }
+}
+
 pub(super) fn bind(vm: &mut Vm<World>) {
     macro_rules! f {
         ($name:literal, $body:expr) => {
@@ -294,24 +319,25 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     m!("getloadoutweapon", |vm, world, s, a| {
         let class = arg(a, 0).as_int().unwrap_or(0);
         let slot = text(vm, a, 1);
-        if let Some(p) = his(vm, world, s, &slot) {
-            let w = p.loadout_weapon(class, &slot);
-            return Ok(vm.string(&w));
-        }
-        let Some((it, extra)) = slot_item(vm, world, s, class, &slot) else {
-            return Ok(vm.string("weapon_null_mp"));
-        };
-        let mut name = format!("{}_mp", it.reference);
-        let is_bot = world
-            .resource::<Zm>()
-            .bots
-            .contains_key(&entnum(vm, s).unwrap_or(u32::MAX));
-        if is_bot {
-            for att in extra.iter().filter(|a| it.attachments.contains(a)) {
-                name.push('+');
-                name.push_str(att);
+        let client = entnum(vm, s).unwrap_or(u32::MAX);
+        let (name, why) = if let Some(p) = his(vm, world, s, &slot) {
+            let set = p.match_set.clone();
+            let (w, why) = p.loadout_weapon_checked(class, &slot);
+            (w, why.map(|why| format!("his class (set {set}): {why}")))
+        } else {
+            let mut name = String::from("weapon_null_mp");
+            if let Some((it, extra)) = slot_item(vm, world, s, class, &slot) {
+                name = format!("{}_mp", it.reference);
+                if world.resource::<Zm>().bots.contains_key(&client) {
+                    for att in extra.iter().filter(|a| it.attachments.contains(a)) {
+                        name.push('+');
+                        name.push_str(att);
+                    }
+                }
             }
-        }
+            (name, None)
+        };
+        log_loadout_weapon(world, client, class, &slot, &name, why);
         Ok(vm.string(&name))
     });
     m!("getloadoutitem", |vm, world, s, a| {
@@ -413,6 +439,42 @@ pub(super) fn bind(vm: &mut Vm<World>) {
 #[cfg(test)]
 mod tests {
     use super::streak_list;
+
+    /// A guest gun's class name against a script-names table shaped like
+    /// the match's (index = weapon; BO2's rows, then the guests' with
+    /// their variants as the catalog names them).
+    #[test]
+    fn guest_guns_take_their_variant_else_the_nearest() {
+        let names: Vec<String> = [
+            "none",
+            "tar21_mp",
+            "tar21_mp+reflex",
+            "bo1_ak74u_mp",
+            "bo1_ak74u_mp+reflex",
+            "bo1_ak74u_mp+grip+reflex",
+            "bo1_ak74u_mp+rf",
+            "mw2_m4_mp",
+            "mw2_m4_mp+eotech",
+            "gh_ak12_mp",
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+        let near = |n: &str| crate::world::nearest_guest_variant(&names, n, |_| true);
+        // Exactly (any order), else the most of his and none other.
+        assert_eq!(near("bo1_ak74u_mp+reflex+grip"), Some(5));
+        assert_eq!(near("bo1_ak74u_mp+reflex+silencer"), Some(4));
+        assert_eq!(near("bo1_ak74u_mp+extclip"), Some(3));
+        assert_eq!(near("mw2_m4_mp+eotech+fmj"), Some(8));
+        assert_eq!(near("gh_ak12_mp+reflex"), Some(9));
+        // A variant that can't be given is passed over.
+        assert_eq!(crate::world::nearest_guest_variant(&names, "bo1_ak74u_mp+grip+reflex", |w| w != 5), Some(4));
+        assert_eq!(near("bo1_famas_mp+reflex"), None);
+        for n in ["bo1_ak74u_mp+rf", "mw2_m4_mp", "gh_ak12_mp+acog", "cod4_m16_mp", "waw_mp40_mp+silencer"] {
+            assert!(bo2_profile::guest::is_guest_name(n), "{n}");
+        }
+        assert!(!bo2_profile::guest::is_guest_name("tar21_mp+reflex"));
+    }
 
     #[test]
     fn streak_column_lists_dearest_first_with_held() {
