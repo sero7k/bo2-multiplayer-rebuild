@@ -200,6 +200,30 @@ pub(crate) struct Look {
     pub capture: asset_t6::ZoneCapture,
     pub packs: asset_t6::PackSet,
     pub swaps: HashMap<String, Swap>,
+    /// The model map's sky (its `*_skycubemaphdr_*` material's cube, Black
+    /// Ops II's own encoding), drawn in place of the map's own: World at
+    /// War's skies are small cubes and looked poor under Black Ops II's
+    /// grade. `None`: the model has no readable sky; the map keeps its own.
+    pub sky: Option<(String, Arc<Image>)>,
+}
+
+/// The model map's sky cube: (material name, decoded cube).
+fn model_sky(capture: &asset_t6::ZoneCapture, packs: &asset_t6::PackSet) -> Result<(String, Arc<Image>), String> {
+    let material = capture
+        .materials
+        .iter()
+        .find(|m| {
+            m.technique_set
+                .and_then(|k| capture.technique_sets.get(k.index))
+                .is_some_and(|t| t.name.contains("skycubemap"))
+        })
+        .ok_or_else(|| "no sky material".to_owned())?;
+    let image = super::t6_materials::colour_texture(material, capture)
+        .and_then(|t| t.image)
+        .and_then(|k| capture.images.get(k.index))
+        .ok_or_else(|| format!("{}: no colour map", material.name))?;
+    let cube = super::t6_materials::decode(packs, image).map_err(|e| format!("{}: {e}", material.name))?;
+    Ok((material.name.clone(), Arc::new(cube)))
 }
 
 /// Black Ops II's zone folder (where every model and palette map is).
@@ -270,7 +294,17 @@ pub(crate) fn load(recipe: &'static Recipe, images: &[String], report: &mut Vec<
         if misses.is_empty() { String::new() } else { format!("; not: {}", misses.join("; ")) }
     ));
     let capture = zones.remove(recipe.model).flatten()?;
-    Some(Look { model: recipe.model, capture, packs, swaps })
+    let sky = match model_sky(&capture, &packs) {
+        Ok(found) => {
+            report.push(format!("bo2 look: sky from {}: {}", recipe.model, found.0));
+            Some(found)
+        }
+        Err(e) => {
+            report.push(format!("bo2 look: {}'s sky not used ({e}); the map keeps its own", recipe.model));
+            None
+        }
+    };
+    Some(Look { model: recipe.model, capture, packs, swaps, sky })
 }
 
 type Pictures = (Arc<Image>, Option<Arc<Image>>, Option<Arc<Image>>);

@@ -229,14 +229,25 @@ fn link_world_materials(
         } else if let Some(texture) = colour
             && let Some(image) = texture.image.and_then(|i| mzone.image(i))
         {
-            let sky_cube = (draw.blend == asset_core::T6Blend::Sky)
-                .then(|| main.map(|main| asset_material::decode_sky_cube_from_main(main, &image.name)))
+            // bo2mp: a map in Black Ops II's look takes its model map's sky.
+            let bo2_sky = (draw.blend == asset_core::T6Blend::Sky)
+                .then(|| look.and_then(|l| l.sky.as_ref()))
                 .flatten();
+            let sky_cube = if let Some((name, cube)) = bo2_sky {
+                Some(Ok(Some((**cube).clone()))).inspect(|_| sky_line = Some(format!("{tag} sky: the Black Ops II model's {name}")))
+            } else {
+                (draw.blend == asset_core::T6Blend::Sky)
+                    .then(|| main.map(|main| asset_material::decode_sky_cube_from_main(main, &image.name)))
+                    .flatten()
+            };
+            let bo2_sky_used = bo2_sky.is_some();
             if let Some(cube) = sky_cube {
                 let slot = match cube {
                     Ok(Some(img)) => {
                         let size = img.texture_descriptor.size;
-                        sky_line = Some(format!("{tag} sky: {} ({}x{} cube)", image.name, size.width, size.width));
+                        if !bo2_sky_used {
+                            sky_line = Some(format!("{tag} sky: {} ({}x{} cube)", image.name, size.width, size.width));
+                        }
                         Some(catalog.link_image(AuthoredImage {
                             namespace: AssetNamespace::T6,
                             name: AssetRef::Real(format!("{tag}:sky:{}", image.name)),
@@ -247,7 +258,7 @@ fn link_world_materials(
                             width: size.width as u16,
                             height: size.width as u16,
                             depth: 1,
-                            level_count: 1,
+                            level_count: img.texture_descriptor.mip_level_count as u8,
                             format: 0,
                             payload: Arc::new(Vec::new()),
                             decoded: Some(Arc::new(img)),
