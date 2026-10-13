@@ -1106,6 +1106,8 @@ pub(crate) fn phase_trace(
         let Some(facts) = world.combat_facts_for(em.weapon) else {
             continue;
         };
+        // bo2mp: a bolt-action sniper kills with any hit.
+        let one_shot = crate::bullet::one_shot_sniper(&facts, world.weapon_script_name(em.weapon));
         let query = world.lagcomp_query_for(em.attacker, tick);
         let end = [
             em.origin[0] + em.direction[0] * em.max_range,
@@ -1284,6 +1286,11 @@ pub(crate) fn phase_trace(
                 }) = segment.collider
             {
                 let head = hud_iw4::obituary_is_headshot(hitloc);
+                let scaled = if one_shot && scaled > 0 {
+                    (crate::bullet::ONE_SHOT_SNIPER_DAMAGE * segment.damage_mult) as i32
+                } else {
+                    scaled
+                };
                 if damage_log() {
                     diag::info!(
                         Sim,

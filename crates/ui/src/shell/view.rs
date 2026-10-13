@@ -775,9 +775,14 @@ pub(crate) fn options_view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Ro
         let shown: Vec<Row> = rows.iter().map(|r| Row { sub: String::new(), ..r.clone() }).collect();
         menu_rows(col, cx, &shown, shell.focus, 760.0, false);
     });
+    // bo2mp: the CONTROLLER tab draws the pad and what each button does.
+    let controller = shell.page == 3;
+    if controller {
+        super::pad_diagram::view(c, cx, &super::options::snapshot(), 312.0);
+    }
     if let Some(r) = rows.get(shell.focus).filter(|r| !r.sub.is_empty()) {
         c.spawn((
-            Node { width: cx.px(520.0), padding: UiRect::all(cx.px(22.0)), border: UiRect::top(cx.px(3.0)), ..abs(None, Some(196.0), Some(64.0), None, cx) },
+            Node { width: cx.px(if controller { 760.0 } else { 520.0 }), padding: UiRect::all(cx.px(22.0)), border: UiRect::top(cx.px(3.0)), ..abs(None, Some(196.0), Some(64.0), None, cx) },
             BackgroundColor(cx.pal.panel),
             BorderColor::all(cx.pal.accent),
         ))

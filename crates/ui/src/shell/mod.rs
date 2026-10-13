@@ -33,6 +33,7 @@ mod room;
 mod looks;
 mod online;
 pub(crate) mod options;
+mod pad_diagram; // bo2mp: OPTIONS > CONTROLLER's pad
 pub(crate) mod pics; // (hud_match reuses the picture resolver)
 #[doc(hidden)]
 pub mod preview;
@@ -1207,6 +1208,9 @@ fn prefetch_pictures(
 }
 
 pub(crate) fn register_shell(app: &mut App) {
+    // (Zombies' START writes its `map` command; the frame registers this
+    // too, the shell preview does not.)
+    app.add_message::<frame::UiExecCommand>();
     app.init_resource::<Shell>()
         .init_resource::<pics::ShellPics>()
         .add_systems(Startup, theme::load_fonts)

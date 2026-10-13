@@ -160,6 +160,15 @@ const DEFEAT_RED: Color = Color::srgb(0.86, 0.30, 0.18);
 const VICTORY_BLUE: Color = Color::srgb(0.50, 0.82, 1.0);
 const DRAW_GREY: Color = Color::srgb(0.80, 0.80, 0.82);
 
+/// bo2mp: the end screen is up: it alone shows (VICTORY / DEFEAT / DRAW and
+/// the places); the HUD, scoreboard and the rest are hidden meanwhile
+/// (`screen::layers_for_screen`).
+static OUTCOME_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn outcome_up() -> bool {
+    OUTCOME_UP.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn outcome_screen(
     mut commands: Commands,
@@ -183,6 +192,7 @@ fn outcome_screen(
         _ => None,
     };
     let clear = |commands: &mut Commands| {
+        OUTCOME_UP.store(false, std::sync::atomic::Ordering::Relaxed);
         for e in &roots {
             commands.entity(e).despawn();
         }
@@ -214,6 +224,7 @@ fn outcome_screen(
         state.shown = Some((raw.clone(), now));
     }
     let start = state.shown.as_ref().map_or(now, |(_, t)| *t);
+    OUTCOME_UP.store(true, std::sync::atomic::Ordering::Relaxed);
     if !roots.is_empty() {
         for (mut text, d) in &mut lines {
             let v = decoded(&d.target, (now - d.start) as f32, d.full, d.seed);

@@ -70,6 +70,9 @@ pub struct ClientActionInput {
     pub pad_turn_rate: [f32; 2],
     /// Pitch and yaw, degrees.
     pub pad_look_delta: [f32; 2],
+    /// bo2mp: the part of an angle unit each axis's pad turn left over last
+    /// command (carried, so slow stick moves turn smoothly, not in steps).
+    pub pad_look_carry: [f32; 2],
     pub pad_aim_assist: u8,
     pub pad_lockon: Option<u64>,
     pub pad_autoaim: Option<(u64, f32)>,
@@ -103,6 +106,7 @@ impl Default for ClientActionInput {
             pad_ads_sensitivity: 1.0,
             pad_turn_rate: [0.0; 2],
             pad_look_delta: [0.0; 2],
+            pad_look_carry: [0.0; 2],
             pad_aim_assist: 0,
             pad_lockon: None,
             pad_autoaim: None,
@@ -178,16 +182,18 @@ pub fn build_usercmd(input: &mut ClientActionInput, look: &LookState, server_tim
     );
     let (mouse_pitch, mouse_yaw) = mouse_move_angles(mx, my, input.m_yaw, input.m_pitch);
     let mouse_look = input.mouse_x != 0.0 || input.mouse_y != 0.0;
-    let pad_pitch = if mouse_look {
-        0
-    } else {
-        (input.pad_look_delta[0] * ANGLE2SHORT) as i32
-    };
-    let pad_yaw = if mouse_look {
-        0
-    } else {
-        (input.pad_look_delta[1] * ANGLE2SHORT) as i32
-    };
+    let mut pad_units = [0i32; 2];
+    for (axis, units) in pad_units.iter_mut().enumerate() {
+        if mouse_look {
+            input.pad_look_carry[axis] = 0.0;
+            continue;
+        }
+        let exact = input.pad_look_delta[axis] * ANGLE2SHORT + input.pad_look_carry[axis];
+        let whole = exact.trunc();
+        input.pad_look_carry[axis] = if input.pad_look_delta[axis] == 0.0 { 0.0 } else { exact - whole };
+        *units = whole as i32;
+    }
+    let [pad_pitch, pad_yaw] = pad_units;
     let forward = (axes.forward + input.pad_move[0]).clamp(-1.0, 1.0);
     let right = (axes.right + input.pad_move[1]).clamp(-1.0, 1.0);
 

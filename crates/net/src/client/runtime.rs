@@ -835,10 +835,12 @@ pub fn sample_client_input(
                 world.trace_world(eye, point, [0.0; 3], [0.0; 3], hud_iw4::OVERHEAD_TRACE_MASK);
             hit.fraction >= 1.0 && hit.startsolid == 0
         };
-        let angles = [
-            look.angles[0] as f32 / input_iw4::ANGLE2SHORT,
-            look.angles[1] as f32 / input_iw4::ANGLE2SHORT,
-        ];
+        // bo2mp: where he really looks (the predicted view: the command's
+        // angles plus his delta angles). The command's angles alone ran away
+        // from it once the pitch limit was reached (each frame past it moves
+        // the delta), and the aim assist then slowed, locked and pulled the
+        // pitch from a wrong view: the pad's jumpy up and down.
+        let angles = [ps.viewangles[0], ps.viewangles[1]];
         let (sp, cp) = angles[0].to_radians().sin_cos();
         let (sy, cy) = angles[1].to_radians().sin_cos();
         let forward = [cp * cy, cp * sy, -sp];

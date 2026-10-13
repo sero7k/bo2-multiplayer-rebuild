@@ -27,6 +27,12 @@ pub fn sync_ui_layers(
     mut layers: ResMut<UiLayers>,
 ) {
     let set = layers_for_screen(*screen, ui_draw.0, loading.is_some());
+    // bo2mp: the match's end screen shows alone (it is in no layer).
+    let set = if *screen == AppScreen::InGame && loading.is_none() && crate::hud_outcome::outcome_up() {
+        &[UiLayer::Overlay][..]
+    } else {
+        set
+    };
     layers.show_only(set.iter().copied());
 }
 
