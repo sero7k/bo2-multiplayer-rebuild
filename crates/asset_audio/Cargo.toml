@@ -15,6 +15,7 @@ fastfile_iw4.workspace = true
 fastfile_iw5.workspace = true
 fastfile_t5.workspace = true
 fastfile_iw6.workspace = true # bo2mp: Ghosts' gun sounds
+fastfile_s1.workspace = true # bo2mp: Advanced Warfare's gun sounds
 t4 = { path = "../t4" } # bo2mp: World at War's gun sounds
 diag.workspace = true
 bevy.workspace = true

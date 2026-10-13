@@ -19,7 +19,7 @@ mod fx;
 mod material;
 mod misc;
 mod model;
-mod sound;
+pub mod sound;
 mod weapon;
 
 use std::collections::HashMap;

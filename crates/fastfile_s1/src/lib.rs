@@ -204,6 +204,24 @@ mod retail_walk {
                     println!("  class {} type {} class {} inv {} fire {} clip {} dmg {}", g.name, i(D::weapType), i(D::weapClass), i(D::inventoryType), i(D::fireType), i(D::clipSize), i(D::damage));
                 }
             }
+            if let Ok(gun) = std::env::var("S1_SOUNDS") {
+                if let Some(g) = w.cap.weapons.iter().find(|g| g.name == gun) {
+                    for (off, alias) in &g.sounds {
+                        let list = w.cap.sounds.iter().find(|s| &s.name == alias);
+                        let files: Vec<String> = list.map(|l| l.aliases.iter().map(|a| {
+                            let f = a.file.and_then(|v| w.cap.sound_files.get(&v));
+                            match f {
+                                Some(f) => format!("kind {} loaded {:?} stream {:?}", f.kind, f.loaded.map(|id| {
+                                    let l = &w.cap.loaded[id.index as usize];
+                                    format!("{} fmt {} {}Hz ch{} bits {} bytes {:?} stream {:?} head {:02x?}", l.name, l.format, l.sample_rate, l.channels, l.bits, l.data.map(|d| d.1), l.stream, l.data.map(|d| zone.image[d.0..d.0 + 8.min(d.1)].to_vec()))
+                                }), f.stream),
+                                None => format!("file {:?} unresolved", a.file),
+                            }
+                        }).collect()).unwrap_or_default();
+                        println!("  sound @{off} {alias} -> {} aliases {:?}", list.map_or(0, |l| l.aliases.len()), files.iter().take(2).collect::<Vec<_>>());
+                    }
+                }
+            }
             if std::env::var_os("S1_LIST").is_some() {
                 for m in &w.cap.xmodels {
                     println!("  model {} bones {} surfs {} lods {:?}", m.name, m.num_bones, m.numsurfs,
