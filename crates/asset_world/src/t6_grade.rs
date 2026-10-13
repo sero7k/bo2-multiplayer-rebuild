@@ -342,11 +342,37 @@ fn naked_slot() -> &'static NakedSlot {
 }
 
 fn named_grade(name: &str) -> Option<Arc<T6Grade>> {
-    let (vision, base) = vision_registry()
+    let found = vision_registry()
         .read()
         .ok()
-        .and_then(|r| r.0.get(&name.to_ascii_lowercase()).map(|v| (*v, r.1.clone())))?;
-    Some(Arc::new(T6Grade { lut: t6_grade_lut(&vision, base.as_deref()), vision }))
+        .and_then(|r| r.0.get(&name.to_ascii_lowercase()).map(|v| (*v, r.1.clone())));
+    match found {
+        Some((vision, base)) => Some(Arc::new(T6Grade { lut: t6_grade_lut(&vision, base.as_deref()), vision })),
+        // An IW-style film vision of that name (`register_film_visions`).
+        None => film_registry()
+            .read()
+            .ok()
+            .and_then(|r| r.get(&name.to_ascii_lowercase()).cloned())
+            .map(|v| Arc::new(T6Grade { lut: iw_film_lut(&v), vision: T6Vision::default() })),
+    }
+}
+
+fn film_registry() -> &'static RwLock<std::collections::HashMap<String, crate::FilmVision>> {
+    static REG: std::sync::OnceLock<RwLock<std::collections::HashMap<String, crate::FilmVision>>> =
+        std::sync::OnceLock::new();
+    REG.get_or_init(Default::default)
+}
+
+/// bo2mp: named visions in the IW games' film form (contrast, brightness,
+/// desaturation, light/dark tints), drawn as Black Ops II's colour table
+/// when a script's `visionsetnaked` names them (Black Ops II's own of a
+/// name win).
+pub fn register_film_visions(visions: Vec<(String, crate::FilmVision)>) {
+    if let Ok(mut r) = film_registry().write() {
+        for (name, v) in visions {
+            r.insert(name.to_ascii_lowercase(), v);
+        }
+    }
 }
 
 /// bo2mp vehicle screens: the local player's server vision ("" back to the

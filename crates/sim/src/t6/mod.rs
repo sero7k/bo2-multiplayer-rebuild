@@ -38,7 +38,7 @@ mod killstreaks;
 mod loadout;
 mod map_natives;
 mod movers;
-mod mp;
+pub(crate) mod mp;
 mod natives_ai;
 mod natives_ent;
 mod natives_fx;
@@ -567,6 +567,13 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
         ] {
             vm.dvars.insert(k.to_owned(), v.to_owned());
         }
+        // bo2mp: the optional M.O.A.B. (`bo2mp/moab`): the lobby's choice,
+        // or BO2MP_MOAB=<kills>; 0 keeps Black Ops II as it is.
+        let moab = std::env::var("BO2MP_MOAB").ok().and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or_else(mp::moab_kills);
+        if moab > 0 {
+            vm.dvars.insert("scr_moab".to_owned(), "1".to_owned());
+            vm.dvars.insert("scr_moab_kills".to_owned(), moab.to_string());
+        }
         // bo2mp: BO2's own HUD asked for (`BO2_HUD=bo2`): its prematch
         // countdown shows instead of the modern HUD's.
         let bo2_hud = std::env::var("BO2_HUD").is_ok_and(|v| v.trim().eq_ignore_ascii_case("bo2"));
@@ -1025,6 +1032,8 @@ pub(crate) fn start(world: &mut World) {
         // bo2mp: the test aid's script last (BO2MP_DEBUG_GSC).
         let mut calls = calls;
         if mp_map {
+            // bo2mp: the optional M.O.A.B. (off unless scr_moab 1).
+            calls.push(("bo2mp/moab".to_owned(), "main", false));
             calls.push(("bo2mp/debug".to_owned(), "main", false));
         }
         for (script, func, required) in calls {

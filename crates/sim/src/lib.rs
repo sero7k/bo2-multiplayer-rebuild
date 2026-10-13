@@ -40,6 +40,7 @@ mod t6;
 pub mod t6_playeranim;
 pub mod t6_ragdoll;
 pub use t6::stats::{ranked as local_match_ranked, set_local_class_set, set_local_match_ranked, set_local_stats_path}; // bo2mp lane C
+pub use t6::mp::set_moab_kills;
 pub use t6::{T6Anim, T6Install, T6PathNode, T6PathTables, T6Table, T6Vehicle, T6VehicleDrive};
 pub mod t5_destructible;
 mod world;

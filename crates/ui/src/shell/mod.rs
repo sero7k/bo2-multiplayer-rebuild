@@ -114,6 +114,8 @@ pub(crate) enum Setting {
     Friends,
     Enemies,
     Difficulty,
+    /// The optional M.O.A.B. (off, or its kill count).
+    Moab,
     LethalCount,
     TacticalCount,
     /// Zombies' starting round.
@@ -181,6 +183,9 @@ impl Row {
     }
 }
 
+/// The M.O.A.B.'s choices: off, Modern Warfare 3's 25 kills, then others.
+pub(crate) const MOAB_KILLS: [u32; 5] = [0, 25, 20, 15, 30];
+
 pub(crate) const DIFFICULTY: [&str; 4] = ["RECRUIT", "REGULAR", "HARDENED", "VETERAN"];
 /// Maps a picker page holds (6 by 4).
 pub(crate) const PAGE: usize = 48;
@@ -200,6 +205,8 @@ pub(crate) struct Shell {
     pub friends: u32,
     pub enemies: u32,
     pub difficulty: u32,
+    /// The optional M.O.A.B.: an index into `MOAB_KILLS` (0: off).
+    pub moab: u32,
     /// The map picker's page (a group, split by `PAGE`).
     pub page: usize,
     pub note: Option<(String, f64)>,
@@ -234,6 +241,7 @@ impl Default for Shell {
             friends: 5,
             enemies: 6,
             difficulty: 1,
+            moab: 0,
             page: 0,
             note: None,
             played: false,
@@ -303,12 +311,21 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
                     Row::new("ENEMY BOTS", "", Act::Cycle(Setting::Enemies)),
                     Row::new("BOT DIFFICULTY", "", Act::Cycle(Setting::Difficulty)),
                     Row::new("MAP", "", Act::PickMap),
+                    Row::new(
+                        "M.O.A.B.",
+                        "Optional, not Black Ops II: Modern Warfare 3's M.O.A.B. for a kill streak in one life (kills every enemy, then an EMP).",
+                        Act::Cycle(Setting::Moab),
+                    ),
                 ];
                 r[0].value = Some(mode);
                 r[1].value = Some(s.friends.to_string());
                 r[2].value = Some(s.enemies.to_string());
                 r[3].value = Some(DIFFICULTY[s.difficulty.min(3) as usize].to_owned());
                 r[4].value = Some(c.map(&s.map).map_or_else(|| s.map.clone(), |m| m.title.clone()));
+                r[5].value = Some(match MOAB_KILLS.get(s.moab as usize).copied().unwrap_or(0) {
+                    0 => "OFF".to_owned(),
+                    n => format!("{n} KILLS"),
+                });
                 r
             }
         },
@@ -476,6 +493,7 @@ impl Shell {
             Setting::Friends => self.friends = step(self.friends, 8),
             Setting::Enemies => self.enemies = step(self.enemies, 9),
             Setting::Difficulty => self.difficulty = step(self.difficulty, 3),
+            Setting::Moab => self.moab = step(self.moab, MOAB_KILLS.len() as u32 - 1),
             Setting::ZmRound => self.zm_round = step(self.zm_round as u32, zombies::ROUNDS.len() as u32 - 1) as usize,
             Setting::Option(k) => options::queue(self.page, k, by),
             Setting::LethalCount | Setting::TacticalCount => {
@@ -558,6 +576,7 @@ impl Shell {
                     return;
                 }
                 self.played = true;
+                sim::set_moab_kills(MOAB_KILLS.get(self.moab as usize).copied().unwrap_or(0));
                 bridge::request(Request::Start(StartSpec {
                     map: self.map.clone(),
                     gametype: self.mode.clone(),

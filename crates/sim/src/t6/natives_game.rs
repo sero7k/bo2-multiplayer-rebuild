@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use bevy_ecs::prelude::World;
 use gsc_t6::{ObjKind, ObjRef, Value, Vm};
 
-use super::{Zm, arg, entnum, frame, int, is_player, list, text, vec3};
+use super::{Zm, arg, entnum, frame, int, is_player, list, num, text, vec3};
 use crate::world::ClientId;
 
 /// Notify `name` on `obj` after `ms` (server time).
@@ -361,6 +361,30 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         Ok(list(v))
     });
     f!("weaponfuellife", |_, _, _, _| Ok(Value::Int(0)));
+    // earthquake(scale, seconds, origin, radius): the screen shake the
+    // engine's scene effects present (as the IW games' scripts get it).
+    f!("earthquake", |_, world, _, a| {
+        let now = crate::level_time_ms(world.resource::<crate::step::StepRequest>().tick);
+        let mut quake = crate::ScriptEarthquake {
+            id: 0,
+            scale: num(a, 0).unwrap_or(0.0),
+            duration_ms: (num(a, 1).unwrap_or(0.0) * 1000.0).round() as i32,
+            origin: vec3(a, 2).unwrap_or([0.0; 3]),
+            radius: num(a, 3).unwrap_or(0.0),
+            start_ms: now,
+        };
+        if quake.valid() && quake.duration_ms > 0 {
+            let mut runtime = world.resource_mut::<crate::script::Runtime>();
+            let engine = &mut runtime.engine;
+            engine.earthquakes.retain(|q| q.active(now));
+            if engine.earthquakes.len() < crate::MAX_SCRIPT_EARTHQUAKES {
+                quake.id = engine.next_earthquake;
+                engine.next_earthquake = engine.next_earthquake.wrapping_add(1);
+                engine.earthquakes.push(quake);
+            }
+        }
+        Ok(Value::Undefined)
+    });
     f!("numremoteclients", |_, _, _, _| Ok(Value::Int(0)));
     f!("addboxinfluencer", |_, _, _, _| Ok(Value::Int(1)));
     for name in [
@@ -866,7 +890,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         "playsound",
         "physicsexplosionsphere",
         "physicsexplosioncylinder",
-        "earthquake",
         "playrumbleonposition",
         "setclientnamemode",
         "setvoipattachment",
