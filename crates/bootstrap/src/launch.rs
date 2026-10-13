@@ -168,15 +168,16 @@ pub fn launch(
             }
         }
         LaunchMode::Map(zone) => {
-            // bo2mp test runs: `BO2MP_T6_RULES=1 iw4l map <zone>` plays the
-            // map by Black Ops II's rules, as the BO2 front end's START
-            // MATCH does (no front end needed).
-            if std::env::var("BO2MP_T6_RULES").is_ok_and(|v| v.trim() == "1") {
-                assets::set_t6_rules(true);
-            }
+            // bo2mp: the game is Black Ops II at its core: `iw4l map <zone>`
+            // plays the map by Black Ops II's rules, as the front end's
+            // START MATCH does, whichever game the map comes from.
+            assets::set_t6_rules(true);
             run_map(games, artifacts, zone, acceptance, Role::Listen, None)
         }
-        LaunchMode::Serve(zone) => run_map(games, artifacts, zone, None, Role::Dedicated, None),
+        LaunchMode::Serve(zone) => {
+            assets::set_t6_rules(true);
+            run_map(games, artifacts, zone, None, Role::Dedicated, None)
+        }
         LaunchMode::ExportGltf(zone) => {
             if acceptance.is_some() {
                 fatal("render acceptance is not available for export-gltf");
