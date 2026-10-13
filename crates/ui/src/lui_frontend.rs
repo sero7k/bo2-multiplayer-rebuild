@@ -810,6 +810,8 @@ pub(crate) struct FeedLine {
     /// team known, the name keeps the font's white).
     attacker_mine: Option<bool>,
     victim_mine: Option<bool>,
+    /// bo2mp: words after the name (a suicide's `CGAME_QUAKE_SUICIDE`).
+    note: String,
 }
 
 /// How many kill feed lines show at once, how long each stays (ms), and its
@@ -832,7 +834,7 @@ fn call_method(host: &mut Host, obj: &Value, name: &str, args: Vec<Value>) -> Op
 
 /// A kill feed line as the engine writes one: the killer, the weapon's
 /// kill icon, the one killed (a suicide or a fall: the icon and him).
-fn feed_line(_host: &Host, mp: &Mp, item: &str, my_team: &str) -> Option<FeedLine> {
+fn feed_line(host: &Host, mp: &Mp, item: &str, my_team: &str) -> Option<FeedLine> {
     let mut f = item.split('|').skip(1);
     let (attacker, victim, weapon) = (f.next()?, f.next()?, f.next().unwrap_or(""));
     let mod_ = f.next().unwrap_or("");
@@ -852,7 +854,12 @@ fn feed_line(_host: &Host, mp: &Mp, item: &str, my_team: &str) -> Option<FeedLin
     // otherwise). The gun's name is never written.
     let none = base.is_empty() || base == "none";
     let named = |n: &str| m.kill_icons.get(n).cloned();
-    let icon = if none {
+    // bo2mp: nobody else killed him (a fall, his own grenade, the map):
+    // Black Ops II writes the skull, his name and "Mistakes were made."
+    // (`CGAME_QUAKE_SUICIDE`).
+    let icon = if own {
+        named("hud_obit_death_suicide").or_else(|| named("killicondied"))
+    } else if none {
         match mod_ {
             "MOD_MELEE" => named("hud_obit_knife"),
             "MOD_HEAD_SHOT" => named("killiconheadshot"),
@@ -872,6 +879,16 @@ fn feed_line(_host: &Host, mp: &Mp, item: &str, my_team: &str) -> Option<FeedLin
         victim: victim.to_owned(),
         attacker_mine,
         victim_mine,
+        note: if own {
+            host.values
+                .borrow()
+                .localize
+                .get("CGAME_QUAKE_SUICIDE")
+                .cloned()
+                .unwrap_or_else(|| "Mistakes were made.".to_owned())
+        } else {
+            String::new()
+        },
     })
 }
 
@@ -986,6 +1003,16 @@ fn draw_feed(host: &mut Host, mp: &Mp, seen: &mut MatchSeen) {
         call_method(host, v, "setRGB", vec![Value::Num(c[0]), Value::Num(c[1]), Value::Num(c[2])]);
         place(host, v, x, x + w, bottom - h);
         call_method(host, v, "setAlpha", vec![Value::Num(alpha)]);
+        // A suicide's words after his name, white, in the killer's place
+        // (a suicide has no killer).
+        if !line.note.is_empty() {
+            let x = x + w + gap;
+            let nw = width(host, &line.note);
+            call_method(host, a, "setText", vec![Value::str(&line.note)]);
+            call_method(host, a, "setRGB", vec![Value::Num(1.0), Value::Num(1.0), Value::Num(1.0)]);
+            place(host, a, x, x + nw, bottom - h);
+            call_method(host, a, "setAlpha", vec![Value::Num(alpha)]);
+        }
     }
 }
 
