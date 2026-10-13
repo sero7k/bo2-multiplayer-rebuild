@@ -1415,6 +1415,9 @@ struct T6Surface {
     eyes: bool,
     /// bo2mp: drawn with a weapon camo's material: its tiling.
     camo_tile: Option<f32>,
+    /// bo2mp: a pattern camo laid on it (the pattern in the specular
+    /// map's slot): its repeat.
+    pattern: Option<f32>,
 }
 
 enum T6Triangles {
@@ -1484,6 +1487,9 @@ fn t6_model_surfaces(
             refused.push((surface, "shadow-only material (never drawn in colour)", m.name.to_string()));
         }
         let shine = |semantic| m.texture_semantic(semantic).map_or(u32::MAX, |id| id.0);
+        // bo2mp: a pattern camo on a camo-ready material (none when a
+        // material camo already drew it).
+        let pattern = camo.is_none().then(|| asset_core::weapon_camos::pattern(item.camo, material)).flatten();
         out.push(T6Surface {
             vbase,
             vn,
@@ -1491,9 +1497,10 @@ fn t6_model_surfaces(
             slot,
             code: draw.code(),
             normal: shine(asset_material::TS_NORMAL_MAP),
-            specular: shine(asset_material::TS_SPECULAR_MAP),
+            specular: pattern.map_or_else(|| shine(asset_material::TS_SPECULAR_MAP), |p| p.image),
             eyes: draw.eyes,
             camo_tile: camo.map(|c| c.tile),
+            pattern: pattern.map(|p| p.scale),
         });
     }
     if !refused.is_empty() {
@@ -1508,20 +1515,23 @@ fn t6_model_surfaces(
 fn t6_camo_instance(
     item: &render_anim::occupancy::missile::T6MissileModel,
     instances: &mut Vec<[f32; 24]>,
-    mut row: [f32; 24],
+    row: [f32; 24],
     instance: u32,
-) -> u32 {
-    let tile = (item.camo != 0)
-        .then(|| item.materials.iter().flatten().find_map(|&m| asset_core::weapon_camos::swap(item.camo, m)))
-        .flatten();
-    match tile {
-        Some(c) => {
-            row[22] = asset_core::weapon_camos::tile_slot(c.tile);
-            instances.push(row);
-            instances.len() as u32 - 1
-        }
-        None => instance,
+) -> (u32, u32) {
+    use asset_core::weapon_camos as camos;
+    let mut push = |value: f32| {
+        let mut r = row;
+        r[22] = value;
+        instances.push(r);
+        instances.len() as u32 - 1
+    };
+    if item.camo == 0 {
+        return (instance, instance);
     }
+    let mats = || item.materials.iter().flatten();
+    let tiled = mats().find_map(|&m| camos::swap(item.camo, m)).map_or(instance, |c| push(camos::tile_slot(c.tile)));
+    let patterned = mats().find_map(|&m| camos::pattern(item.camo, m)).map_or(instance, |p| push(camos::pattern_slot(p.scale)));
+    (tiled, patterned)
 }
 
 /// bo2mp diag: a model (a player's body or head, a gun) with surfaces the
@@ -1565,7 +1575,7 @@ fn t6_surface_rows(surfaces: &[T6Surface], mut first: u32) -> Vec<[u32; 7]> {
         .iter()
         .map(|s| {
             let count = s.index_count() as u32;
-            let row = [first, count, s.slot, s.code, s.normal, s.specular, if s.eyes { 1 } else if s.camo_tile.is_some() { 2 } else { 0 }];
+            let row = [first, count, s.slot, s.code, s.normal, s.specular, if s.eyes { 1 } else if s.camo_tile.is_some() { 2 } else if s.pattern.is_some() { 3 } else { 0 }];
             first += count;
             row
         })
@@ -1820,6 +1830,7 @@ pub fn extract_t6_dynamic(
             // camo's tiling in slot 22).
             let camo_option = asset_core::weapon_camos::viewmodel();
             let mut camo_tile: Option<f32> = None;
+            let mut pattern_scale: Option<f32> = None;
             let draws = rows
                 .draws
                 .iter()
@@ -1831,6 +1842,13 @@ pub fn extract_t6_dynamic(
                     });
                     if let Some(c) = swap {
                         camo_tile.get_or_insert(c.tile);
+                    }
+                    let pattern = swap
+                        .is_none()
+                        .then(|| asset_core::weapon_camos::pattern(camo_option, material.unwrap_or(u32::MAX)))
+                        .flatten();
+                    if let Some(p) = pattern {
+                        pattern_scale.get_or_insert(p.scale);
                     }
                     let material = swap.map_or(material?, |c| c.material);
                     let m = catalog.derived(assets::MaterialIndex::from_order(material as usize))?;
@@ -1847,9 +1865,9 @@ pub fn extract_t6_dynamic(
                         count,
                         slot_of(asset_material::TS_COLOR_MAP),
                         draw.code(),
-                        u32::from(swap.is_some()),
+                        if swap.is_some() { 1 } else if pattern.is_some() { 2 } else { 0 },
                         shine_of(asset_material::TS_NORMAL_MAP),
-                        shine_of(asset_material::TS_SPECULAR_MAP),
+                        pattern.map_or_else(|| shine_of(asset_material::TS_SPECULAR_MAP), |p| p.image),
                     ])
                 })
                 .collect();
@@ -1866,11 +1884,15 @@ pub fn extract_t6_dynamic(
             instance[21] = lit.visibility;
             // The gun reflects the probe nearest the eye (plus one; 0 = none).
             instance[23] = asset_world::t6_nearest_probe(eye).map_or(0.0, |p| p as f32 + 1.0);
+            // (Rows: the gun's own, its material camo's, its pattern's.)
             let mut instances = vec![instance];
-            if let Some(tile) = camo_tile {
+            if camo_tile.is_some() || pattern_scale.is_some() {
                 let mut tiled = instance;
-                tiled[22] = asset_core::weapon_camos::tile_slot(tile);
+                tiled[22] = asset_core::weapon_camos::tile_slot(camo_tile.unwrap_or(1.0));
+                let mut patterned = instance;
+                patterned[22] = asset_core::weapon_camos::pattern_slot(pattern_scale.unwrap_or(1.0));
                 instances.push(tiled);
+                instances.push(patterned);
             }
             Some(render_gpu::T6DynamicDraw {
                 vertices,
@@ -2193,11 +2215,12 @@ pub fn extract_t6_dynamic(
                 }
                 None => instance,
             };
-            let camo_instance = t6_camo_instance(item, &mut instances, row, instance);
+            let (camo_instance, pattern_instance) = t6_camo_instance(item, &mut instances, row, instance);
             for s in &kept.surfaces {
                 let at = match s[6] {
                     1 => eye_instance,
                     2 => camo_instance,
+                    3 => pattern_instance,
                     _ => instance,
                 };
                 draws.push([s[0], s[1], s[2], s[3], at, s[4], s[5]]);
@@ -2291,11 +2314,12 @@ pub fn extract_t6_dynamic(
                 }
                 None => instance,
             };
-            let camo_instance = t6_camo_instance(item, &mut instances, row, instance);
+            let (camo_instance, pattern_instance) = t6_camo_instance(item, &mut instances, row, instance);
             for s in surfaces {
                 let at = match s[6] {
                     1 => eye_instance,
                     2 => camo_instance,
+                    3 => pattern_instance,
                     _ => instance,
                 };
                 draws.push([s[0], s[1], s[2], s[3], at, s[4], s[5]]);

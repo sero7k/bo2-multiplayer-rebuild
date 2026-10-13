@@ -23,11 +23,21 @@ pub struct MaterialCamo {
     pub tile: f32,
 }
 
+/// A pattern camo on one of a gun's materials: the pattern picture (a
+/// texture slot) and how many times it repeats across the gun.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PatternCamo {
+    pub image: u32,
+    pub scale: f32,
+}
+
 /// The match's camos: per material camo option, each gun material it
-/// replaces (catalog index) and what it draws instead.
+/// replaces (catalog index) and what it draws instead; per pattern camo
+/// option, the pattern on each camo-ready gun material.
 #[derive(Clone, Debug, Default)]
 pub struct CamoTable {
     pub swaps: HashMap<(u32, u32), MaterialCamo>,
+    pub patterns: HashMap<(u32, u32), PatternCamo>,
     /// Options that are material camos, and their names (`camo_gold`).
     pub options: HashMap<u32, String>,
 }
@@ -52,6 +62,24 @@ pub fn swap(option: u32, material: u32) -> Option<MaterialCamo> {
         return None;
     }
     TABLE.read().ok()?.as_ref()?.swaps.get(&(option, material)).copied()
+}
+
+/// The pattern `option` lays on a gun's `material`, if it is camo-ready.
+#[must_use]
+pub fn pattern(option: u32, material: u32) -> Option<PatternCamo> {
+    if option == 0 {
+        return None;
+    }
+    TABLE.read().ok()?.as_ref()?.patterns.get(&(option, material)).copied()
+}
+
+/// Instance slot 22's value for a pattern camo surface: 3000 + the
+/// pattern's repeat (the model shader lays the pattern, read from the
+/// surface's specular map slot, under the gun's colour where its alpha is
+/// low, as Black Ops II's gun shaders do).
+#[must_use]
+pub fn pattern_slot(scale: f32) -> f32 {
+    3000.0 + if scale > 0.0 { scale.min(900.0) } else { 1.0 }
 }
 
 /// Each player's camos as the server sent them: client number -> (weapon,

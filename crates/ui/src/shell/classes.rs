@@ -67,8 +67,8 @@ pub(crate) struct Camo {
     pub index: i32,
     pub name: String,
     pub image: String,
-    /// It swaps the gun's materials (Gold, Diamond, Carbon Fiber): drawn
-    /// in matches. The pattern camos are not drawn yet.
+    /// One of the base game's camos (drawn in every match); the DLC camos'
+    /// pictures come with their packs.
     pub drawn: bool,
 }
 
@@ -217,7 +217,7 @@ fn camos(v: &hks_t6::host::EngineValues) -> Vec<Camo> {
                 index,
                 name: localized(v, r.get(3).map_or("", |c| c.trim()), reference.trim_start_matches("camo_")),
                 image: r.get(6).map_or_else(String::new, |c| c.trim().to_owned()),
-                drawn: material.contains(&index) || [10, 15, 16].contains(&index),
+                drawn: index <= 18 || material.contains(&index),
             })
         })
         .collect()

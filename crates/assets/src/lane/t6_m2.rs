@@ -1973,6 +1973,48 @@ fn f32_to_half(x: f32) -> u16 {
     sign | ((exp as u16) << 10) | ((mant >> 13) as u16)
 }
 
+/// bo2mp: Black Ops II's pattern camos for the match: per camo option
+/// (`mp/weaponoptions.csv` column 3 = 0, its pattern set counted from 1 in
+/// column 4), every gun's camo-ready materials (those its material camos
+/// replace) with that gun's pattern picture and repeat for the set.
+fn mp_pattern_camos(captures: &[&ZoneCapture]) -> BTreeMap<u32, Vec<(String, String, f32)>> {
+    let mut out: BTreeMap<u32, Vec<(String, String, f32)>> = BTreeMap::new();
+    let Some(t) = captures
+        .iter()
+        .rev()
+        .flat_map(|c| c.string_tables.iter())
+        .find(|t| t.name.eq_ignore_ascii_case("mp/weaponoptions.csv"))
+    else {
+        return out;
+    };
+    let sets: Vec<(u32, usize)> = (0..t.rows)
+        .filter_map(|r| {
+            let cell = |k: usize| t.cells.get(r * t.columns + k).map_or("", String::as_str);
+            (cell(1) == "camo" && cell(3) == "0")
+                .then(|| Some((cell(0).parse::<u32>().ok()?, cell(4).parse::<usize>().ok()?)))
+                .flatten()
+        })
+        .filter(|(o, set)| *o > 0 && *set > 0)
+        .collect();
+    let camos: Vec<&asset_t6::WeaponCamoRef> = captures.iter().flat_map(|c| c.weapon_camos.iter()).collect();
+    for (option, set) in sets {
+        let list = out.entry(option).or_default();
+        for camo in &camos {
+            let Some(pattern) = camo.sets.get(set - 1).filter(|p| real(&p.pattern)) else {
+                continue;
+            };
+            let ready: BTreeSet<&String> = camo.material_sets.iter().flatten().flat_map(|m| m.base.iter()).filter(|b| real(b)).collect();
+            for base in ready {
+                if !list.iter().any(|(b, _, _)| b == base) {
+                    list.push((base.clone(), pattern.pattern.clone(), pattern.scale));
+                }
+            }
+        }
+    }
+    out.retain(|_, l| !l.is_empty());
+    out
+}
+
 /// bo2mp: Black Ops II's material camos for the match: per camo option
 /// (`mp/weaponoptions.csv`: index, "camo", name, 1 = swaps materials, its
 /// material set counted from 1), every gun's (camo-ready material, the
@@ -2401,6 +2443,7 @@ pub(crate) fn load_t6_combat(
     // bo2mp: the material camos' materials (gold, diamond, ...), and the
     // guns' camo-ready ones they replace.
     let camo_plan = mp_material_camos(&captures);
+    let pattern_plan = mp_pattern_camos(&captures);
     for (base, camo, _) in camo_plan.values().flatten() {
         for name in [base, camo] {
             if let Some(&(ci, mi)) = homes.get(name.trim_start_matches(',')) {
@@ -2506,13 +2549,58 @@ pub(crate) fn load_t6_combat(
                 table.options.insert(option, String::new());
             }
         }
+        // The pattern pictures (no material draws them): each linked once,
+        // its texture slot for the draw.
+        let mut pictures: HashMap<String, Option<u32>> = HashMap::new();
+        let image_refs: HashMap<&str, &asset_t6::ImageRef> = captures
+            .iter()
+            .flat_map(|c| c.images.iter())
+            .filter(|i| i.name.starts_with("t6_camo_"))
+            .map(|i| (i.name.as_str(), i))
+            .collect();
+        for (&option, list) in &pattern_plan {
+            for (base, image, scale) in list {
+                let Some(b) = catalog_of(base) else { continue };
+                let slot = *pictures.entry(image.clone()).or_insert_with(|| {
+                    let r = image_refs.get(image.as_str())?;
+                    let gpu = super::t6_materials::decode(packs?, r).ok()?;
+                    Some(materials.link_image(asset_material::AuthoredImage {
+                        namespace: asset_core::AssetNamespace::T6,
+                        name: asset_core::AssetRef::Real(r.name.clone()),
+                        map_type: r.map_type,
+                        semantic: asset_material::TS_COLOR_MAP,
+                        category: 0,
+                        use_srgb_reads: true,
+                        width: r.width,
+                        height: r.height,
+                        depth: r.depth,
+                        level_count: r.level_count,
+                        format: 0,
+                        payload: std::sync::Arc::new(Vec::new()),
+                        decoded: Some(std::sync::Arc::new(gpu)),
+                        common_owned: false,
+                        decoded_variant: None,
+                        decoded_by: None,
+                        pending_decode: None,
+                    }) as u32)
+                });
+                if let Some(image) = slot {
+                    table.patterns.insert((option, b), asset_core::weapon_camos::PatternCamo { image, scale: *scale });
+                }
+            }
+        }
+        report.push(format!(
+            "t6 camos: {} pattern camo pictures, {} gun materials patterned",
+            pictures.values().filter(|s| s.is_some()).count(),
+            table.patterns.len()
+        ));
         report.push(format!(
             "t6 camos: {} material camos ({} gun materials swapped) of {} planned",
             table.options.len(),
             table.swaps.len(),
             camo_plan.len()
         ));
-        asset_core::weapon_camos::install((!table.swaps.is_empty()).then_some(table));
+        asset_core::weapon_camos::install((!table.swaps.is_empty() || !table.patterns.is_empty()).then_some(table));
     }
 
     // A model surface's material, in the catalog: the capture's own row
@@ -3445,5 +3533,10 @@ mod camo_plan_tests {
         let gold = &plan[&15];
         assert!(gold.iter().any(|(b, c, t)| b.contains("mp7") && c == "mc/mtl_weapon_camo_gold" && *t == 10.0), "{gold:?}");
         println!("{} material camos: {:?}", plan.len(), plan.iter().map(|(o, l)| (o, l.len())).collect::<Vec<_>>());
+        // The pattern camos: DEVGRU (1) on the MP7 with its own repeat.
+        let patterns = super::mp_pattern_camos(&refs);
+        let devgru = patterns.get(&1).expect("devgru");
+        assert!(devgru.iter().any(|(b, img, scale)| b.contains("mp7") && img == "t6_camo_devgru_pattern" && (*scale - 1.77).abs() < 0.01), "{devgru:?}");
+        println!("{} pattern camos", patterns.len());
     }
 }

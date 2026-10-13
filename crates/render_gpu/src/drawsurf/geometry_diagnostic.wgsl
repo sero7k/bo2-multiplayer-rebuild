@@ -1024,7 +1024,8 @@ fn vertex_prop(in: PropVertexIn) -> PropOut {
     // bo2mp: a weapon camo's surfaces (gold, diamond, ...) tile the camo's
     // pictures across the gun: instance slot 22 holds 1000 + the tiling
     // (its effect feather and unlit dimming are below 1000).
-    if (in.primary.z >= 1000.0) {
+    // (3000 + a pattern camo's repeat passes on to the pixels.)
+    if (in.primary.z >= 1000.0 && in.primary.z < 3000.0) {
         out.uv = in.uv * (in.primary.z - 1000.0);
         out.primary.z = 0.0;
     }
@@ -1245,6 +1246,20 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
         base = texel * texel;
     }
 #ifdef SHINE
+    // bo2mp: a pattern camo (instance slot 22 = 3000 + its repeat), as Black
+    // Ops II's gun shader lays it (fxc disassembly of `mc_lit_sm_r0c0n0s0o0`'s
+    // light-probe pass): the pattern at (uv - 0.5) * repeat + 0.5, under the
+    // gun's colour by the colour map's alpha (alpha 0: all pattern). The
+    // pattern rides in the specular map's slot here; the camo areas shine as
+    // painted metal. (Sampled either way: texture reads stay in uniform
+    // control flow.)
+    let camo_on = in.primary.z >= 3000.0;
+    let camo_uv = (in.uv - vec2(0.5)) * max(in.primary.z - 3000.0, 0.0001) + vec2(0.5);
+    let camo_pat = textureSample(specular_map, colour_sampler, camo_uv);
+    if (camo_on) {
+        let camo_mixed = mix(raw_texel(camo_pat.rgb), texel, albedo.a) * in.color.rgb;
+        base = camo_mixed * camo_mixed;
+    }
     // bo2zm: Black Ops II's lit model shader (`mc_lit_sm_r0c0n0s0`, its
     // light-probe technique, from the fxc disassembly): as the world's, the
     // light here from the light grid. A model's vertices carry no tangent
@@ -1335,7 +1350,11 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
 #endif
     let nm = textureSample(normal_map, colour_sampler, in.uv).xy * 4.015748 - 2.015748;
     let n = normalize(nm.x * tg * frame + nm.y * bt * frame + vn);
-    let spec_tex = textureSample(specular_map, colour_sampler, in.uv);
+    let spec_tex = select(
+        textureSample(specular_map, colour_sampler, in.uv),
+        vec4(0.24, 0.24, 0.24, 0.45),
+        camo_on,
+    );
     let spec_raw = raw_texel(spec_tex.rgb);
     let spec = spec_raw * spec_raw;
     let gloss = spec_tex.a;

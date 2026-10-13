@@ -160,7 +160,7 @@ pub(crate) fn picks(s: &Shell, book: &ClassBook) -> (Vec<String>, Vec<Pick>) {
                 desc: if k.drawn {
                     "Worn on the gun in matches, first and third person.".to_owned()
                 } else {
-                    "A pattern camo: saved with the class; patterns are not drawn on the gun yet.".to_owned()
+                    "Worn on the gun in matches, first and third person (a DLC camo shows once its pack is read).".to_owned()
                 },
                 image: k.image.clone(),
                 cost: 0,
