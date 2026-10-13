@@ -354,6 +354,44 @@ impl HudImages {
         self.rgba_by_name.insert(key, decoded);
     }
 
+    /// bo2mp: `ensure_rgba` for many pictures, the IWD ones decoded on
+    /// every core at once.
+    pub fn ensure_rgba_many(&mut self, wanted: &[(AssetNamespace, String)]) {
+        let mut todo: Vec<(AssetNamespace, &str)> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for (ns, name) in wanted {
+            let key = (*ns, cache_key(name));
+            if self.rgba_by_name.contains_key(&key) || !seen.insert(key) {
+                continue;
+            }
+            if *ns == HUD_CHROME_NAMESPACE || *ns == AssetNamespace::Iw6 {
+                self.ensure_rgba(*ns, name);
+            } else {
+                todo.push((*ns, name.as_str()));
+            }
+        }
+        if todo.is_empty() {
+            return;
+        }
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 16);
+        let chunk = todo.len().div_ceil(threads);
+        let this = &*self;
+        let decoded: Vec<((AssetNamespace, String), CachedRgba)> = std::thread::scope(|scope| {
+            let jobs: Vec<_> = todo
+                .chunks(chunk)
+                .map(|part| {
+                    scope.spawn(move || {
+                        part.iter()
+                            .map(|&(ns, name)| ((ns, cache_key(name)), this.decode_iwd_rgba(ns, name)))
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            jobs.into_iter().flat_map(|j| j.join().unwrap_or_default()).collect()
+        });
+        self.rgba_by_name.extend(decoded);
+    }
+
     pub fn rgba(&self, ns: AssetNamespace, name: &str) -> Option<&(u32, u32, Vec<u8>)> {
         self.rgba_by_name
             .get(&(ns, cache_key(name)))
@@ -535,6 +573,23 @@ impl HudImages {
 /// bo2mp: World at War's or CoD4's `main` (beside its multiplayer common
 /// zone), for its guest guns' pictures.
 fn legacy_main_for(ns: AssetNamespace) -> Option<std::path::PathBuf> {
+    // bo2mp: found once per game. (Each lookup walks the games folders and
+    // reads every common_mp's version: done per kill icon it held the main
+    // thread for over half a minute while a match loaded.)
+    static FOUND: std::sync::OnceLock<std::sync::Mutex<HashMap<AssetNamespace, Option<std::path::PathBuf>>>> =
+        std::sync::OnceLock::new();
+    let cache = FOUND.get_or_init(Default::default);
+    if let Some(hit) = cache.lock().ok().and_then(|c| c.get(&ns).cloned()) {
+        return hit;
+    }
+    let found = find_legacy_main(ns);
+    if let Ok(mut c) = cache.lock() {
+        c.insert(ns, found.clone());
+    }
+    found
+}
+
+fn find_legacy_main(ns: AssetNamespace) -> Option<std::path::PathBuf> {
     let version = asset_transport::legacy_version(ns.as_str())?;
     let root = asset_transport::games_root_from_env().ok()?;
     let common = asset_transport::find_common_mp_for_envelope(&root, version).ok()?;
@@ -544,8 +599,11 @@ fn legacy_main_for(ns: AssetNamespace) -> Option<std::path::PathBuf> {
 /// bo2mp: a Ghosts 2-D picture by material name (`hud_icon_ak12`), read
 /// from its ui_mp / common_core_mp zones when Ghosts is installed.
 fn ghosts_ui_rgba(name: &str) -> Option<(u32, u32, Vec<u8>)> {
-    let root = asset_transport::games_root_from_env().ok();
-    let extra: Vec<std::path::PathBuf> = asset_transport::game_paths::get("ghosts").into_iter().collect();
-    let install = fastfile_iw6::install::find_install(root.as_ref().map(|r| r.0.as_path()), &extra)?;
-    fastfile_iw6::ui_image::read_ui_image(&install, &[name.trim_start_matches(',').to_owned()])
+    static INSTALL: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+    let install = INSTALL.get_or_init(|| {
+        let root = asset_transport::games_root_from_env().ok();
+        let extra: Vec<std::path::PathBuf> = asset_transport::game_paths::get("ghosts").into_iter().collect();
+        fastfile_iw6::install::find_install(root.as_ref().map(|r| r.0.as_path()), &extra)
+    });
+    fastfile_iw6::ui_image::read_ui_image(install.as_ref()?, &[name.trim_start_matches(',').to_owned()])
 }

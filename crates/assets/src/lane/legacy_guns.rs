@@ -474,6 +474,10 @@ fn build_legacy_guests(game: Legacy, path: &Path, read: LegacyRead, material_see
         if let Some(rocket) = w.assets.get("rocketModel") {
             first_person.insert(rocket.clone());
         }
+        // The knife the melee pose holds (`viewmodel_knife`, WaW's kbar).
+        if let Some(knife) = w.assets.get("knifeModel") {
+            first_person.insert(knife.clone());
+        }
     }
     let models: HashMap<&str, &iw3::zone::XModel> = read
         .zone

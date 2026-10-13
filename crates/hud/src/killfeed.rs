@@ -594,7 +594,24 @@ pub(crate) fn foreign_kill_icons(
     }
     *done = key;
     let reg = &weapons.0;
+    let started = std::time::Instant::now();
     let (mut added, mut missing) = (0usize, Vec::new());
+    // The bases that already have a picture (BO2's own, an earlier catalog's).
+    let mut have: std::collections::HashSet<String> = icons
+        .0
+        .iter()
+        .filter_map(|(k, _)| k.strip_prefix("killicon:")?.rsplit_once(':').map(|(b, _)| b.to_owned()))
+        .collect();
+    // Every picture wanted, decoded together first.
+    let wanted: Vec<(asset_core::AssetNamespace, String)> = (1..=reg.len() as u32)
+        .filter_map(|id| {
+            let ns = reg.namespace_of(id)?;
+            foreign_kill_icon_base(ns, reg.name_of(id))?;
+            Some([reg.kill_icon_image_of(id), reg.kill_icon_of(id)].into_iter().flatten().map(move |s| (ns, s.to_owned())))
+        })
+        .flatten()
+        .collect();
+    hud_images.ensure_rgba_many(&wanted);
     for id in 1..=reg.len() as u32 {
         let Some(ns) = reg.namespace_of(id) else { continue };
         let Some(base) = foreign_kill_icon_base(ns, reg.name_of(id)) else {
@@ -602,7 +619,7 @@ pub(crate) fn foreign_kill_icons(
         };
         let ratio = reg.facts_of(id).map_or(0, |f| f.kill_icon_ratio);
         let prefix = format!("killicon:{base}:");
-        if icons.0.iter().any(|(k, _)| k.starts_with(&prefix)) {
+        if have.contains(&base) {
             continue;
         }
         let stems: Vec<String> = [reg.kill_icon_image_of(id), reg.kill_icon_of(id)]
@@ -633,12 +650,14 @@ pub(crate) fn foreign_kill_icons(
             bevy::asset::RenderAssetUsages::default(),
         );
         icons.0.push((format!("{prefix}{ratio}"), std::sync::Arc::new(image)));
+        have.insert(base);
         added += 1;
     }
     if added > 0 || !missing.is_empty() {
         diag::info!(
             Ui,
-            "bo2 foreign kill icons: {added} added (keys killicon:<bo1_|mw2_|mw3_><name>:<ratio>); no picture for {}: {missing:?}",
+            "bo2 foreign kill icons: {added} added in {:.0} ms (keys killicon:<bo1_|mw2_|mw3_><name>:<ratio>); no picture for {}: {missing:?}",
+            started.elapsed().as_secs_f64() * 1000.0,
             missing.len()
         );
     }

@@ -130,6 +130,12 @@ fn link_world_materials(
     let mut images: HashMap<String, Option<usize>> = HashMap::new();
     let (mut decoded, mut grey, mut missing) = (0usize, 0usize, Vec::new());
     let mut out = Vec::with_capacity(world.surfaces.len());
+    let sky_materials: std::collections::HashSet<_> = world
+        .sky_start_surfs
+        .iter()
+        .filter_map(|&i| world.surfaces.get(usize::try_from(i).ok()?)?.material)
+        .collect();
+    let mut sky_line = None;
     for surf in &world.surfaces {
         let Some(mid) = surf.material else {
             out.push(None);
@@ -149,7 +155,12 @@ fn link_world_materials(
             .and_then(|t| zone.technique_set(t))
             .map_or("", |t| t.name.as_str());
         let state = TECHNIQUES.iter().find_map(|&t| material.state_bits_for(t));
-        let draw = T6Draw::from_technique_set(technique_set, material.sort_key, state);
+        let mut draw = T6Draw::from_technique_set(technique_set, material.sort_key, state);
+        // bo2mp: the sky surfaces' material (`skyStartSurfs`) is the sky:
+        // drawn by the Black Ops II sky pass from its cube picture.
+        if sky_materials.contains(&mid) {
+            draw.blend = asset_core::T6Blend::Sky;
+        }
         let mut textures = Vec::new();
         let colour = material
             .textures
@@ -207,6 +218,52 @@ fn link_world_materials(
         } else if let Some(texture) = colour
             && let Some(image) = texture.image.and_then(|i| zone.image(i))
         {
+            let sky_cube = (draw.blend == asset_core::T6Blend::Sky)
+                .then(|| main.map(|main| asset_material::decode_sky_cube_from_main(main, &image.name)))
+                .flatten();
+            if let Some(cube) = sky_cube {
+                let slot = match cube {
+                    Ok(Some(img)) => {
+                        let size = img.texture_descriptor.size;
+                        sky_line = Some(format!("{tag} sky: {} ({}x{} cube)", image.name, size.width, size.width));
+                        Some(catalog.link_image(AuthoredImage {
+                            namespace: AssetNamespace::T6,
+                            name: AssetRef::Real(format!("{tag}:sky:{}", image.name)),
+                            map_type: 5,
+                            semantic: TS_COLOR_MAP,
+                            category: 0,
+                            use_srgb_reads: true,
+                            width: size.width as u16,
+                            height: size.width as u16,
+                            depth: 1,
+                            level_count: 1,
+                            format: 0,
+                            payload: Arc::new(Vec::new()),
+                            decoded: Some(Arc::new(img)),
+                            common_owned: false,
+                            decoded_variant: None,
+                            decoded_by: None,
+                            pending_decode: None,
+                        }))
+                    }
+                    Ok(None) => {
+                        sky_line = Some(format!("{tag} sky: {} is not a cube in the IWDs", image.name));
+                        None
+                    }
+                    Err(e) => {
+                        sky_line = Some(format!("{tag} sky: {}: {e}", image.name));
+                        None
+                    }
+                };
+                textures.push(MaterialTextureBinding {
+                    name_hash: texture.name_hash,
+                    name_start: 0,
+                    name_end: 0,
+                    sampler_state: texture.sampler_state,
+                    semantic: TS_COLOR_MAP,
+                    image: slot,
+                });
+            } else {
             let slot = *images.entry(image.name.clone()).or_insert_with(|| {
                 let pixels = main
                     .and_then(|main| asset_material::decode_ui_image_from_main(main, &image.name).ok().flatten());
@@ -250,6 +307,7 @@ fn link_world_materials(
                 semantic: TS_COLOR_MAP,
                 image: slot,
             });
+            }
         }
         let index = catalog.link_material(AuthoredMaterial {
             name: AssetRef::Real(format!("{tag}:{}", material.name)),
@@ -292,6 +350,7 @@ fn link_world_materials(
             String::new()
         }
     ));
+    report.push(sky_line.unwrap_or_else(|| format!("{tag} sky: none ({} sky surfaces)", world.sky_start_surfs.len())));
     out
 }
 
@@ -631,7 +690,8 @@ pub(crate) fn build_legacy_world(
     let lighting = asset_world::T6WorldLighting {
         sun: asset_world::WorldSunLight { direction: dir, diffuse: colour, specular: colour },
         exposure_scale: 1.0,
-        sky: [1.0, 0.0, 0.0, 1.0],
+        // The sky cube as the game looks it up (world x, y, z: no turn).
+        sky: [0.0, 1.0, 0.0, 1.0],
     };
     // The baked light: each lightmap page pair from the zone (the images
     // carry their pixels), packed for the fallback pass's IW3 branch.
@@ -692,7 +752,16 @@ pub(crate) fn build_legacy_world(
             if let Some(look) = &look
                 && let Some(model) = look.capture.world.as_ref()
             {
-                if let Some(rows) = super::t6::world_fog_rows(model) {
+                if let Some(mut rows) = super::t6::world_fog_rows(model) {
+                    // Its fog colours are HDR for the model map's exposure
+                    // (2^-exposure, a quarter to an eighth); this map draws
+                    // at exposure 1, so they take that scale here (at 1 the
+                    // far city and the dome's glass burned white).
+                    let exposure = model.exposure_volumes.first().map_or(model.init_sun_exposure, |v| v[0]);
+                    let scale = (-exposure).exp2();
+                    for k in (4..7).chain(8..11) {
+                        rows[1][k] *= scale;
+                    }
                     draw.t6_lights.resize(32, [0.0; 16]);
                     draw.t6_lights[30] = rows[0];
                     draw.t6_lights[31] = rows[1];

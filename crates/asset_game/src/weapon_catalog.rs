@@ -5837,7 +5837,10 @@ impl WeaponBuild {
                     };
                     let melee = match &knife_model {
                         None => None,
-                        Some(Err(error)) => return Some(Err(error.clone())),
+                        // bo2mp: no knife model: the melee pose without the
+                        // knife, never the whole gun refused (every CoD4 and
+                        // World at War gun drew no view model).
+                        Some(Err(_)) => None,
                         Some(Ok(knife)) => match assemble(*hands, mounts, false, Some(*knife)) {
                             Ok(melee) => Some(melee),
                             Err(error) => return Some(Err(error)),

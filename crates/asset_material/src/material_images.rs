@@ -1412,6 +1412,18 @@ pub fn decode_ui_image_from_main(
     Ok(None)
 }
 
+/// bo2mp: a sky's cube picture from a game's IWDs (CoD4 / World at War
+/// `sky_*` images), as a GPU cube image (sRGB faces).
+pub fn decode_sky_cube_from_main(main: &Path, image_name: &str) -> Result<Option<Image>, String> {
+    let name = crate::AssetRef::bare_name(image_name);
+    let index = IwdIndex::open(main)?;
+    match index.decode_cubemap_if_skybox(name, 5) {
+        Some(Ok((size, faces))) => Ok(Some(pack_material_cubemap(size, &faces, true))),
+        Some(Err(error)) => Err(error),
+        None => Ok(None),
+    }
+}
+
 fn ui_decode_mains(games_root: &Path) -> Vec<PathBuf> {
     let mut mains = game_mains_under(games_root);
     mains.sort_by(
