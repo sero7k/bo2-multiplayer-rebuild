@@ -109,6 +109,17 @@ pub fn image_pixels(
     max_size: u32,
 ) -> Result<ImagePixels, String> {
     let format = rec.format;
+    // The engine's own flat normal map (`$identitynormalmap`) has no pixels
+    // and no format in the zone: the renderer makes it. It is (0.5, 0.5, 1).
+    if format == 0 && rec.name.ends_with("$identitynormalmap") {
+        return Ok(ImagePixels {
+            width: 1,
+            height: 1,
+            levels: 1,
+            dxgi_format: 28, // R8G8B8A8_UNORM
+            data: vec![128, 128, 255, 255],
+        });
+    }
     dxgi_unit(format).ok_or_else(|| format!("DXGI format {format} is not read"))?;
     if rec.streamed {
         return streamed(rec, paks, max_size);
