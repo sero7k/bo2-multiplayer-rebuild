@@ -31,6 +31,49 @@ struct Game {
     dlc: &'static [(&'static str, &'static str)],
 }
 
+/// bo2mp: IW4x's own map pack in Modern Warfare 2 (`zone/iw4x/.../dlc`):
+/// Call of Duty 4's and Black Ops' maps rebuilt for MW2, and its variants,
+/// titled as IW4x lists them. They are MW2's maps here (MW2's section), and
+/// a Call of Duty 4 map with a version in this list is not listed from
+/// Call of Duty 4 itself (`COD4_IN_MW2`).
+const IW4X: &[(&str, &str)] = &[
+    ("mp_nuked", "Nuketown"),
+    ("mp_cross_fire", "Crossfire"),
+    ("mp_cargoship", "Wet Work"),
+    ("mp_bloc_sh", "Forgotten City"),
+    ("mp_killhouse", "Killhouse"),
+    ("mp_bog_sh", "Bog"),
+    ("mp_cargoship_sh", "Freighter"),
+    ("mp_shipment", "Shipment"),
+    ("mp_shipment_long", "Shipment: Long"),
+    ("mp_rust_long", "Rust: Long"),
+    ("mp_firingrange", "Firing Range"),
+    ("mp_bloc", "Bloc"),
+    ("mp_crash_tropical", "Crash: Tropical"),
+    ("mp_estate_tropical", "Estate: Tropical"),
+    ("mp_fav_tropical", "Favela: Tropical"),
+    ("mp_storm_spring", "Chemical Plant"),
+    ("mp_convoy", "Ambush"),
+    ("mp_backlot", "Backlot"),
+    ("mp_countdown", "Countdown"),
+    ("mp_citystreets", "District"),
+    ("mp_farm", "Downpour"),
+    ("mp_pipeline", "Pipeline"),
+    ("mp_showdown", "Showdown"),
+    ("mp_crash_snow", "Winter Crash"),
+    ("mp_broadcast", "Broadcast"),
+    ("mp_carentan", "Chinatown"),
+];
+
+/// bo2mp: Call of Duty 4 maps whose MW2 version has another zone name.
+const COD4_IN_MW2: &[(&str, &str)] = &[("mp_bog", "mp_bog_sh"), ("mp_crossfire", "mp_cross_fire")];
+
+/// The MW2 zone that is Call of Duty 4's `stem` (the same name, or
+/// `COD4_IN_MW2`'s).
+fn mw2_version_of(stem: &str) -> &str {
+    COD4_IN_MW2.iter().find(|(c, _)| *c == stem).map_or(stem, |(_, m)| m)
+}
+
 const GAMES: &[Game] = &[
     Game {
         prefix: "iw4",
@@ -352,12 +395,12 @@ fn discover() -> Vec<Category> {
     installed.sort();
     installed.dedup();
     // bo2mp: a Call of Duty 4 map MW2's folder also has (IW4x's CoD4 pack:
-    // Backlot, Crossfire, Wet Work, ...) is played as MW2's port - it loads
-    // through MW2's lane like the rest of MW2 - so CoD4's own copy is not
-    // listed.
+    // Backlot, Crossfire, Wet Work, ...) is played as MW2's version - it
+    // loads through MW2's lane like the rest of MW2, and runs better - so
+    // CoD4's own copy is not listed.
     let ported: Vec<String> = installed
         .iter()
-        .filter(|(g, s)| g == "iw3" && installed.iter().any(|(g2, s2)| g2 == "iw4" && s2 == s))
+        .filter(|(g, s)| g == "iw3" && installed.iter().any(|(g2, s2)| g2 == "iw4" && s2 == mw2_version_of(s)))
         .map(|(_, s)| s.clone())
         .collect();
     if !ported.is_empty() {
@@ -383,13 +426,16 @@ fn discover() -> Vec<Category> {
         };
         let base = known(game.base);
         let mut dlc = known(game.dlc);
+        // IW4x's pack: MW2's own maps, with IW4x's titles.
+        let iw4x: &[(&str, &str)] = if game.prefix == "iw4" { IW4X } else { &[] };
+        dlc.extend(known(iw4x));
         // Another game's map ported into this one (IW4x's CoD4 and MW3
         // packs in MW2): its own title, listed as that game's map.
         let mut ports: Vec<(String, String, &'static str)> = Vec::new();
         // Maps the tables do not name (a remaster's extra, a mod map) go
         // with the DLC, by their zone names.
         for stem in &mine {
-            if game.base.iter().chain(game.dlc).any(|(s, _)| *s == stem.as_str()) {
+            if game.base.iter().chain(game.dlc).chain(iw4x).any(|(s, _)| *s == stem.as_str()) {
                 continue;
             }
             let from = GAMES
@@ -460,6 +506,17 @@ mod usermap_title_tests {
         assert_eq!(super::usermap_title("mp_cod4_crash_snow"), "Crash Snow (CoD4)");
         assert_eq!(super::usermap_title("mp_nuketown"), "Nuketown");
         assert_eq!(super::usermap_title("mp_waw"), "Waw");
+    }
+
+    #[test]
+    fn cod4_maps_have_their_mw2_versions() {
+        assert_eq!(super::mw2_version_of("mp_bog"), "mp_bog_sh");
+        assert_eq!(super::mw2_version_of("mp_backlot"), "mp_backlot");
+        // No title twice in IW4x's list.
+        let mut t: Vec<&str> = super::IW4X.iter().map(|(s, _)| *s).collect();
+        t.sort();
+        t.dedup();
+        assert_eq!(t.len(), super::IW4X.len());
     }
 }
 
