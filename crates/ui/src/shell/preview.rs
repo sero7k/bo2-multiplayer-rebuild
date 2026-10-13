@@ -157,7 +157,7 @@ fn stand_in_book() -> ClassBook {
         }
         ClassView { n, name: name.to_owned(), slots, spent: 0 }
     };
-    let camo = |index: i32, name: &str, drawn: bool| classes::Camo { index, name: name.to_owned(), image: String::new(), drawn };
+    let camo = |index: i32, name: &str, drawn: bool| classes::Camo { index, name: name.to_owned(), image: String::new(), drawn, material: drawn };
     let mut b = ClassBook {
         classes: vec![class(0, "Custom 1", 10), class(1, "Custom 2", 30), class(2, "Custom 3", 50), class(3, "Custom 4", 31), class(4, "Custom 5", 50)],
         items,

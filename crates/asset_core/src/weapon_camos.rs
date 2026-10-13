@@ -42,13 +42,59 @@ pub struct CamoTable {
     pub options: HashMap<u32, String>,
 }
 
+impl CamoTable {
+    /// Each material camo's most used material (and its tiling): what it
+    /// draws on another game's gun, which has no camo material set of its
+    /// own (see `install_wrap`).
+    fn representatives(&self) -> HashMap<u32, MaterialCamo> {
+        let mut counts: HashMap<(u32, u32, u32), usize> = HashMap::new();
+        for (&(option, _), c) in &self.swaps {
+            *counts.entry((option, c.material, c.tile.to_bits())).or_default() += 1;
+        }
+        let mut best: HashMap<u32, ((u32, u32), usize)> = HashMap::new();
+        for ((option, material, tile), n) in counts {
+            let e = best.entry(option).or_insert(((material, tile), n));
+            if n > e.1 || (n == e.1 && (material, tile) < e.0) {
+                *e = ((material, tile), n);
+            }
+        }
+        best.into_iter()
+            .map(|(o, ((material, tile), _))| (o, MaterialCamo { material, tile: f32::from_bits(tile) }))
+            .collect()
+    }
+}
+
 static TABLE: RwLock<Option<Arc<CamoTable>>> = RwLock::new(None);
 
 /// The match load's camos (None: no camos this match).
 pub fn install(table: Option<CamoTable>) {
+    if let Ok(mut r) = REPRESENTATIVE.write() {
+        *r = table.as_ref().map(CamoTable::representatives).filter(|m| !m.is_empty());
+    }
     if let Ok(mut t) = TABLE.write() {
         *t = table.map(Arc::new);
     }
+}
+
+/// Each Black Ops II material camo's material for another game's gun.
+static REPRESENTATIVE: RwLock<Option<HashMap<u32, MaterialCamo>>> = RwLock::new(None);
+
+/// bo2mp: the materials of the other games' guns that have no camos of
+/// their own (Black Ops, World at War, CoD4, Ghosts, Advanced Warfare):
+/// Black Ops II's material camos (Gold, Diamond, Carbon Fiber and the DLC
+/// ones) draw over them whole, as on its own guns.
+static WRAP: RwLock<Option<std::collections::HashSet<u32>>> = RwLock::new(None);
+
+pub fn install_wrap(materials: std::collections::HashSet<u32>) {
+    if let Ok(mut w) = WRAP.write() {
+        *w = (!materials.is_empty()).then_some(materials);
+    }
+}
+
+/// Whether Black Ops II's material camos draw on this gun material.
+#[must_use]
+pub fn wraps(material: u32) -> bool {
+    WRAP.read().ok().and_then(|w| w.as_ref().map(|w| w.contains(&material))).unwrap_or(false)
 }
 
 pub fn table() -> Option<Arc<CamoTable>> {
@@ -74,6 +120,9 @@ pub fn swap(option: u32, material: u32) -> Option<MaterialCamo> {
     }
     let own = TABLE.read().ok().and_then(|t| t.as_ref()?.swaps.get(&(option, material)).copied());
     own.or_else(|| GUEST.read().ok()?.as_ref()?.get(&(option, material)).copied())
+        .or_else(|| {
+            wraps(material).then(|| REPRESENTATIVE.read().ok()?.as_ref()?.get(&option).copied()).flatten()
+        })
 }
 
 /// The pattern `option` lays on a gun's `material`, if it is camo-ready.
@@ -158,6 +207,22 @@ pub fn tile_slot(tile: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_material_camo_wraps_another_games_gun() {
+        let mut t = CamoTable::default();
+        t.swaps.insert((15, 1), MaterialCamo { material: 100, tile: 2.0 });
+        t.swaps.insert((15, 2), MaterialCamo { material: 100, tile: 2.0 });
+        t.swaps.insert((15, 3), MaterialCamo { material: 101, tile: 1.0 });
+        install(Some(t));
+        install_wrap([500].into_iter().collect());
+        assert_eq!(swap(15, 500), Some(MaterialCamo { material: 100, tile: 2.0 }));
+        assert_eq!(swap(15, 501), None);
+        assert_eq!(swap(0, 500), None);
+        assert_eq!(swap(15, 3), Some(MaterialCamo { material: 101, tile: 1.0 }));
+        install(None);
+        install_wrap(Default::default());
+    }
 
     #[test]
     fn worn_text_round_trips() {

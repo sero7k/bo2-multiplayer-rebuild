@@ -57,7 +57,17 @@ fn camo_choices(book: &ClassBook, gun: i32) -> Option<Vec<(i32, String, String)>
     let list: &[(u8, &str, &str)] = match bo2_profile::guest::game_for_index(gun)? {
         "iw4" => &MW2_CAMOS,
         "iw5" => &MW3_CAMOS,
-        _ => return None,
+        // (The other games' guns have no camo models: Black Ops II's
+        // material camos draw over them whole.)
+        _ => {
+            let list: Vec<_> = book
+                .camos
+                .iter()
+                .filter(|k| k.material)
+                .map(|k| (k.index, k.name.to_uppercase(), k.image.clone()))
+                .collect();
+            return (!list.is_empty()).then_some(list);
+        }
     };
     let game = bo2_profile::guest::game_for_index(gun)?;
     Some(list.iter().map(|(n, name, pic)| (i32::from(*n), name.to_uppercase(), format!("{game}:{pic}"))).collect())

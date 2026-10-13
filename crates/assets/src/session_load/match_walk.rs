@@ -1085,6 +1085,43 @@ fn guest_camo_swaps(fpv: &FpvMeshBuild, world: &WorldWeaponBuild, report: &mut V
     }
     report.push(format!("guest camos: {camos} camos of {guns} guns as {} material swaps ({refused} not paired)", swaps.len()));
     asset_core::weapon_camos::install_guest(swaps);
+
+    // The other games' guns with no camos of their own wear Black Ops II's
+    // material camos: every material of their gun models but glass, sights
+    // and hands.
+    use asset_core::AssetNamespace as Ns;
+    let wears = |ns: Ns| matches!(ns, Ns::T5 | Ns::T4 | Ns::Iw3 | Ns::Iw6 | Ns::S1);
+    let skip = |name: &str| {
+        let n = name.to_ascii_lowercase();
+        ["lens", "glass", "reticle", "reflex", "holo", "scope_overlay", "red_dot", "dot_", "hand", "glove", "sleeve", "arm_", "_arms", "emissive", "_glow", "screen", "display", "decal", "sticker", "laser", "flash", "muzzle"]
+            .iter()
+            .any(|w| n.contains(w))
+    };
+    let mut wrap = std::collections::HashSet::new();
+    let mut take = |keys: &[Option<asset_core::MaterialKey>], edges: &[asset_core::AssetEdge<asset_model::MaterialSpace>]| {
+        for (k, e) in keys.iter().zip(edges) {
+            if let (Some(k), Some(i)) = (k, e.bound_index())
+                && !skip(&k.name)
+            {
+                wrap.insert(i as u32);
+            }
+        }
+    };
+    let mut models = 0usize;
+    for i in 0..fpv.len() {
+        if let Some(e) = fpv.get_at(i).filter(|e| wears(e.namespace)) {
+            take(&e.material_keys, &e.material_edges);
+            models += 1;
+        }
+    }
+    for i in 0..world.len() {
+        if let Some(e) = world.get_at(i).filter(|e| wears(e.namespace)) {
+            take(&e.material_keys, &e.material_edges);
+            models += 1;
+        }
+    }
+    report.push(format!("guest camos: Black Ops II's material camos on {} materials of {models} other games' gun models", wrap.len()));
+    asset_core::weapon_camos::install_wrap(wrap);
 }
 
 fn link_materials_after_absorb(

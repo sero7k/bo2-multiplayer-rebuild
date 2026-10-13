@@ -70,6 +70,10 @@ pub(crate) struct Camo {
     /// One of the base game's camos (drawn in every match); the DLC camos'
     /// pictures come with their packs.
     pub drawn: bool,
+    /// A material camo (Gold, Diamond, Carbon Fiber, the DLC camos), which
+    /// other games' guns wear too; else a pattern laid on Black Ops II's
+    /// own guns' camo-ready parts.
+    pub material: bool,
 }
 
 impl ClassBook {
@@ -218,6 +222,7 @@ fn camos(v: &hks_t6::host::EngineValues) -> Vec<Camo> {
                 name: localized(v, r.get(3).map_or("", |c| c.trim()), reference.trim_start_matches("camo_")),
                 image: r.get(6).map_or_else(String::new, |c| c.trim().to_owned()),
                 drawn: index <= 18 || material.contains(&index),
+                material: material.contains(&index),
             })
         })
         .collect()
