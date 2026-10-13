@@ -25,6 +25,7 @@ pub mod jump;
 mod ladder;
 pub mod mantle;
 mod melee_charge;
+pub mod noclip; // bo2zm
 mod pml;
 mod pmove;
 mod prone_turn; // bo2zm

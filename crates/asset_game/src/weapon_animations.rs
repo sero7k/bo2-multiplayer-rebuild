@@ -174,6 +174,11 @@ pub struct WeaponAnimations {
     pub name: String,
 
     pub fire_time_ms: i32,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_animations.rs
+=======
+    /// An offhand's wind-up (`holdFireTime`): the pull-back plays over it.
+    pub hold_fire_time_ms: i32,
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_animations.rs
     /// bo2zm: Black Ops II's first-shots fire time (`intro_fire_time_ms`).
     pub intro_fire_time_ms: i32,
 
@@ -247,6 +252,10 @@ impl WeaponAnimations {
         Self {
             name: name.into(),
             fire_time_ms: 0,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_animations.rs
+=======
+            hold_fire_time_ms: 0,
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_animations.rs
             intro_fire_time_ms: 0,
             melee_time_ms: 0,
             melee_charge_time_ms: 0,
@@ -347,6 +356,10 @@ impl WeaponAnimations {
         Self {
             name,
             fire_time_ms: 0,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_animations.rs
+=======
+            hold_fire_time_ms: 0,
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_animations.rs
             intro_fire_time_ms: 0,
             melee_time_ms: 0,
             melee_charge_time_ms: 0,
@@ -384,6 +397,10 @@ impl WeaponAnimations {
             self.alternate_drop_time_ms = facts.alternate_drop_time_ms;
             self.melee_time_ms = facts.melee_time_ms;
             self.melee_charge_time_ms = facts.melee_charge_time_ms;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_animations.rs
+=======
+            self.hold_fire_time_ms = facts.hold_fire_time_ms;
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_animations.rs
             self.intro_fire_time_ms = facts.intro_fire_time_ms;
         }
         let (fire_time_ms, raise_time_ms) = registry.timers_of(index);

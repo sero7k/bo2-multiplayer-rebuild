@@ -3,7 +3,11 @@
 use core::{fmt, str::FromStr};
 
 pub const PROTOCOL_VERSION: u16 = 10;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/master_protocol/src/lib.rs
 pub const ALPN: &[u8] = b"iw4l-master/10";
+=======
+pub const ALPN: &[u8] = b"iw4l-master/9";
+>>>>>>> /tmp/claude-0/zmhead/crates/master_protocol/src/lib.rs
 pub const MAX_CONTROL_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_PAYLOAD: usize = 1100;
 
@@ -17,7 +21,9 @@ pub const MAX_CONCURRENT_BOOTSTRAP: u32 = 4;
 pub const MAX_SESSION_MEMBERS: u8 = 18;
 pub const MAX_ADVERT_NAME_BYTES: usize = 48;
 pub const MAX_MAP_BYTES: usize = 64;
-pub const MAX_MODE_BYTES: usize = 24;
+/// Zombies modes carry the start and the lobby kind
+/// (`zstandard:processing:private` is 28).
+pub const MAX_MODE_BYTES: usize = 48;
 pub const MAX_BUILD_BYTES: usize = 64;
 pub const MAX_PLAYER_NAME_BYTES: usize = 64;
 pub const MAX_LIST_ADVERTS: usize = 128;
@@ -128,7 +134,11 @@ const TAG_BOOTSTRAP_APPLIED: u8 = 12;
 const TAG_ENTER_MATCH: u8 = 13;
 const TAG_VOTE_TO_SKIP: u8 = 14;
 const TAG_ADMISSION_FAILED: u8 = 15;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/master_protocol/src/lib.rs
 const TAG_FRIENDS: u8 = 16;
+=======
+const TAG_KICK_MEMBER: u8 = 16;
+>>>>>>> /tmp/claude-0/zmhead/crates/master_protocol/src/lib.rs
 const TAG_ERROR: u8 = 0x7f;
 
 const EVENT_HOST_WORLD_READY: u8 = 1;
@@ -468,6 +478,10 @@ pub enum RequestBody {
         reason: AdmissionFailure,
     },
     VoteToSkip,
+    // bo2zm: BO2's UI_KickPlayer_f -> PartyHost_KickPlayer; only the room's host may send it.
+    KickMember {
+        member_id: MemberId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -590,6 +604,7 @@ pub enum SessionCloseReason {
     HostLeft,
     LeaseExpired,
     Overload,
+    Kicked,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -962,6 +977,7 @@ fn encode_request_body(body: &RequestBody) -> Result<Vec<u8>, ProtocolError> {
             reason.encode(&mut out);
         }
         RequestBody::VoteToSkip => out.u8(TAG_VOTE_TO_SKIP),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/master_protocol/src/lib.rs
         RequestBody::Friends { codes } => {
             if codes.len() > MAX_FRIENDS {
                 return Err(ProtocolError::LengthExceeded(codes.len()));
@@ -971,6 +987,11 @@ fn encode_request_body(body: &RequestBody) -> Result<Vec<u8>, ProtocolError> {
             for code in codes {
                 out.u32(*code);
             }
+=======
+        RequestBody::KickMember { member_id } => {
+            out.u8(TAG_KICK_MEMBER);
+            out.bytes(&member_id.0);
+>>>>>>> /tmp/claude-0/zmhead/crates/master_protocol/src/lib.rs
         }
     }
     Ok(out.0)
@@ -1038,6 +1059,7 @@ fn decode_request_body(body: &mut Reader<'_>) -> Result<RequestBody, ProtocolErr
             reason: AdmissionFailure::decode(body)?,
         },
         TAG_VOTE_TO_SKIP => RequestBody::VoteToSkip,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/master_protocol/src/lib.rs
         TAG_FRIENDS => {
             let count = body.u8()? as usize;
             if count > MAX_FRIENDS {
@@ -1049,6 +1071,11 @@ fn decode_request_body(body: &mut Reader<'_>) -> Result<RequestBody, ProtocolErr
             }
             RequestBody::Friends { codes }
         }
+=======
+        TAG_KICK_MEMBER => RequestBody::KickMember {
+            member_id: MemberId(body.array()?),
+        },
+>>>>>>> /tmp/claude-0/zmhead/crates/master_protocol/src/lib.rs
         tag => return Err(ProtocolError::UnknownTag(tag)),
     })
 }
@@ -1624,6 +1651,7 @@ impl SessionCloseReason {
             Self::HostLeft => 0,
             Self::LeaseExpired => 1,
             Self::Overload => 2,
+            Self::Kicked => 3,
         }
     }
 
@@ -1632,6 +1660,7 @@ impl SessionCloseReason {
             0 => Ok(Self::HostLeft),
             1 => Ok(Self::LeaseExpired),
             2 => Ok(Self::Overload),
+            3 => Ok(Self::Kicked),
             _ => Err(ProtocolError::InvalidBody),
         }
     }

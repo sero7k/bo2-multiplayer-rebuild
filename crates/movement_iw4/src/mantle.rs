@@ -564,7 +564,12 @@ pub fn enter(
 ) {
     ps.mantle_yaw = vectoyaw(results.dir);
     ps.mantle_timer = 0;
-    ps.mantle_trans_index = find_transition(results.start_pos[2], results.ledge_pos[2]);
+    // BO2: a hatch climb is always the highest (57) climb.
+    ps.mantle_trans_index = if (results.flags & MANTLE_FLAG_HATCH) != 0 {
+        0
+    } else {
+        find_transition(results.start_pos[2], results.ledge_pos[2])
+    };
     ps.mantle_flags = results.flags & !0x20;
 
     if (ps.perks[0] & PERK_FASTMANTLE) != 0 {
@@ -842,6 +847,88 @@ fn vectoyaw(dir: [f32; 3]) -> f32 {
     libm::atan2f(dir[1], dir[0]) * RAD2DEG
 }
 
+/// BO2 `hatch_mantle_up` and `hatch_mantle_fwd`.
+pub const HATCH_MANTLE_UP: f32 = 10.0;
+pub const HATCH_MANTLE_FWD: f32 = 44.0;
+
+/// BO2 mantle flags (bits IW4 leaves free): a hatch climb, and "jump was
+/// let go under the hatch" (the next press climbs).
+pub const MANTLE_FLAG_HATCH: u32 = 0x1000;
+pub const MANTLE_FLAG_HATCH_READY: u32 = 0x800;
+
+/// BO2 `Hatch_FindHatchSurface`: a thin column 20 to 70 above his feet,
+/// swept from 10 below to 10 above along his view's up, meets a climbable
+/// mantle brush (a roof hatch). Where the column stopped.
+fn hatch_find_surface(
+    origin: [f32; 3],
+    up: [f32; 3],
+    tracer: &mut impl MantleCapsuleTrace,
+) -> Option<[f32; 3]> {
+    let r = MANTLE_CHECK_RADIUS_DEFAULT;
+    let mins = [-r, -r, HATCH_MANTLE_UP * 2.0];
+    let maxs = [r, r, 70.0];
+    let len = libm::sqrtf(up[0] * up[0] + up[1] * up[1] + up[2] * up[2]);
+    let inv = 1.0 / if len <= 0.0 { 1.0 } else { len };
+    let start: [f32; 3] = core::array::from_fn(|i| origin[i] - up[i] * inv * 10.0);
+    let end: [f32; 3] = core::array::from_fn(|i| origin[i] + up[i] * inv * HATCH_MANTLE_UP);
+    let hit = tracer.trace(start, end, mins, maxs, CONTENTS_MANTLE);
+    if hit.startsolid != 0 || hit.allsolid != 0 || hit.fraction == 1.0 {
+        return None;
+    }
+    // BO2 asks for its mantle-on, mantle-over or hatch surface bits; the
+    // map loader keeps the first two (as IW4's), which the hatches carry.
+    if (hit.surface_flags & SURF_MANTLE_ON_OR_OVER) == 0 {
+        return None;
+    }
+    Some(core::array::from_fn(|i| start[i] + (end[i] - start[i]) * hit.fraction))
+}
+
+/// BO2 `Hatch_Check` and `Hatch_CheckHatch` (Zombies only, before the
+/// ledge search): under a hatch, jump, let go and jump again climbs up
+/// through it, the 57 climb ending 44 ahead and 87 above where the column
+/// met it. True while a hatch is over him (the ledge search is skipped).
+pub fn hatch_check(
+    ps: &mut PlayerState,
+    buttons: u32,
+    forward: [f32; 3],
+    up: [f32; 3],
+    tracer: &mut impl MantleCapsuleTrace,
+    lengths: &impl MantleXAnimLength,
+    root: &impl MantleRootDelta,
+) -> bool {
+    let Some(hit) = hatch_find_surface(ps.origin, up, tracer) else {
+        ps.mantle_flags &= !MANTLE_FLAG_HATCH_READY;
+        return false;
+    };
+    let len = libm::sqrtf(forward[0] * forward[0] + forward[1] * forward[1]);
+    let inv = 1.0 / if len <= 0.0 { 1.0 } else { len };
+    let dir = [forward[0] * inv, forward[1] * inv, 0.0];
+    let end = [
+        hit[0] + dir[0] * HATCH_MANTLE_FWD,
+        hit[1] + dir[1] * HATCH_MANTLE_FWD,
+        hit[2] + HATCH_MANTLE_UP + 77.0,
+    ];
+    let mut results = MantleResults {
+        dir,
+        start_pos: ps.origin,
+        ledge_pos: end,
+        end_pos: end,
+        flags: MANTLE_FLAG_HATCH,
+    };
+    let jump = (buttons & BUTTON_JUMP) != 0;
+    if !jump {
+        ps.mantle_flags |= MANTLE_FLAG_HATCH | MANTLE_FLAG_HATCH_READY;
+        results.flags |= MANTLE_FLAG_HATCH_READY;
+    }
+    if (ps.mantle_flags & MANTLE_FLAG_HATCH_READY) != 0 && jump {
+        // BO2 adds its "end event, clear the climb flag" bit and its "stop
+        // at the end" bit, which Zombies leaves off (mantle_adjustment_tu).
+        results.flags |= MANTLE_FLAG_EVENT6;
+        enter(ps, &results, lengths, root);
+    }
+    true
+}
+
 pub fn check(
     ps: &mut PlayerState,
     context: MantleCheckContext,
@@ -976,3 +1063,109 @@ mod bo2_weapon_tests {
         assert!(is_weapon_inactive(&climbing(4), true));
     }
 }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/movement_iw4/src/mantle.rs
+=======
+
+#[cfg(test)]
+mod hatch_tests {
+    use super::*;
+
+    /// A roof hatch: a climbable slab from 144 to 150 up, over everything.
+    struct Hatch;
+
+    impl MantleCapsuleTrace for Hatch {
+        fn trace(
+            &mut self,
+            start: [f32; 3],
+            end: [f32; 3],
+            _mins: [f32; 3],
+            maxs: [f32; 3],
+            contentmask: u32,
+        ) -> Trace {
+            let mut t = Trace {
+                fraction: 1.0,
+                endpos: end,
+                ..Trace::default()
+            };
+            if contentmask & CONTENTS_MANTLE == 0 {
+                return t;
+            }
+            let (top0, top1) = (start[2] + maxs[2], end[2] + maxs[2]);
+            if top0 > 144.0 {
+                t.startsolid = 1;
+                return t;
+            }
+            if top1 < 144.0 {
+                return t;
+            }
+            t.fraction = (144.0 - top0) / (top1 - top0);
+            t.surface_flags = 0x0200_0000;
+            t.normal = [0.0, 0.0, -1.0];
+            t
+        }
+    }
+
+    const FORWARD: [f32; 3] = [1.0, 0.0, 0.0];
+    const UP: [f32; 3] = [0.0, 0.0, 1.0];
+
+    fn step(ps: &mut PlayerState, jump: bool) -> bool {
+        let buttons = if jump { BUTTON_JUMP } else { 0 };
+        let lengths = FlatMantleAnimLength::default();
+        hatch_check(ps, buttons, FORWARD, UP, &mut Hatch, &lengths, &ZeroMantleRootDelta)
+    }
+
+    fn at(z: f32) -> PlayerState {
+        let mut ps = PlayerState::ZERO;
+        ps.origin = [0.0, 0.0, z];
+        ps
+    }
+
+    #[test]
+    fn standing_under_it_finds_nothing() {
+        // The column reaches 80 above his feet: from the aisle (38) the
+        // hatch (144) is out of reach.
+        let mut ps = at(38.0);
+        ps.mantle_flags = MANTLE_FLAG_HATCH_READY;
+        assert!(!step(&mut ps, false));
+        assert_eq!(ps.mantle_flags & MANTLE_FLAG_HATCH_READY, 0);
+    }
+
+    #[test]
+    fn jump_let_go_jump_again_climbs() {
+        // Up in his jump, jump still held from the floor: found, no climb.
+        let mut ps = at(70.0);
+        assert!(step(&mut ps, true));
+        assert_eq!(ps.pm_flags & pm_flags::MANTLE, 0);
+        assert_eq!(ps.mantle_flags & MANTLE_FLAG_HATCH_READY, 0);
+        // Let go: ready.
+        assert!(step(&mut ps, false));
+        assert_eq!(ps.pm_flags & pm_flags::MANTLE, 0);
+        assert_ne!(ps.mantle_flags & MANTLE_FLAG_HATCH_READY, 0);
+        // Press again: the 57 climb to 44 ahead, 87 above where the
+        // column met the hatch (its top at 144: 74 up).
+        assert!(step(&mut ps, true));
+        assert_ne!(ps.pm_flags & pm_flags::MANTLE, 0);
+        assert_eq!(ps.mantle_trans_index, 0);
+        assert_eq!(ps.mantle_flags & 0xffff, MANTLE_FLAG_HATCH | MANTLE_FLAG_EVENT6);
+        assert!((ps.origin[0] - HATCH_MANTLE_FWD).abs() < 1e-3);
+        assert!((ps.origin[2] - (74.0 + 87.0)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn leaving_it_forgets_the_let_go() {
+        let mut ps = at(70.0);
+        assert!(step(&mut ps, false));
+        assert_ne!(ps.mantle_flags & MANTLE_FLAG_HATCH_READY, 0);
+        ps.origin[2] = 38.0;
+        assert!(!step(&mut ps, false));
+        ps.origin[2] = 70.0;
+        assert!(step(&mut ps, true));
+        assert_eq!(ps.pm_flags & pm_flags::MANTLE, 0);
+    }
+
+    #[test]
+    fn head_already_in_it_is_no_hatch() {
+        assert!(!step(&mut at(90.0), false));
+    }
+}
+>>>>>>> /tmp/claude-0/zmhead/crates/movement_iw4/src/mantle.rs

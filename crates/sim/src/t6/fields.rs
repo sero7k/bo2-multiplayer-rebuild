@@ -77,6 +77,10 @@ pub(super) fn get(
             )),
             "sessionstate" => Some(vm.string(&sessionstate)),
             "classname" => Some(vm.string("player")),
+            "model" => {
+                let m = world.resource::<Zm>().players.get(&n).map(|p| p.model.clone());
+                Some(vm.string(&m.unwrap_or_default()))
+            }
             "name" => {
                 let n = frame(world)
                     .client_meta(id)
@@ -90,6 +94,7 @@ pub(super) fn get(
             "velocity" => Some(Value::Vec3(
                 frame(world).player(id).map_or([0.0; 3], |ps| ps.velocity),
             )),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/fields.rs
             // bo2mp: the scorestreak vehicle his view is locked to (the
             // VTOL's and the Dragonfire's ends unlink him only while set).
             "viewlockedentity" => Some(
@@ -97,6 +102,8 @@ pub(super) fn get(
                     .and_then(|v| world.resource::<Zm>().ents.get(&v).and_then(|e| e.obj))
                     .map_or(Value::Undefined, Value::Object),
             ),
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/fields.rs
             // 1 from a dive's take-off until its slide ends.
             "divetoprone" => Some(Value::Int(
                 frame(world)
@@ -127,6 +134,7 @@ pub(super) fn get(
             "health" => return Some(Value::Int(a.health)),
             "maxhealth" => return Some(Value::Int(a.maxhealth)),
             "enemy" => return Some(a.enemy.map_or(Value::Undefined, Value::Object)),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/fields.rs
             // bo2mp: where its path leads next (a dog runs only on a
             // straight stretch: `dog_move::shouldrun`).
             "lookaheaddist" | "lookaheaddir" => {
@@ -148,6 +156,8 @@ pub(super) fn get(
                     Value::Vec3([c, s, 0.0])
                 });
             }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/fields.rs
             _ => {}
         }
     }

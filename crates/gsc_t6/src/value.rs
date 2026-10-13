@@ -89,8 +89,12 @@ impl Key {
     }
 }
 
-/// Array storage: insertion order kept; iteration (`getfirstarraykey`,
-/// `getnextarraykey`, `getarraykeys`) runs newest first.
+/// Array storage: insertion order kept (a write to a key it has keeps its
+/// place). As in BO2's engine (Scr_FirstArrayKey / Scr_NextArrayKey walk
+/// from the oldest; Scr_AddArrayKeys and getlastarraykey start at the
+/// newest): `foreach`, `getfirstarraykey` and `getnextarraykey` run oldest
+/// first, `getarraykeys` lists newest first. (Die Rise's tower legs and
+/// Buried's sloth table wait in the order their arrays were built.)
 pub type ArrayMap = IndexMap<Key, Value, FxBuildHasher>;
 
 #[derive(Clone, Debug, Default)]
@@ -129,23 +133,25 @@ impl Array {
         self.set(k, v);
     }
 
-    /// The first key in iteration order (the newest).
+    /// The first key `foreach` visits (the oldest).
     pub fn first_key(&self) -> Option<Key> {
+        self.map.first().map(|(k, _)| *k)
+    }
+
+    /// The key `foreach` visits after `k` (the next newer one).
+    pub fn next_key(&self, k: &Key) -> Option<Key> {
+        let i = self.map.get_index_of(k)?;
+        self.map.get_index(i + 1).map(|(k, _)| *k)
+    }
+
+    /// The newest key (`getlastarraykey`).
+    pub fn last_key(&self) -> Option<Key> {
         self.map.last().map(|(k, _)| *k)
     }
 
-    /// The key after `k` in iteration order (the next older one).
-    pub fn next_key(&self, k: &Key) -> Option<Key> {
-        let i = self.map.get_index_of(k)?;
-        if i == 0 {
-            return None;
-        }
-        self.map.get_index(i - 1).map(|(k, _)| *k)
-    }
-
-    /// Keys in iteration order.
-    pub fn keys(&self) -> impl Iterator<Item = Key> + '_ {
-        self.map.keys().rev().copied()
+    /// Keys as `getarraykeys` lists them: newest first.
+    pub fn keys(&self) -> Box<dyn Iterator<Item = Key> + '_> {
+        Box::new(self.map.keys().rev().copied())
     }
 
     /// Values in index order 0..n when the array is a plain list, else in

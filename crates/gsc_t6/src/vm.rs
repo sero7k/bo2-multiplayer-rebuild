@@ -18,6 +18,7 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering::Relaxed};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -172,6 +173,9 @@ pub struct Vm<H> {
     threads: Vec<Option<Box<Thread>>>,
     thread_gens: Vec<u32>,
     free_threads: Vec<u32>,
+    /// (due ms, !seq, thread index, generation): soonest first, and of the
+    /// threads due on the same tick the newest `wait` first, as BO2 runs
+    /// them (OP_wait puts a thread at the head of its time's list).
     timers: BinaryHeap<Reverse<(i64, u64, u32, u32)>>,
     next_seq: u64,
     frame_end: Vec<ThreadId>,
@@ -180,6 +184,8 @@ pub struct Vm<H> {
     running: Vec<ThreadId>,
     pending_unwind: FxHashMap<ThreadId, u32>,
     nest: u32,
+    /// Woken threads wait in `ready` instead of running at once.
+    queue_wakes: bool,
     pub time_ms: i64,
     pub dvars: FxHashMap<String, String>,
     reported: FxHashSet<String>,
@@ -199,9 +205,76 @@ pub struct Vm<H> {
     pub ftrace: FxHashSet<u32>,
 }
 
+/// Hang watch (read from another thread when the sim stops ticking): the
+/// builtin running now (id + 1, 0 = none), the script function that called
+/// it, and a count of instructions run (moves while scripts loop).
+static NATIVE_NOW: AtomicU32 = AtomicU32::new(0);
+static NATIVE_CALLER: AtomicU32 = AtomicU32::new(u32::MAX);
+static STEPS_RUN: AtomicU64 = AtomicU64::new(0);
+/// Sampled every 4096 instructions: the function running and its thread's
+/// first function; and how many times a thread was resumed.
+static SAMPLE_FUNC: AtomicU32 = AtomicU32::new(u32::MAX);
+static SAMPLE_ROOT: AtomicU32 = AtomicU32::new(u32::MAX);
+static RESUMES: AtomicU64 = AtomicU64::new(0);
+static NAMES: std::sync::Mutex<(Vec<String>, Vec<String>)> =
+    std::sync::Mutex::new((Vec::new(), Vec::new()));
+
+/// What the scripts are doing now, for a hang report: the builtin being
+/// run (and by which function), or none, and the instructions run so far.
+pub fn hang_report() -> String {
+    let (id, caller, steps) = (
+        NATIVE_NOW.load(Relaxed),
+        NATIVE_CALLER.load(Relaxed),
+        STEPS_RUN.load(Relaxed),
+    );
+    let names = NAMES.lock().map(|n| n.clone()).unwrap_or_default();
+    let get = |v: &Vec<String>, i: u32| {
+        v.get(i as usize)
+            .cloned()
+            .unwrap_or_else(|| format!("#{i}"))
+    };
+    let sample = format!(
+        "{} instructions run, {} resumes; sampled {} in thread {}",
+        steps,
+        RESUMES.load(Relaxed),
+        get(&names.1, SAMPLE_FUNC.load(Relaxed)),
+        get(&names.1, SAMPLE_ROOT.load(Relaxed))
+    );
+    if id == 0 {
+        format!("no builtin running; {sample}")
+    } else {
+        format!(
+            "builtin {} called from {}; {sample}",
+            get(&names.0, id - 1),
+            get(&names.1, caller)
+        )
+    }
+}
+
 impl<H> Vm<H> {
     pub fn new(program: Program, strings: Strings) -> Self {
         let n = program.builtins.len();
+        // The biggest program's names (the server's, not the client's).
+        if let Ok(mut names) = NAMES.lock()
+            && names.1.len() < program.functions.len()
+        {
+            names.0 = program
+                .builtins
+                .iter()
+                .map(|(b, _)| strings.get(*b).to_owned())
+                .collect();
+            names.1 = program
+                .functions
+                .iter()
+                .map(|f| {
+                    format!(
+                        "{}::{}",
+                        program.scripts[f.script as usize].name,
+                        strings.get(f.name)
+                    )
+                })
+                .collect();
+        }
         let mut vm = Self {
             strings,
             program: Arc::new(program),
@@ -230,6 +303,7 @@ impl<H> Vm<H> {
             running: Vec::new(),
             pending_unwind: FxHashMap::default(),
             nest: 0,
+            queue_wakes: false,
             time_ms: 0,
             dvars: FxHashMap::default(),
             reported: FxHashSet::default(),
@@ -406,8 +480,11 @@ impl<H> Vm<H> {
         self.set_raw_field(o, f, v);
     }
 
-    /// Free an object (an entity deleted): threads that run on it, wait on
-    /// it or end on it end.
+    /// Free an object (an entity deleted), as BO2 cancels a dead entity's
+    /// notify list (Scr_FreeEntityList -> Scr_CancelNotifyList): a thread
+    /// waiting on it ends, an endon on it is dropped and its thread runs on,
+    /// and threads that run on it run on (nothing ends them for that; a
+    /// `delete` ends `endon("death")` threads by notifying "death" first).
     pub fn free_object(&mut self, host: &mut H, o: ObjRef) {
         if !self.alive(o) {
             return;
@@ -423,7 +500,7 @@ impl<H> Vm<H> {
             .copied()
             .collect();
         let mut kill: Vec<ThreadId> = Vec::new();
-        let mut unwind: Vec<(ThreadId, u32)> = Vec::new();
+        let mut dropped: Vec<ThreadId> = Vec::new();
         for k in keys {
             if let Some(list) = self.waiters.remove(&k) {
                 for w in list {
@@ -431,18 +508,20 @@ impl<H> Vm<H> {
                         continue;
                     }
                     match w.kind {
-                        WaiterKind::Endon(d) => unwind.push((w.thread, d)),
+                        WaiterKind::Endon(_) => dropped.push(w.thread),
                         _ => kill.push(w.thread),
                     }
                 }
             }
         }
-        // Running threads on it (this call may come from one of them).
-        for &t in &self.running {
-            if let Some(Some(_)) = self.threads.get(t.index as usize) {
-                continue;
+        // A running thread's own list keeps its stale entry; its waiter is
+        // gone, so nothing can fire it.
+        for t in dropped {
+            if self.thread_gens.get(t.index as usize) == Some(&t.generation)
+                && let Some(Some(th)) = self.threads.get_mut(t.index as usize)
+            {
+                th.endons.retain(|e| e.0 != o);
             }
-            let _ = t;
         }
         let x = &mut self.objects[o.index as usize];
         x.alive = false;
@@ -450,9 +529,6 @@ impl<H> Vm<H> {
         self.dying.push(o.index);
         for t in kill {
             self.unwind(host, t, 0);
-        }
-        for (t, d) in unwind {
-            self.unwind(host, t, d);
         }
     }
 
@@ -522,6 +598,11 @@ impl<H> Vm<H> {
     fn thread_live(&self, t: ThreadId) -> bool {
         self.thread_gens.get(t.index as usize) == Some(&t.generation)
             && (self.threads[t.index as usize].is_some() || self.running.contains(&t))
+    }
+
+    /// Is the thread still running (not returned or ended)?
+    pub fn thread_running(&self, t: ThreadId) -> bool {
+        self.thread_live(t)
     }
 
     /// Start `func` as a new thread on `self_` and run it until it yields.
@@ -644,7 +725,7 @@ impl<H> Vm<H> {
     }
 
     fn run_or_defer(&mut self, host: &mut H, t: ThreadId) {
-        if self.nest >= MAX_NEST {
+        if self.nest >= MAX_NEST || self.queue_wakes {
             self.ready.push_back(t);
         } else {
             self.exec(host, t);
@@ -704,6 +785,18 @@ impl<H> Vm<H> {
         }
     }
 
+    /// Notify `name` on `obj` as BO2's VM_Notify does: endons end at once,
+    /// waiting threads are queued to run after the caller (on the current
+    /// time's list). `delete` notifies "death" so: its waiters run after the
+    /// entity is freed and find `self` undefined (Die Rise's corpse-room
+    /// count returns on a deleted zombie).
+    pub fn notify_queued(&mut self, host: &mut H, obj: ObjRef, name: &str, args: &[Value]) {
+        let n = self.intern(name);
+        let was = std::mem::replace(&mut self.queue_wakes, true);
+        self.notify(host, obj, n, args);
+        self.queue_wakes = was;
+    }
+
     /// Notify by string.
     pub fn notify_str(&mut self, host: &mut H, obj: ObjRef, name: &str, args: &[Value]) {
         let n = self.intern(name);
@@ -742,9 +835,10 @@ impl<H> Vm<H> {
             while let Some(t) = self.ready.pop_front() {
                 self.exec(host, t);
             }
-            let Some(&Reverse((at, seq, index, generation))) = self.timers.peek() else {
+            let Some(&Reverse((at, newest, index, generation))) = self.timers.peek() else {
                 break;
             };
+            let seq = !newest;
             if at > self.time_ms {
                 break;
             }
@@ -949,6 +1043,16 @@ impl<H> Vm<H> {
                         BinOp::Le => x <= y,
                         _ => x >= y,
                     },
+                    // Strings compare by text (_visionset_mgr::add_sorted_name_key).
+                    (Value::Str(_) | Value::IStr(_), Value::Str(_) | Value::IStr(_)) => {
+                        let (x, y) = (self.to_text(&a), self.to_text(&b));
+                        match op {
+                            BinOp::Lt => x < y,
+                            BinOp::Gt => x > y,
+                            BinOp::Le => x <= y,
+                            _ => x >= y,
+                        }
+                    }
                     _ => {
                         let (Some(x), Some(y)) = (num(&a), num(&b)) else {
                             return Err(format!(
@@ -985,12 +1089,15 @@ impl<H> Vm<H> {
             }
             BinOp::Add => match (&a, &b) {
                 (Int(x), Int(y)) => Int(x.wrapping_add(*y)),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/gsc_t6/src/vm.rs
                 // bo2mp: a hashed dvar name plus an index (`_class`'s
                 // exclusion lists walk `#"..." + n` until one is unset): a
                 // hash no dvar of ours has, so it reads as unset.
                 (Value::Hash(h), Int(y)) | (Int(y), Value::Hash(h)) => {
                     Value::Hash(h.wrapping_add(*y as u32))
                 }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/gsc_t6/src/vm.rs
                 (Vec3(x), Vec3(y)) => Vec3([x[0] + y[0], x[1] + y[1], x[2] + y[2]]),
                 (Value::Str(_) | Value::IStr(_), _) | (_, Value::Str(_) | Value::IStr(_)) => {
                     let s = format!("{}{}", self.to_text(&a), self.to_text(&b));
@@ -1010,6 +1117,16 @@ impl<H> Vm<H> {
             BinOp::Sub => match (&a, &b) {
                 (Int(x), Int(y)) => Int(x.wrapping_sub(*y)),
                 (Vec3(x), Vec3(y)) => Vec3([x[0] - y[0], x[1] - y[1], x[2] - y[2]]),
+                // A number with a vector is first made (n, n, n), as BO2's
+                // own VM does (the Jet Gun's smoke: tag_flash - view height).
+                (Vec3(v), s) if num(s).is_some() => {
+                    let k = num(s).unwrap_or(0.0);
+                    Vec3([v[0] - k, v[1] - k, v[2] - k])
+                }
+                (s, Vec3(v)) if num(s).is_some() => {
+                    let k = num(s).unwrap_or(0.0);
+                    Vec3([k - v[0], k - v[1], k - v[2]])
+                }
                 _ => match (num(&a), num(&b)) {
                     (Some(x), Some(y)) => Float(x - y),
                     _ => {
@@ -1363,10 +1480,32 @@ impl<H> Vm<H> {
         th.state = State::Timer;
         self.timers.push(Reverse((
             self.time_ms + ms,
-            self.next_seq,
+            !self.next_seq,
             t.index,
             t.generation,
         )));
+    }
+
+    /// The thread's call chain, outermost first: `script::func@addr > ...`.
+    fn frame_chain(&self, program: &Program, th: &Thread) -> String {
+        let chain: Vec<String> = th
+            .frames
+            .iter()
+            .map(|fr| {
+                let func = &program.functions[fr.func as usize];
+                let at = func
+                    .addrs
+                    .get(fr.pc.saturating_sub(1) as usize)
+                    .copied()
+                    .unwrap_or(0);
+                format!(
+                    "{}::{}@{at:#x}",
+                    program.scripts[func.script as usize].name,
+                    self.strings.get(func.name)
+                )
+            })
+            .collect();
+        chain.join(" > ")
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1374,6 +1513,9 @@ impl<H> Vm<H> {
         let mut r = Ref::default();
         let mut obj: Option<ObjRef> = None;
         let mut steps: u64 = 0;
+        let started = std::time::Instant::now();
+        let mut slow_named = false;
+        RESUMES.fetch_add(1, Relaxed);
         macro_rules! pop {
             () => {
                 th.stack.pop().unwrap_or_default()
@@ -1392,6 +1534,7 @@ impl<H> Vm<H> {
                 }
             }
             steps += 1;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/gsc_t6/src/vm.rs
             if steps > STEP_LIMIT {
                 let chain: Vec<String> = th
                     .frames
@@ -1413,7 +1556,27 @@ impl<H> Vm<H> {
                 fail!(
                     "thread ran {STEP_LIMIT} instructions without waiting; ended ({})",
                     chain.join(" > ")
+=======
+            if steps & 0xFFF == 0 {
+                STEPS_RUN.fetch_add(0x1000, Relaxed);
+                SAMPLE_FUNC.store(th.frames.last().map_or(u32::MAX, |f| f.func), Relaxed);
+                SAMPLE_ROOT.store(th.frames.first().map_or(u32::MAX, |f| f.func), Relaxed);
+            }
+            // Slow-thread watchdog: a thread that has run 2 s without waiting
+            // names itself on stderr once (the step limit may be far off when
+            // its builtins are slow, and messages only drain after the tick).
+            if steps & 0xFFFF == 0 && !slow_named && started.elapsed().as_secs() >= 2 {
+                slow_named = true;
+                eprintln!(
+                    "bo2zm gsc: thread running {} ms, {steps} instructions without waiting: {}",
+                    started.elapsed().as_millis(),
+                    self.frame_chain(program, th)
+>>>>>>> /tmp/claude-0/zmhead/crates/gsc_t6/src/vm.rs
                 );
+            }
+            if steps > STEP_LIMIT {
+                let chain = self.frame_chain(program, th);
+                fail!("thread ran {STEP_LIMIT} instructions without waiting; ended ({chain})");
                 return Outcome::Done;
             }
             let Some(frame) = th.frames.last_mut() else {
@@ -1822,6 +1985,10 @@ impl<H> Vm<H> {
                                 self.notify(host, o, n, &args);
                             }
                         }
+                        // A thing this thread just deleted reads as undefined;
+                        // BO2 goes on past the notify (_zm_powerups: powerup_delete
+                        // then notify "powerup_grabbed").
+                        (Value::Undefined, Some(_)) => {}
                         (o, _) => fail!("notify on a {}", o.type_name()),
                     }
                 }
@@ -2059,7 +2226,10 @@ impl<H> Vm<H> {
                 }
             }
             FuncRef::Builtin(b) => {
+                NATIVE_CALLER.store(th.frames.last().map_or(u32::MAX, |f| f.func), Relaxed);
+                NATIVE_NOW.store(b + 1, Relaxed);
                 let v = self.call_native(host, b, &self_v, &args);
+                NATIVE_NOW.store(0, Relaxed);
                 th.stack
                     .push(if kind.thread() { Value::Undefined } else { v });
             }

@@ -12,6 +12,16 @@ use crate::world::ClientId;
 
 type R = Result<Value, String>;
 
+const CALLBACKS: &str = "maps/mp/gametypes_zm/_callbacksetup";
+
+/// An actor's body (radius, height) for the route checks; a zombie's for
+/// anything else.
+fn body_size(vm: &Vm<World>, world: &World, v: &Value) -> (f32, f32) {
+    entnum(vm, v)
+        .and_then(|n| world.resource::<Zm>().actors.get(&n))
+        .map_or((15.0, 72.0), |a| (a.radius, a.height))
+}
+
 fn actor_n(vm: &Vm<World>, world: &World, s: &Value) -> Result<u32, String> {
     let n = entnum(vm, s).ok_or("not an entity")?;
     if world.resource::<Zm>().actors.contains_key(&n) {
@@ -30,6 +40,10 @@ pub(super) fn actor_alive(vm: &Vm<World>, world: &World, v: &Value) -> Option<bo
     world.resource::<Zm>().actors.get(&n).map(|a| a.alive)
 }
 
+/// Set by the down test: its one blow lands even under IW4L_T6_GOD.
+pub(crate) static TEST_BLOW: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 /// `CodeCallback_PlayerDamage` on player `victim` (a zombie's swing, a
 /// fall, an explosion...).
 #[allow(clippy::too_many_arguments)]
@@ -47,9 +61,21 @@ pub(crate) fn player_damage(
     dir: [f32; 3],
     hitloc: &str,
 ) {
-    // IW4L_T6_GOD=1 (tests): players take no damage.
-    static GOD: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if *GOD.get_or_init(|| std::env::var("IW4L_T6_GOD").is_ok()) || super::autoplay::rounds_test() {
+    // IW4L_T6_GOD=1 (tests): players take no damage; IW4L_T6_GOD=melee:
+    // none from zombies' hits only (TranZit's lava still burns him).
+    static GOD: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    let forced = TEST_BLOW.swap(false, std::sync::atomic::Ordering::Relaxed);
+    let god = match GOD.get_or_init(|| std::env::var("IW4L_T6_GOD").ok()).as_deref() {
+        Some("melee") => means == "MOD_MELEE",
+        Some(_) => true,
+        None => false,
+    };
+    // bo2zm: the cheat menu's God Mode: no hurt and no going down, from
+    // anything (zombies, falls, explosions, his own grenades).
+    if super::cheats::cheat_on(super::cheats::Cheat::GodMode) {
+        return;
+    }
+    if !forced && (god || super::autoplay::rounds_test()) {
         return;
     }
     let Some(obj) = world.resource::<Zm>().players.get(&victim).map(|p| p.obj) else {
@@ -74,7 +100,11 @@ pub(crate) fn player_damage(
     let cb = super::mp::callbacks(world);
     vm.spawn_named(
         world,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
         &cb,
+=======
+        CALLBACKS,
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
         "codecallback_playerdamage",
         Value::Object(obj),
         args,
@@ -121,8 +151,11 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                 .filter(|x| x.alive)
                 .filter_map(|x| x.obj)
                 .collect();
+            // A deleted actor's object is freed at once; its actor entry
+            // goes on the next think, so skip it here.
             let out = actors
                 .into_iter()
+                .filter(|o| vm.alive(*o))
                 .filter(|o| match &team {
                     None => true,
                     Some(t) if t == "all" => true,
@@ -172,6 +205,11 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let n = actor_n(vm, world, s)?;
         let goal = vec3(a, 0)?;
         set_goal(vm, world, n, goal);
+        if let Some(ang) = arg(a, 1).as_vec3()
+            && let Some(x) = world.resource_mut::<Zm>().actors.get_mut(&n)
+        {
+            x.goal_yaw = Some(ang[1]);
+        }
         Ok(Value::Undefined)
     });
     m!("setgoalnode", |vm, world, s, a| {
@@ -195,10 +233,48 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         }
         Ok(Value::Undefined)
     });
+    // 0 when no path joins them, as BO2's engine says: the scripts test
+    // `== 0` / `!= 0` (Buried's ghosts skip such a player, Buried's and
+    // Origins' distance tracking respawn a zombie that can reach no one).
+    // Before it was -1, so an unreachable player read as the closest one.
     m!("calcpathlength", |vm, world, s, a| {
         let from = origin_of(vm, world, s).unwrap_or([0.0; 3]);
         let to = vec3(a, 0)?;
-        Ok(actors::path_length(world, from, to).map_or(Value::Float(-1.0), Value::Float))
+        let (r, h) = body_size(vm, world, s);
+        Ok(Value::Float(actors::path_length(world, from, to, r, h).unwrap_or(0.0)))
+    });
+    // getpathlength: how far this actor still has to go on its route (0
+    // with none). Buried's mansion ghosts read 0 as no way to a player who
+    // left the mansion and run back (_zm_ai_ghost should_runaway).
+    m!("getpathlength", |vm, world, s, _| {
+        let n = actor_n(vm, world, s)?;
+        let zm = world.resource::<Zm>();
+        let (Some(x), Some(e)) = (zm.actors.get(&n), zm.ents.get(&n)) else {
+            return Ok(Value::Float(0.0));
+        };
+        let mut at = e.origin;
+        let mut len = 0.0;
+        for p in x.path.iter().skip(x.path_i) {
+            len += ((p[0] - at[0]).powi(2) + (p[1] - at[1]).powi(2) + (p[2] - at[2]).powi(2)).sqrt();
+            at = *p;
+        }
+        Ok(Value::Float(len))
+    });
+    // findpath(start, end, ent, allow_negotiation, allow_partial): whether
+    // the path nodes join the two points (Mob's brutus_stuck_watcher counts
+    // a false as a stuck Brutus and teleports him after 4).
+    f!("findpath", |vm, world, _, a| {
+        let from = arg(a, 0)
+            .as_vec3()
+            .or_else(|| origin_of(vm, world, arg(a, 0)));
+        let to = arg(a, 1)
+            .as_vec3()
+            .or_else(|| origin_of(vm, world, arg(a, 1)));
+        let (r, h) = body_size(vm, world, arg(a, 2));
+        Ok(Value::bool(match (from, to) {
+            (Some(from), Some(to)) => actors::path_length(world, from, to, r, h).is_some(),
+            _ => false,
+        }))
     });
     m!("isingoal", |vm, world, s, a| {
         let n = actor_n(vm, world, s)?;
@@ -212,26 +288,111 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             (d[0] * d[0] + d[1] * d[1]).sqrt() <= radius.max(64.0)
         })))
     });
-    for name in [
-        "maymovetopoint",
-        "maymovefrompointtopoint",
-        "cansee",
-        "canshoot",
-    ] {
+    // maymovetopoint(point, ignore_actors) / maymovefrompointtopoint(from,
+    // to): a straight walk with this actor's body (actors::may_move).
+    m!("maymovetopoint", |vm, world, s, a| {
+        let Some(n) = entnum(vm, s) else {
+            return Ok(Value::Int(1));
+        };
+        let to = vec3(a, 0)?;
+        let body = {
+            let zm = world.resource::<Zm>();
+            zm.actors.get(&n).map(|x| (x.radius, x.height)).zip(zm.ents.get(&n).map(|e| e.origin))
+        };
+        let Some(((r, h), from)) = body else {
+            return Ok(Value::Int(1));
+        };
+        Ok(Value::bool(actors::may_move(world, from, to, r, h)))
+    });
+    m!("maymovefrompointtopoint", |vm, world, s, a| {
+        let Some(n) = entnum(vm, s) else {
+            return Ok(Value::Int(1));
+        };
+        let from = vec3(a, 0)?;
+        let to = vec3(a, 1)?;
+        let body = world.resource::<Zm>().actors.get(&n).map(|x| (x.radius, x.height));
+        let Some((r, h)) = body else {
+            return Ok(Value::Int(1));
+        };
+        Ok(Value::bool(actors::may_move(world, from, to, r, h)))
+    });
+    for name in ["cansee", "canshoot"] {
         vm.bind(name, true, |_, _, _, _| Ok(Value::Int(1)));
     }
     m!("forceteleport", |vm, world, s, a| {
         let Some(n) = entnum(vm, s) else {
             return Ok(Value::Undefined);
         };
-        let p = vec3(a, 0)?;
+        let mut p = vec3(a, 0)?;
         let ang = arg(a, 1).as_vec3();
+        // A walking actor lands on the floor under the spot and plans its
+        // goal again from there (its old route started where it was).
+        let walker = {
+            let zm = world.resource::<Zm>();
+            zm.actors
+                .get(&n)
+                .filter(|x| x.alive && x.scripted.is_none() && x.traverse.is_none())
+                .filter(|_| zm.ents.get(&n).is_some_and(|e| e.link.is_none()))
+                .map(|x| (x.radius, x.height))
+        };
+        let asked = p;
+        if let Some((r, h)) = walker {
+            p = actors::floor_below(world, p, r, h);
+        }
+        let goal = {
+            let mut zm = world.resource_mut::<Zm>();
+            if let Some(e) = zm.ents.get_mut(&n) {
+                e.origin = p;
+                if let Some(ang) = ang {
+                    e.angles = ang;
+                }
+            }
+            match (walker, zm.actors.get_mut(&n)) {
+                (Some(_), Some(x)) => {
+                    x.path.clear();
+                    x.path_nodes.clear();
+                    x.path_i = 0;
+                    x.goal_node = None;
+                    x.progress = None;
+                    x.stalled_on = None;
+                    x.goal
+                }
+                _ => None,
+            }
+        };
+        if walker.is_some() && std::env::var_os("IW4L_T6_ACTORS").is_some() {
+            diag::info!(
+                Sim,
+                "bo2zm t6 actor {n} forceteleport to ({:.0} {:.0} {:.0}) stands at ({:.0} {:.0} {:.0}), replans {}",
+                asked[0],
+                asked[1],
+                asked[2],
+                p[0],
+                p[1],
+                p[2],
+                goal.map_or("nothing".to_owned(), |g| format!("({:.0} {:.0} {:.0})", g[0], g[1], g[2]))
+            );
+        }
+        if let Some(g) = goal {
+            set_goal(vm, world, n, g);
+        }
+        Ok(Value::Undefined)
+    });
+    // teleport(origin): animscripts/traverse/shared::teleportthread lifts a
+    // zombie mid-climb by the height its animation misses. Ours crosses
+    // node to node already (actors' traverse), so a climbing one stays on
+    // it; any other moves there.
+    m!("teleport", |vm, world, s, a| {
+        let Some(n) = entnum(vm, s) else {
+            return Ok(Value::Undefined);
+        };
+        let p = vec3(a, 0)?;
         let mut zm = world.resource_mut::<Zm>();
+        if zm.actors.get(&n).is_some_and(|x| x.traverse.is_some()) {
+            return Ok(Value::Undefined);
+        }
         if let Some(e) = zm.ents.get_mut(&n) {
             e.origin = p;
-            if let Some(ang) = ang {
-                e.angles = ang;
-            }
         }
         Ok(Value::Undefined)
     });
@@ -373,13 +534,109 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             });
         Ok(Value::bool(has))
     });
+    // An ASD state's animation, for the scripts that measure it
+    // (Die Rise's Jumping Jacks: `_zm_ai_leaper::leaper_calc_anim_offsets`
+    // takes getmovedelta and getnotetracktimes of `zm_wall_up` ...). The
+    // value is the animation's name; the anim builtins below take it.
+    m!("getanimfromasd", |vm, world, s, a| {
+        let n = actor_n(vm, world, s)?;
+        let state = text(vm, a, 0);
+        let zm = world.resource::<Zm>();
+        let anim = zm
+            .actors
+            .get(&n)
+            .and_then(|x| zm.asds.get(&x.asd))
+            .and_then(|d| d.state(&state, false))
+            .and_then(|st| {
+                let i = int(a, 1).unwrap_or(0).max(0) as usize;
+                st.substates.get(i).or(st.substates.first())
+            })
+            .map(|(_, anim)| anim.to_ascii_lowercase());
+        Ok(anim.map_or(Value::Undefined, |anim| vm.string(&anim)))
+    });
+    f!("getmovedelta", |vm, world, _, a| {
+        let Some(anim) = anim_of(vm, world, arg(a, 0)) else {
+            return Ok(Value::Vec3([0.0; 3]));
+        };
+        let (from, to) = (num(a, 1).unwrap_or(0.0), num(a, 2).unwrap_or(1.0));
+        let (p, q) = (actors::anim_root(&anim, from), actors::anim_root(&anim, to));
+        Ok(Value::Vec3(std::array::from_fn(|i| q[i] - p[i])))
+    });
+    // Where an aligned animation (window board tear, Leroy's table eat)
+    // starts when played at `origin`/`angles`: its first root key, turned
+    // by the yaw (scripted anims play from there by root motion). Only
+    // translation is captured, so the start angles are the align angles.
+    f!("getstartorigin", |vm, world, _, a| {
+        let origin = vec3(a, 0).unwrap_or([0.0; 3]);
+        let yaw = vec3(a, 1).map_or(0.0, |v| v[1]);
+        let root = anim_of(vm, world, arg(a, 2)).map_or([0.0; 3], |anim| actors::anim_root(&anim, 0.0));
+        let (s, c) = yaw.to_radians().sin_cos();
+        Ok(Value::Vec3([
+            origin[0] + root[0] * c - root[1] * s,
+            origin[1] + root[0] * s + root[1] * c,
+            origin[2] + root[2],
+        ]))
+    });
+    f!("getstartangles", |_vm, _world, _, a| {
+        Ok(Value::Vec3(vec3(a, 1).unwrap_or([0.0; 3])))
+    });
+    f!("getnotetracktimes", |vm, world, _, a| {
+        let note = text(vm, a, 1);
+        let times = anim_of(vm, world, arg(a, 0))
+            .map(|anim| {
+                anim.notifies
+                    .iter()
+                    .filter(|(n, _)| n.eq_ignore_ascii_case(&note))
+                    .map(|(_, f)| Value::Float(*f))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(list(times))
+    });
+    f!("getanimlength", |vm, world, _, a| {
+        let ms = anim_of(vm, world, arg(a, 0)).map_or(1000, |anim| actors::anim_length_ms(&anim));
+        Ok(Value::Float(ms as f32 / 1000.0))
+    });
+    // The function runs as the actor's animscript: its AI picks no script
+    // until the thread ends.
+    m!("animcustom", |vm, world, s, a| {
+        let n = actor_n(vm, world, s)?;
+        let Some(obj) = s.as_obj() else {
+            return Ok(Value::Undefined);
+        };
+        if let Some(x) = world.resource_mut::<Zm>().actors.get_mut(&n) {
+            x.script = "custom".to_owned();
+            x.path.clear();
+        }
+        vm.notify_str(world, obj, "killanimscript", &[]);
+        let Value::Func(gsc_t6::FuncRef::Script(f)) = arg(a, 0).clone() else {
+            return Ok(Value::Undefined);
+        };
+        let at = world.resource::<Zm>().ents.get(&n).map_or([0.0; 3], |e| e.origin);
+        diag::info!(
+            Sim,
+            "bo2zm t6 animcustom ent{n} starts at ({:.0} {:.0} {:.0})",
+            at[0],
+            at[1],
+            at[2]
+        );
+        let t = vm.spawn(world, f, Value::Object(obj), vec![]);
+        if let Some(x) = world.resource_mut::<Zm>().actors.get_mut(&n) {
+            x.custom = Some(t);
+        }
+        Ok(Value::Undefined)
+    });
     m!("animscripted", |vm, world, s, a| {
         let n = actor_n(vm, world, s)?;
         let origin = vec3(a, 0)?;
         let angles = vec3(a, 1).unwrap_or([0.0; 3]);
         if let Some(x) = world.resource_mut::<Zm>().actors.get_mut(&n) {
             x.scripted = Some(actors::Scripted { origin, angles });
+            x.scripted_starts += 1;
             x.path.clear();
+            // Each call starts zm_scripted afresh, even back to back (the
+            // window boards' tear in, loop and out).
+            x.script.clear();
         }
         // The engine hands the arguments to zm_scripted::init, then runs
         // zm_scripted::main (which calls startscriptedanim).
@@ -409,12 +666,37 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             }
             if let Some(x) = zm.actors.get_mut(&n) {
                 x.scripted = Some(actors::Scripted { origin, angles });
+                x.scripted_starts += 1;
                 if !mode.is_empty() {
                     x.animmode = mode;
                 }
             }
         }
         actors::set_state(vm, world, n, &state, &sub);
+        // The clip's first frame is where the actor stands from the start:
+        // a clip begun from a script woken mid-tick (the window boards'
+        // grab, pull and climb in) is past this tick's root move, and the
+        // aligned origin alone would show it one tick at the window.
+        let first = {
+            let zm = world.resource::<Zm>();
+            zm.actors
+                .get(&n)
+                .and_then(|x| x.playing.as_ref())
+                .filter(|p| p.start_ms == zm.now_ms)
+                .and_then(|p| zm.anims.get(&p.anim))
+                .map(|anim| actors::anim_root(anim, 0.0))
+        };
+        if let Some(root) = first {
+            let (s, c) = angles[1].to_radians().sin_cos();
+            let mut zm = world.resource_mut::<Zm>();
+            if let Some(e) = zm.ents.get_mut(&n) {
+                e.origin = [
+                    origin[0] + root[0] * c - root[1] * s,
+                    origin[1] + root[0] * s + root[1] * c,
+                    origin[2] + root[2],
+                ];
+            }
+        }
         Ok(Value::Undefined)
     });
     m!("stopanimscripted", |vm, world, s, _| {
@@ -479,6 +761,16 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                 .map_or(0, |e| e.attached.len() as i32),
         ))
     });
+    // Buried 10-09: the Paralyzer's and the Time Bomb's slow-down (and the
+    // ghosts' death): a body's clips and its walk play this fast (1 normal).
+    m!("setentityanimrate", |vm, world, s, a| {
+        if let Some(n) = entnum(vm, s) {
+            let rate = num(a, 0).unwrap_or(1.0);
+            let now = world.resource::<Zm>().now_ms;
+            actors::set_anim_rate(world, n, rate, now);
+        }
+        Ok(Value::Undefined)
+    });
     m!("getattachmodelname", |vm, world, s, a| {
         let Some(n) = entnum(vm, s) else {
             return Ok(Value::Undefined);
@@ -502,8 +794,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         "setengagementmindist",
         "setengagementmaxdist",
         "pushplayer",
-        "startragdoll",
-        "launchragdoll",
         "clearenemy",
         "cleargoalvolume",
         "setgoalvolume",
@@ -511,7 +801,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         "setcanbeseen",
         "setavoidancemask",
         "pushactors",
-        "setmaxhealth",
     ] {
         vm.bind(name, true, |_, _, _, _| Ok(Value::Undefined));
     }
@@ -555,6 +844,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             return Ok(Value::Undefined);
         };
         let dmg_s = vm.intern("meleedamage");
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
         let mut dmg = vm.raw_field(obj, dmg_s).as_int().unwrap_or(60);
         // bo2mp: a K9 Unit dog bites with its own weapon (`aiweapon`,
         // dog_bite_mp): named in the hit, and its melee damage.
@@ -574,6 +864,9 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         {
             dmg = f.melee_damage;
         }
+=======
+        let dmg = vm.raw_field(obj, dmg_s).as_int().unwrap_or(60);
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
         let dir = gsc_t6::math::normalize(d);
         player_damage(
             vm,
@@ -584,7 +877,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             dmg,
             0,
             "MOD_MELEE",
-            &weapon,
+            "none",
             p,
             dir,
             "torso_upper",
@@ -624,6 +917,20 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             x.health -= amount.max(0);
             x.health
         };
+        if std::env::var_os("IW4L_T6_HITLOG").is_some() {
+            let max = {
+                let f = vm.intern("maxhealth");
+                vm.raw_field(obj, f)
+            };
+            diag::info!(
+                Sim,
+                "bo2zm t6 damage ent{n}: {amount} at {} -> health {health} (max {}) by {} {}",
+                vm.to_text(&loc),
+                vm.to_text(&max),
+                vm.to_text(&weapon),
+                vm.to_text(&mod_)
+            );
+        }
         let none = vm.string("");
         vm.notify_str(
             world,
@@ -688,6 +995,14 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                 &hitloc,
             );
         } else if is_player(vm, world, s) {
+            // No attacker given is world damage: the scripts get undefined,
+            // not the player himself (_zm callback_playerdamage drops a
+            // player's own MOD_UNKNOWN damage, so Mob's out-of-mana
+            // `dodamage(1000, origin)` never killed).
+            let (attacker, inflictor) = match arg(a, 2) {
+                Value::Undefined => (Value::Undefined, arg(a, 3).clone()),
+                _ => (attacker, inflictor),
+            };
             player_damage(
                 vm, world, n, inflictor, attacker, amount, 0, &means, &weapon, point, [0.0; 3],
                 &hitloc,
@@ -722,6 +1037,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let dir = arg(a, 7).as_vec3();
         let bo2 = !crate::step::bo2_feel_mw2();
         let finish = crate::script_player::finish_damage(&mut frame(world), id, amount, dir, bo2);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
         // bo2mp: in multiplayer a lethal hit kills: the engine's death (body,
         // the client dead), then BO2's own CodeCallback_PlayerKilled (kill
         // feed, score, killcam, respawn).
@@ -767,6 +1083,8 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             );
             return Ok(Value::Undefined);
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
         if finish != crate::script_player::Finish::Hurt {
             // Zombies: a lethal hit puts the player into last stand (the
             // scripts decide what follows).
@@ -776,6 +1094,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             if let Some(p) = world.resource_mut::<Zm>().players.get_mut(&n) {
                 p.laststand = true;
             }
+            super::clientfields::went_down(world, n);
             let obj = s.as_obj().unwrap();
             let args = vec![
                 arg(a, 0).clone(),
@@ -791,7 +1110,11 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             let cb = super::mp::callbacks(world);
             vm.spawn_named(
                 world,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
                 &cb,
+=======
+                CALLBACKS,
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
                 "codecallback_playerlaststand",
                 Value::Object(obj),
                 args,
@@ -799,14 +1122,25 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         }
         Ok(Value::Undefined)
     });
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
     // `gib(type, limb tags)`: each limb's own model (its character's
     // gibspawnN at gibspawntagN) flies off and falls, gone after a while.
+=======
+    // `gib(type, pieces)`: pieces are the scripts' piece numbers
+    // (`level._zombie_gib_piece_index_*`: 0 all limbs, 1 right arm, 2 left
+    // arm, 3 right leg, 4 left leg, 5 head, 6 guts, 7 hat). Each piece's
+    // own model (its character's gibspawnN at gibspawntagN) flies off and
+    // falls, gone after a while, with the client scripts' blood
+    // (clientscripts/mp/zombies/_zm.csc on_gib_event: do_gib_fx on a limb,
+    // do_headshot_gib_fx on the head).
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
     m!("gib", |vm, world, s, a| {
         let n = actor_n(vm, world, s)?;
         let Some(obj) = s.as_obj() else {
             return Ok(Value::Undefined);
         };
         let up = vm.to_text(arg(a, 0)) == "up";
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
         let tags: Vec<String> = match arg(a, 1) {
             Value::Array(arr) => arr
                 .snapshot()
@@ -814,9 +1148,38 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                 .map(|v| vm.to_text(v).to_ascii_lowercase())
                 .collect(),
             v => vec![vm.to_text(v).to_ascii_lowercase()],
+=======
+        let asked: Vec<Value> = match arg(a, 1) {
+            Value::Array(arr) => arr.snapshot().values_in_order().cloned().collect(),
+            v => vec![v.clone()],
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
         };
+        let mut wanted: Vec<u32> = Vec::new();
+        for v in &asked {
+            match v.as_int() {
+                Some(0) => wanted.extend(1..=4),
+                Some(i) if (1..=8).contains(&i) => wanted.push(i as u32),
+                // A limb named by its tag (older callers).
+                _ => {
+                    let t = vm.to_text(v).to_ascii_lowercase();
+                    for i in 1..=8u32 {
+                        let f = vm.intern(&format!("gibspawntag{i}"));
+                        let tag = vm.raw_field(obj, f);
+                        if !tag.is_undefined() && vm.to_text(&tag).to_ascii_lowercase() == t {
+                            wanted.push(i);
+                        }
+                    }
+                }
+            }
+        }
+        wanted.sort_unstable();
+        wanted.dedup();
         let mut pieces = Vec::new();
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
         for i in 1..=8 {
+=======
+        for i in wanted {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
             let tag = {
                 let f = vm.intern(&format!("gibspawntag{i}"));
                 vm.raw_field(obj, f)
@@ -825,6 +1188,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                 let f = vm.intern(&format!("gibspawn{i}"));
                 vm.raw_field(obj, f)
             };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
             if tag.is_undefined() || model.is_undefined() {
                 continue;
             }
@@ -832,6 +1196,19 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             if tags.contains(&tag) {
                 pieces.push(vm.to_text(&model));
             }
+=======
+            let tag = if tag.is_undefined() {
+                String::new()
+            } else {
+                vm.to_text(&tag)
+            };
+            let model = if model.is_undefined() {
+                String::new()
+            } else {
+                vm.to_text(&model)
+            };
+            pieces.push((i, model, tag));
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
         }
         let (origin, yaw) = {
             let zm = world.resource::<Zm>();
@@ -840,31 +1217,97 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                 .map_or(([0.0; 3], 0.0), |e| (e.origin, e.angles[1]))
         };
         let now = world.resource::<Zm>().now_ms;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
         for (k, model) in pieces.into_iter().enumerate() {
             let side = if k % 2 == 0 { 90.0 } else { -90.0 };
             let (dx, dy) = (yaw + side).to_radians().sin_cos();
             let from = [origin[0], origin[1], origin[2] + 45.0];
             let vel = if up {
+=======
+        for (k, (piece, model, tag)) in pieces.into_iter().enumerate() {
+            let head = piece == 5 || piece == 7;
+            if piece == 5 {
+                // do_headshot_gib_fx: the burst at the neck, the sound, and
+                // the neck spurting a moment later.
+                super::natives_fx::bolt_effect(world, n, "impacts/fx_flesh_hit", "j_neck", false);
+                super::natives_fx::bolt_effect(
+                    world,
+                    n,
+                    "misc/fx_zombie_bloodsplat",
+                    "j_neck",
+                    false,
+                );
+                let at = [origin[0], origin[1], origin[2] + 60.0];
+                super::natives_fx::sound(world, crate::EventAudience::All, "zombie_head_gib", at);
+                super::clientfields::bolt_later(
+                    world,
+                    n,
+                    300,
+                    "misc/fx_zombie_bloodspurt",
+                    "j_neck",
+                );
+            } else if (1..=4).contains(&piece) && !tag.is_empty() {
+                // do_gib_fx: blood where the limb was.
+                let t = tag.to_ascii_lowercase();
+                super::natives_fx::bolt_effect(
+                    world,
+                    n,
+                    "weapon/bullet/fx_flesh_gib_fatal_01",
+                    &t,
+                    false,
+                );
+                let at = [origin[0], origin[1], origin[2] + 40.0];
+                super::natives_fx::sound(world, crate::EventAudience::All, "zmb_death_gibs", at);
+            }
+            if model.is_empty() {
+                continue;
+            }
+            let side = if k % 2 == 0 { 90.0 } else { -90.0 };
+            let (dx, dy) = (yaw + side).to_radians().sin_cos();
+            let height = match piece {
+                5 | 7 => 62.0,
+                1 | 2 => 50.0,
+                3 | 4 => 20.0,
+                _ => 45.0,
+            };
+            let from = [origin[0], origin[1], origin[2] + height];
+            let vel = if head {
+                // do_hat_gib: up and a little to the side.
+                [dy * 40.0, dx * 40.0, 300.0]
+            } else if up {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
                 [dy * 60.0, dx * 60.0, 420.0]
             } else {
                 [dy * 140.0, dx * 140.0, 160.0]
             };
             let g = world.resource_mut::<Zm>().alloc_entnum();
             let gobj = vm.alloc_object(ObjKind::Entity(g));
-            let mut zm = world.resource_mut::<Zm>();
-            zm.ents.insert(
-                g,
-                super::Ent {
-                    obj: Some(gobj),
-                    classname: "script_model".into(),
-                    origin: from,
-                    angles: [0.0, yaw, 0.0],
-                    model,
-                    ..Default::default()
-                },
-            );
-            zm.movers.gravity(g, from, vel, now, 1.2);
-            zm.gibs.push((g, now + 6000));
+            {
+                let mut zm = world.resource_mut::<Zm>();
+                zm.ents.insert(
+                    g,
+                    super::Ent {
+                        obj: Some(gobj),
+                        classname: "script_model".into(),
+                        origin: from,
+                        angles: [0.0, yaw, 0.0],
+                        model,
+                        ..Default::default()
+                    },
+                );
+                zm.movers.gravity(g, from, vel, now, 1.2);
+                zm.gibs.push((g, now + 6000));
+            }
+            // do_gib's blood trail behind a flying limb.
+            if !head {
+                super::clientfields::bolt_later(
+                    world,
+                    g,
+                    0,
+                    "trail/fx_trail_blood_streak",
+                    "tag_origin",
+                );
+            }
         }
         Ok(Value::Undefined)
     });
@@ -872,8 +1315,13 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         radius_damage(vm, world, a);
         Ok(Value::Undefined)
     });
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
     // bo2mp: `ent radiusdamage(...)` (the Demolition bomb's blast): the
     // same, the entity being the blast's source.
+=======
+    // `self radiusdamage(...)`: the same blast from an entity (Town's burning
+    // zombies burst when they die and singe players close by).
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
     vm.bind("radiusdamage", true, |vm, world, _, a| {
         radius_damage(vm, world, a);
         Ok(Value::Undefined)
@@ -883,7 +1331,9 @@ pub(super) fn bind(vm: &mut Vm<World>) {
 
 /// `radiusdamage(origin, range, max, min, attacker, means, weapon)`: every
 /// zombie and player in range takes max..min by distance (not through
-/// walls), as the callbacks would from a blast.
+/// walls), as the callbacks would from a blast. As BO2's engine does, the
+/// distance is to the nearest point of each one's box, not its middle:
+/// TranZit's lava blasts at the player's feet with a range of 10.
 fn radius_damage(vm: &mut Vm<World>, world: &mut World, a: &[Value]) {
     let Some(origin) = arg(a, 0).as_vec3() else {
         return;
@@ -914,20 +1364,26 @@ fn radius_damage(vm: &mut Vm<World>, world: &mut World, a: &[Value]) {
             .fraction
             >= 0.99
     };
-    let actors: Vec<(u32, [f32; 3])> = {
+    let nearest = |lo: [f32; 3], hi: [f32; 3]| {
+        let p: [f32; 3] = std::array::from_fn(|i| origin[i].clamp(lo[i], hi[i]));
+        gsc_t6::math::length(gsc_t6::math::sub(p, origin))
+    };
+    let actors: Vec<(u32, [f32; 3], f32)> = {
         let zm = world.resource::<Zm>();
         zm.actors
             .iter()
             .filter(|(_, x)| x.alive)
             .filter_map(|(n, x)| {
-                zm.ents
-                    .get(n)
-                    .map(|e| (*n, [e.origin[0], e.origin[1], e.origin[2] + x.height * 0.5]))
+                zm.ents.get(n).map(|e| {
+                    let o = e.origin;
+                    let lo = [o[0] - x.radius, o[1] - x.radius, o[2]];
+                    let hi = [o[0] + x.radius, o[1] + x.radius, o[2] + x.height];
+                    (*n, [o[0], o[1], o[2] + x.height * 0.5], nearest(lo, hi))
+                })
             })
             .collect()
     };
-    for (n, mid) in actors {
-        let d = gsc_t6::math::length(gsc_t6::math::sub(mid, origin));
+    for (n, mid, d) in actors {
         if d > range || !clear(world, mid) {
             continue;
         }
@@ -942,23 +1398,24 @@ fn radius_damage(vm: &mut Vm<World>, world: &mut World, a: &[Value]) {
             1,
             &means,
             &weapon,
-            mid,
+            // BO2's point for a blast is its centre (the limb nearest it
+            // comes off).
+            origin,
             dir,
             "none",
         );
     }
-    let players: Vec<(u32, [f32; 3])> = {
+    let players: Vec<(u32, [f32; 3], f32)> = {
         let ids: Vec<u32> = world.resource::<Zm>().players.keys().copied().collect();
-        let f = super::frame(world);
         ids.into_iter()
             .filter_map(|c| {
-                f.player(crate::world::ClientId(c))
-                    .map(|p| (c, [p.origin[0], p.origin[1], p.origin[2] + 36.0]))
+                let (lo, hi) = super::triggers::player_box(world, c)?;
+                let o = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, lo[2]];
+                Some((c, [o[0], o[1], o[2] + 36.0], nearest(lo, hi)))
             })
             .collect()
     };
-    for (c, mid) in players {
-        let d = gsc_t6::math::length(gsc_t6::math::sub(mid, origin));
+    for (c, mid, d) in players {
         if d > range || !clear(world, mid) {
             continue;
         }
@@ -989,13 +1446,32 @@ fn set_goal(vm: &mut Vm<World>, world: &mut World, n: u32, goal: [f32; 3]) {
         };
         x.goal = Some(goal);
         x.goal_sent = false;
+        x.goal_yaw = None;
+        let again = x.failed_goal.is_some_and(|f| {
+            (f[0] - goal[0]).abs() < 1.0 && (f[1] - goal[1]).abs() < 1.0 && (f[2] - goal[2]).abs() < 1.0
+        });
+        x.failed_goal = (!found).then_some(goal);
         if !found {
             x.path.clear();
             x.path_nodes.clear();
         }
-        x.obj
+        x.obj.filter(|_| !again)
     };
     if !found && let Some(o) = obj {
-        super::natives_game::notify_later(vm, world, o, "bad_path", 50);
+        super::natives_game::notify_later_once(vm, world, o, "bad_path", 50);
     }
+}
+
+/// The animation a script value names: `%anim` or an animation's name.
+fn anim_of(vm: &Vm<World>, world: &World, v: &Value) -> Option<super::T6Anim> {
+    let name = match v {
+        Value::Anim(i) => vm.str(vm.program.anims.get(*i as usize)?.1).to_owned(),
+        Value::Undefined => return None,
+        v => vm.to_text(v),
+    };
+    world
+        .resource::<Zm>()
+        .anims
+        .get(&name.to_ascii_lowercase())
+        .cloned()
 }

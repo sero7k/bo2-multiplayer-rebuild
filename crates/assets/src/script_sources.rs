@@ -22,6 +22,7 @@ pub struct T6ScriptSet {
     pub strings: Vec<(String, String)>,
     /// Every sound alias the map's banks hold (lower case).
     pub sound_aliases: Vec<String>,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/script_sources.rs
     /// bo2mp: the game type settings files (`mp/gamesettings_default.cfg`,
     /// `mp/gamesettings_tdm.cfg`, ...): (name, text), later zones last.
     pub gamesettings: Vec<(String, String)>,
@@ -46,6 +47,14 @@ pub struct T6ScriptSet {
     /// bo2mp: the ragdoll definitions (`ragdoll.cfg`), how a dead body
     /// goes limp.
     pub ragdoll: Option<String>,
+=======
+    /// Props that break in stages, by name (later zones win).
+    pub destructibles: Vec<xmodel_runtime::T5DestructibleDef>,
+    /// Screen shakes and blurs (`shock/NAME.shock`): (name, text).
+    pub shocks: Vec<(String, String)>,
+    /// Barrier types (`ZBarrierDef`), later zones winning a name.
+    pub zbarriers: Vec<asset_t6::ZBarrierDefRef>,
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/script_sources.rs
 }
 
 /// bo2zm M3: what the server needs of an animation.
@@ -57,6 +66,8 @@ pub struct T6AnimFacts {
     pub looping: bool,
     /// Root translation keys: (frame, position).
     pub delta_trans: Vec<(u16, [f32; 3])>,
+    /// Root turn keys: (frame, quaternion x y z w).
+    pub delta_quat: Vec<(u16, [f32; 4])>,
     /// Notetracks: (name, time 0..1).
     pub notifies: Vec<(String, f32)>,
 }
@@ -124,10 +135,24 @@ impl ScriptSources {
     }
 
     pub fn shocks(&self) -> impl Iterator<Item = (&str, &str)> {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/script_sources.rs
         self.configs.iter().filter_map(|(path, text)| {
             let name = path.strip_prefix("shock/")?.strip_suffix(".shock")?;
             Some((name, text.as_str()))
         })
+=======
+        let t6 = self
+            .t6
+            .iter()
+            .flat_map(|t6| t6.shocks.iter().map(|(n, t)| (n.as_str(), t.as_str())));
+        self.configs
+            .iter()
+            .filter_map(|(path, text)| {
+                let name = path.strip_prefix("shock/")?.strip_suffix(".shock")?;
+                Some((name, text.as_str()))
+            })
+            .chain(t6)
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/script_sources.rs
     }
 
     pub(crate) fn capture(&mut self, name: &str, data: &[u8], compressed: bool) {

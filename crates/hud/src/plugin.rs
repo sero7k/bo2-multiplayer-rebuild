@@ -32,6 +32,7 @@ use crate::weaponbar::{WeaponbarRaster, spawn_weaponbar, update_weaponbar};
 #[derive(Component)]
 struct HudRoot;
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hud/src/plugin.rs
 /// bo2mp: the scope picture and its black surround. BO2 draws them on the
 /// match world's frame, under the match HUD (score panel, ammo, killfeed stay
 /// visible over the surround), so they live in a root of their own on the
@@ -40,6 +41,8 @@ struct HudRoot;
 #[derive(Component)]
 struct HudIrisRoot;
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/hud/src/plugin.rs
 pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
@@ -320,6 +323,7 @@ fn ensure_hud_root(mut commands: Commands, existing: Query<Entity, With<HudRoot>
     }
     commands
         .spawn((
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hud/src/plugin.rs
             HudIrisRoot,
             Node {
                 position_type: PositionType::Absolute,
@@ -334,6 +338,8 @@ fn ensure_hud_root(mut commands: Commands, existing: Query<Entity, With<HudRoot>
         .with_children(|root| spawn_iris(root));
     commands
         .spawn((
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/hud/src/plugin.rs
             HudRoot,
             Node {
                 position_type: PositionType::Absolute,
@@ -347,6 +353,7 @@ fn ensure_hud_root(mut commands: Commands, existing: Query<Entity, With<HudRoot>
         .with_children(|root| {
             crate::font_overlay::spawn_overlay(root, crate::overhead_names::OverheadNamesRaster);
             spawn_reticle(root);
+            spawn_iris(root);
             spawn_hud_elems_back(root);
             spawn_compass(root);
             spawn_scorebar(root);
@@ -364,6 +371,7 @@ fn ensure_hud_root(mut commands: Commands, existing: Query<Entity, With<HudRoot>
         });
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hud/src/plugin.rs
 /// The scope root draws on the match world's camera when there is one (as
 /// the LUI HUD does), otherwise on the default UI camera.
 fn retarget_iris_root(
@@ -408,6 +416,16 @@ fn sync_hud_visibility(
     // dims it like the world.
     let dimmed_out = world_dim.is_some_and(|d| d.0 >= 2.0) || menu_dims.is_some_and(|d| d.0 >= 2);
     let show = hud_root_should_show(*screen, ui_on) && !dimmed_out;
+=======
+fn sync_hud_visibility(
+    screen: Res<AppScreen>,
+    ui_draw: Option<Res<UiDraw>>,
+    mut roots: Query<&mut Visibility, With<HudRoot>>,
+    mut visible: ResMut<HudRootVisible>,
+) {
+    let ui_on = ui_draw.is_some_and(|d| d.0);
+    let show = hud_root_should_show(*screen, ui_on);
+>>>>>>> /tmp/claude-0/zmhead/crates/hud/src/plugin.rs
     visible.0 = Some(i32::from(show));
     for mut vis in &mut roots {
         let want = if show {

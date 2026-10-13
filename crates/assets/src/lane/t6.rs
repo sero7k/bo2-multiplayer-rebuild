@@ -156,20 +156,37 @@ fn attach_t6_static_models(
 /// The map's player start. Zombies maps start players at `initial_spawn`
 /// structs whose `script_string` names the mode and location
 /// (`zstandard_nuked`); their `info_player_start` can sit inside player
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
 /// clip. Then any `initial_spawn` struct; a multiplayer map's own first
 /// free-for-all spawn point (bo2mp: BO2 never starts a player at the
 /// `info_player_start`, which Hijacked lacks and Overflow puts in a
 /// dumpster); the `info_player_start`; and last the world centre.
+=======
+/// clip. Then any `initial_spawn` struct, the `info_player_start`, and last
+/// the world centre.
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
 fn player_start(
     capture: &asset_t6::ZoneCapture,
     map: &str,
     report: &mut Vec<String>,
 ) -> ([f32; 3], f32) {
     let location = map.strip_prefix("zm_").unwrap_or(map);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
     let wanted = [
         format!("zstandard_{location}"),
         format!("zclassic_{location}"),
     ];
+=======
+    // A chosen start (Tranzit's Town survival: `zstandard_town`) first.
+    let chosen = frame::bo2_zm_start(map).map(|(loc, mode)| format!("{mode}_{loc}"));
+    let wanted: Vec<String> = chosen
+        .into_iter()
+        .chain([
+            format!("zstandard_{location}"),
+            format!("zclassic_{location}"),
+        ])
+        .collect();
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
     let ents: Vec<asset_t6::MapEntity> = capture
         .map_ents
         .iter()
@@ -179,6 +196,7 @@ fn player_start(
         ents.iter()
             .filter(|e| e.get("script_noteworthy") == Some("initial_spawn"))
     };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
     let named = initial().find(|e| {
         e.get("script_string")
             .is_some_and(|s| s.split_whitespace().any(|t| wanted.iter().any(|w| w == t)))
@@ -204,15 +222,26 @@ fn player_start(
                 .join(", ")
         ));
     }
+=======
+    let named = wanted.iter().find_map(|w| {
+        initial().find(|e| {
+            e.get("script_string")
+                .is_some_and(|s| s.split_whitespace().any(|t| t == w))
+        })
+    });
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
     let picks = [
         named.map(|e| (e, "initial_spawn for this location")),
         initial().next().map(|e| (e, "initial_spawn")),
         ents.iter()
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
             .find(|e| e.classname() == "mp_dm_spawn")
             .or_else(|| ents.iter().find(is_mp_spawn))
             .filter(|_| mp)
             .map(|e| (e, e.classname())),
         ents.iter()
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
             .find(|e| e.classname() == "info_player_start")
             .map(|e| (e, "info_player_start")),
     ];
@@ -238,6 +267,156 @@ fn player_start(
     (c, 0.0)
 }
 
+/// bo2zm: the props a map zone only names. TranZit's placed models live
+/// in its area zones (`zm_transit_gump_busstation.ff`, ...), which the game
+/// streams in by area; the map zone holds a comma-named reference to each
+/// (the Bus Depot's route-map kiosk, most of the Diner, Farm and Town).
+#[derive(Default)]
+struct AreaModels {
+    captures: Vec<asset_t6::ZoneCapture>,
+    /// A referenced model's name -> (capture, its model index).
+    models: std::collections::HashMap<String, (usize, usize)>,
+    /// Per capture: its material index -> catalog row.
+    local: Vec<std::collections::HashMap<usize, usize>>,
+    /// The map zone's own materials by name (an area material can be a
+    /// reference to one of them).
+    map_materials: std::collections::HashMap<String, usize>,
+}
+
+impl AreaModels {
+    /// The area zones beside the map that define the models its static
+    /// models reference; none for a map whose props are all its own.
+    fn read(path: &Path, map: &str, capture: &asset_t6::ZoneCapture, world: &asset_t6::WorldRef) -> Self {
+        let wanted: std::collections::BTreeSet<&str> = world
+            .static_models
+            .iter()
+            .filter_map(|sm| sm.model)
+            .filter_map(|k| capture.xmodels.get(k.index))
+            .filter_map(|m| m.name.strip_prefix(','))
+            .collect();
+        if wanted.is_empty() {
+            return Self::default();
+        }
+        let dir = asset_transport::t6_extra::install_zone_dir(path);
+        let prefix = format!("{map}_gump_");
+        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with(&prefix) && n.ends_with(".ff"))
+            })
+            .collect();
+        files.sort();
+        let mut out = Self::default();
+        for file in files {
+            let Ok(area) = asset_t6::capture_zone(&file) else { continue };
+            let ci = out.captures.len();
+            for (mi, m) in area.xmodels.iter().enumerate() {
+                if wanted.contains(m.name.as_str()) {
+                    out.models.entry(m.name.clone()).or_insert((ci, mi));
+                }
+            }
+            out.captures.push(area);
+        }
+        out.map_materials = capture
+            .materials
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| !m.name.is_empty() && !m.name.starts_with(','))
+            .map(|(i, m)| (m.name.clone(), i))
+            .collect();
+        out
+    }
+
+    /// Each area model surface's material: (capture, material index), the
+    /// area's own or, for a reference, the map zone's (capture `None`).
+    fn surface_materials(&self) -> impl Iterator<Item = (Option<usize>, usize)> + '_ {
+        self.models.values().flat_map(move |&(ci, mi)| {
+            let c = &self.captures[ci];
+            c.xmodels[mi].lod0.iter().filter_map(move |srf| {
+                let k = srf.material?;
+                let name = &c.materials.get(k.index)?.name;
+                match name.strip_prefix(',') {
+                    Some(n) => self.map_materials.get(n).map(|&i| (None, i)),
+                    None => Some((Some(ci), k.index)),
+                }
+            })
+        })
+    }
+
+    /// Link every area model's own materials into the catalog, images by
+    /// name from the map zone and the areas.
+    fn link(
+        &mut self,
+        materials: &mut asset_material::MaterialCatalog,
+        capture: &asset_t6::ZoneCapture,
+        packs: Option<&asset_t6::PackSet>,
+        report: &mut Vec<String>,
+    ) {
+        let mut images: std::collections::HashMap<String, asset_t6::ImageRef> = Default::default();
+        for img in capture.images.iter().chain(self.captures.iter().flat_map(|c| c.images.iter())) {
+            if !img.name.is_empty() && !img.name.starts_with(',') {
+                images.entry(img.name.clone()).or_insert_with(|| img.clone());
+            }
+        }
+        let mut wanted: Vec<std::collections::BTreeSet<usize>> = vec![Default::default(); self.captures.len()];
+        for (ci, mi) in self.surface_materials() {
+            if let Some(ci) = ci {
+                wanted[ci].insert(mi);
+            }
+        }
+        self.local = self
+            .captures
+            .iter()
+            .zip(&wanted)
+            .map(|(c, want)| {
+                let linked = super::t6_materials::link_materials_with(
+                    materials,
+                    c,
+                    packs,
+                    want.iter().copied(),
+                    &c.zone,
+                    Some(&images),
+                );
+                report.extend(linked.report.into_iter().map(|l| format!("t6 area ({}): {l}", c.zone)));
+                linked.local
+            })
+            .collect();
+        report.push(format!(
+            "t6 area zones: {} read, {} referenced props found",
+            self.captures.len(),
+            self.models.len()
+        ));
+    }
+
+    /// The real model for a map model, with its surfaces' catalog rows.
+    fn model<'a>(
+        &'a self,
+        own: &'a asset_t6::XModelRef,
+        map_local: &'a std::collections::HashMap<usize, usize>,
+    ) -> (&'a asset_t6::XModelRef, Box<dyn Fn(asset_t6::AssetKey) -> Option<usize> + 'a>) {
+        let Some(&(ci, mi)) = own.name.strip_prefix(',').and_then(|n| self.models.get(n)) else {
+            return (own, Box::new(move |k| map_local.get(&k.index).copied()));
+        };
+        let c = &self.captures[ci];
+        let local = self.local.get(ci);
+        (
+            &c.xmodels[mi],
+            Box::new(move |k| {
+                let name = &c.materials.get(k.index)?.name;
+                match name.strip_prefix(',') {
+                    Some(n) => map_local.get(self.map_materials.get(n)?).copied(),
+                    None => local?.get(&k.index).copied(),
+                }
+            }),
+        )
+    }
+}
+
 /// The placed static models: one mesh per model used (its first LOD), a
 /// mesh of its own for each instance with baked vertex light, and every
 /// placement with its light. Instances without baked light take the light
@@ -247,6 +426,7 @@ fn build_props(
     capture: &asset_t6::ZoneCapture,
     world: &asset_t6::WorldRef,
     local_materials: &std::collections::HashMap<usize, usize>,
+    areas: &AreaModels,
     clip: Option<&asset_world::ClipCollision>,
     report: &mut Vec<String>,
 ) -> (
@@ -297,10 +477,16 @@ fn build_props(
     let mut pending: Vec<(usize, usize, Option<[f32; 3]>, bool)> = Vec::new();
     for (i, sm) in world.static_models.iter().enumerate() {
         let Some(key) = sm.model else { continue };
+        // A referenced model (TranZit's) draws from its area zone.
+        let (xm, material) = areas.model(&capture.xmodels[key.index], local_materials);
         let base = *shared.entry(key.index).or_insert_with(|| {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
             let mesh = asset_world::build_t6_model_mesh(&capture.xmodels[key.index], |k| {
                 local_materials.get(&k.index).copied()
             })?;
+=======
+            let mesh = asset_world::build_t6_model_mesh(xm, |k| material(k))?;
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
             meshes.push(mesh);
             Some(meshes.len() - 1)
         });
@@ -414,6 +600,7 @@ fn build_props(
         pending.push((i, mesh, grid_light, vertex_lit));
     }
     ratios.sort_by(f32::total_cmp);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
     let scale = ratios.get(ratios.len() / 2).copied().unwrap_or(1.0);
     let at = |q: f32| {
         ratios
@@ -449,6 +636,17 @@ fn build_props(
         at(0.75),
         at(0.9)
     ));
+=======
+    // A map with (almost) no baked props has nothing to measure on: Tranzit
+    // has none, and 1.0 drew its 5,059 props ~13x too dark. The ratio is
+    // the grid's storage scale, 13.1-13.4 on Nuketown, Buried and Nacht.
+    const TYPICAL_GRID_SCALE: f32 = 13.354;
+    let scale = if ratios.len() >= 20 {
+        ratios[ratios.len() / 2]
+    } else {
+        TYPICAL_GRID_SCALE
+    };
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
     own_ratios.sort_by(f32::total_cmp);
     let pct = |q: f32| {
         own_ratios
@@ -563,11 +761,19 @@ fn art_fog(capture: &asset_t6::ZoneCapture, path: &Path, map: &str) -> Option<as
             .and_then(|(_, bytes)| asset_t6::parse_art_fog(bytes))
     };
     find(capture).or_else(|| {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
         let patch = path.with_file_name(format!("{map}_patch.ff"));
+=======
+        let patch = asset_transport::t6_extra::file_in(
+            &asset_transport::t6_extra::install_zone_dir(path),
+            &format!("{map}_patch.ff"),
+        );
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
         asset_t6::capture_zone(&patch).ok().as_ref().and_then(find)
     })
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
 /// bo2mp: the map's final colour: its vision file (`vision/<map>.vision`)
 /// and band 0 of its colour table (`GfxWorld::lutMaterial`'s image), built
 /// into the table BO2's `hdr_create_lut2dv` makes (`asset_world::t6_grade`).
@@ -630,6 +836,13 @@ pub(crate) fn t6_grade(
 /// Light-table slots that carry the fog (no map has this many lights).
 const FOG_SLOT: usize = 31;
 const SUN_FOG_SLOT: usize = 30;
+=======
+/// The light table: every primary light (a surface's light index is a
+/// byte; Die Rise has 214, Origins 148), then the two fog rows.
+const MAX_LIGHTS: usize = 256;
+const SUN_FOG_SLOT: usize = MAX_LIGHTS;
+const FOG_SLOT: usize = MAX_LIGHTS + 1;
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
 
 /// Where a map's fog came from.
 #[derive(Clone, Copy, Debug)]
@@ -641,16 +854,16 @@ enum T6Fog {
 /// The map's primary lights for the renderer's fallback draw, four vec4
 /// each: origin and type (`ComPrimaryLight::type`: 1 sun, 2 spot, 5 omni),
 /// colour and radius, direction and the cone's outer cosine, then
-/// `dAttenuation` and the inner cosine. Slots 30 and 31 carry the fog
-/// (`GfxWorldFog` terms): 31 = (start distance, half distance, opacity, 1),
+/// `dAttenuation` and the inner cosine. Slots 256 and 257 carry the fog
+/// (`GfxWorldFog` terms): 257 = (start distance, half distance, opacity, 1),
 /// (fog colour HDR, base height), (sun fog colour HDR, sun fog opacity),
-/// (direction toward the sun fog, half height); 30 = the sun fog blend
+/// (direction toward the sun fog, half height); 256 = the sun fog blend
 /// t = saturate(y * dot(dir, view) + x) as (x, y, 0, 0).
 fn t6_light_table(capture: &asset_t6::ZoneCapture, fog: Option<T6Fog>) -> Vec<[f32; 16]> {
     let mut table: Vec<[f32; 16]> = capture
         .primary_lights
         .iter()
-        .take(SUN_FOG_SLOT)
+        .take(MAX_LIGHTS)
         .map(|p| {
             [
                 p.origin[0],
@@ -680,6 +893,7 @@ fn t6_light_table(capture: &asset_t6::ZoneCapture, fog: Option<T6Fog>) -> Vec<[f
     table
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
 /// bo2mp: a Black Ops II world's own fog as the light table's rows 30 and
 /// 31 (another game's map in its look, `bo2_look`).
 pub(crate) fn world_fog_rows(world: &asset_t6::WorldRef) -> Option<[[f32; 16]; 2]> {
@@ -690,6 +904,9 @@ pub(crate) fn world_fog_rows(world: &asset_t6::WorldRef) -> Option<[[f32; 16]; 2
 }
 
 /// The light table's two fog rows for a fog (slots 30 and 31, as
+=======
+/// The light table's two fog rows for a fog (slots 256 and 257, as
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
 /// `t6_light_table` lays them out).
 fn fog_rows(fog: T6Fog) -> [[f32; 16]; 2] {
     let (slot, sun) = match fog {
@@ -723,7 +940,8 @@ fn fog_rows(fog: T6Fog) -> [[f32; 16]; 2] {
                     dir[0],
                     dir[1],
                     dir[2],
-                    f.half_height,
+                    // BO2: a half height under 1 is 1.
+                    f.half_height.max(1.0),
                 ],
                 [-co * scale, scale],
             )
@@ -760,6 +978,7 @@ fn fog_rows(fog: T6Fog) -> [[f32; 16]; 2] {
 /// each fog volume's bank is its control word's low byte (Nuketown: three
 /// bank-1 volumes with the map's fog, one bank-2 volume with none, which
 /// its game-over shot switches to). Per bank, the first volume's rows.
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
 fn fog_banks(world: &asset_t6::WorldRef) -> Vec<(u32, [[f32; 16]; 2])> {
     let mut banks: Vec<(u32, [[f32; 16]; 2])> = Vec::new();
     for (_, _, control, _, fog) in &world.fog_volumes {
@@ -770,6 +989,140 @@ fn fog_banks(world: &asset_t6::WorldRef) -> Vec<(u32, [[f32; 16]; 2])> {
         banks.push((bank, fog_rows(T6Fog::World(*fog))));
     }
     banks
+=======
+fn fog_banks(world: &asset_t6::WorldRef) -> Vec<asset_world::T6FogVolume> {
+    // Like an exposure volume's, a fog volume's control word holds its first
+    // plane (bits 16..) and plane count less one (bits 8..15); its low byte
+    // is the banks it belongs to, a bit mask (Origins' volumes 15, 7, 4, 2,
+    // 1; Mob's csc sets banks 4, 8 and 1). Bank-less volumes never draw.
+    world
+        .fog_volumes
+        .iter()
+        .filter(|(_, _, control, _, _)| control & 0xff != 0)
+        .map(|(_, _, control, _, fog)| {
+            let start = (control >> 16) as usize;
+            let count = ((control >> 8) & 0xff) as usize + 1;
+            asset_world::T6FogVolume {
+                planes: world
+                    .fog_volume_planes
+                    .get(start..start + count)
+                    .map(<[_]>::to_vec)
+                    .unwrap_or_default(),
+                banks: control & 0xff,
+                rows: fog_rows(T6Fog::World(*fog)),
+            }
+        })
+        .collect()
+}
+
+/// The world's fog modifier volumes: their control words pick planes and
+/// banks as fog volumes' do. Bank-less volumes never apply.
+fn fog_modifiers(world: &asset_t6::WorldRef) -> Vec<asset_world::T6FogModifier> {
+    world
+        .fog_modifier_volumes
+        .iter()
+        .filter(|(control, _, _)| control & 0xff != 0)
+        .map(|(control, scales, color_adjust)| {
+            let start = (control >> 16) as usize;
+            let count = ((control >> 8) & 0xff) as usize + 1;
+            asset_world::T6FogModifier {
+                planes: world
+                    .fog_modifier_volume_planes
+                    .get(start..start + count)
+                    .map(<[_]>::to_vec)
+                    .unwrap_or_default(),
+                banks: control & 0xff,
+                depth_scale: scales[1],
+                color_adjust: *color_adjust,
+            }
+        })
+        .collect()
+}
+
+/// The world's exposure volumes with their bounding planes: a volume's
+/// control word holds its first plane (bits 16..) and its plane count less
+/// one (bits 8..15) (measured: Nuketown 3 volumes of 10 planes at 20, 10
+/// and 0; Tranzit 8 of 6; Mob's 8- and 9-plane volumes tile its 121).
+fn exposure_volumes(world: &asset_t6::WorldRef) -> Vec<asset_world::T6ExposureVolume> {
+    world
+        .exposure_volumes
+        .iter()
+        .zip(&world.exposure_volume_controls)
+        .map(|(v, control)| {
+            let start = (control >> 16) as usize;
+            let count = ((control >> 8) & 0xff) as usize + 1;
+            asset_world::T6ExposureVolume {
+                planes: world
+                    .exposure_volume_planes
+                    .get(start..start + count)
+                    .map(<[_]>::to_vec)
+                    .unwrap_or_default(),
+                exposure: v[0],
+                increase_scale: v[1],
+                decrease_scale: v[2],
+                feather_range: v[3],
+            }
+        })
+        .collect()
+}
+
+/// The map's colour tables: the first image of its `lutMaterial` (RGBA8 in
+/// the packs; Buried's `zm_buried_lut_win` is 1024x96, three tables).
+fn world_lut(
+    capture: &asset_t6::ZoneCapture,
+    world: &asset_t6::WorldRef,
+    packs: Option<&asset_t6::PackSet>,
+) -> Result<asset_world::T6Lut, String> {
+    let material = &capture.materials[world.lut_material.ok_or("no lutMaterial")?.index];
+    let image = material
+        .textures
+        .first()
+        .and_then(|t| t.image)
+        .map(|k| &capture.images[k.index])
+        .ok_or("lutMaterial has no image")?;
+    let Some(asset_t6::ImageSource::Pack(i, entry)) = packs.and_then(|p| p.locate(image)) else {
+        return Err(format!("{} is in no pack", image.name));
+    };
+    let bytes = packs.ok_or("no packs")?.packs[i].read(entry)?;
+    let iwi = ipak_t6::parse_iwi(&bytes).map_err(|e| e.to_string())?;
+    let rgba = iwi.level(0);
+    if iwi.format != ipak_t6::IwiFormat::Rgba8
+        || iwi.width != 1024
+        || iwi.height % 32 != 0
+        || rgba.len() < (iwi.width * iwi.height * 4) as usize
+    {
+        return Err(format!("{} is {:?} {}x{}", image.name, iwi.format, iwi.width, iwi.height));
+    }
+    Ok(asset_world::T6Lut {
+        width: iwi.width,
+        height: iwi.height,
+        rgba: rgba[..(iwi.width * iwi.height * 4) as usize].to_vec(),
+    })
+}
+
+/// The volumes that pick among the colour tables, as the game stores them
+/// (`control`: banks in the low byte, the plane count less one in the next,
+/// the first plane above).
+fn lut_volumes(world: &asset_t6::WorldRef) -> Vec<asset_world::T6LutVolume> {
+    world
+        .lut_volumes
+        .iter()
+        .map(|&(control, table, transition_time)| {
+            let start = (control >> 16) as usize;
+            let count = ((control >> 8) & 0xff) as usize + 1;
+            asset_world::T6LutVolume {
+                planes: world
+                    .lut_volume_planes
+                    .get(start..start + count)
+                    .map(<[_]>::to_vec)
+                    .unwrap_or_default(),
+                banks: control & 0xff,
+                table: table & 0x1f,
+                transition_time,
+            }
+        })
+        .collect()
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
 }
 
 impl ZoneLane for T6Lane {
@@ -888,6 +1241,7 @@ impl ZoneLane for T6Lane {
         let stage = progress.begin_scoped(StageId::MapAssets, "materials", None);
         // IW4L_HEADLESS=1: nothing is drawn, so no colour map is read or
         // decoded; the materials still link, without their images.
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
         let packs = match path.parent().filter(|_| !frame::Headless::requested()) {
             Some(dir) => match asset_t6::PackSet::open_dir(dir) {
                 Ok(packs) => Some(packs),
@@ -896,6 +1250,17 @@ impl ZoneLane for T6Lane {
                     None
                 }
             },
+=======
+        let packs = match Some(asset_transport::t6_extra::install_zone_dir(path))
+            .filter(|_| !frame::Headless::requested())
+            .map(|dir| asset_t6::PackSet::open_dir(&dir))
+        {
+            Some(Ok(packs)) => Some(packs),
+            Some(Err(error)) => {
+                report.push(format!("t6 image packs: {error}"));
+                None
+            }
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
             None => None,
         };
         let mut materials = material_seed;
@@ -913,6 +1278,11 @@ impl ZoneLane for T6Lane {
             .flat_map(|k| capture.xmodels[k.index].lod0.iter())
             .filter_map(|srf| srf.material.map(|k| k.index))
             .chain(sky_materials);
+        let mut areas = AreaModels::read(path, &map, &capture, world);
+        let area_map_materials: Vec<usize> = areas
+            .surface_materials()
+            .filter_map(|(ci, mi)| ci.is_none().then_some(mi))
+            .collect();
         let linked = super::t6_materials::link_materials(
             &mut materials,
             &capture,
@@ -921,19 +1291,30 @@ impl ZoneLane for T6Lane {
                 .surfaces
                 .iter()
                 .filter_map(|s| s.material.map(|k| k.index))
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
                 .chain(model_materials),
+=======
+                .chain(model_materials)
+                .chain(area_map_materials),
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
             &map,
         );
         stage.done();
         report.extend(linked.report);
+        areas.link(&mut materials, &capture, packs.as_ref(), &mut report);
         let surface_materials: Vec<Option<usize>> = world
             .surfaces
             .iter()
             .map(|s| s.material.and_then(|k| linked.local.get(&k.index).copied()))
             .collect();
         // Lighting: each lightmap's secondary image (the only one T6 keeps),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
         // the world's sun, and the exposure of its first exposure volume
         // (exposure values are stops: the scale is 2^-exposure).
+=======
+        // the world's sun, and its exposure (exposure values are stops: the
+        // scale is 2^-exposure).
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
         let lightmaps: Vec<Option<asset_world::WorldLightmap>> = world
             .lightmaps
             .iter()
@@ -961,6 +1342,7 @@ impl ZoneLane for T6Lane {
                 })
                 .collect(),
         );
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
         // bo2mp: a map with no exposure volume (Cove, Plaza, Pod, Uplink)
         // takes its world sun's own exposure (`initWorldSun.exposure`), not
         // 0 stops (drawn four to eight times too bright).
@@ -971,6 +1353,19 @@ impl ZoneLane for T6Lane {
         let (grade, grade_line) = t6_grade(&capture, world, packs.as_ref(), &map);
         asset_world::install_t6_grade(grade);
         report.push(grade_line);
+=======
+        // The exposure outside every exposure volume: the map's sun's
+        // (`sunParse.initWorldSun`, its last word: Nuketown 4.8, Tranzit 3,
+        // Origins 3 stops). Origins has no exposure volumes at all, so
+        // without it it drew at 0 stops, 8x too bright.
+        let exposure = world
+            .init_sun_raw
+            .get(20)
+            .map(|w| f32::from_bits(*w))
+            .filter(|e| e.is_finite() && *e > 0.0 && *e < 16.0)
+            .or_else(|| world.exposure_volumes.first().map(|v| v[0]))
+            .unwrap_or(0.0);
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
         // The sky: its material's rotation and brightness constants.
         let sky_material = capture
             .xmodels
@@ -986,16 +1381,45 @@ impl ZoneLane for T6Lane {
         };
         let rotation = constant("skyBoxRotation").unwrap_or([1.0, 0.0, -0.0, 1.0]);
         let brightness = constant("skyColorParm").map_or(1.0, |c| c[1]);
+        let sky_parms = constant("skyColorParm").map_or([1.0, 1.0], |c| [c[0], c[3]]);
+        // `r_skyTransition` blends the sky shader's two cube lookups, the
+        // second with z flipped the other way. Die Rise's client script sets
+        // it to 1 (`clientscripts/mp/zm_highrise.csc` main), so it draws the
+        // cube's other half: the dark storm, not the blue-white day.
+        let sky_transition = map == "zm_highrise";
         let sky = [
             rotation[0],
             rotation[1],
             rotation[2],
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
             if rotation[3] < 0.0 {
+=======
+            if (rotation[3] < 0.0) != sky_transition {
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
                 -brightness
             } else {
                 brightness
             },
         ];
+        // The map's vision (`vision/<map>.vision`; Origins starts on
+        // zm_tomb): the final image's saturation and colour grade. Die Rise's
+        // client script picks its vision by fog volume with the power's
+        // suffix (`fog_vol_to_visionset_set_suffix("_off")` in
+        // `clientscripts/mp/zm_highrise.csc`), so it starts on
+        // zm_highrise_off; its plain vision is an identity grade.
+        let vision = if map == "zm_highrise" {
+            format!("vision/{map}_off.vision")
+        } else {
+            format!("vision/{map}.vision")
+        };
+        let vision_bytes = capture
+            .raw_files
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(&vision))
+            .map(|(_, bytes)| bytes.as_slice());
+        let saturation = vision_bytes.map(vision_saturation);
+        let grade = vision_bytes.map(vision_grade);
+        report.push(format!("t6 vision: {vision} saturation {saturation:?} grade {grade:?}"));
         let lighting = world.sun.map(|sun| asset_world::T6WorldLighting {
             sun: asset_world::WorldSunLight {
                 direction: sun.dir,
@@ -1004,6 +1428,9 @@ impl ZoneLane for T6Lane {
             },
             exposure_scale: (-exposure).exp2(),
             sky,
+            sky_parms,
+            saturation,
+            grade,
         });
         report.push(format!(
             "t6 lighting: {} of {} lightmaps built, sun {:?}, exposure {exposure} (scale {:.4})",
@@ -1052,11 +1479,70 @@ impl ZoneLane for T6Lane {
                 report.push(format!("t6 fog: {fog:?}"));
                 draw.t6_lights = t6_light_table(&capture, fog);
                 draw.t6_fog_banks = fog_banks(world);
+                draw.t6_fog_modifiers = fog_modifiers(world);
+                report.push(format!(
+                    "t6 fog modifiers: {:?}",
+                    draw.t6_fog_modifiers
+                        .iter()
+                        .map(|m| (m.banks, m.planes.len(), m.depth_scale, m.color_adjust))
+                        .collect::<Vec<_>>()
+                ));
+                draw.t6_exposure_volumes = exposure_volumes(world);
+                // The map's own colour tables, graded before its vision
+                // (`hdr_create_lut2dv`), and the volumes picking among them.
+                match world_lut(&capture, world, packs.as_ref()) {
+                    Ok(lut) => {
+                        report.push(format!(
+                            "t6 colour table: {}x{} ({} tables)",
+                            lut.width,
+                            lut.height,
+                            lut.height / 32
+                        ));
+                        draw.t6_lut = Some(std::sync::Arc::new(lut));
+                    }
+                    Err(e) => report.push(format!("t6 colour table: none ({e})")),
+                }
+                draw.t6_lut_volumes = lut_volumes(world);
+                // The sun light and colour the client scripts'
+                // r_lightTweakSunLight / SunColor replace (Buried 13, TranZit
+                // 12, Nuketown 15; Origins 0.38 0.78 1) and the sky intensity
+                // r_sky_intensity_* replaces.
+                draw.t6_light_tweaks = world
+                    .init_sun_raw
+                    .get(11)
+                    .map(|w| f32::from_bits(*w))
+                    .filter(|v| v.is_finite() && *v > 0.0)
+                    .map(|sun_light| asset_world::T6LightTweaks {
+                        sun_light,
+                        sun_color: [8, 9, 10].map(|i| {
+                            world.init_sun_raw.get(i).map_or(1.0, |w| f32::from_bits(*w))
+                        }),
+                        sky_intensity: world.sky_dyn_intensity,
+                    });
+                report.push(format!("t6 light tweaks: {:?}", draw.t6_light_tweaks));
+                report.push(format!(
+                    "t6 colour table volumes: {:?}",
+                    draw.t6_lut_volumes
+                        .iter()
+                        .map(|v| (v.table, v.banks, v.transition_time, v.planes.len()))
+                        .collect::<Vec<_>>()
+                ));
+                report.push(format!(
+                    "t6 exposure volumes: {:?}",
+                    draw.t6_exposure_volumes
+                        .iter()
+                        .map(|v| (v.exposure, v.planes.len()))
+                        .collect::<Vec<_>>()
+                ));
                 report.push(format!(
                     "t6 fog banks: {:?}",
                     draw.t6_fog_banks
                         .iter()
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
                         .map(|(b, rows)| (*b, rows[1][2]))
+=======
+                        .map(|v| (v.banks, v.planes.len(), v.rows[1][2]))
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
                         .collect::<Vec<_>>()
                 ));
                 // Reflection probes: their cube maps (one cube array) and
@@ -1084,7 +1570,11 @@ impl ZoneLane for T6Lane {
                     draw.stats.vertices, draw.stats.triangles, draw.stats.surfaces
                 ));
                 let (min, max) = (draw.stats.min, draw.stats.max);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
                 let props = build_props(&capture, world, &linked.local, collision.as_ref(), &mut report);
+=======
+                let props = build_props(&capture, world, &linked.local, &areas, collision.as_ref(), &mut report);
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
                 // bo2zm M2: guns, arms, animations, effects and sound from
                 // every zone the map loads.
                 let stage = progress.begin_scoped(StageId::MapAssets, "weapons, effects, sound", None);
@@ -1092,11 +1582,29 @@ impl ZoneLane for T6Lane {
                     super::t6_m2::load_t6_combat(path, &capture, &mut materials, packs.as_ref());
                 stage.done();
                 report.extend(combat.report);
+                // The visions a script turns on (Mob's Afterlife), graded
+                // as the map's own.
+                draw.t6_script_grades = combat
+                    .visions
+                    .iter()
+                    .map(|(name, bytes)| (name.clone(), vision_grade(bytes)))
+                    .collect();
+                report.push(format!(
+                    "t6 script visions: {}",
+                    draw.t6_script_grades
+                        .iter()
+                        .map(|(name, _)| name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+                let prepare = script_sound_aliases(&combat.scripts);
+                report.push(format!("t6 script sounds prepared at load: {}", prepare.len()));
                 let facts = crate::MapFacts {
                     t6_footsteps: combat.footsteps,
                     t6_hud_icons: combat.hud_icons,
                     t6_hud_fonts: combat.hud_fonts,
                     t6_ui: combat.ui,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
                     t6_playeranim: combat.scripts.playeranim.clone(),
                     t6_ragdoll: combat.scripts.ragdoll.clone(),
                     t6_anim_speeds: combat
@@ -1119,9 +1627,14 @@ impl ZoneLane for T6Lane {
                             (len > 0.0 && d > 1.0).then(|| (a.name.to_ascii_lowercase(), d / len))
                         })
                         .collect(),
+=======
+                    t6_pen_table: combat.pen_table,
+                    t6_screen_filters: combat.screen_filters,
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
                     script_sound: asset_audio::MapScriptSoundFacts {
                         ambient_alias: combat.room_tone,
                         script: Some(format!("clientscripts/mp/{map}_amb.csc")),
+                        prepare,
                         ..Default::default()
                     },
                     ..Default::default()
@@ -1214,6 +1727,7 @@ impl ZoneLane for T6Lane {
     }
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6.rs
 /// bo2mp: the map Black Ops II's own rules borrow the faction pairing and
 /// mapstable row of, for a map from another game (Aftermath: SEALs and
 /// the PMC).
@@ -1524,4 +2038,109 @@ pub(crate) fn attach_t6_rules(
     });
     report.push(format!("bo2 rules: {map} plays by Black Ops II's rules"));
     loaded.report.extend(report);
+=======
+/// bo2zm: every sound alias a map script names as a whole string (the
+/// banks' aliases that appear in a script's string table).
+fn script_sound_aliases(scripts: &crate::script_sources::T6ScriptSet) -> Vec<String> {
+    let known: std::collections::HashSet<&str> =
+        scripts.sound_aliases.iter().map(String::as_str).collect();
+    let mut out: Vec<String> = scripts
+        .objects
+        .iter()
+        .filter_map(|bytes| asset_t6::gsc::GscObject::parse(bytes).ok())
+        .flat_map(|g| g.strings.into_values())
+        .map(|s| s.to_ascii_lowercase())
+        .filter(|s| known.contains(s.as_str()))
+        .collect();
+    // Breakable props' break sounds (a mannequin's head popping off).
+    for d in &scripts.destructibles {
+        for p in &d.pieces {
+            for st in &p.stages {
+                if let Some(snd) = st.break_sound.as_ref().map(|s| s.to_ascii_lowercase())
+                    && known.contains(snd.as_str())
+                {
+                    out.push(snd);
+                }
+            }
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// A T6 vision file's saturation: the w of `vc_FSM "r g b saturation"` (its
+/// Rec. 709 weights then the mix toward colour), 1 when it has none.
+fn vision_saturation(bytes: &[u8]) -> f32 {
+    vision_value(bytes, "vc_FSM").map_or(1.0, |v| v[3])
+}
+
+/// A T6 vision value `vc_<key> "x y z w"`.
+fn vision_value(bytes: &[u8], key: &str) -> Option<[f32; 4]> {
+    String::from_utf8_lossy(bytes).lines().find_map(|line| {
+        let rest = line.trim().strip_prefix(key)?;
+        if !rest.starts_with([' ', '\t']) {
+            return None;
+        }
+        let mut v = [0.0f32; 4];
+        let mut parts = rest.trim().trim_matches('"').split_whitespace();
+        for x in &mut v {
+            *x = parts.next()?.parse::<f32>().ok().filter(|f| f.is_finite())?;
+        }
+        Some(v)
+    })
+}
+
+/// A T6 vision's colour grade as the game's colour table shader
+/// (`hdr_create_lut2dv`) reads it, rows for `asset_world::T6WorldLighting::grade`:
+/// the tone bands' slopes and offsets against the luma of the display value
+/// (shadow falling over `vc_RS.x..vc_RE.x`, highlight rising over `.y`, mid
+/// rising over `.z` and falling over `.w`), the red, green and blue rows of
+/// the shadow, mid and highlight matrices (`vc_SM*`, `vc_MM*`, `vc_HM*`; w a
+/// bias), then `vc_FGM` (gamma, as its reciprocal power), `vc_FSM` (luma weights, saturation) and
+/// `vc_FBM` (how much of the grade is kept).
+fn vision_grade(bytes: &[u8]) -> [[f32; 4]; 14] {
+    let get = |key: &str, default: [f32; 4]| vision_value(bytes, key).unwrap_or(default);
+    let rs = get("vc_RS", [0.0, 1.0, 0.0, 1.0]);
+    let re = get("vc_RE", [1.0, 2.0, 1.0, 2.0]);
+    let (mut slope, mut offset) = ([0.0f32; 4], [0.0f32; 4]);
+    for i in 0..4 {
+        let width = (re[i] - rs[i]).max(0.0001);
+        // The shadow and the mid's fall go down, the others up.
+        if i == 0 || i == 3 {
+            slope[i] = -1.0 / width;
+            offset[i] = re[i] / width;
+        } else {
+            slope[i] = 1.0 / width;
+            offset[i] = -rs[i] / width;
+        }
+    }
+    // The shader raises to cb131; an artist's gamma brightens above 1, so
+    // the table takes its reciprocal (Die Rise's warm 1.05 / 0.995 / 0.957
+    // as given turns its spawn blue, R/B 1.03 against the real 1.31).
+    let fgm = get("vc_FGM", [1.0, 1.0, 1.0, 0.0]);
+    let inv = |g: f32| if g > 0.0001 { 1.0 / g } else { 1.0 };
+    let gamma = [inv(fgm[0]), inv(fgm[1]), inv(fgm[2]), fgm[3]];
+    let row = |key: &str, i: usize| {
+        let mut r = [0.0; 4];
+        r[i] = 1.0;
+        get(key, r)
+    };
+    [
+        slope,
+        offset,
+        row("vc_SMR", 0),
+        row("vc_MMR", 0),
+        row("vc_HMR", 0),
+        row("vc_SMG", 1),
+        row("vc_MMG", 1),
+        row("vc_HMG", 1),
+        row("vc_SMB", 2),
+        row("vc_MMB", 2),
+        row("vc_HMB", 2),
+        gamma,
+        get("vc_FSM", [0.212585, 0.715195, 0.07222, 1.0]),
+        get("vc_FBM", [1.0, 1.0, 1.0, 0.0]),
+    ]
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6.rs
 }

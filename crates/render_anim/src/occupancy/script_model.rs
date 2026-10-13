@@ -8,6 +8,7 @@ use crate::anim::xmodel_pose::{
     PosedModelSurface, lod_local_surface, skin_model_filtered, stream_lod_surface_rigid,
 };
 use crate::occupancy::dyn_ent::{fpv_frustum_planes, sphere_behind_frustum};
+use crate::occupancy::ragdoll::Ragdolls;
 use crate::{
     ScriptModelDrawPlan, ScriptModelOwnerDraw, append_script_model_asset,
     overwrite_script_model_asset, retain_script_model_assets,
@@ -31,6 +32,175 @@ struct ScriptModelDobjs {
 struct PersistentScriptDobj {
     dobj: std::sync::Arc<xmodel_runtime::DObj>,
     reuse_key: xmodel_runtime::DObjReuseKey,
+    wheels: Option<WheelRig>,
+    track: WheelTrack,
+}
+
+/// bo2zm: a vehicle's wheel tags, in BO2's names; the front ones steer.
+const WHEEL_TAGS: [(&str, bool); 6] = [
+    ("tag_wheel_front_left", true),
+    ("tag_wheel_front_right", true),
+    ("tag_wheel_middle_left", false),
+    ("tag_wheel_middle_right", false),
+    ("tag_wheel_back_left", false),
+    ("tag_wheel_back_right", false),
+];
+
+/// A wheel's radius when its tag's height above the model's origin is no
+/// size for a wheel (units).
+const WHEEL_RADIUS_FALLBACK: f32 = 20.0;
+
+/// Front to back axle when the model has wheels at one end only (units).
+const WHEELBASE_FALLBACK: f32 = 200.0;
+
+/// How far the front wheels turn at most (radians, 35 degrees: a stand-in
+/// until the vehicle's own number is read).
+const WHEEL_MAX_STEER: f32 = 0.61;
+
+/// How much of the way to the wanted steer the wheels go each frame.
+const WHEEL_STEER_EASE: f32 = 0.25;
+
+/// A move this long in one frame is a jump, not a roll (units).
+const WHEEL_MAX_STEP: f32 = 256.0;
+
+/// The wheels of a drawn model: each wheel tag, the bones under it, and
+/// whether it steers.
+struct WheelRig {
+    wheels: Vec<(usize, Vec<usize>, bool)>,
+    radius: f32,
+    wheelbase: f32,
+}
+
+/// Where a wheeled model was last frame and how far its wheels have turned
+/// (radians).
+#[derive(Default)]
+struct WheelTrack {
+    last: Option<(Vec3, Quat)>,
+    spin: f32,
+    steer: f32,
+}
+
+impl WheelTrack {
+    /// BO2 turns a vehicle's wheels on the client
+    /// (CG_Vehicle_DoControllersGround): each spins by the ground it rolled
+    /// over, the front ones steer into the turn.
+    fn roll(&mut self, rig: &WheelRig, at: Vec3, rotation: Quat) {
+        if let Some((last_at, last_rotation)) = self.last {
+            let moved = last_rotation.inverse() * (at - last_at);
+            if moved.length() < WHEEL_MAX_STEP {
+                let forward = moved.x;
+                self.spin = (self.spin + forward / rig.radius).rem_euclid(std::f32::consts::TAU);
+                if forward.abs() > 0.5 {
+                    let (turn, _, _) = (last_rotation.inverse() * rotation).to_euler(EulerRot::ZYX);
+                    let want = (rig.wheelbase * turn / forward)
+                        .atan()
+                        .clamp(-WHEEL_MAX_STEER, WHEEL_MAX_STEER);
+                    self.steer += (want - self.steer) * WHEEL_STEER_EASE;
+                }
+            }
+        }
+        self.last = Some((at, rotation));
+    }
+
+    /// The wheel angles ride in the cache key's pose revision, so a turned
+    /// wheel re-poses the model in both caches (the pose and the draw plan).
+    fn keyed(
+        &self,
+        state: &xmodel_runtime::DObjSemanticState,
+    ) -> xmodel_runtime::DObjSemanticState {
+        let spin = (self.spin / std::f32::consts::TAU * 256.0) as u32 & 0xff;
+        let steer = ((self.steer.to_degrees() * 2.0).round() as i32 + 128) as u32 & 0xff;
+        let mut keyed = state.clone();
+        keyed.pose_revision =
+            state.pose_revision.rotate_left(16) ^ (1u32 << 31 | spin << 8 | steer);
+        keyed
+    }
+}
+
+fn wheel_rig(dobj: &xmodel_runtime::DObj) -> Option<WheelRig> {
+    let wheels: Vec<_> = WHEEL_TAGS
+        .iter()
+        .filter_map(|&(tag, steers)| {
+            let wheel = dobj.find(tag)?;
+            let under: Vec<usize> = (0..dobj.bones.len())
+                .filter(|&bone| dobj.bones[bone].parent == Some(wheel))
+                .collect();
+            Some((wheel, under, steers))
+        })
+        .collect();
+    if wheels.is_empty() {
+        return None;
+    }
+    let at = |bone: usize| {
+        dobj.bones[bone]
+            .bind_world
+            .to_scale_rotation_translation()
+            .2
+    };
+    let height = wheels.iter().map(|w| at(w.0).z).sum::<f32>() / wheels.len() as f32;
+    let radius = if (8.0..=60.0).contains(&height) {
+        height
+    } else {
+        WHEEL_RADIUS_FALLBACK
+    };
+    let axle = |front: bool| {
+        let xs: Vec<f32> = wheels
+            .iter()
+            .filter(|w| w.2 == front)
+            .map(|w| at(w.0).x)
+            .collect();
+        (!xs.is_empty()).then(|| xs.iter().sum::<f32>() / xs.len() as f32)
+    };
+    let wheelbase = match (axle(true), axle(false)) {
+        (Some(front), Some(back)) => (front - back).abs().max(1.0),
+        _ => WHEELBASE_FALLBACK,
+    };
+    Some(WheelRig {
+        wheels,
+        radius,
+        wheelbase,
+    })
+}
+
+/// BO2's wheel controller: the wheel tag steers, the bones under it spin
+/// (the tag itself when nothing hangs under it).
+fn turn_wheels(
+    dobj: &xmodel_runtime::DObj,
+    locals: &mut [anim_iw4::Local],
+    rig: &WheelRig,
+    track: &WheelTrack,
+) {
+    for (wheel, under, steers) in &rig.wheels {
+        if *steers {
+            turn_bone(dobj, locals, *wheel, Vec3::Z, track.steer);
+        }
+        if under.is_empty() {
+            turn_bone(dobj, locals, *wheel, Vec3::Y, track.spin);
+        }
+        for &bone in under {
+            turn_bone(dobj, locals, bone, Vec3::Y, track.spin);
+        }
+    }
+}
+
+/// Turns a bone about one of the model's axes, as it sits at bind.
+fn turn_bone(
+    dobj: &xmodel_runtime::DObj,
+    locals: &mut [anim_iw4::Local],
+    bone: usize,
+    model_axis: Vec3,
+    angle: f32,
+) {
+    let (Some(local), Some(bind)) = (locals.get_mut(bone), dobj.bones.get(bone)) else {
+        return;
+    };
+    let (_, bind_rotation, _) = bind.bind_world.to_scale_rotation_translation();
+    let axis = (bind_rotation.inverse() * model_axis).normalize_or_zero();
+    if axis == Vec3::ZERO {
+        return;
+    }
+    let out = (Quat::from_array(local.rotation) * Quat::from_axis_angle(axis, angle)).normalize();
+    local.rotation = out.to_array();
 }
 
 const SPAWNED_PRESENCE: std::ops::Range<u32> = 0x4000_0000..0x8000_0000;
@@ -75,6 +245,8 @@ struct ScriptModelPoseLocals<'w, 's> {
     remap: Local<'s, Vec<Option<usize>>>,
     lod_skinned: Res<'w, render_scene::LodRampSkinnedDvar>,
     gfx_scene: Res<'w, HostGfxScene>,
+    ragdolls: ResMut<'w, Ragdolls>,
+    phys_clip: Option<Res<'w, crate::occupancy::dyn_ent_phys::DynEntPhysClip>>,
 }
 
 #[derive(SystemParam)]
@@ -238,6 +410,7 @@ pub fn register_script_model_systems(app: &mut App) {
         .init_resource::<ScriptModelDrawPlan>()
         .init_resource::<ScriptModelDobjs>()
         .init_resource::<ScriptModelPoseProduct>()
+        .init_resource::<Ragdolls>()
         .add_systems(
             Update,
             (
@@ -352,6 +525,7 @@ fn apply_presented_script_model_dobjs(
         return;
     };
     let by_owner = presented_dobj_states(presented);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/script_model.rs
     // bo2mp: a vehicle he sees from its own tag is not drawn for him (his
     // view sits inside it: the Dragonfire, the VTOL Warship's gun).
     let ridden = local
@@ -364,6 +538,9 @@ fn apply_presented_script_model_dobjs(
             *visibility = Visibility::Hidden;
             continue;
         }
+=======
+    for (mut owner, mut visibility) in &mut owners {
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/script_model.rs
         let Some(authority_owner) = owner.authority_owner else {
             *visibility = Visibility::Hidden;
             continue;
@@ -584,6 +761,7 @@ fn occupy_script_model_scene_ents(
     persist: Res<ScriptModelDobjs>,
     mut scene_submissions: MessageWriter<AnimDObjSceneSubmission>,
     lod_skinned: Res<render_scene::LodRampSkinnedDvar>,
+    ragdolls: Res<Ragdolls>,
 ) {
     let _slow = crate::occupancy::t6_body::SlowGuard::new("occupy_script_model_scene_ents");
     let Some(assets) = assets else {
@@ -603,15 +781,10 @@ fn occupy_script_model_scene_ents(
         };
         let skel_refs: Vec<&asset_model::ModelSkel> =
             skels.iter().map(|skel| skel.as_ref()).collect();
-        if lod_culled(
-            &skel_refs,
-            transform.translation.to_array(),
-            eye,
-            skinned_ramp,
-        ) {
+        let origin = (transform.translation + ragdoll_shift(&ragdolls, owner)).to_array();
+        if lod_culled(&skel_refs, origin, eye, skinned_ramp) {
             continue;
         }
-        let origin = transform.translation.to_array();
         let quat = scene_quat_from_mover_sample(persist.mover_pose.get(&owner.id.source_ordinal()));
         let Some(entnum) = owner.gentity_number.map(u32::from) else {
             continue;
@@ -642,7 +815,9 @@ fn occupy_script_model_scene_ents(
             render_fx_flags: 0,
             has_tree: owner.dobj_state.tree.is_some(),
             origin,
-            lighting_origin: owner.lighting_origin,
+            lighting_origin: (Vec3::from_array(owner.lighting_origin)
+                + ragdoll_shift(&ragdolls, owner))
+            .to_array(),
             radius: skels.iter().find_map(|skel| skel.radius),
             entnum,
             quat,
@@ -652,6 +827,18 @@ fn occupy_script_model_scene_ents(
             store_skin: true,
         });
     }
+}
+
+/// bo2zm (Die Rise chat): how far a limp body has fallen from where it went
+/// limp (where to cull, light and shade it).
+fn ragdoll_shift(ragdolls: &Ragdolls, owner: &WorldScriptModelInstance) -> Vec3 {
+    owner
+        .dobj_state
+        .ragdoll
+        .and(owner.authority_owner)
+        .and_then(|owner| owner.script_model())
+        .and_then(|id| ragdolls.shift(id.to_wire()))
+        .unwrap_or(Vec3::ZERO)
 }
 
 /// bo2zm M3 fix list 2: how far the client's clock is past the newest
@@ -742,7 +929,14 @@ fn pose_script_models(
         mut remap,
         lod_skinned,
         gfx_scene,
+        mut ragdolls,
+        phys_clip,
     } = locals;
+    let clock_ms = cg_clock
+        .as_deref()
+        .filter(|clock| clock.started())
+        .map(|clock| clock.time());
+    let clip = phys_clip.as_deref().and_then(|clip| clip.0.as_deref());
     live_assets.clear();
     live_ids.clear();
     let producer_ready = assets.is_some() && atlas.is_some() && facts.spawned;
@@ -791,13 +985,14 @@ fn pose_script_models(
             }
             continue;
         }
-        let advanced = advance_script_anim(&owner.dobj_state, anim_ahead_s, |clip| {
+        let looping = |clip: &str| {
             let catalog = &xanims.as_ref()?.0;
             catalog
                 .clip(asset_core::AssetNamespace::T6, clip)
                 .or_else(|| catalog.clip(asset_core::AssetNamespace::Iw4, clip))
                 .map(|c| c.looping)
-        });
+        };
+        let advanced = advance_script_anim(&owner.dobj_state, anim_ahead_s, looping);
         let dobj_state = advanced.as_ref().unwrap_or(&owner.dobj_state);
         // IW4L_ANIM_AHEAD_LOG=<clip name part>: the first model seen playing
         // such a clip: its clip time as sent and as drawn, each frame.
@@ -838,7 +1033,8 @@ fn pose_script_models(
             }
             continue;
         };
-        let origin = transform.translation.to_array();
+        let shift = ragdoll_shift(&ragdolls, owner);
+        let origin = (transform.translation + shift).to_array();
 
         if lod_culled(&skels, origin, eye, skinned_ramp) {
             if let Some(id) = focused_owner_id {
@@ -864,14 +1060,101 @@ fn pose_script_models(
                 continue;
             }
             live_ids.insert(id);
+            // bo2zm: a vehicle's wheels roll and steer as it moves.
+            let wheel_keyed = persist.by_id.get_mut(&id).and_then(|slot| {
+                let rig = slot.wheels.as_ref()?;
+                slot.track
+                    .roll(rig, transform.translation, transform.rotation);
+                Some(slot.track.keyed(dobj_state))
+            });
+            let key_state = wheel_keyed.as_ref().unwrap_or(dobj_state);
             let request = dobj_state.resolve_request(|name| {
                 xanims
                     .as_ref()?
                     .0
                     .clip(asset_core::AssetNamespace::Iw4, name)
             });
-            let index = if let Some(index) =
-                product.asset_index(&owner.current_model, dobj_state, &camera_lods)
+            // bo2zm (Die Rise chat): a limp body is posed by its fall, from
+            // the pose it had when it went limp.
+            let limp = match (
+                owner.dobj_state.ragdoll.as_ref(),
+                request.as_ref(),
+                clock_ms,
+                persist.by_id.get(&id),
+            ) {
+                (Some(ragdoll), Ok(request), Some(now_ms), Some(slot_dobj)) => {
+                    let dobj = &slot_dobj.dobj;
+                    ragdolls
+                        .pose(id, ragdoll, dobj, transform.to_matrix(), now_ms, clip, || {
+                            let now = xmodel_runtime::pose_dobj(dobj, request, Mat4::IDENTITY).ok()?;
+                            let ahead = advance_script_anim(
+                                &owner.dobj_state,
+                                anim_ahead_s + crate::occupancy::ragdoll::AHEAD_S,
+                                looping,
+                            )
+                            .and_then(|later| {
+                                later
+                                    .resolve_request(|name| {
+                                        xanims
+                                            .as_ref()?
+                                            .0
+                                            .clip(asset_core::AssetNamespace::Iw4, name)
+                                    })
+                                    .ok()
+                            })
+                            .and_then(|later| {
+                                xmodel_runtime::pose_dobj(dobj, &later, Mat4::IDENTITY).ok()
+                            })
+                            .unwrap_or_else(|| now.clone());
+                            Some((now, ahead))
+                        })
+                        .map(|pose| (*ragdoll, pose))
+                }
+                _ => None,
+            };
+            let index = if let Some((ragdoll, pose)) = limp {
+                // Its own pose key: the body's number and its fall's step,
+                // so each step is posed once and a still body never again.
+                let mut key = owner.dobj_state.clone();
+                key.tree = None;
+                key.pose_revision = id;
+                key.ragdoll = Some(xmodel_runtime::DObjRagdoll {
+                    start_ms: ragdoll.start_ms,
+                    launch: [0.0; 3],
+                    launches: pose.stamp as u16,
+                });
+                if let Some(index) = product.asset_index(&owner.current_model, &key, &camera_lods)
+                {
+                    index
+                } else {
+                    let (Some(slot_dobj), Ok(request)) = (persist.by_id.get(&id), request.as_ref())
+                    else {
+                        continue;
+                    };
+                    let skin_entries = slot.as_ref().map(|slot| slot.skin_entries).unwrap_or(&[]);
+                    let Some((surfaces, surface_materials)) = skin_script_dobj_with_materials(
+                        Some(&assets),
+                        &skels,
+                        &slot_dobj.dobj,
+                        &pose.bones,
+                        &request.hide_part_bits,
+                        lod_view,
+                        skin_entries,
+                    ) else {
+                        continue;
+                    };
+                    append_or_overwrite_script_pose(
+                        &mut product,
+                        &live_assets,
+                        owner.current_model.clone(),
+                        key,
+                        camera_lods.clone(),
+                        surfaces,
+                        surface_materials,
+                    )
+                }
+            } else if let Some(index) =
+                product.asset_index(&owner.current_model, key_state, &camera_lods)
             {
                 index
             } else {
@@ -882,13 +1165,18 @@ fn pose_script_models(
                     continue;
                 };
                 let skin_entries = slot.as_ref().map(|slot| slot.skin_entries).unwrap_or(&[]);
-                let Some((surfaces, surface_materials)) = pose_script_dobj_with_materials(
+                let Some((surfaces, surface_materials)) = pose_script_dobj_with_controller(
                     Some(&assets),
                     &skels,
                     &slot_dobj.dobj,
                     &request,
                     lod_view,
                     skin_entries,
+                    |dobj, _, locals| {
+                        if let Some(rig) = &slot_dobj.wheels {
+                            turn_wheels(dobj, locals, rig, &slot_dobj.track);
+                        }
+                    },
                 ) else {
                     continue;
                 };
@@ -950,7 +1238,7 @@ fn pose_script_models(
                     &mut product,
                     &live_assets,
                     owner.current_model.clone(),
-                    dobj_state.clone(),
+                    key_state.clone(),
                     camera_lods.clone(),
                     surfaces,
                     surface_materials,
@@ -970,6 +1258,7 @@ fn pose_script_models(
         };
         let box_half =
             crate::script_model_lighting_box_half(&assets, &owner.dobj_state.composition.models);
+        let lighting_origin = (Vec3::from_array(owner.lighting_origin) + shift).to_array();
         let radius = skels
             .first()
             .and_then(|skel| skel.radius)
@@ -983,12 +1272,15 @@ fn pose_script_models(
             world_from_local: transform.to_matrix(),
             entnum,
             camera_hidden: sphere_behind_frustum(origin, radius, &planes),
-            lighting_origin: owner.lighting_origin,
-            lookup_fallback: atpoint.fallback(owner.lighting_origin, box_half),
+            lighting_origin,
+            lookup_fallback: atpoint.fallback(lighting_origin, box_half),
             caster_bound: render_scene::XModelCasterBound { origin, radius },
         });
     }
     persist.by_id.retain(|id, _| live_ids.contains(id));
+    if let Some(now_ms) = clock_ms {
+        ragdolls.forget_unseen(now_ms);
+    }
     keep.clear();
     keep.resize(product.assets.len(), false);
     for &index in &live_assets {
@@ -1239,10 +1531,22 @@ fn append_or_overwrite_script_pose(
 fn script_dobj_reuse_key(
     state: &xmodel_runtime::DObjSemanticState,
 ) -> xmodel_runtime::DObjReuseKey {
-    let mut parts = Vec::with_capacity(state.composition.models.len() * 2);
-    for model in &state.composition.models {
+    // A weapon part's place on its tag counts too.
+    let offsets: Vec<String> = state
+        .composition
+        .models
+        .iter()
+        .map(|model| {
+            model.tag_offset.map_or_else(String::new, |at| {
+                format!("{:?}{:?}", at.offset(), at.rotation())
+            })
+        })
+        .collect();
+    let mut parts = Vec::with_capacity(state.composition.models.len() * 3);
+    for (model, offset) in state.composition.models.iter().zip(&offsets) {
         parts.push(model.model.as_str());
         parts.push(model.attach_tag.as_deref().unwrap_or(""));
+        parts.push(offset.as_str());
     }
     xmodel_runtime::DObjReuseKey {
         e_type: entity_iw4::ET_SCRIPTMOVER,
@@ -1345,7 +1649,8 @@ pub fn collect_presented_models<'a>(
     )>,
     Vec<&'a asset_model::ModelSkel>,
 )> {
-    let mut skels = Vec::with_capacity(state.composition.models.len());
+    let mut skels: Vec<&'a asset_model::ModelSkel> =
+        Vec::with_capacity(state.composition.models.len());
     let mut attaches = Vec::with_capacity(state.composition.models.len());
     for (index, descriptor) in state.composition.models.iter().enumerate() {
         let skel = match catalog.get_name(&descriptor.model)? {
@@ -1357,9 +1662,25 @@ pub fn collect_presented_models<'a>(
         let attach = match (descriptor.parent_model, descriptor.attach_tag.as_ref()) {
             (None, None) if index == 0 => None,
             (Some(parent), Some(tag)) if usize::from(parent) < index => {
+                let parent = usize::from(parent);
+                // bo2zm: a weapon part (magazine, scope) goes on its gun's
+                // bone of that name in any case, as first person mounts it
+                // (`fpv_catalog`: a def's `TAG_CLIP` is the model's
+                // `tag_clip`); on a tag its gun lacks it hangs on the gun's
+                // root bone rather than losing the whole gun.
+                let parent_bones = skels[parent].pose.as_ref().map(|p| &p.bone_names);
+                let tag = match parent_bones {
+                    Some(bones) if descriptor.tag_offset.is_some() => bones
+                        .iter()
+                        .find(|b| b.eq_ignore_ascii_case(tag))
+                        .or_else(|| bones.first())
+                        .unwrap_or(tag)
+                        .clone(),
+                    _ => tag.clone(),
+                };
                 Some(xmodel_runtime::Attach {
-                    parent_model: usize::from(parent),
-                    tag: tag.clone(),
+                    parent_model: parent,
+                    tag,
                 })
             }
             _ => return None,
@@ -1395,15 +1716,27 @@ fn compose_or_reuse_script_dobj(
         [only] => prepared.scene_dobj(&only.model).cloned(),
         _ => None,
     };
+    // bo2zm: weapon parts sit at their offset and turn from their tag.
+    let root_binds: Vec<_> = state
+        .composition
+        .models
+        .iter()
+        .map(|d| d.tag_offset.map(xmodel_runtime::TagOffset::root_bind))
+        .collect();
     let dobj = match single {
         Some(dobj) => dobj,
-        None => std::sync::Arc::new(xmodel_runtime::DObj::build(&specs).ok()?),
+        None => std::sync::Arc::new(
+            xmodel_runtime::DObj::build_with_root_binds(&specs, &root_binds).ok()?,
+        ),
     };
+    let wheels = wheel_rig(&dobj);
     persist.by_id.insert(
         id,
         PersistentScriptDobj {
             dobj,
             reuse_key: key,
+            wheels,
+            track: WheelTrack::default(),
         },
     );
     Some(())
@@ -1417,9 +1750,60 @@ pub fn pose_script_dobj_with_materials(
     lod_view: Option<DObjLodView>,
     skin_entries: &[dpvs_iw4::SceneEntSkinEntry],
 ) -> Option<(Vec<PosedModelSurface>, Vec<Option<assets::MaterialIndex>>)> {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/script_model.rs
     let world = xmodel_runtime::pose_dobj(dobj, request, Mat4::IDENTITY).ok()?;
     let skin = dobj.skin_matrices(&world);
     let hide = request.hide_part_bits.words();
+=======
+    pose_script_dobj_with_controller(
+        catalog,
+        skels,
+        dobj,
+        request,
+        lod_view,
+        skin_entries,
+        |_, _, _| {},
+    )
+}
+
+/// As pose_script_dobj_with_materials, with a controller that turns bones
+/// after the animation (a vehicle's wheels).
+fn pose_script_dobj_with_controller(
+    catalog: Option<&asset_world::MapXModelSceneCatalog>,
+    skels: &[&asset_model::ModelSkel],
+    dobj: &xmodel_runtime::DObj,
+    request: &xmodel_runtime::DObjPoseRequest,
+    lod_view: Option<DObjLodView>,
+    skin_entries: &[dpvs_iw4::SceneEntSkinEntry],
+    controller: impl FnOnce(&xmodel_runtime::DObj, &anim_iw4::PartBits, &mut [anim_iw4::Local]),
+) -> Option<(Vec<PosedModelSurface>, Vec<Option<assets::MaterialIndex>>)> {
+    let world =
+        xmodel_runtime::pose_dobj_with_controller(dobj, request, Mat4::IDENTITY, controller)
+            .ok()?;
+    skin_script_dobj_with_materials(
+        catalog,
+        skels,
+        dobj,
+        &world,
+        &request.hide_part_bits,
+        lod_view,
+        skin_entries,
+    )
+}
+
+/// The model's surfaces skinned by its bones (model space, as `pose_dobj`
+/// gives them).
+pub(crate) fn skin_script_dobj_with_materials(
+    catalog: Option<&asset_world::MapXModelSceneCatalog>,
+    skels: &[&asset_model::ModelSkel],
+    dobj: &xmodel_runtime::DObj,
+    world: &[Mat4],
+    hide_part_bits: &xmodel_runtime::HidePartBits,
+    lod_view: Option<DObjLodView>,
+    skin_entries: &[dpvs_iw4::SceneEntSkinEntry],
+) -> Option<(Vec<PosedModelSurface>, Vec<Option<assets::MaterialIndex>>)> {
+    let skin = dobj.skin_matrices(world);
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/script_model.rs
     let mut surfaces = Vec::new();
     let mut materials = Vec::new();
     for (model, skel) in skels.iter().enumerate() {
@@ -1440,8 +1824,12 @@ pub fn pose_script_dobj_with_materials(
             |surface_index| {
                 !anim_iw4::surface_hidden_whole(
                     &skel.surface_part_bits[surface_index],
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/script_model.rs
                     hide,
                     base as u32,
+=======
+                    hide_part_bits,
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/script_model.rs
                 ) && dpvs_iw4::SceneEntSkinEntry::stream_draws(
                         skin_entries,
                         model as u16,

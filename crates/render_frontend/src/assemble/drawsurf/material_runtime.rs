@@ -1417,6 +1417,25 @@ pub fn capture_runtime_catalog(
                     .find(|constant| constant.name.starts_with(b"envMapParms"))
                     .map(|constant| constant.literal.map(f32::to_bits))
                     .unwrap_or([0; 4]),
+                sheet_bits: {
+                    let constant = |name: &[u8], default: f32| {
+                        material
+                            .constants
+                            .iter()
+                            .find(|constant| constant.name.starts_with(name))
+                            .map_or([default; 4], |constant| constant.literal)
+                    };
+                    let speed = constant(b"ColorSpeed", 0.0);
+                    let hdr = constant(b"hdrAmount", 1.0)[0];
+                    [
+                        1.0 / constant(b"FadeFactor", 0.0)[0].max(1e-4),
+                        speed[0],
+                        speed[1],
+                        constant(b"ColorScale", 1.0)[0],
+                        hdr * hdr,
+                    ]
+                    .map(f32::to_bits)
+                },
                 textures: {
                     let mut textures = material
                         .textures

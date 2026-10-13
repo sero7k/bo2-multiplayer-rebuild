@@ -98,7 +98,40 @@ impl WalkSink for Lister {
                 extra = format!(
                     " display='{display}' clip={clip} type={ty} class={class} inv={inv} overlay='{wname}'"
                 );
+                // T6LIST_WEAPON=name,name: also its firing and turret numbers.
+                let want = std::env::var("T6LIST_WEAPON").unwrap_or_default();
+                if let Some(d) = def.filter(|_| want.split(',').any(|w| w == name)) {
+                    let f = |off| s.f32_at(d, off);
+                    let i = |off| s.i32_at(d, off);
+                    let fx = |off| -> fastfile_t6::Result<String> {
+                        Ok(match deref(s, d, off)? {
+                            Some(p) => string_field(s, p, 0)?,
+                            None => String::new(),
+                        })
+                    };
+                    let w = l::WeaponDef::damage;
+                    let r = l::WeaponDef::damageRange;
+                    extra += &format!(
+                        " fire_ms={} damage=[{} {} {} {} {} {}] ranges=[{} {} {} {} {} {}] arcs(l r t b)=[{} {} {} {}] \
+                         max_range={} turn_speed=[{} {}]/[{} {}] converge(p y)=[{} {}] accuracy={} ai_spread={} \
+                         player_spread={} suppress={} flash='{}' tracer='{}' fire_sound='{}'",
+                        i(l::WeaponDef::iFireTime)?,
+                        i(w)?, i(w + 4)?, i(w + 8)?, i(w + 12)?, i(w + 16)?, i(w + 20)?,
+                        f(r)?, f(r + 4)?, f(r + 8)?, f(r + 12)?, f(r + 16)?, f(r + 20)?,
+                        f(l::WeaponDef::leftArc)?, f(l::WeaponDef::rightArc)?,
+                        f(l::WeaponDef::topArc)?, f(l::WeaponDef::bottomArc)?,
+                        f(l::WeaponDef::maxRange)?,
+                        f(l::WeaponDef::minTurnSpeed)?, f(l::WeaponDef::minTurnSpeed + 4)?,
+                        f(l::WeaponDef::maxTurnSpeed)?, f(l::WeaponDef::maxTurnSpeed + 4)?,
+                        f(l::WeaponDef::pitchConvergenceTime)?, f(l::WeaponDef::yawConvergenceTime)?,
+                        f(l::WeaponDef::accuracy)?, f(l::WeaponDef::aiSpread)?,
+                        f(l::WeaponDef::playerSpread)?, f(l::WeaponDef::suppressTime)?,
+                        fx(l::WeaponDef::worldFlashEffect)?, fx(l::WeaponDef::tracerType)?,
+                        string_field(s, d, l::WeaponDef::fireSound)?,
+                    );
+                }
             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6list.rs
             // bo2mp lane D: a vehicle's guns (its turret and gunner
             // weapons, by name).
             AssetType::VehicleDef => {
@@ -108,6 +141,26 @@ impl WalkSink for Lister {
                     .filter(|g| !g.is_empty())
                     .collect();
                 extra = format!(" turret='{turret}' gunners='{}'", gunners.join(","));
+=======
+            // Speeds as loaded: units a second (the vehicle files' miles per
+            // hour times 17.6; Buried's ghost lantern is 88 = 5 mph).
+            AssetType::VehicleDef => {
+                let f = |off| s.f32_at(body, off);
+                extra = format!(
+                    " type={} maxSpeed={} maxSpeedVertical={} accel={} accelVertical={} rotAccel={} decelFwd={} decelSide={} decelUp={} quadRotor={} radius={}",
+                    s.i16_at(body, l::VehicleDef::r#type)?,
+                    f(l::VehicleDef::maxSpeed)?,
+                    f(l::VehicleDef::maxSpeedVertical)?,
+                    f(l::VehicleDef::accel)?,
+                    f(l::VehicleDef::accelVertical)?,
+                    f(l::VehicleDef::rotAccel)?,
+                    f(l::VehicleDef::vehHelicopterDecelerationFwd)?,
+                    f(l::VehicleDef::vehHelicopterDecelerationSide)?,
+                    f(l::VehicleDef::vehHelicopterDecelerationUp)?,
+                    s.i32_at(body, l::VehicleDef::vehHelicopterQuadRotor)?,
+                    f(l::VehicleDef::radius)?,
+                );
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6list.rs
             }
             _ => {}
         }

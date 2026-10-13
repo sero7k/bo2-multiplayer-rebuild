@@ -126,11 +126,18 @@ impl SmodelGpuPlan {
         &self,
         catalog: &crate::assemble::drawsurf::RuntimeMaterialCatalog,
         exposure: f32,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/assemble/drawsurf/tess/smodel.rs
     ) -> (Vec<[u32; 4]>, Vec<T6PropInstance>, Vec<[u32; 3]>) {
         let mut draws = Vec::new();
         let mut instances = Vec::new();
         // bo2zm: per draw, its normal and specular map slots (shine);
         // bo2mp: then its layer 1 slot (an emissive flow's remap).
+=======
+    ) -> (Vec<[u32; 4]>, Vec<T6PropInstance>, Vec<[u32; 2]>) {
+        let mut draws = Vec::new();
+        let mut instances = Vec::new();
+        // bo2zm: per draw, its normal and specular map slots (shine).
+>>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/assemble/drawsurf/tess/smodel.rs
         let mut shine = Vec::new();
         for placement in &self.placements {
             let Some(packed) = placement.packed_lighting else {
@@ -166,8 +173,28 @@ impl SmodelGpuPlan {
                 let code = runtime
                     .and_then(|m| m.t6_draw)
                     .map_or(asset_core::T6Draw::NONE_CODE, asset_core::T6Draw::code);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/assemble/drawsurf/tess/smodel.rs
                 draws.push([surface, slot, code, instance]);
                 shine.push([asset_material::TS_NORMAL_MAP, asset_material::TS_SPECULAR_MAP, 0xf1].map(
+=======
+                // bo2zm 27c: a cloud sheet takes no light: its own row holds
+                // its constants in the light slots (1 / FadeFactor,
+                // ColorSpeed.xy, ColorScale.x) and hdrAmount squared in the
+                // primary light's (the cull distance kept).
+                let draw_instance = match runtime.filter(|m| m.t6_draw.is_some_and(|d| d.sheet)) {
+                    Some(m) => {
+                        let sheet = m.sheet();
+                        let mut sheet_row = instances[instance as usize];
+                        sheet_row[16..20].copy_from_slice(&sheet[..4]);
+                        sheet_row[20] = sheet[4];
+                        instances.push(sheet_row);
+                        (instances.len() - 1) as u32
+                    }
+                    None => instance,
+                };
+                draws.push([surface, slot, code, draw_instance]);
+                shine.push([asset_material::TS_NORMAL_MAP, asset_material::TS_SPECULAR_MAP].map(
+>>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/assemble/drawsurf/tess/smodel.rs
                     |semantic| {
                         runtime
                             .and_then(|m| m.texture_semantic(semantic))

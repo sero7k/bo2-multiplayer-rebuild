@@ -86,6 +86,7 @@ fn code_color(c: char) -> Option<Color> {
 
 /// Split a hint into coloured runs; `[{+activate}]`-style key names become
 /// the player's own key ("[F]").
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
 pub(crate) fn hint_runs(text: &str, keys: &HudInputView) -> Vec<(String, Color)> {
     hint_runs_with(text, keys, true)
 }
@@ -94,6 +95,9 @@ pub(crate) fn hint_runs(text: &str, keys: &HudInputView) -> Vec<(String, Color)>
 /// to respawn": the PC game's multiplayer prompts show only the letter,
 /// coloured).
 pub(crate) fn hint_runs_with(text: &str, keys: &HudInputView, brackets: bool) -> Vec<(String, Color)> {
+=======
+fn hint_runs(text: &str, keys: &HudInputView) -> Vec<(String, Color)> {
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
     let mut text = text.to_owned();
     while let Some(start) = text.find("[{") {
         let Some(len) = text[start..].find("}]") else {
@@ -116,7 +120,17 @@ pub(crate) fn hint_runs_with(text: &str, keys: &HudInputView, brackets: bool) ->
                     command.trim_start_matches('+').to_uppercase()
                 }
             });
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
         let shown = if brackets { format!("[{key}]") } else { key };
+=======
+        // A pad button shows as its icon, without brackets (as BO2 shows its
+        // pad pictures).
+        let shown = if key.chars().count() == 1 && key.chars().all(crate::bo2_font::is_button_icon) {
+            key
+        } else {
+            format!("[{key}]")
+        };
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
         text.replace_range(start..start + len + 2, &shown);
     }
     let mut runs: Vec<(String, Color)> = Vec::new();
@@ -596,9 +610,13 @@ fn parse_script_hud(s: &str) -> Vec<ScriptElem> {
                 fontscale: n(6),
                 color: [n(7), n(8), n(9), n(10)],
                 sort: f[11].parse().unwrap_or(0),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
                 text: f[12].to_owned(),
                 hide_in_menu: f.get(13) == Some(&"m"),
                 font: f.get(14).map_or("default", |v| v).to_owned(),
+=======
+                text: f[12..].join(" "),
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
             })
         })
         .collect();
@@ -618,12 +636,18 @@ fn zm_script_hud(
     font: Option<Res<GameUiFont>>,
     window: Query<&Window, With<PrimaryWindow>>,
     roots: Query<Entity, With<ZmScriptHudRoot>>,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
     mut shown: Local<(String, f32, f32, bool, bool, bool, bool)>,
     bo2: Option<Res<crate::bo2_font::Bo2Fonts>>,
     // bo2mp: BO2's menus open (its `hidewheninmenu` elements hide).
     lui: Option<Res<frame::LuiMenus>>,
     menu_dims: Option<Res<frame::MenuDims>>,
     (icons, mut images, mut pictures, mut additive, world_cam): (
+=======
+    mut shown: Local<(String, f32, f32, bool)>,
+    bo2: Option<Res<crate::bo2_font::Bo2Fonts>>,
+    (icons, mut images, mut pictures): (
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
         Option<Res<assets::T6HudIcons>>,
         ResMut<Assets<Image>>,
         Local<Vec<(String, Handle<Image>)>>,
@@ -632,11 +656,17 @@ fn zm_script_hud(
     ),
 ) {
     // The game's own pictures the scripts put up (the red low-health
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
     // overlay), again whenever the loaded pictures change: the front end
     // loads its own first (Create-a-Class's perk icons), and a match from
     // the menus has to swap in the match's (its hit marker).
     if let Some(icons) = icons.as_ref()
         && icons.is_changed()
+=======
+    // overlay, the build progress bar), once.
+    if pictures.is_empty()
+        && let Some(icons) = icons.as_deref()
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
     {
         pictures.clear();
         // (bo2mp: and the hit marker, `damage_feedback`; the teams' icons
@@ -644,7 +674,11 @@ fn zm_script_hud(
         for (name, image) in icons
             .0
             .iter()
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
             .filter(|(n, _)| n.starts_with("overlay_") || n.starts_with("damage_feedback") || n.starts_with("faction_") || n.starts_with("additive:faction_") || n.starts_with("perk_"))
+=======
+            .filter(|(n, _)| n.starts_with("overlay_") || n.starts_with("progress_bar_"))
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
         {
             pictures.push((name.clone(), images.add((**image).clone())));
         }
@@ -672,6 +706,7 @@ fn zm_script_hud(
         for e in &roots {
             commands.entity(e).despawn();
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
         *shown = (String::new(), 0.0, 0.0, false, false, false, false);
         return;
     };
@@ -691,6 +726,12 @@ fn zm_script_hud(
     // on the match world's camera when there is one, as the LUI match HUD and
     // the sight reticle are drawn.
     let lens = if in_mp { world_cam.iter().next() } else { None };
+=======
+        *shown = (String::new(), 0.0, 0.0, false);
+        return;
+    };
+    let Some(font) = font else { return };
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
     let (sw, sh) = window
         .single()
         .map_or((1920.0, 1080.0), |w| (w.width(), w.height()));
@@ -705,6 +746,7 @@ fn zm_script_hud(
     {
         return;
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
     *shown = (value.clone(), sw, sh, bo2.is_some(), menus_open, dimmed_out, lens.is_some());
     for e in &roots {
         commands.entity(e).despawn();
@@ -737,6 +779,28 @@ fn zm_script_hud(
         root.insert(bevy::ui::UiTargetCamera(cam));
     }
     root.with_children(|p| {
+=======
+    *shown = (value.clone(), sw, sh, bo2.is_some());
+    for e in &roots {
+        commands.entity(e).despawn();
+    }
+    let (kx, ky) = (sw / 640.0, sh / 480.0);
+    let keys = keys.as_deref().cloned().unwrap_or_default();
+    let elems = parse_script_hud(&value);
+    commands
+        .spawn((
+            ZmScriptHudRoot,
+            UiLayer::Hud,
+            UiLayerVisibility,
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+        ))
+        .with_children(|p| {
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
             for e in elems {
                 let base_x = match e.horzalign.as_str() {
                     "center" | "user_center" | "center_safearea" => 320.0,
@@ -748,6 +812,7 @@ fn zm_script_hud(
                     "bottom" | "user_bottom" | "bottom_adjustable" => 480.0,
                     _ => 0.0,
                 };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
                 // bo2mp: a key prompt in a match ("Press F to respawn") is
                 // three quarters of the plain size, without brackets
                 // (measured against real/55: 60 px against 80 for "Press").
@@ -774,6 +839,11 @@ fn zm_script_hud(
                     face = f;
                     px = h;
                 }
+=======
+                let px = 18.0 * e.fontscale.max(0.1) * ky;
+                let x = (base_x + e.x) * kx;
+                let y = (base_y + e.y) * ky;
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
                 // A wide box the text is justified in, so alignx anchors it.
                 let w = sw;
                 let (left, justify) = match e.alignx.as_str() {
@@ -791,6 +861,7 @@ fn zm_script_hud(
                     (false, "bottom") => y - px * 1.2,
                     _ => y,
                 };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
                 // bo2mp: on the encoded world camera the numbers go in as the
                 // script wrote them (the same as lui_hud.rs's enc_ui colours).
                 let enc = |c: Color| {
@@ -802,6 +873,9 @@ fn zm_script_hud(
                     }
                 };
                 let color = enc(Color::srgba(e.color[0], e.color[1], e.color[2], e.color[3]));
+=======
+                let color = Color::srgba(e.color[0], e.color[1], e.color[2], e.color[3]);
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
                 // A picture: BO2's plain black/white fills (the game-over
                 // fade); full screen when aligned to the full screen.
                 if let Some(rest) = e.text.strip_prefix("#shader:") {
@@ -812,22 +886,41 @@ fn zm_script_hud(
                     // bo2zm M3 fix list 2: or one of the game's own pictures:
                     // the red overlay the health script fades in when he is
                     // hit ("my screen should get red"); it was skipped.
-                    let fill = match name {
-                        "black" => Some(Color::srgba(0.0, 0.0, 0.0, e.color[3])),
-                        "white" => Some(color),
-                        _ => None,
-                    };
                     let picture = pictures
                         .iter()
                         .find(|(n, _)| n == name)
                         .map(|(_, h)| h.clone());
+                    // Buried 10-09: the build progress bar (_hud_util
+                    // createbar: progress_bar_bg behind, progress_bar_fill
+                    // growing); a plain fill in its colour if the picture
+                    // did not load.
+                    let fill = match name {
+                        "black" => Some(Color::srgba(0.0, 0.0, 0.0, e.color[3])),
+                        "white" => Some(color),
+                        _ if name.starts_with("progress_bar_") && picture.is_none() => Some(color),
+                        _ => None,
+                    };
                     if fill.is_none() && picture.is_none() {
                         continue;
                     }
                     let full = e.horzalign == "fullscreen" && e.vertalign == "fullscreen";
+                    // A picture is anchored by alignx/aligny like text is
+                    // (the bar is centred: setpoint "CENTER").
+                    let (width, height) = (w * kx, h * ky);
+                    let left = match e.alignx.as_str() {
+                        "center" => x - width * 0.5,
+                        "right" => x - width,
+                        _ => x,
+                    };
+                    let top = match e.aligny.as_str() {
+                        "middle" => y - height * 0.5,
+                        "bottom" => y - height,
+                        _ => y,
+                    };
                     let (left, top, width, height) = if full {
                         (0.0, 0.0, sw, sh)
                     } else {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
                         // bo2mp: anchored by alignx/aligny as BO2 does (the
                         // outcome screen's team icons are centred on their
                         // point).
@@ -843,6 +936,9 @@ fn zm_script_hud(
                             _ => 0.0,
                         };
                         (x - w * ax, y - h * ay, w, h)
+=======
+                        (left, top, width, height)
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
                     };
                     let node = Node {
                         position_type: PositionType::Absolute,
@@ -852,6 +948,7 @@ fn zm_script_hud(
                         height: Val::Px(height),
                         ..default()
                     };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
                     // bo2mp: the team icons are ONE/ONE pictures in BO2 (their
                     // glow is in the colours, on black): added onto the world,
                     // not alpha-blended (a bright world still takes the glow).
@@ -872,6 +969,8 @@ fn zm_script_hud(
                         ));
                         continue;
                     }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
                     match (fill, picture) {
                         (Some(fill), _) => {
                             p.spawn((BackgroundColor(fill), ZIndex(e.sort - 1000), node));
@@ -889,6 +988,7 @@ fn zm_script_hud(
                     }
                     continue;
                 }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
                 // bo2mp: a perk list (`setperks`: the spawn list, the killer
                 // card): rows of `icon|name`, each a name right-aligned
                 // beside its picture, the rows one picture-height apart,
@@ -942,12 +1042,21 @@ fn zm_script_hud(
                 // bo2zm: in BO2's own font when it loaded.
                 if let Some(bo2) = bo2.as_deref() {
                     let runs: Vec<(String, Color)> = hint_runs_with(&e.text, &keys, !key_prompt)
+=======
+                // bo2zm: in BO2's own font when it loaded.
+                if let Some(bo2) = bo2.as_deref() {
+                    let runs: Vec<(String, Color)> = hint_runs(&e.text, &keys)
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
                         .into_iter()
                         .map(|(run, c)| {
                             let c = if c == Color::WHITE {
                                 color
                             } else {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
                                 enc(c).with_alpha(e.color[3])
+=======
+                                c.with_alpha(e.color[3])
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
                             };
                             (run, c)
                         })
@@ -997,7 +1106,11 @@ fn zm_script_hud(
                     },
                 ))
                 .with_children(|t| {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
                     for (run, c) in hint_runs_with(&e.text, &keys, !key_prompt) {
+=======
+                    for (run, c) in hint_runs(&e.text, &keys) {
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
                         let c = if c == Color::WHITE {
                             color
                         } else {
@@ -1095,7 +1208,14 @@ fn zm_icons(
             if dvars.string("bo2zm_hud_hidden") == Some("1") {
                 return None;
             }
-            dvars.string("bo2zm_icons").map(str::to_owned)
+            // Only the perks and power-ups (Mob's Afterlife mana, also on
+            // the list, steps every 0.05 s).
+            dvars.string("bo2zm_icons").map(|v| {
+                v.split(',')
+                    .filter(|e| e.starts_with("perk_") || e.starts_with("powerup_"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
         }),
         _ => None,
     };
@@ -1434,6 +1554,7 @@ fn zm_hurt_overlay(
     ));
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/zm_hud.rs
 #[derive(Component)]
 struct ScriptWaypoint;
 
@@ -1614,6 +1735,8 @@ fn killcam_you(
     ));
 }
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/zm_hud.rs
 pub(crate) fn register_zm_hud_systems(app: &mut App) {
     app.add_systems(Update, killcam_you.in_set(ClientSet::Ui));
     app.add_systems(Update, script_waypoints.in_set(ClientSet::Ui));

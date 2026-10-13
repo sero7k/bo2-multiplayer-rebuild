@@ -262,6 +262,7 @@ pub struct ClientInput {
     /// bo2zm: the local player is sprinting at standing height (set each
     /// frame from the predicted player): the stance button dives when held.
     pub sprinting: bool,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/input_iw4/src/lib.rs
 
     /// bo2mp: when `+weapnext_inventory` went down, while it still waits to
     /// be a tap (Black Ops II's weapNextHeld / weapNextTime).
@@ -272,6 +273,8 @@ pub struct ClientInput {
     /// bo2mp: the switch-weapon key went down this frame (the vehicle seat
     /// button).
     pub change_seat_press: bool,
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/input_iw4/src/lib.rs
 }
 
 impl Default for ClientInput {
@@ -287,9 +290,12 @@ impl Default for ClientInput {
             stance_held: None,
             center_view: false,
             sprinting: false,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/input_iw4/src/lib.rs
             weapnext_held: None,
             inventory_request: false,
             change_seat_press: false,
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/input_iw4/src/lib.rs
         }
     }
 }
@@ -738,6 +744,7 @@ mod bo2_stance_tests {
         assert_eq!(client.stance_latch, PRONE);
     }
 }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/input_iw4/src/lib.rs
 
 #[cfg(test)]
 mod bo2_weapnext_tests {
@@ -812,3 +819,5 @@ mod bo2_weapnext_tests {
         assert!(client.inventory_request);
     }
 }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/input_iw4/src/lib.rs

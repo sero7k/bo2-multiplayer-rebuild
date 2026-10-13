@@ -125,6 +125,7 @@ impl FpvHands {
                 return def;
             }
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_model/src/fpv_catalog.rs
         // bo2mp: a Black Ops II multiplayer map carries its factions' arms
         // (`c_usa_mp_seal6_longsleeve_viewhands`), not the Zombies default;
         // until a class script picks them, the first the map loaded.
@@ -140,6 +141,24 @@ impl FpvHands {
                     name: (*name).to_owned(),
                 };
             }
+=======
+        // bo2zm: a Black Ops II map without Nuketown's suit arms draws its
+        // own players' arms (Buried's `c_zom_engineer_viewhands`...). The
+        // older games' base hands come last: a zone that keeps them only as
+        // a stand-in carries 8x8 placeholder textures (the Black Ops 1 map pack
+        // draws its players' `viewmodel_*_arms` instead).
+        if map_ns == AssetNamespace::T6
+            && let Some(name) = catalog
+                .names_in(map_ns)
+                .find(|n| n.contains("_viewhands") && *n != VIEWHANDS_NAME)
+                .or_else(|| catalog.names_in(map_ns).find(|n| crate::is_arms_model(n)))
+                .or_else(|| catalog.names_in(map_ns).find(|n| n.contains("_viewhands")))
+        {
+            return Self::GameDefault {
+                namespace: map_ns,
+                name: name.to_owned(),
+            };
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_model/src/fpv_catalog.rs
         }
         Self::Unresolved
     }

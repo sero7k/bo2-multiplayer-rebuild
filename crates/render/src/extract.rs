@@ -811,12 +811,20 @@ fn world_surface_styles(
 }
 
 /// bo2zm: the T6 world lighting the fallback draw adds to lightmaps: the
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render/src/extract.rs
 /// sun's direction and exposure scale, then its colour. A T6 world fills the
+=======
+/// sun's direction and exposure scale, then its colour, the sky's rotation
+/// and brightness, its decode and fog share, then the vision's colour grade
+/// (an identity grade at the vision's saturation without one), then the
+/// world colour tables drawn (`adapters::t6_lut`). A T6 world fills the
+>>>>>>> /tmp/claude-0/zmhead/crates/render/src/extract.rs
 /// T5 sun and exposure carriers; only T6 surfaces read this.
 fn t6_lighting(
     sun: Option<&render_frontend::assemble::drawsurf::MapDirPrimaryLight>,
     exposure: Option<&render_frontend::assemble::drawsurf::MapT5SunParseExposure>,
     sky: Option<[f32; 4]>,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render/src/extract.rs
 ) -> Option<[[f32; 4]; 3]> {
     let (sun, exposure) = (sun?, exposure?);
     // bo2mp: a Black Ops map keeps its sunParse exposure raw (its own world
@@ -828,12 +836,38 @@ fn t6_lighting(
         exposure.exposure
     };
     Some([
+=======
+    sky_parms: Option<[f32; 2]>,
+    grade: Option<[[f32; 4]; 14]>,
+    lut: [f32; 4],
+    [sun_r, sun_g, sun_b, sky_scale]: [f32; 4],
+) -> Option<[[f32; 4]; 19]> {
+    let (sun, exposure) = (sun?, exposure?);
+    let grade = grade.unwrap_or([
+        [-1.0, 1.0, 1.0, -1.0],
+        [1.0, 0.0, 0.0, 1.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [1.0, 1.0, 1.0, 0.0],
+        [0.212585, 0.715195, 0.07222, exposure.saturation],
+        [1.0, 1.0, 1.0, 0.0],
+    ]);
+    let rows = [
+>>>>>>> /tmp/claude-0/zmhead/crates/render/src/extract.rs
         [
             sun.direction[0],
             sun.direction[1],
             sun.direction[2],
             exposure_scale,
         ],
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render/src/extract.rs
         [sun.color[0], sun.color[1], sun.color[2], 1.0],
         sky.unwrap_or([1.0, 0.0, 0.0, 1.0]),
     ])
@@ -867,6 +901,24 @@ fn t6_dynamic_lighting(
         [color[0], color[1], color[2], 1.0],
         sky.unwrap_or([1.0, 0.0, 0.0, 1.0]),
     ])
+=======
+        [
+            sun.color[0] * sun_r,
+            sun.color[1] * sun_g,
+            sun.color[2] * sun_b,
+            exposure.saturation,
+        ],
+        // The sky's brightness (w, its sign the transition) times the sky
+        // intensity (`skyColorMultiplier`).
+        sky.map_or([1.0, 0.0, 0.0, 1.0], |[x, y, z, w]| [x, y, z, w * sky_scale]),
+        sky_parms.map_or([1.0, 1.0, 0.0, 0.0], |[x, w]| [x, w, 0.0, 0.0]),
+    ];
+    let mut all = [[0.0f32; 4]; 19];
+    all[..4].copy_from_slice(&rows);
+    all[4..18].copy_from_slice(&grade);
+    all[18] = lut;
+    Some(all)
+>>>>>>> /tmp/claude-0/zmhead/crates/render/src/extract.rs
 }
 
 fn srgb_to_linear(c: f32) -> f32 {
@@ -892,6 +944,7 @@ pub fn extract_geometry(
     if !render_gpu::geometry_diagnostic_enabled() {
         return;
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render/src/extract.rs
     let sky = lighting.2.as_ref().and_then(|scene| scene.t5_sky_dynamic_intensity);
     let mut full_lighting = t6_lighting(lighting.0.as_deref(), lighting.1.as_deref(), sky);
     // bo2mp: a CoD4 / World at War world's lightmaps are read by the
@@ -935,6 +988,23 @@ pub fn extract_geometry(
         .2
         .as_ref()
         .map_or(0.0, |scene| scene.t6_sun_sample_size_near);
+=======
+    let t6_lighting = t6_lighting(
+        lighting.0.as_deref(),
+        lighting.1.as_deref(),
+        lighting.2.as_ref().and_then(|scene| scene.t5_sky_dynamic_intensity),
+        lighting.2.as_ref().and_then(|scene| scene.t6_sky_parms),
+        lighting.2.as_ref().and_then(|scene| scene.t6_vision_grade),
+        lighting
+            .2
+            .as_ref()
+            .map_or([0.0, 0.0, 1.0, 0.0], |scene| scene.t6_lut_pick),
+        lighting
+            .2
+            .as_ref()
+            .map_or([1.0; 4], |scene| scene.t6_sun_sky_scale),
+    );
+>>>>>>> /tmp/claude-0/zmhead/crates/render/src/extract.rs
     let Some(runtime) = runtime.as_ref() else {
         return;
     };
@@ -946,9 +1016,12 @@ pub fn extract_geometry(
     let generation = runtime.catalog.generation_id;
     // bo2zm: the BO2 props, rebuilt when the material generation or the
     // placements change.
+    // The exposure too: the props carry it baked in, and a T6 map changes
+    // it per exposure volume (in 1/16 stop steps).
     let props_key = (
         runtime.catalog.generation_id,
         smodel.as_ref().map_or(0, |plan| plan.placements.len()),
+        t6_lighting.map_or(0, |l| l[0][3].to_bits()),
     );
     let t6_props = match existing.as_ref() {
         Some(extracted) if extracted.t6_props_key == Some(props_key) => (
@@ -1052,6 +1125,14 @@ pub fn extract_geometry(
         {
             existing.t6_lights = Arc::clone(&scene.t6_lights);
         }
+        let lut = lighting.2.as_ref().and_then(|scene| scene.t6_lut.clone());
+        if !match (&existing.t6_lut, &lut) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        } {
+            existing.t6_lut = lut;
+        }
         existing.t6_lighting = t6_lighting;
         existing.t6_bloom = t6_bloom;
         existing.t6_sun_sample_size_near = sun_sample_size_near;
@@ -1126,6 +1207,7 @@ pub fn extract_geometry(
             .2
             .as_ref()
             .map_or_else(Default::default, |scene| Arc::clone(&scene.t6_probes)),
+        t6_lut: lighting.2.as_ref().and_then(|scene| scene.t6_lut.clone()),
     };
     if let Some(mut existing) = existing {
         *existing = next;
@@ -1178,7 +1260,11 @@ fn t6_packed_to_vertex(row: &[u8; asset_iw4::size::GFX_PACKED_VERTEX]) -> render
     }
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render/src/extract.rs
 /// `R_HashString("featherParms")`: an effect material's (1 / feather
+=======
+/// The string hash of "featherParms": an effect material's (1 / feather
+>>>>>>> /tmp/claude-0/zmhead/crates/render/src/extract.rs
 /// distance, feather distance).
 const T6_FEATHER_PARMS: u32 = 0x4d7e_a234;
 /// bo2zm M3 fix list 1: `eyeOffsetParms` (its register slot in the `_eo`
@@ -1190,6 +1276,11 @@ const T6_EYE_OFFSET_PARMS: u32 = 0x0812_c0a9;
 /// fades as it turns edge-on to the eye.
 const T6_FALLOFF_PARMS: u32 = 0xbdde_5cf5;
 const T6_FALLOFF_END_COLOR: u32 = 0x6b1d_a6fa;
+/// bo2zm M4 retest 5: `alphaDissolveParms` (register slot from the t6shader
+/// dump of the `_ds` blood effects): their alpha is saturate(x * (texture
+/// alpha + vertex alpha - 1)), the texture's alpha a dissolve order, not a
+/// coverage (multiplied, its faint floor drew each sprite's whole square).
+const T6_ALPHA_DISSOLVE_PARMS: u32 = 0x8c1d_2f74;
 
 /// bo2zm: an effect material drawn with no colour map (white): logged once.
 fn t6_note_untextured(material: u32, name: &str) {
@@ -1211,6 +1302,7 @@ fn t6_note_untextured(material: u32, name: &str) {
 #[derive(Default)]
 pub struct T6StaticCache {
     generation: Option<u64>,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render/src/extract.rs
     /// Bumped whenever the kept shapes are thrown out and gathered again.
     epoch: u64,
     frame: u64,
@@ -1221,6 +1313,15 @@ pub struct T6StaticCache {
     /// Last frame's skinned poses, by address (held, so a new pose cannot
     /// take an old one's address): one handed on again holds still.
     posed_before: std::collections::HashMap<usize, Arc<render_anim::occupancy::missile::PosedVerts>>,
+=======
+    vertices: Vec<render_frame::SmodelVertex>,
+    indices: Vec<u32>,
+    shared: Arc<(Vec<render_frame::SmodelVertex>, Vec<u32>)>,
+    revision: u64,
+    /// Per model: its surfaces' (first index, count, colour slot, draw
+    /// code, normal map slot, specular map slot).
+    models: std::collections::HashMap<(String, Vec<Option<u32>>), Vec<[u32; 6]>>,
+>>>>>>> /tmp/claude-0/zmhead/crates/render/src/extract.rs
 }
 
 /// A kept shape: its surfaces (first index, count, colour slot, draw code),
@@ -1334,6 +1435,7 @@ impl T6Surface {
 fn t6_model_surfaces(
     item: &render_anim::occupancy::missile::T6MissileModel,
     catalog: &render_frontend::assemble::drawsurf::RuntimeMaterialCatalog,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render/src/extract.rs
 ) -> Vec<T6Surface> {
     let skel = &item.skel;
     let mut out = Vec::new();
@@ -1351,6 +1453,27 @@ fn t6_model_surfaces(
         };
         let Some(draw) = m.t6_model_draw(assets::t6_rules()) else {
             refused.push((surface, "material has no BO2 draw (not linked by a T6 lane, not an mc_ model material)", m.name.to_string()));
+=======
+    vertices: &mut Vec<render_frame::SmodelVertex>,
+    indices: &mut Vec<u32>,
+) -> Vec<[u32; 6]> {
+    let skel = &item.skel;
+    let mut out = Vec::new();
+    // Surfaces left out, by why: no material, not in the catalog, no BO2 draw.
+    let mut dropped = [0u32; 3];
+    let ranges = skel.surface_vertex_ranges.iter().zip(&skel.surface_index_ranges);
+    for (surface, (&(vbase, vn), &(ibase, icount))) in ranges.enumerate() {
+        let Some(material) = item.materials.get(surface).copied().flatten() else {
+            dropped[0] += 1;
+            continue;
+        };
+        let Some(m) = catalog.derived(assets::MaterialIndex::from_order(material as usize)) else {
+            dropped[1] += 1;
+            continue;
+        };
+        let Some(draw) = m.t6_draw else {
+            dropped[2] += 1;
+>>>>>>> /tmp/claude-0/zmhead/crates/render/src/extract.rs
             continue;
         };
         if vbase + vn > skel.positions.len() || ibase + icount > skel.indices.len() {
@@ -1573,6 +1696,32 @@ fn t6_note_dark(item: &render_anim::occupancy::missile::T6MissileModel, lit: &as
             lit.primary,
             lit.visibility
         );
+        // Its shine maps: BO2's gold power-ups, perk machines and the box
+        // gloss and reflect as the gun in his hands does.
+        let shine = |semantic| m.texture_semantic(semantic).map_or(u32::MAX, |id| id.0);
+        out.push([
+            start,
+            icount as u32,
+            slot,
+            draw.code(),
+            shine(asset_material::TS_NORMAL_MAP),
+            shine(asset_material::TS_SPECULAR_MAP),
+        ]);
+    }
+    // Once per model (the moving ones come through every frame).
+    static TOLD: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    if dropped.iter().any(|&n| n > 0)
+        && let Ok(mut told) = TOLD.lock()
+        && !told.contains(&skel.name)
+    {
+        told.push(skel.name.clone());
+        diag::info!(
+            World,
+            "t6 model {}: {} of {} surfaces drawn; left out (no material, not in catalog, no draw) {dropped:?}",
+            skel.name,
+            out.len(),
+            skel.surface_index_ranges.len()
+        );
     }
 }
 
@@ -1756,6 +1905,7 @@ pub fn extract_t6_dynamic(
                         .find(|(hash, _)| *hash == want)
                         .map(|(_, bits)| bits.map(f32::from_bits))
                 };
+                let dissolve = constant(T6_ALPHA_DISSOLVE_PARMS).map_or(0.0, |p| p[0]);
                 let falloff = constant(T6_FALLOFF_PARMS).map(|p| {
                     let end = constant(T6_FALLOFF_END_COLOR).map_or(1.0, |c| c[0]);
                     [p[2], p[3], end]
@@ -1786,10 +1936,37 @@ pub fn extract_t6_dynamic(
                     instance[16..19].copy_from_slice(&f);
                     instance[19] = 1.0;
                 }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render/src/extract.rs
                 instance[20] = f32::from(eye_light.primary);
+=======
+                // Slot 20: the primary light (0 or more), or for a dissolve
+                // material (effect shaders, which read no primary light)
+                // minus its alphaDissolveParms.x.
+                instance[20] = if dissolve > 0.0 {
+                    -dissolve
+                } else {
+                    f32::from(eye_light.primary)
+                };
+>>>>>>> /tmp/claude-0/zmhead/crates/render/src/extract.rs
                 instance[21] = eye_light.visibility;
                 instance[22] = feather;
                 instance[23] = eye_offset;
+                // bo2zm M4 retest 5: a projected decal (a hit's blood on a
+                // zombie): its box from the world in the columns, the grid's
+                // light at the box.
+                if draw.projected_decal {
+                    let Some((box_from_world, at)) = mesh.model_boxes.get(&start) else {
+                        return None;
+                    };
+                    instance[..16].copy_from_slice(box_from_world);
+                    let lit = asset_world::t6_light_sampler()
+                        .map(|sampler| sampler.at(*at))
+                        .unwrap_or_default();
+                    for c in 0..3 {
+                        instance[16 + c] = lit.light[c] * exposure;
+                    }
+                    instance[19] = 0.0;
+                }
                 instances.push(instance);
                 Some([start, count, slot, draw.code(), instances.len() as u32 - 1, u32::MAX, u32::MAX])
             })
@@ -1987,10 +2164,18 @@ pub fn extract_t6_dynamic(
             }
             row[20] = f32::from(lit.primary);
             row[21] = lit.visibility;
+            // Its reflection probe (the nearest, plus one), for its shine.
+            let at = item.world_from_local.w_axis.truncate().to_array();
+            row[23] = asset_world::t6_nearest_probe(at).map_or(0.0, |p| p as f32 + 1.0);
             instances.push(row);
             let instance = instances.len() as u32 - 1;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render/src/extract.rs
             for s in &kept.surfaces {
                 draws.push([s[0], s[1], s[2], s[3], instance, u32::MAX, u32::MAX]);
+=======
+            for s in surfaces {
+                draws.push([s[0], s[1], s[2], s[3], instance, s[4], s[5]]);
+>>>>>>> /tmp/claude-0/zmhead/crates/render/src/extract.rs
             }
         }
         cache.posed_before = posed_now;
@@ -2065,8 +2250,12 @@ pub fn extract_t6_dynamic(
             }
             row[20] = f32::from(lit.primary);
             row[21] = lit.visibility;
+            // Its reflection probe (the nearest, plus one), for its shine.
+            let at = item.world_from_local.w_axis.truncate().to_array();
+            row[23] = asset_world::t6_nearest_probe(at).map_or(0.0, |p| p as f32 + 1.0);
             instances.push(row);
             let instance = instances.len() as u32 - 1;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render/src/extract.rs
             for s in surfaces {
                 draws.push([s[0], s[1], s[2], s[3], instance, u32::MAX, u32::MAX]);
             }
@@ -2084,6 +2273,25 @@ pub fn extract_t6_dynamic(
             for (skel, posed, plan, card) in &models {
                 if !*card {
                     t6_fill_model(skel, posed.as_deref(), plan, vertices, indices.as_deref_mut(), 0);
+=======
+            // bo2zm round 1: a zombie's eyes get their own row: its eye
+            // brightness rides negated in slot 22, which the unlit shader
+            // scales the eye texture by (nothing else makes it negative).
+            let eye_instance = match item.eye_luminance {
+                Some(luminance) => {
+                    row[22] = -luminance;
+                    instances.push(row);
+                    instances.len() as u32 - 1
+                }
+                None => instance,
+            };
+            let ranges = skel.surface_vertex_ranges.iter().zip(&skel.surface_index_ranges);
+            for (surface, (&(vbase, vn), &(ibase, icount))) in ranges.enumerate() {
+                let Some(material) = item.materials.get(surface).copied().flatten() else {
+                    continue;
+                };
+                let Some(m) = catalog.derived(assets::MaterialIndex::from_order(material as usize)) else {
+>>>>>>> /tmp/claude-0/zmhead/crates/render/src/extract.rs
                     continue;
                 }
                 let Some(indices) = indices.as_deref_mut() else {
@@ -2093,6 +2301,25 @@ pub fn extract_t6_dynamic(
                     t6_fill_indices(skel, s, on_card, indices);
                     on_card += s.vn as u32;
                 }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render/src/extract.rs
+=======
+                let start = indices.len() as u32;
+                indices.extend(
+                    skel.indices[ibase..ibase + icount]
+                        .iter()
+                        .map(|&i| base + i.saturating_sub(vbase as u32)),
+                );
+                let shine = |semantic| m.texture_semantic(semantic).map_or(u32::MAX, |id| id.0);
+                draws.push([
+                    start,
+                    icount as u32,
+                    slot,
+                    draw.code(),
+                    if draw.eyes { eye_instance } else { instance },
+                    shine(asset_material::TS_NORMAL_MAP),
+                    shine(asset_material::TS_SPECULAR_MAP),
+                ]);
+>>>>>>> /tmp/claude-0/zmhead/crates/render/src/extract.rs
             }
         };
         render_gpu::T6DynamicDraw {

@@ -140,6 +140,28 @@ impl PadButton {
         }
     }
 
+    /// bo2zm: the name `frame::bo2_pad_glyph` knows this button by.
+    pub const fn bo2_name(self) -> &'static str {
+        match self {
+            Self::South => "south",
+            Self::East => "east",
+            Self::West => "west",
+            Self::North => "north",
+            Self::LeftBumper => "lb",
+            Self::RightBumper => "rb",
+            Self::LeftTrigger => "lt",
+            Self::RightTrigger => "rt",
+            Self::LeftStick => "ls",
+            Self::RightStick => "rs",
+            Self::DpadUp => "dpad_up",
+            Self::DpadDown => "dpad_down",
+            Self::DpadLeft => "dpad_left",
+            Self::DpadRight => "dpad_right",
+            Self::Select => "select",
+            Self::Start => "start",
+        }
+    }
+
     pub const fn prompt(self, style: frame::PromptStyle) -> &'static str {
         use frame::PromptStyle::*;
         match (style, self) {

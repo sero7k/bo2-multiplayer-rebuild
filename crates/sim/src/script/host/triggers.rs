@@ -108,6 +108,44 @@ pub(crate) fn t6_volume<'f>(
 }
 
 impl Volume<'_> {
+    /// bo2zm: as `touches`, for brushes turned by `turn` (a rotation, row i
+    /// = world axis i) about their origin since they were built: a Black
+    /// Ops II brush trigger linked to a turning mover (Tranzit's bus window
+    /// triggers, `zm_transit_openings` `busaddopening`) turns with it. The
+    /// box's centre goes into the brushes' frame; its reach along each
+    /// plane is taken along that plane's turned normal.
+    pub(crate) fn touches_turned(
+        &self,
+        mins: [f32; 3],
+        maxs: [f32; 3],
+        turn: [[f32; 3]; 3],
+    ) -> bool {
+        let Volume::Brushes {
+            origin,
+            ids,
+            brushes,
+        } = *self
+        else {
+            return self.touches(mins, maxs);
+        };
+        let d: [f32; 3] = std::array::from_fn(|i| (mins[i] + maxs[i]) * 0.5 - origin[i]);
+        let half: [f32; 3] = std::array::from_fn(|i| (maxs[i] - mins[i]) * 0.5);
+        let mid: [f32; 3] = std::array::from_fn(|j| (0..3).map(|i| turn[i][j] * d[i]).sum());
+        ids.iter()
+            .filter_map(|&id| brushes.get(usize::from(id)))
+            .any(|brush| {
+                brush.planes.iter().all(|p| {
+                    let reach: f32 = (0..3)
+                        .map(|i| {
+                            (turn[i][0] * p[0] + turn[i][1] * p[1] + turn[i][2] * p[2]).abs()
+                                * half[i]
+                        })
+                        .sum();
+                    p[0] * mid[0] + p[1] * mid[1] + p[2] * mid[2] - p[3] <= reach
+                })
+            })
+    }
+
     pub(crate) fn touches(&self, mins: [f32; 3], maxs: [f32; 3]) -> bool {
         match *self {
             Volume::Brushes {

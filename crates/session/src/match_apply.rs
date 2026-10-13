@@ -114,10 +114,14 @@ pub fn apply_prepared_match(
         mut probe,
         camera: sim_cam,
     } = presentation;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/session/src/match_apply.rs
     let MatchInstallOccupancy {
         mut has_world,
         bo2mp,
     } = occupancy;
+=======
+    let MatchInstallOccupancy { mut has_world } = occupancy;
+>>>>>>> /tmp/claude-0/zmhead/crates/session/src/match_apply.rs
     let stale_key = !ready.load_key.match_key.is_none()
         && bridge.as_ref().is_none_or(|bridge| {
             let state = bridge.state();
@@ -289,6 +293,7 @@ pub fn apply_prepared_match(
         stage_resource(&mut install, facts.t6_hud_icons);
         stage_resource(&mut install, facts.t6_hud_fonts);
         stage_resource(&mut install, facts.t6_ui);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/session/src/match_apply.rs
         // bo2mp: other players' third-person animations (BO2's script).
         stage_resource(
             &mut install,
@@ -302,6 +307,9 @@ pub fn apply_prepared_match(
             &mut install,
             sim::t6_ragdoll::T6RagdollRes::from_text(facts.t6_ragdoll.as_deref()),
         );
+=======
+        stage_resource(&mut install, facts.t6_screen_filters);
+>>>>>>> /tmp/claude-0/zmhead/crates/session/src/match_apply.rs
         stage_resource(&mut install, assets::PreparedLocalizedStrings(strings));
         stage_resource(&mut install, fx_catalog);
         stage_resource(&mut install, type10);
@@ -423,8 +431,28 @@ pub fn apply_prepared_match(
                 .collect(),
         );
         content.set_weapon_world_models(weapons.0.world_models_table());
+        content.set_weapon_world_parts(
+            weapons
+                .0
+                .world_parts_table()
+                .into_iter()
+                .map(|parts| {
+                    parts
+                        .into_iter()
+                        .map(|(model, tag, offset, rotation)| sim::WeaponPart {
+                            model,
+                            tag,
+                            offset,
+                            rotation,
+                        })
+                        .collect()
+                })
+                .collect(),
+        );
+        content.set_weapon_display_names(weapons.0.display_names_table());
         content.set_weapon_projectile_models(weapons.0.projectile_models_table());
         content.set_weapon_melee_only(combat_table::melee_only_from_registry(&weapons.0));
+        content.set_weapon_melee_damage(combat_table::melee_damage_from_registry(&weapons.0));
         content.set_weapon_script_sounds(combat_table::script_sounds_from_registry(&weapons.0));
         install_team_voice_prefixes(&mut content, catalog.as_deref(), identity.as_deref(), &zone);
         install_shocks(&mut content, catalog.as_deref(), &map_shocks);
@@ -966,6 +994,7 @@ fn preflight_match_install(
         strings = t6;
     }
     // bo2zm M3: a Black Ops II map's own compiled scripts.
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/session/src/match_apply.rs
     // bo2mp: a multiplayer map runs its game type (BO2MP_GAMETYPE, default
     // Team Deathmatch); its scripts only with BO2MP_SCRIPTS=1 until the
     // multiplayer engine side is in (lane B) - without them it is a walk.
@@ -987,6 +1016,16 @@ fn preflight_match_install(
     let t6_scripts = sources.0.t6.as_ref().filter(|_| !mp || mp_scripts).map(|set| sim::T6Install {
         map: zone.to_owned(),
         gametype: mp_gametype.clone(),
+=======
+    // The menu's (or test's) start location and game type, else the map's own.
+    let start = frame::bo2_zm_start(zone);
+    let t6_scripts = sources.0.t6.as_ref().map(|set| sim::T6Install {
+        map: zone.to_owned(),
+        gametype: start
+            .as_ref()
+            .map_or_else(|| sim::zm_gametype(zone).to_owned(), |(_, mode)| mode.clone()),
+        location: start.as_ref().map(|(loc, _)| loc.clone()).unwrap_or_default(),
+>>>>>>> /tmp/claude-0/zmhead/crates/session/src/match_apply.rs
         objects: set.objects.clone(),
         tables: set
             .tables
@@ -1035,6 +1074,7 @@ fn preflight_match_install(
                 framerate: a.framerate,
                 looping: a.looping,
                 delta_trans: a.delta_trans.clone(),
+                delta_quat: a.delta_quat.clone(),
                 notifies: a.notifies.clone(),
             })
             .collect(),
@@ -1052,6 +1092,7 @@ fn preflight_match_install(
             .collect(),
         strings: set.strings.iter().cloned().collect(),
         sound_aliases: set.sound_aliases.iter().cloned().collect(),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/session/src/match_apply.rs
         gamesettings: gamesettings(&set.gamesettings, &mp_gametype),
         bots: setup.map(|s| (s.bot_friends, s.bot_enemies, s.bot_difficulty)),
         sound_lengths: set.sound_lengths.iter().cloned().collect(),
@@ -1087,10 +1128,29 @@ fn preflight_match_install(
         destructibles: set.destructibles.clone(),
         // The AI's animations, and the players' (bo2mp: their hit boxes
         // are posed on the server).
+=======
+        zbarrier_defs: set
+            .zbarriers
+            .iter()
+            .map(|z| sim::T6ZBarrierDef {
+                name: z.name.clone(),
+                taunts: z.taunts,
+                reach_through: z.reach_through,
+                auto_hide_open_pieces: z.auto_hide_open_pieces,
+                taunt_state: z.taunt_state.clone(),
+                reach_through_state: z.reach_through_state.clone(),
+                num_attack_slots: z.num_attack_slots,
+                attack_spot_horz_offset: z.attack_spot_horz_offset,
+                boards: z.boards.clone(),
+            })
+            .collect(),
+        destructibles: set.destructibles.iter().cloned().map(std::sync::Arc::new).collect(),
+>>>>>>> /tmp/claude-0/zmhead/crates/session/src/match_apply.rs
         clips: set
             .anims
             .iter()
             .filter(|a| set.animstatedefs.iter().any(|(_, text)| text.contains(a.name.as_str())))
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/session/src/match_apply.rs
             .map(|a| a.name.clone())
             .chain(
                 sim::t6_playeranim::T6PlayerAnimsRes::from_text(set.playeranim.as_ref(), &[])
@@ -1099,6 +1159,9 @@ fn preflight_match_install(
                     .flat_map(|p| p.anims.clone()),
             )
             .filter_map(|name| Some((name.to_ascii_lowercase(), xanims.0.clip(asset_core::AssetNamespace::T6, &name)?)))
+=======
+            .filter_map(|a| Some((a.name.to_ascii_lowercase(), xanims.0.clip(asset_core::AssetNamespace::T6, &a.name)?)))
+>>>>>>> /tmp/claude-0/zmhead/crates/session/src/match_apply.rs
             .collect(),
     });
     let gametype = kind
@@ -1294,6 +1357,7 @@ fn player_kit_collision(
     }
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/session/src/match_apply.rs
 /// bo2mp: a game type's settings from the zones' settings files: every
 /// `gametype_setting <name> <value>` line of `<mode>/gamesettings_default.cfg`
 /// then of `<mode>/gamesettings_<gametype>.cfg` (its own win), names lower case.
@@ -1319,6 +1383,8 @@ fn gamesettings(
     out
 }
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/session/src/match_apply.rs
 fn match_kind(
     selection: Option<&sim::HostGameModeSelection>,
 ) -> Result<gamemode_iw4::GameModeKind, &'static str> {

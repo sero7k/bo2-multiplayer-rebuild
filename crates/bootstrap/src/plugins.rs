@@ -51,6 +51,7 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         // inherit the window runner's 60 Hz sleep.
         app.insert_resource(bevy::winit::WinitSettings::continuous());
     } else if !frame::Headless::requested() && !app.world().contains_resource::<frame::Headless>() {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bootstrap/src/plugins.rs
         // bo2mp: the window he plays in runs flat out, focused or not. Test
         // games are hidden or headless now and keep their own pace above, so
         // a background cap only slowed his game: with another window focused
@@ -60,6 +61,12 @@ pub fn add_runtime_plugins_with_role(app: &mut App, role: RuntimeRole) {
         if fps > 0 {
             diag::info!(Launch, "window: {fps} fps while another window has focus (IW4L_BACKGROUND_FPS)");
         }
+=======
+        // bo2mp: the window he plays in runs flat out; the others (8 games
+        // at once on one PC) draw about 30 times a second
+        // (IW4L_BACKGROUND_FPS, 0 for no limit).
+        let fps = std::env::var("IW4L_BACKGROUND_FPS").ok().and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(30);
+>>>>>>> /tmp/claude-0/zmhead/crates/bootstrap/src/plugins.rs
         app.insert_resource(bevy::winit::WinitSettings {
             focused_mode: bevy::winit::UpdateMode::Continuous,
             unfocused_mode: match fps {
@@ -187,14 +194,20 @@ fn log_plugin() -> LogPlugin {
         filter: crate::span_stats::FILTER.into(),
         level: bevy::log::Level::WARN,
         custom_layer: crate::span_stats::layer,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bootstrap/src/plugins.rs
         fmt_layer: log_lines,
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/bootstrap/src/plugins.rs
         ..default()
     };
     #[cfg(not(feature = "span-stats"))]
     LogPlugin {
         filter: "warn,iw4l=info".into(),
         level: bevy::log::Level::WARN,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bootstrap/src/plugins.rs
         fmt_layer: log_lines,
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/bootstrap/src/plugins.rs
         ..default()
     }
 }

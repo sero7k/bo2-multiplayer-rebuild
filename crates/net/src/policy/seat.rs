@@ -163,8 +163,63 @@ pub fn snapshot_and_sample_for_viewer(
     now_ms: i32,
 ) -> (Snapshot, Option<SeatSample>) {
     let (mut out, sample) = seat_snapshot(archive, seats, live, viewer, now_ms);
+    follow_teammate(&mut out, viewer);
     reveal_shown_movers(&mut out, viewer);
     (out, sample)
+}
+
+/// bo2zm: a player who bled out in co-op sees through the teammate he
+/// follows: BO2 copies that player's state into his (SpectatorClientEndFrame).
+/// His client draws it as a seat (no prediction), with no killcam.
+fn follow_teammate(out: &mut Snapshot, viewer: ClientId) {
+    let Some(&(_, followed)) = out.meta.follows.iter().find(|(v, _)| *v == viewer) else {
+        return;
+    };
+    // Not a dead or third-person teammate: a killcam seat's third-person
+    // camera has no archive clock (offset_third_person_view).
+    let Some(seen) = out
+        .players
+        .iter()
+        .find(|(id, _)| *id == followed)
+        .map(|(_, ps)| *ps)
+        .filter(|ps| ps.pm_type < playerstate_iw4::PM_TYPE_DEAD && ps.other_flags & 2 == 0)
+    else {
+        return;
+    };
+    let focus = SeatFocus {
+        kill_cam_entity: playerstate_iw4::ENTITYNUM_NONE,
+        kill_cam_look_at_entity: playerstate_iw4::ENTITYNUM_NONE,
+        kill_cam_client_num: followed.0 as i32,
+    };
+    if let Some((_, ps)) = out.players.iter_mut().find(|(id, _)| *id == viewer) {
+        *ps = apply_killcam_seat(ps, &seen, focus);
+    }
+    // The copy carries his ammo and grenades too, so the watcher's HUD counts
+    // the teammate's clip, stock and grenades. His points and the hint stay
+    // the watcher's own (BO2 rebuilds the current hud elems for him).
+    let Some((clip, stock, by_weapon, dvars)) = out.meta.for_client(followed).map(|m| {
+        let dvars: Vec<(String, String)> = m
+            .client_dvars
+            .iter()
+            .filter(|(k, _)| k == "bo2zm_offhand" || k == "bo2zm_actionslots")
+            .cloned()
+            .collect();
+        (m.ammo_clip, m.ammo_stock, m.ammo_by_weapon.clone(), dvars)
+    }) else {
+        return;
+    };
+    let Some((_, mine)) = out.meta.clients.iter_mut().find(|(id, _)| *id == viewer) else {
+        return;
+    };
+    mine.ammo_clip = clip;
+    mine.ammo_stock = stock;
+    mine.ammo_by_weapon = by_weapon;
+    for (name, value) in dvars {
+        match mine.client_dvars.iter_mut().find(|(k, _)| *k == name) {
+            Some(row) => row.1 = value,
+            None => mine.client_dvars.push((name, value)),
+        }
+    }
 }
 
 fn reveal_shown_movers(out: &mut Snapshot, viewer: ClientId) {
@@ -173,6 +228,11 @@ fn reveal_shown_movers(out: &mut Snapshot, viewer: ClientId) {
     };
     let Snapshot { meta, .. } = out;
     for mover in &mut meta.script_movers {
+        // A brush that does not stop this player goes to his prediction
+        // nonsolid (the others' still clip against it).
+        if mover.passes_for & bit != 0 {
+            mover.nonsolid = true;
+        }
         if mover.shown_to == 0 || mover.state.e_flags & entity_iw4::CG_SCRIPT_MOVER_NODRAW == 0 {
             continue;
         }
@@ -368,4 +428,48 @@ pub const fn killcam_seconds_to_ms(seconds: f32) -> i32 {
     let ms = seconds * 1000.0;
     let ticks = (ms / (AUTHORITY_MS as f32) + 0.5) as i32;
     ticks.saturating_mul(AUTHORITY_MS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sim::{ClientSnapshotMeta, SnapshotMeta, Tick};
+
+    fn meta(clip: i32, offhand: &str) -> ClientSnapshotMeta {
+        ClientSnapshotMeta {
+            ammo_clip: clip,
+            ammo_stock: clip * 10,
+            score: clip * 100,
+            client_dvars: vec![("bo2zm_offhand".to_owned(), offhand.to_owned())],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_watcher_counts_the_teammates_ammo_but_keeps_his_points() {
+        let (host, watcher) = (ClientId(0), ClientId(1));
+        let mut out = Snapshot {
+            tick: Tick(1),
+            players: vec![(host, PlayerState::ZERO), (watcher, PlayerState::ZERO)],
+            projectiles: Vec::new(),
+            meta: SnapshotMeta {
+                clients: vec![
+                    (host, meta(30, "frag_grenade_zm:2")),
+                    (watcher, meta(8, "")),
+                ],
+                follows: vec![(watcher, host)],
+                ..Default::default()
+            },
+        };
+        follow_teammate(&mut out, watcher);
+        let mine = out.meta.for_client(watcher).unwrap();
+        assert_eq!(
+            (mine.ammo_clip, mine.ammo_stock, mine.score),
+            (30, 300, 800)
+        );
+        assert_eq!(
+            out.meta.script_dvars(watcher).string("bo2zm_offhand"),
+            Some("frag_grenade_zm:2")
+        );
+    }
 }

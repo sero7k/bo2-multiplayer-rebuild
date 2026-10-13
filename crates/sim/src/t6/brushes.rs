@@ -18,6 +18,8 @@ pub(crate) struct BrushRow {
     pub origin: [f32; 3],
     pub angles: [f32; 3],
     pub solid: bool,
+    /// A bit per player it does not stop (hidden from him).
+    pub passes_for: u64,
     /// The never-drawn networked entity that carries it to the client's
     /// prediction (a brush mover naming the submodel, as MW2's are).
     pub number: Option<i32>,
@@ -41,14 +43,22 @@ fn owner(n: u32) -> ScriptModelId {
 /// only (the visible door is a script model). A never-drawn brush mover
 /// carries each to the client, whose movement prediction clips against it.
 pub(super) fn sync(world: &mut World, now_ms: i64) {
-    let wanted: BTreeMap<u32, (u32, [f32; 3], [f32; 3], bool)> = {
+    let wanted: BTreeMap<u32, (u32, [f32; 3], [f32; 3], bool, u64)> = {
         let zm = world.resource::<Zm>();
+        // A bit per player in the match (a player's entity number is his client).
+        let everyone = bits(zm.players.keys());
         zm.ents
             .iter()
             .filter(|(_, e)| e.classname == "script_brushmodel")
             .filter_map(|(n, e)| {
                 let m = super::triggers::brush_index(e)?;
-                Some((*n, (m, e.origin, e.angles, e.solid)))
+                // A brush hidden from a player (Mob's afterlife doors while he
+                // is a ghost, `afterlife_doors_open`) does not stop him, as
+                // BO2's query_should_pass_gentity; it stops the others.
+                let hidden_from = bits(e.invisible_to.iter()) & everyone;
+                let solid = e.solid && (hidden_from == 0 || hidden_from != everyone);
+                let passes_for = if solid { hidden_from } else { 0 };
+                Some((*n, (m, e.origin, e.angles, solid, passes_for)))
             })
             .collect()
     };
@@ -67,7 +77,7 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
             }
             false
         });
-        for (n, &(cmodel, origin, angles, solid)) in &wanted {
+        for (n, &(cmodel, origin, angles, solid, passes_for)) in &wanted {
             let row = rows.entry(*n).or_insert_with(|| {
                 let number = f.spawn_script_mover(owner(*n), origin, angles).ok();
                 match number.and_then(|number| f.script_mover_mut_by_number(number)) {
@@ -76,6 +86,7 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                         mover.state.solid = entity_iw4::SCRIPT_MOVER_BMODEL_SOLID;
                         mover.state.e_flags |= entity_iw4::CG_SCRIPT_MOVER_NODRAW;
                         mover.nonsolid = !solid;
+                        mover.passes_for = passes_for;
                     }
                     None => diag::warn!(Sim, "bo2zm t6: no free entity for brush *{cmodel}"),
                 }
@@ -89,12 +100,14 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                     }],
                 );
                 cap.solid = solid;
+                cap.passes_for = passes_for;
                 cap.followed_pose = Some((origin, angles));
                 f.insert_collision_owner(cap);
                 BrushRow {
                     origin,
                     angles,
                     solid,
+                    passes_for,
                     number,
                     moving: false,
                 }
@@ -116,19 +129,25 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                 row.origin = origin;
                 row.angles = angles;
             }
-            if row.solid != solid {
+            if row.solid != solid || row.passes_for != passes_for {
                 row.solid = solid;
+                row.passes_for = passes_for;
                 if let Some(mover) = row
                     .number
                     .and_then(|number| f.script_mover_mut_by_number(number))
                 {
                     mover.nonsolid = !solid;
+                    mover.passes_for = passes_for;
                 }
                 if let Some(cap) = f.collision_owner_mut(owner(*n)) {
                     cap.solid = solid;
+                    cap.passes_for = passes_for;
                 }
                 if log {
-                    diag::info!(Sim, "bo2zm t6 brush ent{n} *{cmodel}: solid {solid}");
+                    diag::info!(
+                        Sim,
+                        "bo2zm t6 brush ent{n} *{cmodel}: solid {solid} passes {passes_for:#b}"
+                    );
                 }
             }
         }
@@ -136,6 +155,7 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
     world.resource_mut::<Zm>().brush_rows = rows;
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/brushes.rs
 /// The level restarts (`map_restart`): every brush row goes; the new
 /// level's brush entities make their own.
 pub(super) fn retire_all(world: &mut World) {
@@ -147,6 +167,11 @@ pub(super) fn retire_all(world: &mut World) {
             f.remove_script_mover_by_number(number);
         }
     }
+=======
+/// A bit per client number (players are 0..64).
+fn bits<'a>(clients: impl Iterator<Item = &'a u32>) -> u64 {
+    clients.filter(|c| **c < 64).fold(0, |m, c| m | (1 << c))
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/brushes.rs
 }
 
 /// The entity's submodel bounds (its own space: a submodel's brushes are
@@ -182,7 +207,11 @@ pub(super) fn world_box(world: &mut World, e: &Ent) -> Option<([f32; 3], [f32; 3
 
 /// A model entity's world box: its model's bounds turned by its angles,
 /// placed.
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/brushes.rs
 fn model_box(world: &mut World, e: &Ent) -> Option<([f32; 3], [f32; 3])> {
+=======
+pub(super) fn model_box(world: &mut World, e: &Ent) -> Option<([f32; 3], [f32; 3])> {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/brushes.rs
     let (mid, half) = frame(world).model_capability(&e.model).flatten()?.bounds?;
     let (fw, rt, up) = gsc_t6::math::angle_vectors(e.angles);
     let left = [-rt[0], -rt[1], -rt[2]];

@@ -118,17 +118,38 @@ fn t6_visuals(el: &asset_t6::FxElemRef, view: &FxElemDefView) -> Vec<OwnedFxVisu
         .collect()
 }
 
+/// bo2zm: a trail's split distance as its inverse. Some of Black Ops II's
+/// trails hold a whole number in that field (read as a float it is a tiny
+/// subnormal: 1 / it was infinite, and one blood trail on a flying limb
+/// asked for billions of samples in a frame): those read as the integer.
+fn t6_inv_split_dist(split: f32) -> f32 {
+    let dist = if split != 0.0 && !split.is_normal() {
+        split.to_bits() as f32
+    } else {
+        split
+    };
+    static TOLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if dist != split && !TOLD.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        diag::info!(World, "bo2zm t6 trail: split distance bits {:#x} read as {dist}", split.to_bits());
+    }
+    if dist > 0.0 && dist.is_finite() { 1.0 / dist } else { 0.0 }
+}
+
 fn t6_trail(el: &asset_t6::FxElemRef) -> Option<OwnedFxTrailDef> {
     let trail = el.trail.as_ref()?;
     Some(OwnedFxTrailDef {
         scroll_time_msec: trail.scroll_time_msec,
         repeat_dist: trail.repeat_dist,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/fx_catalog_t6.rs
         // A split distance of (almost) nothing splits by distance not at
         // all: the Warthog's contrail stores a denormal here, whose inverse
         // is infinite and asked the trail for billions of pieces a frame.
         inv_split_dist: Some(1.0 / trail.split_dist)
             .filter(|inv| trail.split_dist > 0.0 && inv.is_finite())
             .unwrap_or(0.0),
+=======
+        inv_split_dist: t6_inv_split_dist(trail.split_dist),
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/fx_catalog_t6.rs
         inv_split_arc_dist: 0.0,
         inv_split_time: 0.0,
         verts: trail

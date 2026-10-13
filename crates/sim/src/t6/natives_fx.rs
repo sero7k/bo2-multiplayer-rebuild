@@ -33,23 +33,86 @@ fn event(
 }
 
 pub(super) fn sound(world: &mut World, audience: EventAudience, alias: &str, origin: [f32; 3]) {
+    sound_as(
+        world,
+        audience,
+        alias,
+        origin,
+        i32::from(trace_iw4::ENTITYNUM_WORLD),
+    );
+}
+
+/// A sound its listener hears as his own, not from a place: BO2's
+/// `playlocalsound` (the announcer's lines, `_zm_audio_announcer`
+/// `playleaderdialogonplayer`) and a player's sound to himself
+/// (`self playsoundtoplayer(alias, self)`: his own quotes, `_zm_audio`).
+/// Sent from the local sound entity, his client plays it unplaced; placed
+/// where he stood, it faded as he ran on.
+fn local_sound(world: &mut World, audience: EventAudience, alias: &str) {
+    sound_as(
+        world,
+        audience,
+        alias,
+        [0.0; 3],
+        entity_iw4::LOCAL_SOUND_ENTITY,
+    );
+}
+
+/// A sound on entity `s` (`playsound`, `playsoundwithnotify`,
+/// `playsoundontag`): a player's own sound (his character's quotes,
+/// `_zm_audio`) is his own to him and comes from where he stands to the
+/// others; any other entity's comes from where it stands.
+fn entity_sound(vm: &mut Vm<World>, world: &mut World, s: &Value, alias: &str) {
+    let origin = origin_of(vm, world, s).unwrap_or([0.0; 3]);
+    match entnum(vm, s).filter(|n| world.resource::<Zm>().players.contains_key(n)) {
+        Some(n) => {
+            local_sound(world, EventAudience::Client(ClientId(n)), alias);
+            sound(world, EventAudience::AllExcept(ClientId(n)), alias, origin);
+        }
+        None => sound(world, EventAudience::All, alias, origin),
+    }
+}
+
+fn sound_as(
+    world: &mut World,
+    audience: EventAudience,
+    alias: &str,
+    origin: [f32; 3],
+    number: i32,
+) {
     if alias.is_empty() {
         return;
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_fx.rs
     // bo2mp: BO2MP_SNDLOG=1 logs every sound the scripts play (test aid:
     // checked against the client's own sound starts).
     if std::env::var_os("BO2MP_SNDLOG").is_some() {
         diag::info!(Sim, "bo2mp sndlog play {alias} {audience:?}");
     }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_fx.rs
     // Black Ops II's own aliases (the client looks names up by game).
     let index = frame(world).sound_alias_index(&format!("t6:{}", alias.to_ascii_lowercase()));
-    event(
-        world,
+    // IW4L_T6_SNDLOG=<parts of names, comma-separated> (1 = all): each
+    // server sound, so a headless run shows the map's sounds play (the
+    // sign, the clock, the bus horn).
+    if let Ok(want) = std::env::var("IW4L_T6_SNDLOG")
+        && (want == "1" || want.split(',').any(|w| alias.contains(w)))
+    {
+        let now = world.resource::<Zm>().now_ms;
+        diag::info!(Sim, "bo2zm t6 sound {alias} index {index} at {origin:?} t={now}");
+    }
+    let t = tick(world);
+    frame(world).push_entity_event(
+        t,
         audience,
         entity_iw4::EntityEventKind::SOUND_ALIAS,
-        index,
-        origin,
-        [0.0; 3],
+        crate::EntityEventPayload {
+            number,
+            event_parm: i32::from(index),
+            origin,
+            ..Default::default()
+        },
     );
 }
 
@@ -122,6 +185,29 @@ pub(super) fn effect_held(
             origin2: up.unwrap_or([0.0; 3]),
             direction: forward,
             simulation_flags: 0x20,
+            ..Default::default()
+        },
+    );
+}
+
+/// BO2's `stopfx` on an effect `playfx` played in the world (Buried's "?"
+/// chalk when its wall buy is built): its client stops the held effect of
+/// that name at that spot.
+pub(super) fn effect_stop_world(world: &mut World, name: &str, origin: [f32; 3]) {
+    if name.is_empty() {
+        return;
+    }
+    let index = frame(world).effect_name_index(name);
+    let t = tick(world);
+    frame(world).push_entity_event(
+        t,
+        EventAudience::All,
+        entity_iw4::EntityEventKind::PLAY_FX,
+        crate::EntityEventPayload {
+            number: i32::from(trace_iw4::ENTITYNUM_WORLD),
+            event_parm: i32::from(index),
+            origin,
+            simulation_flags: 0x80,
             ..Default::default()
         },
     );
@@ -305,10 +391,17 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             world.resource::<Zm>().sound_aliases.contains(&alias),
         ))
     });
+    // An alias' length in ms (the VO threads wait it out). Lengths are not
+    // known here: the same second playsound's notify uses; -1 when there is
+    // no such alias.
+    vm.bind("soundgetplaybacktime", false, |vm, world, _, a| {
+        let alias = text(vm, a, 0).to_ascii_lowercase();
+        let known = world.resource::<Zm>().sound_aliases.contains(&alias);
+        Ok(Value::Int(if known { 1000 } else { -1 }))
+    });
     vm.bind("playsound", true, |vm, world, s, a| {
         let alias = text(vm, a, 0);
-        let origin = origin_of(vm, world, s).unwrap_or([0.0; 3]);
-        sound(world, EventAudience::All, &alias, origin);
+        entity_sound(vm, world, s, &alias);
         // A notify name: sent when the sound would be done (lengths are not
         // known here yet: a second).
         if let (Value::Str(_), Some(o)) = (arg(a, 1), s.as_obj()) {
@@ -319,8 +412,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     });
     vm.bind("playsoundwithnotify", true, |vm, world, s, a| {
         let alias = text(vm, a, 0);
-        let origin = origin_of(vm, world, s).unwrap_or([0.0; 3]);
-        sound(world, EventAudience::All, &alias, origin);
+        entity_sound(vm, world, s, &alias);
         if let Some(o) = s.as_obj() {
             let n = text(vm, a, 1);
             super::natives_game::notify_later(vm, world, o, &n, 1000);
@@ -329,8 +421,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     });
     vm.bind("playsoundontag", true, |vm, world, s, a| {
         let alias = text(vm, a, 0);
-        let origin = origin_of(vm, world, s).unwrap_or([0.0; 3]);
-        sound(world, EventAudience::All, &alias, origin);
+        entity_sound(vm, world, s, &alias);
         Ok(Value::Undefined)
     });
     vm.bind("playsoundasmaster", true, |vm, world, s, a| {
@@ -345,6 +436,11 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let Some(audience) = player_audience(vm, world, &who) else {
             return Ok(Value::Undefined);
         };
+        // On himself, to himself: his own line.
+        if entnum(vm, s).is_some() && entnum(vm, s) == entnum(vm, &who) {
+            local_sound(world, audience, &alias);
+            return Ok(Value::Undefined);
+        }
         let origin = origin_of(vm, world, s)
             .or_else(|| origin_of(vm, world, &who))
             .unwrap_or([0.0; 3]);
@@ -356,13 +452,33 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let Some(EventAudience::Client(client)) = player_audience(vm, world, s) else {
             return Ok(Value::Undefined);
         };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_fx.rs
         local_sound(world, client, &alias);
+=======
+        local_sound(world, audience, &alias);
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_fx.rs
         Ok(Value::Undefined)
     });
     vm.bind("playsoundtoteam", true, |vm, world, s, a| {
         let alias = text(vm, a, 0);
         let origin = origin_of(vm, world, s).unwrap_or([0.0; 3]);
         sound(world, EventAudience::All, &alias, origin);
+        Ok(Value::Undefined)
+    });
+    // earthquake(scale, duration, origin, radius): the perks landing, the
+    // game-over nuke. Shares the iw4 screen shake.
+    vm.bind("earthquake", false, |_, world, _, a| {
+        let quake = crate::ScriptEarthquake {
+            id: 0,
+            scale: arg(a, 0).as_float().unwrap_or(0.0),
+            duration_ms: (arg(a, 1).as_float().unwrap_or(0.0) * 1000.0) as i32,
+            origin: arg(a, 2).as_vec3().unwrap_or([0.0; 3]),
+            radius: arg(a, 3).as_float().unwrap_or(0.0),
+            start_ms: 0,
+        };
+        if quake.valid() {
+            crate::script::push_earthquake(world, quake)?;
+        }
         Ok(Value::Undefined)
     });
     vm.bind("playsoundatposition", false, |vm, world, _, a| {
@@ -441,10 +557,24 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let origin = origin_of(vm, world, &who).unwrap_or([0.0; 3]);
         // Bolted to the entity's shown model: its client keeps the effect
         // on that tag while the entity lives.
-        if let Some(n) = entnum(vm, &who)
-            && bolt_effect(world, n, &name, &tag, false)
-        {
-            return Ok(Value::Undefined);
+        if let Some(n) = entnum(vm, &who) {
+            if bolt_effect(world, n, &name, &tag, false) {
+                return Ok(Value::Undefined);
+            }
+            // A model spawned this tick is drawn from the end of the tick:
+            // bolt the effect to it then, not at its origin in the world (a
+            // looping effect there would stay after the entity is deleted:
+            // Mob's revive effect, `afterlife_revive_do_revive`'s tag_origin
+            // model, kept striking after the revive).
+            let pending = world
+                .resource::<Zm>()
+                .ents
+                .get(&n)
+                .is_some_and(|e| !e.model.is_empty());
+            if pending {
+                super::clientfields::bolt_named_queued(world, n, &name, &tag);
+                return Ok(Value::Undefined);
+            }
         }
         effect(world, &name, origin, [0.0, 0.0, 1.0]);
         Ok(Value::Undefined)

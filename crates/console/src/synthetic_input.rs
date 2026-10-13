@@ -118,3 +118,8 @@ impl ConsoleInputState {
 pub(crate) fn is_bind_command(word: &str) -> bool {
     command_id_lookup(word).is_some()
 }
+
+/// bo2zm: test runs' `key <name> [seconds]` - a physical key held down, so a
+/// run goes through the binds exactly as a player's keyboard does.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct ScriptedKeys(pub Vec<(bevy::input::keyboard::KeyCode, f32, bool)>);

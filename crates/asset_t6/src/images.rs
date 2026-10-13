@@ -57,6 +57,7 @@ impl Pack {
             .map(|i| self.index[i])
     }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/images.rs
     /// Every entry stored under an image name's hash (any data hash).
     pub fn find_name(&self, name_hash: u32) -> Vec<IndexEntry> {
         let lo = IndexEntry::key_of(name_hash, 0);
@@ -64,6 +65,8 @@ impl Pack {
         self.index[start..].iter().take_while(|e| e.name_hash() == name_hash).copied().collect()
     }
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/images.rs
     /// The decoded entry: an IWI v27 file.
     pub fn read(&self, entry: IndexEntry) -> Result<Vec<u8>, String> {
         let at = self.data_offset + entry.offset as u64;
@@ -123,6 +126,10 @@ impl PackSet {
             })
             .collect();
         paths.sort_by_key(|p| priority(p));
+        // bo2zm: then the extra folders' packs (`IW4L_T6_EXTRA`), after the install's.
+        let mut extra = asset_transport::t6_extra::extra_files("ipak");
+        extra.sort_by_key(|p| priority(p));
+        paths.extend(extra);
         let packs = paths
             .iter()
             .map(|p| Pack::open(p))
@@ -130,6 +137,7 @@ impl PackSet {
         Ok(PackSet { packs })
     }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/images.rs
     /// An image by its name alone (a zone's `,name` reference to an image
     /// another zone defines): the first pack holding that name, in
     /// priority order, and its largest entry (the full mip chain).
@@ -141,6 +149,8 @@ impl PackSet {
             .find_map(|(i, p)| p.find_name(h).into_iter().max_by_key(|e| e.size).map(|e| (i, e)))
     }
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/images.rs
     pub fn locate(&self, image: &ImageRef) -> Option<ImageSource> {
         if image.embedded.is_some() {
             return Some(ImageSource::Embedded);

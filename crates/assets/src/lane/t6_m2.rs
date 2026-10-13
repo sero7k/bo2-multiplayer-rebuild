@@ -25,6 +25,7 @@ const T6_OTHER_ARMS: [&str; 1] = ["c_zom_hazmat_viewhands_light"];
 /// Zones a Zombies map loads before its own, in order.
 const T6_ZM_PRE_ZONES: [&str; 4] = ["code_post_gfx_zm", "common_zm", "patch_zm", "patch_ui_zm"];
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
 /// bo2mp: zones a multiplayer map loads before its own, in order (later
 /// zones win a name: `common_patch_mp`'s guns replace `common_mp`'s, the
 /// patch's scripts and tables everything before it). Then the map's two
@@ -53,6 +54,8 @@ pub(crate) fn is_mp_map(map: &str) -> bool {
     map.starts_with("mp_")
 }
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
 pub(crate) struct T6Combat {
     pub weapons: WeaponBuild,
     pub fpv: FpvMeshBuild,
@@ -79,15 +82,30 @@ pub(crate) struct T6Combat {
     pub hud_fonts: crate::T6HudFonts,
     /// bo2zm M4: Black Ops II's UI scripts and what they read.
     pub ui: crate::T6Ui,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     /// bo2mp: Black Ops II's bullet penetration depths
     /// (`info/bullet_penetration_mp`, later zones winning).
     pub pen_table: Option<weapon_iw4::PenetrationDepthTable>,
+=======
+    /// bo2zm: the zones' bullet penetration table.
+    pub pen_table: Option<weapon_iw4::PenetrationDepthTable>,
+    /// bo2zm: every zone's vision files (`vision/<name>.vision`), later
+    /// zones replacing earlier ones: the visions a script turns on
+    /// (Mob's Afterlife, `zm_afterlife` in its mode zone).
+    pub visions: Vec<(String, Vec<u8>)>,
+    /// bo2zm: the full-screen filters the scripts turn on (Mob's Afterlife).
+    pub screen_filters: crate::T6ScreenFilters,
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     pub report: Vec<String>,
 }
 
 /// The Zombies HUD's icons: the perks a Nuketown machine sells and the
 /// power-ups that last a while (their materials' colour maps).
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
 const HUD_ICONS: [&str; 21] = [
+=======
+const HUD_ICONS: [&str; 50] = [
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     "specialty_juggernaut_zombies",
     "specialty_quickrevive_zombies",
     "specialty_fastreload_zombies",
@@ -115,8 +133,55 @@ const HUD_ICONS: [&str; 21] = [
     "reticle_side_small",
     "reticle_center_cross",
     "reticle_flechette",
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     // The orange YOU pin the killcam draws over the player who was killed.
     "headiconyouinkillcam",
+=======
+    // Mob's Afterlife hands' centre mark (its weapon's reticleCenter, in
+    // zm_prison.ff).
+    "afterlife_reticle",
+    // The scoreboard's team badges ("faction_" .. GetFactionForTeam): the
+    // CDC and CIA (Nuketown's teamset).
+    "faction_cdc",
+    "faction_cia",
+    // Nuketown's desert map behind its start locations: GameMapZombie
+    // builds the name ("menu_" .. GetUIMapName() .. "_map", and "_blur"),
+    // so no script names it whole.
+    "menu_zm_nuked_map",
+    "menu_zm_nuked_map_blur",
+    // BO2's Xbox button pictures (code_post_gfx_zm): the pad's prompts in
+    // its menus and hints (frame::BO2_XBOX_GLYPHS).
+    "xenonbutton_a",
+    "xenonbutton_b",
+    "xenonbutton_x",
+    "xenonbutton_y",
+    "xenonbutton_lb",
+    "xenonbutton_rb",
+    "xenonbutton_lt",
+    "xenonbutton_rt",
+    "xenonbutton_back",
+    "xenonbutton_start",
+    "xenonbutton_ls",
+    "xenonbutton_rs",
+    "xenonbutton_dpad_all",
+    "xenonbutton_dpad_ud",
+    "xenonbutton_dpad_rl",
+    "xenonbutton_dpad_up",
+    "xenonbutton_dpad_down",
+    "xenonbutton_dpad_left",
+    "xenonbutton_dpad_right",
+    // BO2 on PC: its menu tabs' arrows (frame::bo2_cycle_glyph).
+    "ui_arrow_left",
+    "ui_arrow_right",
+    // The lobby rows' speaker (the engine's VoipImage, code_post_gfx_zm):
+    // muted, and talking (its left half is the quiet one).
+    "voice_off",
+    "voice_on",
+    // The build progress bar (_hud_util createbar: its back and its fill;
+    // Buried's buildables, any table map).
+    "progress_bar_bg",
+    "progress_bar_fill",
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
 ];
 
 /// The HUD's fonts by the Lua scripts' names and their files, as
@@ -131,7 +196,11 @@ const HUD_FONTS: [(&str, &str); 7] = [
     ("SmallItalic", "fonts/720/smallItalicFont"),
 ];
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
 pub(super) fn hud_fonts(
+=======
+fn hud_fonts(
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     captures: &[ZoneCapture],
     packs: Option<&PackSet>,
     report: &mut Vec<String>,
@@ -196,6 +265,7 @@ pub(super) fn hud_fonts(
     out
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
 /// bo2zm M4: every UI script (`.lua` rawfile) the zones hold, in load
 /// order.
 /// bo2mp: the zones' config files (`*.cfg`) as text, by name (a later
@@ -204,16 +274,360 @@ pub(super) fn ui_configs(captures: &[&ZoneCapture]) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     for (name, bytes) in captures.iter().flat_map(|c| c.raw_files.iter()) {
         if !name.to_ascii_lowercase().ends_with(".cfg") {
-            continue;
+=======
+/// bo2zm M4: the zones Black Ops II's Zombies front end reads (main menu,
+/// lobby, globe and map picker), in load order; each map pack's load zone
+/// adds its map pictures and loading screen (Nuketown, then the four DLC
+/// packs: every Zombies map is on the globe).
+const T6_ZM_FRONTEND_ZONES: [&str; 10] = [
+    "code_post_gfx_zm",
+    "common_zm",
+    "patch_zm",
+    "ui_zm",
+    "patch_ui_zm",
+    "dlczm0_load_zm",
+    "dlc1_load_zm",
+    "dlc2_load_zm",
+    "dlc3_load_zm",
+    "dlc4_load_zm",
+];
+
+/// bo2zm M4: Black Ops II's Zombies front end without a map: its UI
+/// scripts, the pictures they name, the fonts, English strings and string
+/// tables. Kept for the whole run: the menu comes back after each game.
+#[derive(Clone, bevy::prelude::Resource)]
+pub struct T6Frontend {
+    pub ui: crate::T6Ui,
+    pub icons: crate::T6HudIcons,
+    pub fonts: crate::T6HudFonts,
+    /// Its sounds: the menus' clicks and music (`zmb_code_post_gfx`).
+    pub sound: Option<std::sync::Arc<asset_audio::SoundCatalog>>,
+    pub report: Vec<String>,
+}
+
+/// bo2zm M4: read the front end from the zones in `zone_dir`
+/// (`zone/all`; the English zones are in `zone/english` beside it).
+pub fn load_t6_frontend(zone_dir: &Path) -> T6Frontend {
+    let started = std::time::Instant::now();
+    let mut report = Vec::new();
+    let capture_all = |dir: &Path, prefix: &str, report: &mut Vec<String>| -> Vec<ZoneCapture> {
+        T6_ZM_FRONTEND_ZONES
+            .iter()
+            .filter_map(|z| {
+                let path = dir.join(format!("{prefix}{z}.ff"));
+                if !path.is_file() {
+                    return None;
+                }
+                match asset_t6::capture_zone(&path) {
+                    Ok(c) => Some(c),
+                    Err(e) => {
+                        report.push(format!("t6 front end zone gap: {e}"));
+                        None
+                    }
+                }
+            })
+            .collect()
+    };
+    let caps = capture_all(zone_dir, "", &mut report);
+    // A Black Ops map pack in an extra folder (`IW4L_T6_EXTRA`): its load
+    // zone carries those maps' globe rows, words and pictures. Only those
+    // are taken; its own menu scripts are not (BO2's globe stays BO2's).
+    let pack_load = asset_transport::t6_extra::extra_file("mod_load.ff").and_then(|path| {
+        asset_t6::capture_zone(&path)
+            .map_err(|e| report.push(format!("t6 front end map pack gap: {e}")))
+            .ok()
+    });
+    let lang_dir = zone_dir.parent().map(|d| d.join("english"));
+    let lang_caps = lang_dir
+        .as_deref()
+        .map(|d| capture_all(d, "en_", &mut report))
+        .unwrap_or_default();
+    let captures: Vec<&ZoneCapture> = caps.iter().collect();
+    report.push(format!(
+        "t6 front end zones: {}; English: {}",
+        captures
+            .iter()
+            .map(|c| c.zone.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        lang_caps
+            .iter()
+            .map(|c| c.zone.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    let packs = match PackSet::open_dir(zone_dir) {
+        Ok(p) => Some(p),
+        Err(e) => {
+            report.push(format!("t6 front end image packs: {e}"));
+            None
         }
+    };
+    let mut strings: HashMap<String, String> = HashMap::new();
+    for c in &lang_caps {
+        for (k, v) in &c.localize {
+            strings.insert(k.clone(), v.clone());
+        }
+    }
+    let mut tables = Vec::new();
+    for c in &captures {
+        for t in &c.string_tables {
+            if real(&t.name) {
+                tables.push((t.name.clone(), t.columns, t.rows, t.cells.clone()));
+            }
+        }
+    }
+    if let Some(pack) = &pack_load {
+        // Its words where BO2 has none (the maps' names and starts).
+        for (k, v) in &pack.localize {
+            strings.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+        let added = add_pack_maps(&mut tables, pack);
+        report.push(format!("t6 front end map pack maps: {}", added.join(" ")));
+    }
+    let read_ms = started.elapsed().as_millis();
+    let scripts = ui_scripts(&captures);
+    let mut names = ui_strings(&scripts);
+    // Every picture the front-end zones hold: the menus also name them
+    // from tables and joined strings (`menu_` .. map .. `_map`, the maps
+    // table's signposts), which no script constant spells out.
+    for c in captures
+        .iter()
+        .filter(|c| matches!(c.zone.as_str(), "ui_zm" | "patch_ui_zm") || c.zone.ends_with("_load_zm"))
+    {
+        names.extend(
+            c.materials
+                .iter()
+                .filter(|m| real(&m.name))
+                .map(|m| m.name.clone()),
+        );
+    }
+    // TranZit's loading pictures (each start and mode) sit in
+    // code_post_gfx_zm; BO2's loading script joins their names.
+    for c in captures.iter().filter(|c| c.zone == "code_post_gfx_zm") {
+        names.extend(
+            c.materials
+                .iter()
+                .filter(|m| real(&m.name) && m.name.starts_with("loadscreen_"))
+                .map(|m| m.name.clone()),
+        );
+    }
+    // And the pictures string tables name (rank icons, map signposts).
+    for (_, _, _, cells) in &tables {
+        names.extend(
+            cells
+                .iter()
+                .filter(|c| !c.is_empty() && c.len() < 64)
+                .cloned(),
+        );
+    }
+    // The pack's pictures (signposts, map pictures, loading screens).
+    let mut icon_caps = captures.clone();
+    if let Some(pack) = &pack_load {
+        names.extend(
+            pack.materials
+                .iter()
+                .filter(|m| real(&m.name))
+                .map(|m| m.name.clone()),
+        );
+        icon_caps.push(pack);
+    }
+    let mut icons = hud_icons(&icon_caps, packs.as_ref(), &names, &mut report);
+    let icons_ms = started.elapsed().as_millis();
+    let lang_packs = lang_dir.as_deref().and_then(|d| PackSet::open_dir(d).ok());
+    // Pictures with English words on them (the globe's green "NEW" tag)
+    // are in the English zones; their pixels in either folder's packs.
+    let lang_refs: Vec<&ZoneCapture> = lang_caps.iter().collect();
+    let mut found_lang = Vec::new();
+    let mut lang_report = Vec::new();
+    for p in [packs.as_ref(), lang_packs.as_ref()].into_iter().flatten() {
+        let have: std::collections::BTreeSet<String> =
+            icons.0.iter().map(|(n, _)| n.clone()).collect();
+        let lang_names: std::collections::BTreeSet<String> =
+            names.iter().filter(|n| !have.contains(*n)).cloned().collect();
+        lang_report.clear();
+        let more = hud_icons(&lang_refs, Some(p), &lang_names, &mut lang_report);
+        for (n, img) in more.0 {
+            if !have.contains(&n) {
+                found_lang.push(n.clone());
+                icons.0.push((n, img));
+            }
+        }
+    }
+    report.push(format!("t6 front end English pictures: {}", found_lang.join(", ")));
+    report.extend(lang_report.into_iter().map(|l| format!("English: {l}")));
+    let fonts = hud_fonts(
+        &lang_caps,
+        lang_packs.as_ref().or(packs.as_ref()),
+        &mut report,
+    );
+    // The menus' sounds, from the same banks a map reads them from.
+    let sound_dir = zone_dir
+        .parent()
+        .and_then(Path::parent)
+        .map(|install| install.join("sound"));
+    let sound = sound_dir.filter(|d| d.is_dir()).map(|dir| {
+        let bases = bank_bases(&captures, "");
+        let base_refs: Vec<&str> = bases.iter().map(String::as_str).collect();
+        let (index, bank_report) = asset_audio::T6BankIndex::open(&dir, &base_refs);
+        report.extend(bank_report);
+        let banks: Vec<&asset_t6::SndBankRef> = captures
+            .iter()
+            .copied()
+            .chain(lang_caps.iter())
+            .flat_map(|c| c.sound_banks.iter())
+            .collect();
+        let globals = captures.iter().find_map(|c| c.snd_globals.as_ref());
+        let (catalog, census) = asset_audio::build_t6_sound_catalog(
+            &banks,
+            globals,
+            &index,
+            asset_core::ZoneOwner::intern("frontend"),
+        );
+        report.push(format!(
+            "t6 front end sound: {} aliases, {} with a clip",
+            census.aliases, census.with_clip
+        ));
+        std::sync::Arc::new(catalog)
+    });
+    report.push(format!(
+        "t6 front end: {} scripts, {} strings, {} string tables; zones read in {read_ms} ms, pictures by {icons_ms} ms, all in {} ms",
+        scripts.len(),
+        strings.len(),
+        tables.len(),
+        started.elapsed().as_millis()
+    ));
+    T6Frontend {
+        ui: crate::T6Ui {
+            scripts,
+            strings: std::sync::Arc::new(strings.into_iter().collect()),
+            tables: std::sync::Arc::new(tables),
+            game_settings: std::sync::Arc::new(zm_game_settings(&captures)),
+        },
+        icons,
+        fonts,
+        sound,
+        report,
+    }
+}
+
+/// bo2zm: the maps a map pack's load zone adds to the globe: its maps table
+/// rows for maps BO2's table lacks, and those maps' start locations and
+/// modes from its gametypes table (renumbered after BO2's own). Returns the
+/// maps added.
+fn add_pack_maps(
+    tables: &mut [(String, usize, usize, Vec<String>)],
+    pack: &ZoneCapture,
+) -> Vec<String> {
+    let pack_rows = |name: &str| -> Vec<Vec<String>> {
+        pack.string_tables
+            .iter()
+            .find(|t| t.name == name)
+            .map(|t| t.cells.chunks(t.columns.max(1)).map(<[String]>::to_vec).collect())
+            .unwrap_or_default()
+    };
+    fn cell(r: &[String], i: usize) -> &str {
+        r.get(i).map_or("", String::as_str)
+    }
+    let mut added = Vec::new();
+    // Append rows (fitted to the table's columns) to a table.
+    let append = |table: &mut (String, usize, usize, Vec<String>), rows: Vec<Vec<String>>| {
+        let cols = table.1.max(1);
+        for mut r in rows {
+            r.resize(cols, String::new());
+            table.3.extend(r);
+            table.2 += 1;
+        }
+    };
+    let Some(maps) = tables.iter().position(|t| t.0 == "zm/mapstable.csv") else {
+        return added;
+    };
+    let have: BTreeSet<String> = tables[maps]
+        .3
+        .chunks(tables[maps].1.max(1))
+        .map(|r| cell(r, 0).to_owned())
+        .collect();
+    let new_maps: Vec<Vec<String>> = pack_rows("zm/mapstable.csv")
+        .into_iter()
+        .filter(|r| cell(r, 0).starts_with("zm_") && !have.contains(cell(r, 0)))
+        .collect();
+    added.extend(new_maps.iter().map(|r| cell(r, 0).to_owned()));
+    append(&mut tables[maps], new_maps);
+    if let Some(gt) = tables.iter().position(|t| t.0 == "zm/gametypestable.csv") {
+        let cols = tables[gt].1.max(1);
+        let next = |cat: &str| {
+            tables[gt]
+                .3
+                .chunks(cols)
+                .filter(|r| cell(r, 0) == cat)
+                .filter_map(|r| cell(r, 1).parse::<i64>().ok())
+                .max()
+                .map_or(0, |m| m + 1)
+        };
+        let (mut loc_id, mut mode_id) = (next("5"), next("6"));
+        let rows: Vec<Vec<String>> = pack_rows("zm/gametypestable.csv")
+            .into_iter()
+            .filter(|r| matches!(cell(r, 0), "5" | "6") && added.iter().any(|m| m == cell(r, 2)))
+            .map(|mut r| {
+                let id = if r[0] == "5" { &mut loc_id } else { &mut mode_id };
+                r[1] = id.to_string();
+                *id += 1;
+                r
+            })
+            .collect();
+        append(&mut tables[gt], rows);
+    }
+    added
+}
+
+/// bo2zm M4: Zombies' game settings defaults, from the zones' rawfiles
+/// (`gametype_setting <name> <value>` in the default settings file, then
+/// the standard mode's).
+fn zm_game_settings(captures: &[&ZoneCapture]) -> Vec<(String, f32)> {
+    let mut out: Vec<(String, f32)> = Vec::new();
+    for file in ["gamesettings_default.cfg", "gamesettings_zstandard.cfg"] {
+        let Some(bytes) = captures
+            .iter()
+            .rev()
+            .flat_map(|c| c.raw_files.iter())
+            .find(|(n, _)| {
+                n.to_ascii_lowercase().ends_with(file) && n.to_ascii_lowercase().contains("zm")
+            })
+            .map(|(_, b)| b.clone())
+        else {
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
+            continue;
+        };
+        for line in String::from_utf8_lossy(&bytes).lines() {
+            let mut w = line.split_whitespace();
+            if w.next() != Some("gametype_setting") {
+                continue;
+            }
+            let (Some(name), Some(value)) =
+                (w.next(), w.next().and_then(|v| v.parse::<f32>().ok()))
+            else {
+                continue;
+            };
+            out.retain(|(n, _)| !n.eq_ignore_ascii_case(name));
+            out.push((name.to_owned(), value));
+        }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
         let text = String::from_utf8_lossy(bytes).trim_end_matches('\0').to_owned();
         out.retain(|(n, _)| !n.eq_ignore_ascii_case(name));
         out.push((name.clone(), text));
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     }
     out
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
 pub(super) fn ui_scripts(captures: &[&ZoneCapture]) -> Vec<(String, std::sync::Arc<[u8]>)> {
+=======
+/// bo2zm M4: every UI script (`.lua` rawfile) the zones hold, in load
+/// order.
+fn ui_scripts(captures: &[&ZoneCapture]) -> Vec<(String, std::sync::Arc<[u8]>)> {
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     captures
         .iter()
         .flat_map(|c| c.raw_files.iter())
@@ -224,7 +638,11 @@ pub(super) fn ui_scripts(captures: &[&ZoneCapture]) -> Vec<(String, std::sync::A
 
 /// bo2zm M4: the material names the UI scripts may draw: every string
 /// constant in them (`RegisterMaterial("hud_chalk_1")`).
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
 pub(super) fn ui_strings(scripts: &[(String, std::sync::Arc<[u8]>)]) -> std::collections::BTreeSet<String> {
+=======
+fn ui_strings(scripts: &[(String, std::sync::Arc<[u8]>)]) -> std::collections::BTreeSet<String> {
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     let mut out = std::collections::BTreeSet::new();
     for (_, bytes) in scripts {
         let Ok(chunk) = hks_t6::parse(bytes) else {
@@ -245,7 +663,56 @@ pub(super) fn ui_strings(scripts: &[(String, std::sync::Arc<[u8]>)]) -> std::col
     out
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
 pub(super) fn hud_icons(
+=======
+/// bo2zm: every `generic_filter_*` material the zones hold (patch zones
+/// first: their copy wins), its pictures decoded and its constants by name.
+fn screen_filters(
+    captures: &[&ZoneCapture],
+    packs: Option<&PackSet>,
+    report: &mut Vec<String>,
+) -> crate::T6ScreenFilters {
+    let mut out: Vec<crate::T6ScreenFilter> = Vec::new();
+    let Some(packs) = packs else {
+        return crate::T6ScreenFilters(out);
+    };
+    let patched = captures.iter().filter(|c| c.zone.starts_with("patch_"));
+    let rest = captures.iter().filter(|c| !c.zone.starts_with("patch_"));
+    for c in patched.chain(rest) {
+        for m in &c.materials {
+            if !m.name.starts_with("generic_filter_") || out.iter().any(|f| f.material == m.name) {
+                continue;
+            }
+            let mut images = Vec::new();
+            for t in &m.textures {
+                let Some(image) = t.image.and_then(|k| c.images.get(k.index)) else {
+                    continue;
+                };
+                match super::t6_materials::decode(packs, image) {
+                    Ok(img) => images.push((image.name.clone(), std::sync::Arc::new(img))),
+                    Err(e) => report.push(format!("t6 screen filter {}: {}: {e}", m.name, image.name)),
+                }
+            }
+            out.push(crate::T6ScreenFilter {
+                material: m.name.clone(),
+                images,
+                constants: m.constants.iter().map(|(_, n, v)| (n.clone(), *v)).collect(),
+            });
+        }
+    }
+    report.push(format!(
+        "t6 screen filters: {}",
+        out.iter()
+            .map(|f| format!("{} ({} pictures)", f.material, f.images.len()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    crate::T6ScreenFilters(out)
+}
+
+fn hud_icons(
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     captures: &[&ZoneCapture],
     packs: Option<&PackSet>,
     ui_names: &std::collections::BTreeSet<String>,
@@ -260,7 +727,14 @@ pub(super) fn hud_icons(
     let mut seen: std::collections::BTreeSet<String> = wanted.iter().cloned().collect();
     for c in captures {
         for m in &c.materials {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
             if ui_names.contains(&m.name) && seen.insert(m.name.clone()) {
+=======
+            // Origins, Mob and Buried build their ammo corner's names at run
+            // time (`hud_zm_num_tomb_` + digit), so no script names them.
+            let map_hud = m.name.starts_with("hud_zm_");
+            if (ui_names.contains(&m.name) || map_hud) && seen.insert(m.name.clone()) {
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
                 wanted.push(m.name.clone());
             }
         }
@@ -278,10 +752,12 @@ pub(super) fn hud_icons(
     }
     report.push(format!("t6 hud icons the game scripts name: {}", wanted.len() - ui_wanted));
     let mut failed = 0usize;
+    let mut failed_names: Vec<String> = Vec::new();
     let mut additive = 0usize;
     for name in &wanted {
         let name = name.as_str();
         let mut add = false;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
         let mut add_map = None;
         let found = captures.iter().find_map(|c| {
             let m = c.materials.iter().find(|m| m.name == name)?;
@@ -297,6 +773,15 @@ pub(super) fn hud_icons(
                     }
                 }
             }
+=======
+        // A patch zone's copy replaces the one it patches (`patch_ui_zm`'s
+        // Theater frame is silver with light cracks, `ui_zm`'s dull).
+        let patched = captures.iter().filter(|c| c.zone.starts_with("patch_"));
+        let rest = captures.iter().filter(|c| !c.zone.starts_with("patch_"));
+        let found = patched.chain(rest).find_map(|c| {
+            let m = c.materials.iter().find(|m| m.name == name)?;
+            add = super::t6_materials::is_additive(m);
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
             let t = super::t6_materials::colour_texture(m, c)?;
             c.images.get(t.image?.index)
         });
@@ -304,9 +789,11 @@ pub(super) fn hud_icons(
             if HUD_ICONS.contains(&name) {
                 report.push(format!("t6 hud icon {name}: no material"));
             }
+            failed_names.push(format!("{name} (no colour map)"));
             failed += 1;
             continue;
         };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
         // A `,name` image is a reference to one another zone defines (the
         // Create-a-Class perk pictures `perk_*_256` in ui_mp): its pixels
         // are found in the packs by the name alone.
@@ -366,6 +853,16 @@ pub(super) fn hud_icons(
                 // Additive pictures (menu brackets, glows) get their
                 // brightness as alpha: the 2D layer only alpha-blends.
                 let img = match add.then(|| super::t6_materials::additive_to_alpha(&img)).flatten() {
+=======
+        match super::t6_materials::decode(packs, image) {
+            Ok(img) => {
+                // Additive pictures (menu brackets, glows) get their
+                // brightness as alpha: the 2D layer only alpha-blends.
+                let img = match add
+                    .then(|| super::t6_materials::additive_to_alpha(&img))
+                    .flatten()
+                {
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
                     Some(a) => {
                         additive += 1;
                         a
@@ -375,6 +872,7 @@ pub(super) fn hud_icons(
                     None if name.starts_with("compass_map_") => super::t6_materials::to_rgba8(&img).unwrap_or(img),
                     None => img,
                 };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
                 // bo2mp: the default emblem on a player's card (BO2 draws the
                 // rank's emblem layer, `em_rank_pvt_full`, in the rank's
                 // green): the PFC chevron as a white silhouette the
@@ -387,6 +885,13 @@ pub(super) fn hud_icons(
                         px[0] = 255;
                         px[1] = 255;
                         px[2] = 255;
+=======
+                // The lobby's quiet speaker: BO2 draws `voice_on` without
+                // its sound waves while nobody talks.
+                if name == "voice_on" {
+                    if let Some(quiet) = super::t6_materials::left_part(&img, 0.5) {
+                        icons.push(("voice_quiet".to_owned(), std::sync::Arc::new(quiet)));
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
                     }
                     icons.push(("em_rank_pvt_full".to_owned(), std::sync::Arc::new(sil)));
                 }
@@ -396,10 +901,12 @@ pub(super) fn hud_icons(
                 if HUD_ICONS.contains(&name) {
                     report.push(format!("t6 hud icon {name}: {e}"));
                 }
+                failed_names.push(format!("{name} ({e})"));
                 failed += 1;
             }
         }
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     // bo2mp: pictures the scripts name that no material defines; BO2 finds
     // their pixels in the packs by the name alone (the green "NEW" badge on
     // a Create-a-Class / Barracks tile).
@@ -525,6 +1032,13 @@ pub(super) fn hud_icons(
                 icons.push((image.name.clone(), std::sync::Arc::new(img)));
             }
         }
+=======
+    if !failed_names.is_empty() {
+        report.push(format!(
+            "t6 hud icons without a picture: {}",
+            failed_names.join(", ")
+        ));
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     }
     report.push(format!(
         "t6 hud icons: {} of {} ({} hand-picked, the rest the UI scripts name; {failed} without a picture; {additive} additive made see-through)",
@@ -656,7 +1170,11 @@ fn census(
             }
         }
     };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     for name in names.iter().map(String::as_str) {
+=======
+    for name in NUKETOWN_WEAPONS {
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
         let Some(w) = weapon_refs.get(name) else {
             missing_weapons.push(format!("{name}: not in the zones"));
             continue;
@@ -795,7 +1313,11 @@ fn census(
         format!(
             "t6 census: {} missing weapons of {} (models, first person, animations){}",
             missing_weapons.len(),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
             names.len(),
+=======
+            NUKETOWN_WEAPONS.len(),
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
             if missing_weapons.is_empty() {
                 String::new()
             } else {
@@ -880,6 +1402,7 @@ fn map_scripts(
             loop_sounds.push(asset_audio::CreateFxLoopSound {
                 soundalias: alias.clone(),
                 origin_inches: [0, 1, 2].map(|a| p.origin[a] + off[a]),
+                line_end_inches: None,
             });
         }
     }
@@ -887,9 +1410,14 @@ fn map_scripts(
         loop_sounds.push(asset_audio::CreateFxLoopSound {
             soundalias: alias.clone(),
             origin_inches: *origin,
+            line_end_inches: None,
         });
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     let random_sounds: Vec<asset_audio::RandomPointSound> = facts
+=======
+    let mut random_sounds: Vec<asset_audio::RandomPointSound> = facts
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
         .random_sounds
         .iter()
         .map(|(alias, wait, places)| asset_audio::RandomPointSound {
@@ -898,10 +1426,15 @@ fn map_scripts(
             places_inches: places.clone(),
         })
         .collect();
+    let (structs_random, structs_loop) =
+        map_sound_structs(captures, &mut random_sounds, &mut loop_sounds);
     let unresolved = shown
         .iter()
         .filter(|p| !facts.effects.contains_key(&p.fxid))
         .count();
+    report.push(format!(
+        "t6 map sound structs: {structs_random} now-and-then (wind gusts, creaks), {structs_loop} loops (power lines, wind lines, arcs)"
+    ));
     report.push(format!(
         "t6 map scripts: {} placed effects ({} shown at load, {} exploders wait for the game, {unresolved} without an effect table entry); {} loop sounds ({} on effects, {} at points); {} now-and-then sounds; room tone {}",
         facts.placed.len(),
@@ -913,16 +1446,19 @@ fn map_scripts(
         random_sounds.len(),
         facts.room_tone.as_deref().unwrap_or("none"),
     ));
+    report.push(format!("t6 map rooms (room, echo, dry, wet): {:?}", facts.room_echoes));
     (
         asset_audio::ScriptedMapFx {
             oneshots,
             loop_sounds,
             random_sounds,
+            rooms: facts.room_echoes.clone(),
         },
         facts.room_tone,
     )
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
 /// bo2mp: each destructible definition's model, by definition name.
 fn destructible_models(captures: &[&ZoneCapture]) -> HashMap<String, String> {
     let mut defs = HashMap::new();
@@ -1056,6 +1592,95 @@ fn script_model_names(
     captures: &[&ZoneCapture],
     destructibles: &HashMap<String, String>,
 ) -> BTreeSet<String> {
+=======
+/// The map's sound structs, which every map's client script
+/// (clientscripts/mp/_audio.csc) starts: a "random" one plays its sound at
+/// its place every `randomfloatrange(script_wait_min, script_wait_max)` s
+/// (1 to 3 by default), a "looper" loops it there, a "line_emitter" loops
+/// it along the line to its target. Returns (random, loops) added.
+fn map_sound_structs(
+    captures: &[&ZoneCapture],
+    random: &mut Vec<asset_audio::RandomPointSound>,
+    loops: &mut Vec<asset_audio::CreateFxLoopSound>,
+) -> (usize, usize) {
+    let Some(ents) = captures.iter().rev().find(|c| !c.map_ents.is_empty()) else {
+        return (0, 0);
+    };
+    let ents: Vec<_> = ents
+        .map_ents
+        .iter()
+        .flat_map(|e| asset_t6::parse_entities(e))
+        .collect();
+    let (mut nr, mut nl) = (0, 0);
+    for e in &ents {
+        if e.classname() != "script_struct" {
+            continue;
+        }
+        let (Some(alias), Some(origin)) = (e.get("script_sound"), e.vec3("origin")) else {
+            continue;
+        };
+        let alias = alias.to_owned();
+        match e.get("script_label") {
+            Some("random") => {
+                let f = |k: &str, d: f32| e.get(k).and_then(|v| v.trim().parse().ok()).unwrap_or(d);
+                random.push(asset_audio::RandomPointSound {
+                    soundalias: alias,
+                    wait_secs: [f("script_wait_min", 1.0), f("script_wait_max", 3.0)],
+                    places_inches: vec![origin],
+                });
+                nr += 1;
+            }
+            Some("looper") => {
+                loops.push(asset_audio::CreateFxLoopSound {
+                    soundalias: alias,
+                    origin_inches: origin,
+                    line_end_inches: None,
+                });
+                nl += 1;
+            }
+            Some("line_emitter") => {
+                let end = e.get("target").and_then(|t| {
+                    ents.iter()
+                        .find(|o| o.get("targetname") == Some(t))
+                        .and_then(|o| o.vec3("origin"))
+                });
+                loops.push(asset_audio::CreateFxLoopSound {
+                    soundalias: alias,
+                    origin_inches: origin,
+                    line_end_inches: end,
+                });
+                nl += 1;
+            }
+            _ => {}
+        }
+    }
+    (nr, nl)
+}
+
+/// bo2zm M3: every XModel the zones carry whose name a server script
+/// (as a string constant) or a map entity (`"model"`) names.
+/// What a bullet shows on a model's bone boxes: its paint's surface (a
+/// mannequin's is plastic), the one most of its surfaces use; 0 (blood) when
+/// none has one.
+fn model_surface_flags(capture: &ZoneCapture, model: &asset_t6::XModelRef) -> u32 {
+    let mut counts: BTreeMap<u32, usize> = BTreeMap::new();
+    for srf in &model.lod0 {
+        let flags = srf
+            .material
+            .and_then(|k| capture.material(k))
+            .map_or(0, |m| m.surface_flags);
+        if flags != 0 {
+            *counts.entry(flags).or_default() += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .max_by_key(|&(_, n)| n)
+        .map_or(0, |(flags, _)| flags)
+}
+
+fn script_model_names(captures: &[&ZoneCapture]) -> BTreeSet<String> {
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     let models: BTreeSet<&str> = captures
         .iter()
         .flat_map(|c| c.xmodels.iter().map(|m| m.name.as_str()))
@@ -1083,6 +1708,21 @@ fn script_model_names(
             for m in &w.world_models {
                 take(m);
             }
+            // And the parts it wears there (magazine, scope, the RPG's
+            // rocket): BO2 hangs them on the gun (`attachWorldModel`).
+            for (_, m, ..) in &w.attach_world_models {
+                take(m);
+            }
+        }
+        // The pieces a breakable prop throws (a mannequin's head and arms).
+        for d in &c.destructibles {
+            for p in &d.pieces {
+                for st in &p.stages {
+                    for m in st.spawn_models.iter().flatten() {
+                        take(m);
+                    }
+                }
+            }
         }
         for d in &c.destructibles {
             for st in d.pieces.iter().flat_map(|p| &p.stages) {
@@ -1092,7 +1732,11 @@ fn script_model_names(
             }
         }
         for ents in &c.map_ents {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
             for e in asset_t6::parse_entities(&destructible_entities(ents, destructibles)) {
+=======
+            for e in asset_t6::parse_entities(ents) {
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
                 if let Some(m) = e.get("model").filter(|m| !m.starts_with('*')) {
                     take(m);
                 }
@@ -1110,6 +1754,7 @@ fn script_model_names(
 
 /// The zones around the map zone, in load order, that exist beside it.
 fn zone_paths(map_path: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     let dir = map_path.parent().unwrap_or(Path::new("."));
     let stem = map_path
         .file_stem()
@@ -1120,6 +1765,16 @@ fn zone_paths(map_path: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
         &T6_ZM_PRE_ZONES
     };
     let mut pre: Vec<PathBuf> = shared
+=======
+    // bo2zm: a map from an extra folder (`IW4L_T6_EXTRA`) still loads the
+    // install's common zones.
+    let dir = asset_transport::t6_extra::install_zone_dir(map_path);
+    let dir = dir.as_path();
+    let stem = map_path
+        .file_stem()
+        .map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+    let mut pre: Vec<PathBuf> = T6_ZM_PRE_ZONES
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
         .iter()
         .map(|z| dir.join(format!("{z}.ff")))
         .collect();
@@ -1128,16 +1783,38 @@ fn zone_paths(map_path: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
     if stem == "zm_nuked" {
         pre.push(dir.join("dlczm0_load_zm.ff"));
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     // A multiplayer map has no patch zone (its fixes are in patch_mp).
     let post = if is_mp_map(&stem) {
         Vec::new()
     } else {
         vec![dir.join(format!("{stem}_patch.ff"))]
     };
+=======
+    // A map from an extra folder (a map pack) loads its mod's
+    // zones (weapons, string tables, menus) before the map, as its game does.
+    if map_path.parent() != Some(dir) {
+        pre.extend(
+            ["mod.ff", "mod_load.ff", "mod_patch.ff"]
+                .iter()
+                .filter_map(|z| asset_transport::t6_extra::extra_file(z)),
+        );
+    }
+    // The mode zone (`so_zclassic_zm_buried.ff`: the map's zombie types,
+    // their characters and animstatedefs, the mode's extra entities), then
+    // the patch. Nuketown plays zstandard and has none. A survival start
+    // (Tranzit's Town: zstandard) takes the zsurvival zone, Grief and
+    // Turned zencounter (Borough's zombie hands and melee are only there).
+    let post = vec![
+        asset_transport::t6_extra::file_in(dir, &format!("{}.ff", mode_zone(&stem))),
+        asset_transport::t6_extra::file_in(dir, &format!("{stem}_patch.ff")),
+    ];
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     let exists = |v: Vec<PathBuf>| v.into_iter().filter(|p| p.is_file()).collect();
     (exists(pre), exists(post))
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
 /// bo2mp: a multiplayer map's two factions' zones, from `mp/mapstable.csv`
 /// in the zones read so far: the map's row names the allies' and axis'
 /// team sets (columns 1 and 2) and, on the snow, wet and sand maps, the
@@ -1319,6 +1996,17 @@ fn sight_reticle(
     );
     out.sampler = img.sampler.clone();
     Some((scale, out))
+=======
+/// The mode zone's name for a map (`so_zclassic_zm_transit`).
+fn mode_zone(stem: &str) -> String {
+    let mode = match frame::bo2_zm_start(stem).map(|(_, mode)| mode).as_deref() {
+        Some("zstandard") => "zsurvival",
+        Some("zgrief" | "zcleansed" | "zmeat") => "zencounter",
+        _ if stem == "zm_nuked" => "zstandard",
+        _ => "zclassic",
+    };
+    format!("so_{mode}_{stem}")
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
 }
 
 fn real(name: &str) -> bool {
@@ -1350,10 +2038,33 @@ fn material_homes(captures: &[&ZoneCapture]) -> HashMap<String, (usize, usize)> 
 /// `<model>+camo<n>`.
 #[derive(Default)]
 struct PapCamo {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     /// Copy -> (the gun model, swaps base material -> camo material).
     models: BTreeMap<String, (String, Vec<(String, String)>)>,
+=======
+    /// Copy -> (the gun model, swaps base material -> camo material, and
+    /// the camo's texture tiling: the swap's constants 0 and 1, which BO2's
+    /// 3D camo shader multiplies the texture coordinates by, 2 x 2 for the
+    /// zombies camo).
+    models: BTreeMap<String, (String, Vec<(String, String, [f32; 2])>)>,
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     /// Upgraded weapon -> its gun model's copy.
     weapon_models: HashMap<String, String>,
+}
+
+/// A float as a half (IEEE binary16), rounded down; texture coordinates.
+fn f32_to_half(x: f32) -> u16 {
+    let bits = x.to_bits();
+    let sign = ((bits >> 16) & 0x8000) as u16;
+    let exp = ((bits >> 23) & 0xff) as i32 - 127 + 15;
+    let mant = bits & 0x007f_ffff;
+    if exp <= 0 {
+        return sign;
+    }
+    if exp >= 31 {
+        return sign | 0x7c00;
+    }
+    sign | ((exp as u16) << 10) | ((mant >> 13) as u16)
 }
 
 fn pap_camo(
@@ -1395,10 +2106,24 @@ fn pap_camo(
         else {
             continue;
         };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
         let swaps: Vec<(String, String)> = list
             .iter()
             .flat_map(|m| m.base.iter().cloned().zip(m.camo.iter().cloned()))
             .filter(|(base, camo)| real(base) && real(camo))
+=======
+        let swaps: Vec<(String, String, [f32; 2])> = list
+            .iter()
+            .flat_map(|m| {
+                let tile = [m.consts[0], m.consts[1]].map(|t| if t > 0.0 { t } else { 1.0 });
+                m.base
+                    .iter()
+                    .cloned()
+                    .zip(m.camo.iter().cloned())
+                    .map(move |(b, c)| (b, c, tile))
+            })
+            .filter(|(base, camo, _)| real(base) && real(camo))
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
             .collect();
         let Some(gun) = w.gun_models.first().filter(|n| real(n)) else {
             continue;
@@ -1469,7 +2194,11 @@ fn wanted_materials(
 /// The sound bank files a map's banks read: each bank asset's own files,
 /// the map's location banks (`zmb_<location>*`), and every file those
 /// name as a dependency.
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
 pub(super) fn bank_bases(captures: &[&ZoneCapture], map: &str) -> Vec<String> {
+=======
+fn bank_bases(captures: &[&ZoneCapture], map: &str) -> Vec<String> {
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     let mut bases: Vec<String> = Vec::new();
     let mut push = |b: String| {
         if !b.is_empty() && !bases.contains(&b) {
@@ -1490,12 +2219,16 @@ pub(super) fn bank_bases(captures: &[&ZoneCapture], map: &str) -> Vec<String> {
             push(base.to_owned());
         }
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     let deps: [&str; 3] = if is_mp_map(map) {
         ["mpl_common", "mpl_code_post_gfx", "cmn_root"]
     } else {
         ["zmb_common", "zmb_code_post_gfx", "cmn_root"]
     };
     for dep in deps {
+=======
+    for dep in ["zmb_common", "zmb_code_post_gfx", "cmn_root"] {
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
         push(dep.to_owned());
     }
     bases
@@ -1509,6 +2242,7 @@ pub(crate) fn load_t6_combat(
 ) -> T6Combat {
     let mut report = Vec::new();
     let (pre, post) = zone_paths(map_path);
+    let zone_dir = asset_transport::t6_extra::install_zone_dir(map_path);
     let capture = |path: &PathBuf, report: &mut Vec<String>| match asset_t6::capture_zone(path) {
         Ok(c) => Some(c),
         Err(e) => {
@@ -1516,6 +2250,7 @@ pub(crate) fn load_t6_combat(
             None
         }
     };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     let mut pre_caps: Vec<ZoneCapture> =
         pre.iter().filter_map(|p| capture(p, &mut report)).collect();
     let map_stem = map_path
@@ -1530,6 +2265,9 @@ pub(crate) fn load_t6_combat(
             }
         }
     }
+=======
+    let pre_caps: Vec<ZoneCapture> = pre.iter().filter_map(|p| capture(p, &mut report)).collect();
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     let post_caps: Vec<ZoneCapture> = post
         .iter()
         .filter_map(|p| capture(p, &mut report))
@@ -1603,6 +2341,7 @@ pub(crate) fn load_t6_combat(
             }
         }
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     // bo2mp: each multiplayer gun's sight attachments (`au_<gun>_<sight>`
     // with its `<sight>` attachment), later zones winning a name.
     let mut attachments: HashMap<&str, &asset_t6::AttachmentRef> = HashMap::new();
@@ -1627,6 +2366,8 @@ pub(crate) fn load_t6_combat(
             }
         }
     }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     let pap = pap_camo(&captures, &weapon_refs, 39);
     report.push(format!(
         "t6 Pack-a-Punch camo: {} gun models, {} upgraded weapons",
@@ -1661,6 +2402,7 @@ pub(crate) fn load_t6_combat(
             }
         }
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     // bo2mp: the sight attachments' models.
     for (_, _, u) in &sights {
         for model in [&u.view_model, &u.view_model_additional, &u.view_model_ads] {
@@ -1675,13 +2417,30 @@ pub(crate) fn load_t6_combat(
         model_names.insert(T6_PLAYER_ARMS.to_owned());
         for arms in T6_OTHER_ARMS {
             model_names.insert(arms.to_owned());
+=======
+    model_names.insert(T6_PLAYER_ARMS.to_owned());
+    for arms in T6_OTHER_ARMS {
+        model_names.insert(arms.to_owned());
+    }
+    // Every other map's player arms (`c_zom_reporter_viewhands` in
+    // Buried's mode zone): whatever viewhands its zones carry.
+    for c in &captures {
+        for m in c.xmodels.iter() {
+            if real(&m.name) && m.name.contains("_viewhands") {
+                model_names.insert(m.name.clone());
+            }
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
         }
     }
     // bo2zm M3: models the map's own scripts and entities name (perk
     // machines, the box, power-ups, zombie bodies and heads...), drawn as
     // script models and actors from the same catalog.
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     let destructibles = destructible_models(&captures);
     let script_models = script_model_names(&captures, &destructibles);
+=======
+    let script_models = script_model_names(&captures);
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     report.push(format!(
         "t6 script models: {} named by the map's scripts and entities",
         script_models.len()
@@ -1719,8 +2478,24 @@ pub(crate) fn load_t6_combat(
     // Materials the guns, arms and effects draw with, linked per zone.
     let homes = material_homes(&captures);
     let mut wanted = wanted_materials(&captures, &all_models, &homes);
+    // The map's brush models with surfaces (doors), drawn as models.
+    let map_ci = pre_caps.len();
+    let brush_models = map_capture
+        .world
+        .as_ref()
+        .map(brush_model_refs)
+        .unwrap_or_default();
+    for srf in brush_models.iter().flat_map(|m| m.lod0.iter()) {
+        if let Some(k) = srf.material {
+            wanted[map_ci].insert(k.index);
+        }
+    }
     for (_, swaps) in pap.models.values() {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
         for (_, camo) in swaps {
+=======
+        for (_, camo, _) in swaps {
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
             if let Some(&(ci, mi)) = homes.get(camo.trim_start_matches(',')) {
                 wanted[ci].insert(mi);
             }
@@ -1735,6 +2510,7 @@ pub(crate) fn load_t6_combat(
             }
         }
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     // bo2mp: a world colour map named `,<image>` is a picture an earlier
     // zone holds (Carrier's parked jets and drone); the world, linked before
     // those zones were read, drew it flat. Give it its pixels now.
@@ -1770,6 +2546,8 @@ pub(crate) fn load_t6_combat(
             left.len()
         ));
     }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     let mut local: Vec<HashMap<usize, usize>> = Vec::with_capacity(captures.len());
     for (c, want) in captures.iter().zip(&wanted) {
         let linked = super::t6_materials::link_materials_with(
@@ -1820,6 +2598,7 @@ pub(crate) fn load_t6_combat(
             fpv_missing.push(name.clone());
             continue;
         };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
         // bo2mp: a sight's reticle surface is drawn by the HUD at
         // infinity (its shader's projection), not as a picture on the glass.
         let resolve = |k: asset_t6::AssetKey| {
@@ -1830,17 +2609,60 @@ pub(crate) fn load_t6_combat(
         };
         match asset_model::capture_model_skel_t6(model, resolve) {
             Some(skel) => fpv.insert_in(asset_core::AssetNamespace::T6, skel, Some(materials)),
+=======
+        match asset_model::capture_model_skel_t6(model, |k| catalog_material(ci, k)) {
+            Some(mut skel) => {
+                skel.surface_flags = model_surface_flags(captures[ci], model);
+                fpv.insert_in(asset_core::AssetNamespace::T6, skel, Some(materials))
+            }
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
             None => fpv_missing.push(format!("{name} (unreadable)")),
         }
+    }
+    for model in &brush_models {
+        match asset_model::capture_model_skel_t6(model, |k| catalog_material(map_ci, k)) {
+            Some(skel) => fpv.insert_in(asset_core::AssetNamespace::T6, skel, Some(materials)),
+            None => fpv_missing.push(format!("{} (brush model)", model.name)),
+        }
+    }
+    if !brush_models.is_empty() {
+        report.push(format!(
+            "t6 brush models drawn: {}",
+            brush_models
+                .iter()
+                .map(|m| format!(
+                    "{} ({} surfaces [{}], {:.0} {:.0} {:.0} .. {:.0} {:.0} {:.0})",
+                    m.name,
+                    m.lod0.len(),
+                    m.materials
+                        .iter()
+                        .flatten()
+                        .filter_map(|k| map_capture.materials.get(k.index))
+                        .map(|mat| mat.name.trim_start_matches(','))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    m.mins[0],
+                    m.mins[1],
+                    m.mins[2],
+                    m.maxs[0],
+                    m.maxs[1],
+                    m.maxs[2]
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
     }
     // The upgraded guns' copies, their camo surfaces swapped.
     for (copy, (gun, swaps)) in &pap.models {
         let Some((ci, model)) = find_model(gun) else {
             continue;
         };
+        // Each surface's camo tiling, in the order the surfaces are read.
+        let tiles: std::cell::RefCell<Vec<[f32; 2]>> = std::cell::RefCell::new(Vec::new());
         let swapped = |k: asset_t6::AssetKey| -> Option<usize> {
             let name = captures[ci]
                 .materials
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
                 .get(k.index)?
                 .name
                 .trim_start_matches(',');
@@ -1853,10 +2675,50 @@ pub(crate) fn load_t6_combat(
                     local[hc].get(&hm).copied()
                 }
                 None => catalog_material(ci, k),
+=======
+                .get(k.index)
+                .map_or("", |m| m.name.trim_start_matches(','));
+            match swaps
+                .iter()
+                .find(|(base, _, _)| base.trim_start_matches(',') == name)
+            {
+                Some((_, camo, tile)) => {
+                    tiles.borrow_mut().push(*tile);
+                    let &(hc, hm) = homes.get(camo.trim_start_matches(','))?;
+                    local[hc].get(&hm).copied()
+                }
+                None => {
+                    tiles.borrow_mut().push([1.0, 1.0]);
+                    catalog_material(ci, k)
+                }
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
             }
         };
         if let Some(mut skel) = asset_model::capture_model_skel_t6(model, swapped) {
             skel.name = copy.clone();
+            // The camo surfaces' texture coordinates times the camo's
+            // tiling (BO2's camo shader scales them; ours samples as given).
+            let tiles = tiles.into_inner();
+            if tiles.len() == skel.surface_vertex_ranges.len() {
+                for (&(start, count), tile) in skel.surface_vertex_ranges.iter().zip(&tiles) {
+                    if *tile == [1.0, 1.0] {
+                        continue;
+                    }
+                    for uv in skel.uvs.iter_mut().skip(start).take(count) {
+                        uv[0] *= tile[0];
+                        uv[1] *= tile[1];
+                    }
+                    // The packed rows the gun draws from: two halves, v low
+                    // and u high (T6's u-low word turned a half round).
+                    for row in skel.packed_vertices.iter_mut().skip(start).take(count) {
+                        let tex = u32::from_le_bytes([row[20], row[21], row[22], row[23]]);
+                        let v = asset_model::half_to_f32(tex as u16) * tile[1];
+                        let u = asset_model::half_to_f32((tex >> 16) as u16) * tile[0];
+                        let tex = u32::from(f32_to_half(v)) | (u32::from(f32_to_half(u)) << 16);
+                        row[20..24].copy_from_slice(&tex.to_le_bytes());
+                    }
+                }
+            }
             fpv.insert_in(asset_core::AssetNamespace::T6, skel, Some(materials));
         }
     }
@@ -1916,6 +2778,7 @@ pub(crate) fn load_t6_combat(
             .copied();
         catalog.capture_t6(w, left, &pap.weapon_models);
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     // bo2mp: every gun with each of its sight attachments.
     let mut sight_n = 0usize;
     let mut reticle_pictures: HashMap<(String, bool), (f32, std::sync::Arc<bevy::prelude::Image>)> =
@@ -1987,6 +2850,8 @@ pub(crate) fn load_t6_combat(
         attachments.len(),
         uniques.len()
     ));
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     // bo2zm fix list 2: a rolling grenade rests and rolls on its body: the
     // nearest face of its projectile model's bounds to the model's origin
     // (the frag: a ball of about 1.4 units around it, the fuse above).
@@ -2099,14 +2964,19 @@ pub(crate) fn load_t6_combat(
     let map = map_path
         .file_stem()
         .map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     let sound_dir = map_path
         .parent()
+=======
+    let sound_dir = Some(zone_dir.as_path())
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
         .and_then(Path::parent)
         .and_then(Path::parent)
         .map(|install| install.join("sound"));
     let (map_fx, room_tone) = map_scripts(&captures, &map, &mut report);
     // The language zones beside zone/all (zone/english/en_*.ff): the
     // English strings (hints, perk and power-up names) and the voices'
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     // aliases (the announcer's, the players').
     let lang_dir = map_path
         .parent()
@@ -2158,6 +3028,39 @@ pub(crate) fn load_t6_combat(
     // bo2mp: each alias's length in ms (its longest variant's clip), for
     // the scripts' soundgetplaybacktime (the announcer waits one line out).
     let mut sound_lengths: Vec<(String, u32)> = Vec::new();
+=======
+    // aliases (the announcer's, the players'). bo2zm: and the mode zone's
+    // (`en_so_zclassic_zm_transit.ff`: TranZit's player and bus driver
+    // lines; its `en_zm_transit.ff` is empty, so the driver never spoke).
+    let lang_dir = Some(zone_dir.as_path())
+        .and_then(Path::parent)
+        .map(|d| d.join("english"));
+    let mode = mode_zone(&map);
+    let lang_caps: Vec<ZoneCapture> = [
+        "code_post_gfx_zm",
+        "common_zm",
+        "patch_zm",
+        "ui_zm",
+        "patch_ui_zm",
+        map.as_str(),
+        mode.as_str(),
+    ]
+    .iter()
+    .filter_map(|z| {
+        let path = asset_transport::t6_extra::file_in(lang_dir.as_ref()?, &format!("en_{z}.ff"));
+        if !path.is_file() {
+            return None;
+        }
+        match asset_t6::capture_zone(&path) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                report.push(format!("t6 language zone gap: {e}"));
+                None
+            }
+        }
+    })
+    .collect();
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     let sound = match sound_dir {
         Some(dir) if dir.is_dir() => {
             let bases = bank_bases(&captures, &map);
@@ -2185,6 +3088,7 @@ pub(crate) fn load_t6_combat(
                 census.without_clip,
                 globals.map_or(0, |g| g.curves.len())
             ));
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
             for s in &catalog.sounds {
                 let ms = s
                     .aliases
@@ -2198,7 +3102,16 @@ pub(crate) fn load_t6_combat(
                     sound_lengths.push((s.name.to_ascii_lowercase(), ms));
                 }
             }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
             catalog.scripted_map_fx = Some(map_fx);
+            let mut echoes: Vec<String> = catalog
+                .radverbs
+                .iter()
+                .map(|(name, v)| format!("{name} {v:?}"))
+                .collect();
+            echoes.sort();
+            report.push(format!("t6 sound: {} room echoes: {}", echoes.len(), echoes.join("; ")));
             Ok(catalog)
         }
         _ => Err("Black Ops II sound folder not found beside the zones".to_owned()),
@@ -2208,6 +3121,7 @@ pub(crate) fn load_t6_combat(
         .chain(world_missing.iter())
         .cloned()
         .collect();
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     // The guns checked: Nuketown Zombies' list, or (bo2mp) every
     // multiplayer gun the zones carry.
     let census_names: Vec<String> = if is_mp_map(&map) {
@@ -2221,6 +3135,8 @@ pub(crate) fn load_t6_combat(
     } else {
         NUKETOWN_WEAPONS.iter().map(|n| (*n).to_owned()).collect()
     };
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     let census_lines = census(
         &captures,
         &census_names,
@@ -2265,6 +3181,7 @@ pub(crate) fn load_t6_combat(
                     .push((t.name.clone(), t.columns, t.rows, t.cells.clone()));
             }
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
         for v in &c.vehicles {
             scripts.vehicles.retain(|n| n.name != v.name);
             scripts.vehicles.push(v.clone());
@@ -2279,16 +3196,35 @@ pub(crate) fn load_t6_combat(
             scripts.destructibles.retain(|x| x.name != d.name);
             scripts.destructibles.push(d);
         }
+=======
+        scripts.entities.extend(c.map_ents.iter().cloned());
+        for d in c.destructibles.iter().filter(|d| real(&d.name)) {
+            scripts.destructibles.retain(|o| o.name != d.name);
+            scripts.destructibles.push(t5_destructible(d));
+        }
+        for z in &c.zbarriers {
+            scripts.zbarriers.retain(|o| !o.name.eq_ignore_ascii_case(&z.name));
+            scripts.zbarriers.push(z.clone());
+        }
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
         if !c.path_nodes.is_empty() {
             scripts.path_nodes = c.path_nodes.clone();
             scripts.path_tables = c.path_tables.clone();
         }
         for (name, bytes) in &c.raw_files {
+            let lower = name.to_ascii_lowercase();
+            if let Some(shock) = lower.strip_prefix("shock/").and_then(|n| n.strip_suffix(".shock")) {
+                scripts.shocks.retain(|(n, _)| n != shock);
+                scripts
+                    .shocks
+                    .push((shock.to_owned(), String::from_utf8_lossy(bytes).into_owned()));
+            }
             if name.starts_with("animstatedefs/") && name.ends_with(".asd") {
                 let text = String::from_utf8_lossy(bytes).into_owned();
                 scripts.animstatedefs.retain(|(n, _)| n != name);
                 scripts.animstatedefs.push((name.clone(), text));
             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
             // bo2mp: the shellshocks (`shock/flashbang.shock`, ...).
             let lower = name.replace('\\', "/").to_ascii_lowercase();
             if let Some(shock) = lower
@@ -2315,6 +3251,8 @@ pub(crate) fn load_t6_combat(
             if name == "mp/playeranimtypes.txt" {
                 playeranim_types = Some(String::from_utf8_lossy(bytes).into_owned());
             }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
         }
     }
     scripts.playeranim = playeranim.zip(playeranim_types);
@@ -2330,6 +3268,7 @@ pub(crate) fn load_t6_combat(
                     framerate: a.framerate,
                     looping: a.looping,
                     delta_trans: a.delta_trans.clone(),
+                    delta_quat: a.delta_quat.clone(),
                     notifies: a.notifies.clone(),
                 },
             );
@@ -2342,6 +3281,7 @@ pub(crate) fn load_t6_combat(
             strings.insert(k.clone(), v.clone());
         }
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
     // bo2mp: the map's name as players know it (`mp/mapstable.csv` column
     // 3: `MPUI_LA` = "AFTERMATH").
     if is_mp_map(&map) {
@@ -2386,6 +3326,16 @@ pub(crate) fn load_t6_combat(
     melee.sort();
     report.push(format!("t6 melee damage: {}", melee.join(" ")));
     scripts.retrievable_weapons = retrievable;
+=======
+    // Strings a mod zone carries (a map pack's mod_load), where
+    // no language zone has the key.
+    for c in &captures {
+        for (k, v) in &c.localize {
+            strings.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+    }
+    scripts.strings = strings.into_iter().collect();
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     // Every sound alias the banks hold (the scripts' soundexists).
     if let Ok(cat) = &sound {
         scripts.sound_aliases = cat
@@ -2395,13 +3345,18 @@ pub(crate) fn load_t6_combat(
             .collect();
     }
     report.push(format!(
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
         "t6 scripts: {} server script objects, {} string tables, {} entity strings, {} path nodes, {} animations, {} animstatedefs, {} English strings",
+=======
+        "t6 scripts: {} server script objects, {} string tables, {} entity strings, {} path nodes, {} animations, {} animstatedefs, {} English strings, {} barrier types",
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
         scripts.objects.len(),
         scripts.tables.len(),
         scripts.entities.len(),
         scripts.path_nodes.len(),
         scripts.anims.len(),
         scripts.animstatedefs.len(),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
         scripts.strings.len()
     ));
     let ui_script_list = ui_scripts(&captures);
@@ -2455,20 +3410,50 @@ pub(crate) fn load_t6_combat(
     }
     let mut hud_icons = hud_icons(&captures, packs, &ui_names, &mut report);
     hud_icons.0.extend(sight_reticles);
+=======
+        scripts.strings.len(),
+        scripts.zbarriers.len()
+    ));
+    let ui_script_list = ui_scripts(&captures);
+    let ui_names = ui_strings(&ui_script_list);
+    let hud_icons = hud_icons(&captures, packs, &ui_names, &mut report);
+    let screen_filters = screen_filters(&captures, packs, &mut report);
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
     report.push(format!("t6 ui: {} scripts", ui_script_list.len()));
     let ui = crate::T6Ui {
         scripts: ui_script_list,
         strings: std::sync::Arc::new(scripts.strings.clone()),
         tables: std::sync::Arc::new(scripts.tables.clone()),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
         configs: std::sync::Arc::new(ui_configs(&captures)),
     };
     // The font sheet's pixels are in the language's own image packs.
     let lang_packs = map_path
         .parent()
+=======
+        game_settings: std::sync::Arc::new(zm_game_settings(&captures)),
+    };
+    // The font sheet's pixels are in the language's own image packs.
+    let lang_packs = Some(zone_dir.as_path())
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
         .and_then(Path::parent)
         .map(|d| d.join("english"))
         .and_then(|d| asset_t6::PackSet::open_dir(&d).ok());
     let hud_fonts = hud_fonts(&lang_caps, lang_packs.as_ref().or(packs), &mut report);
+    // bo2zm: the bullet penetration table (patch_zm's `info/bullet_penetration_mp`).
+    let pen_table = captures
+        .iter()
+        .flat_map(|c| c.raw_files.iter())
+        .filter_map(|(name, bytes)| asset_game::capture_pen_table(name, bytes, false))
+        .last();
+    report.push(format!(
+        "t6 bullet penetration table: {}",
+        if pen_table.is_some() {
+            "loaded"
+        } else {
+            "missing (bullets stop at the first hit)"
+        }
+    ));
     T6Combat {
         weapons,
         fpv,
@@ -2486,6 +3471,142 @@ pub(crate) fn load_t6_combat(
         hud_fonts,
         ui,
         pen_table,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_m2.rs
+=======
+        visions: script_visions(&captures),
+        screen_filters,
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_m2.rs
         report,
     }
+}
+
+fn script_visions(captures: &[&ZoneCapture]) -> Vec<(String, Vec<u8>)> {
+    let mut out: Vec<(String, Vec<u8>)> = Vec::new();
+    for (name, bytes) in captures.iter().flat_map(|c| c.raw_files.iter()) {
+        let name = name.to_ascii_lowercase();
+        if !(name.starts_with("vision/") && name.ends_with(".vision")) {
+            continue;
+        }
+        out.retain(|(n, _)| *n != name);
+        out.push((name, bytes.clone()));
+    }
+    out
+}
+
+/// A BO2 `DestructibleDef` in the shape the server's destructibles run on
+/// (Black Ops' own, the same layout).
+fn t5_destructible(d: &asset_t6::m2::DestructibleRef) -> xmodel_runtime::T5DestructibleDef {
+    xmodel_runtime::T5DestructibleDef {
+        name: d.name.clone(),
+        model: d.model.clone(),
+        pieces: d
+            .pieces
+            .iter()
+            .map(|p| xmodel_runtime::T5DestructiblePiece {
+                stages: p.stages.clone().map(|st| xmodel_runtime::T5DestructibleStage {
+                    show_bone: st.show_bone,
+                    break_health: st.break_health,
+                    max_time: st.max_time,
+                    flags: st.flags,
+                    break_effect: st.break_effect,
+                    break_sound: st.break_sound,
+                    break_notify: st.break_notify,
+                    loop_sound: st.loop_sound,
+                    has_phys_preset: st.has_phys_preset,
+                    spawn_models: st.spawn_models,
+                }),
+                parent_piece: p.parent_piece,
+                parent_damage_percent: p.parent_damage_percent,
+                bullet_damage_scale: p.bullet_damage_scale,
+                explosive_damage_scale: p.explosive_damage_scale,
+                health: p.health,
+                hide_bones: p.hide_bones,
+            })
+            .collect(),
+        client_only: d.client_only,
+    }
+}
+
+/// bo2zm: a map's brush models that carry surfaces of their own (Zombies
+/// Nacht der Untoten: the first room's door `*11` is a
+/// `script_brushmodel` drawn from the world's surfaces, where BO2's own maps
+/// use a script model), each as a one-bone model named `*N` so the entity
+/// draws where the scripts move it. The world vertex's first 32 bytes are
+/// the model vertex (`GfxPackedVertex`); the surfaces are authored about
+/// the entity's origin, as the submodel's brushes are.
+fn brush_model_refs(world: &asset_t6::WorldRef) -> Vec<asset_t6::XModelRef> {
+    const T6_WORLD_VERTEX: usize = 36;
+    let mut out = Vec::new();
+    for (n, &(first, count, bounds)) in world.brush_models.iter().enumerate().skip(1) {
+        let mut lod0 = Vec::new();
+        for surf in world
+            .surfaces
+            .iter()
+            .skip(first as usize)
+            .take(count as usize)
+        {
+            let start = surf.base_index.max(0) as usize;
+            let Some(tris) = world
+                .indices
+                .get(start..start + usize::from(surf.tri_count) * 3)
+            else {
+                continue;
+            };
+            let Some(&top) = tris.iter().max() else {
+                continue;
+            };
+            let verts = usize::from(top) + 1;
+            let at = surf.vertex_data_offset0.max(0) as usize;
+            let Some(block) = world.vd0.get(at..at + verts * T6_WORLD_VERTEX) else {
+                continue;
+            };
+            lod0.push(asset_t6::XSurfaceRef {
+                // The world's vertex colour (per surface: magenta, green
+                // on Nacht's door) tints a model: draw it white.
+                verts: block
+                    .chunks_exact(T6_WORLD_VERTEX)
+                    .flat_map(|v| {
+                        let mut m = [0u8; 32];
+                        m.copy_from_slice(&v[..32]);
+                        m[16..20].fill(0xff);
+                        m
+                    })
+                    .collect(),
+                vert_count: verts as u16,
+                indices: tris.to_vec(),
+                vert_lists: vec![(0, verts as u16, 0, surf.tri_count)],
+                material: surf.material,
+                ..Default::default()
+            });
+        }
+        if lod0.is_empty() {
+            continue;
+        }
+        out.push(asset_t6::XModelRef {
+            name: format!("*{n}"),
+            numsurfs: lod0.len() as u8,
+            materials: lod0.iter().map(|s| s.material).collect(),
+            num_bones: 1,
+            num_lods: 1,
+            mins: bounds[0],
+            maxs: bounds[1],
+            radius: 0.0,
+            lighting_origin_offset: [0.0; 3],
+            lighting_origin_range: 0.0,
+            lod0,
+            bone_names: vec!["tag_origin".to_owned()],
+            num_root_bones: 1,
+            parent_list: Vec::new(),
+            quats: Vec::new(),
+            trans: Vec::new(),
+            base_mat: vec![([0.0, 0.0, 0.0, 1.0], [0.0; 3])],
+            part_classification: vec![0],
+            bone_info: vec![None],
+            lods: vec![(0.0, 0, 0)],
+            contents: 0,
+            coll_lod: -1,
+            coll_surfs: Vec::new(),
+        });
+    }
+    out
 }

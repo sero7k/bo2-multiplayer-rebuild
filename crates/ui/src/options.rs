@@ -49,7 +49,14 @@ pub(crate) fn apply_window_settings(
     window
         .resolution
         .set_physical_resolution(settings.resolution.width, settings.resolution.height);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/options.rs
     window.mode = if settings.fullscreen {
+=======
+    // IW4L_WINDOW_HIDDEN=1 (a test run with no window) never goes full
+    // screen: a borderless full-screen window would cover his game.
+    let hidden_test = std::env::var("IW4L_WINDOW_HIDDEN").is_ok_and(|v| v == "1");
+    window.mode = if settings.fullscreen && !hidden_test {
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/options.rs
         bevy::window::WindowMode::BorderlessFullscreen(MonitorSelection::Current)
     } else {
         bevy::window::WindowMode::Windowed

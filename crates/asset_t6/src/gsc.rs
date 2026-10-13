@@ -902,8 +902,32 @@ impl<'a> Walk<'a> {
                 | op::GET_FUNCTION
                 | op::GET_HASH
                 | op::EMPTY_ARRAY
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/gsc.rs
                 | op::GET_TIME
                 | op::VECTOR_CONSTANT => self.push(GscValue::Other),
+=======
+                | op::GET_TIME => self.push(GscValue::Other),
+                // bo2zm: a vector of -1/0/1 parts, two bits each (x high),
+                // as the script VM reads it: createfx angles are written
+                // `270 * VectorConstant`, so without it every one read 0.
+                op::VECTOR_CONSTANT => {
+                    let flags = int(&o.arg);
+                    let c = |b: i32| match b & 3 {
+                        1 => -1.0,
+                        2 => 1.0,
+                        _ => 0.0,
+                    };
+                    self.push(GscValue::Vec3([c(flags >> 4), c(flags >> 2), c(flags)]));
+                }
+                op::VECTOR_SCALE => {
+                    let v = self.pop().as_vec3();
+                    let s = self.pop().as_f32();
+                    match (v, s) {
+                        (Some(v), Some(s)) => self.push(GscValue::Vec3(v.map(|c| c * s))),
+                        _ => self.push(GscValue::Other),
+                    }
+                }
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/gsc.rs
                 op::GET_LEVEL_OBJECT => self.field_object = GscValue::Level,
                 op::GET_SELF_OBJECT | op::GET_ANIM_OBJECT => self.field_object = GscValue::Other,
                 op::GET_GAME_REF => {
@@ -1104,6 +1128,9 @@ pub struct MapScriptFacts {
     /// The default ambient room's tone (`declareambientroom(room, true)`,
     /// `setambientroomtone(room, alias, ...)`).
     pub room_tone: Option<String>,
+    /// The ambient rooms' echoes (`setambientroomreverb(room, preset, dry,
+    /// wet)`): room, preset, dry, wet; the default room first.
+    pub room_echoes: Vec<(String, String, f32, f32)>,
     /// Sounds a loop plays now and then at one of a few places
     /// (`wait randomintrange(a, b); playsound(0, alias, place[...])`):
     /// alias, wait range in seconds, places.
@@ -1182,6 +1209,21 @@ impl MapScriptFacts {
                     && let Some(alias) = call.args.get(1).and_then(GscValue::as_str)
                 {
                     facts.room_tone = Some(alias.to_owned());
+                }
+            }
+            for (_, call) in run.calls_named("setambientroomreverb") {
+                let (Some(room), Some(preset)) = (
+                    call.args.first().and_then(GscValue::as_str),
+                    call.args.get(1).and_then(GscValue::as_str),
+                ) else {
+                    continue;
+                };
+                let at = |i: usize| call.args.get(i).and_then(GscValue::as_f32).unwrap_or(1.0);
+                let row = (room.to_owned(), preset.to_owned(), at(2), at(3));
+                if Some(room) == default_room.as_deref() {
+                    facts.room_echoes.insert(0, row);
+                } else {
+                    facts.room_echoes.push(row);
                 }
             }
             for (_, call) in run.calls_named("snd_play_auto_fx") {

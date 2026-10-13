@@ -75,13 +75,25 @@ pub(crate) fn update_reticle(
     aim: Res<ViewweaponAim>,
     cg_clock: Res<FrameClock>,
     mut quads: Query<(&ReticleQuad, &mut Node, &mut ImageNode, &mut UiTransform)>,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hud/src/reticle.rs
     life: (MessageReader<LifeStarted>, Res<ViewSubject>),
+=======
+    life: (
+        MessageReader<LifeStarted>,
+        Res<ViewSubject>,
+        Option<Res<frame::LuiMenus>>,
+    ),
+>>>>>>> /tmp/claude-0/zmhead/crates/hud/src/reticle.rs
     (t6_icons, mut t6_handles): (
         Option<Res<assets::T6HudIcons>>,
         Local<Vec<(String, Handle<Image>)>>,
     ),
 ) {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hud/src/reticle.rs
     let (mut started, view) = life;
+=======
+    let (mut started, view, lui_menus) = life;
+>>>>>>> /tmp/claude-0/zmhead/crates/hud/src/reticle.rs
     for ev in started.read() {
         if ev.client == local.0.0 {
             *ads_latch = ReticleAdsLatch::default();
@@ -95,6 +107,11 @@ pub(crate) fn update_reticle(
         return;
     };
     if ps.pm_type >= playerstate_iw4::PM_TYPE_DEAD {
+        hide_all(&mut quads);
+        return;
+    }
+    // bo2zm: Black Ops II's menus (pause, options) hide the crosshair.
+    if lui_menus.is_some_and(|m| m.open) {
         hide_all(&mut quads);
         return;
     }

@@ -284,6 +284,21 @@ impl Program {
         self.function_index.get(&(si, n)).copied()
     }
 
+    /// Does a function of `script` call (or take a pointer to) function `fi`?
+    pub fn script_refers_to(&self, script: &str, fi: u32) -> bool {
+        let Some(&si) = self.script_index.get(&normalize(script)) else {
+            return false;
+        };
+        self.scripts[si as usize].functions.iter().any(|&f| {
+            self.functions[f as usize].code.iter().any(|op| match *op {
+                Op::Call(site, _) | Op::FuncRef(site) => {
+                    self.sites[site as usize].callee == FuncRef::Script(fi)
+                }
+                _ => false,
+            })
+        })
+    }
+
     fn builtin(&mut self, name: Str, method: bool) -> u32 {
         if let Some(&id) = self.builtin_index.get(&(name, method)) {
             return id;

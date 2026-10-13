@@ -154,6 +154,20 @@ pub fn bind_core<H>(vm: &mut Vm<H>) {
         vec3(a, 0, "vectordot")?,
         vec3(a, 1, "vectordot")?
     ))));
+    // pointonsegmentnearesttopoint(a, b, p): the point of segment a..b
+    // nearest p (Buried's Leroy picks the barricade he faces with it).
+    f!("pointonsegmentnearesttopoint", |_, _, _, a| {
+        let name = "pointonsegmentnearesttopoint";
+        let (s, e, p) = (vec3(a, 0, name)?, vec3(a, 1, name)?, vec3(a, 2, name)?);
+        let d = math::sub(e, s);
+        let len2 = math::dot(d, d);
+        let t = if len2 > 0.0 {
+            (math::dot(math::sub(p, s), d) / len2).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        Ok(Value::Vec3(std::array::from_fn(|i| s[i] + d[i] * t)))
+    });
     f!("vectorcross", |_, _, _, a| Ok(Value::Vec3(math::cross(
         vec3(a, 0, "vectorcross")?,
         vec3(a, 1, "vectorcross")?
@@ -245,6 +259,12 @@ pub fn bind_core<H>(vm: &mut Vm<H>) {
     f!("round", |_, _, _, a| Ok(Value::Float(
         num(a, 0, "round")?.round()
     )));
+    // lerpfloat(from, to, fraction) (Buried's generator lights, Origins).
+    f!("lerpfloat", |_, _, _, a| {
+        let from = num(a, 0, "lerpfloat")?;
+        let to = num(a, 1, "lerpfloat")?;
+        Ok(Value::Float(from + (to - from) * num(a, 2, "lerpfloat")?))
+    });
     f!("abs", |_, _, _, a| Ok(match arg(a, 0) {
         Value::Int(i) => Value::Int(i.wrapping_abs()),
         v => Value::Float(v.as_float().unwrap_or(0.0).abs()),
@@ -351,7 +371,7 @@ pub fn bind_core<H>(vm: &mut Vm<H>) {
     });
     f!("getlastarraykey", |_, _, _, a| {
         let arr = array(a, 0, "getlastarraykey")?;
-        Ok(arr.map.first().map(|(k, _)| k.value()).unwrap_or_default())
+        Ok(arr.last_key().map(Key::value).unwrap_or_default())
     });
     f!("arraycopy", |_, _, _, a| {
         let arr = array(a, 0, "arraycopy")?;
@@ -478,6 +498,12 @@ pub fn bind_core<H>(vm: &mut Vm<H>) {
     f!("setdvar", |vm, _, _, a| {
         let n = vm.dvar_name(arg(a, 0));
         let v = text(vm, a, 1);
+        vm.dvars.insert(n, v);
+        Ok(Value::Undefined)
+    });
+    f!("setdvarint", |vm, _, _, a| {
+        let n = vm.dvar_name(arg(a, 0));
+        let v = math::parse_int(&text(vm, a, 1)).to_string();
         vm.dvars.insert(n, v);
         Ok(Value::Undefined)
     });

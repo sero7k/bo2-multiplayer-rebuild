@@ -264,14 +264,48 @@ pub struct WorldScene {
     pub t5_tree_scatter_amount: Option<f32>,
 
     pub t5_exposure_volume_count: u32,
+    /// bo2zm: see `asset_world::WorldDraw::t6_vision_saturation`.
+    pub t6_vision_saturation: Option<f32>,
+    /// bo2zm: see `asset_world::WorldDraw::t6_sky_parms`.
+    pub t6_sky_parms: Option<[f32; 2]>,
+    /// bo2zm: see `asset_world::WorldDraw::t6_vision_grade`.
+    pub t6_vision_grade: Option<[[f32; 4]; 14]>,
+    /// bo2zm: the map's own grade as loaded, and the visions a script can
+    /// turn on (`adapters::t6_vision` picks among them).
+    pub t6_vision_grade_loaded: Option<[[f32; 4]; 14]>,
+    pub t6_script_grades: std::sync::Arc<Vec<(String, [[f32; 4]; 14])>>,
     /// bo2zm: see `asset_world::WorldDraw::t6_lights`.
     pub t6_lights: std::sync::Arc<Vec<[f32; 16]>>,
     /// bo2zm: see `asset_world::WorldDraw::t6_fog_banks`; the table as
     /// loaded (`t6_lights` may carry another bank's fog) and the bank shown
     /// (0 = the map's own).
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/prepare/scene/world.rs
     pub t6_fog_banks: Vec<(u32, [[f32; 16]; 2])>,
+=======
+    pub t6_fog_banks: Vec<asset_world::T6FogVolume>,
+    /// bo2zm: see `asset_world::WorldDraw::t6_fog_modifiers`.
+    pub t6_fog_modifiers: Vec<asset_world::T6FogModifier>,
+>>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/prepare/scene/world.rs
     pub t6_lights_loaded: std::sync::Arc<Vec<[f32; 16]>>,
+    /// bo2zm: see `asset_world::WorldDraw::t6_flicker`.
+    pub t6_flicker: Vec<asset_world::T6Flicker>,
     pub t6_fog_bank: u32,
+    /// bo2zm: see `asset_world::WorldDraw::t6_exposure_volumes`.
+    pub t6_exposure_volumes: std::sync::Arc<Vec<asset_world::T6ExposureVolume>>,
+    /// bo2zm: see `asset_world::WorldDraw::t6_lut` and `t6_lut_volumes`.
+    pub t6_lut: Option<std::sync::Arc<asset_world::T6Lut>>,
+    pub t6_lut_volumes: std::sync::Arc<Vec<asset_world::T6LutVolume>>,
+    /// bo2zm: the colour tables drawn this frame (`adapters::t6_lut`): the
+    /// first rows of tables A and B, A's weight, 1 when the map has them.
+    pub t6_lut_pick: [f32; 4],
+    /// bo2zm: the table a client script forces (`setlutscriptindex`), if any.
+    pub t6_lut_script: Option<u32>,
+    /// bo2zm: see `asset_world::WorldDraw::t6_light_tweaks`.
+    pub t6_light_tweaks: Option<asset_world::T6LightTweaks>,
+    /// bo2zm: this frame's sun and sky multipliers (`adapters::t6_light_tweaks`):
+    /// the scripts' sun colour times light over the map's (red, green, blue),
+    /// and the sky intensity blend.
+    pub t6_sun_sky_scale: [f32; 4],
     /// bo2zm: see `asset_world::WorldDraw::t6_probes`.
     pub t6_probes: std::sync::Arc<Vec<[[f32; 4]; 3]>>,
 
@@ -759,10 +793,24 @@ impl WorldScene {
             t5_tree_scatter_intensity: None,
             t5_tree_scatter_amount: None,
             t5_exposure_volume_count: 0,
+            t6_vision_saturation: None,
+            t6_sky_parms: None,
+            t6_vision_grade: None,
+            t6_vision_grade_loaded: None,
+            t6_script_grades: Default::default(),
             t6_lights: Default::default(),
             t6_fog_banks: Vec::new(),
+            t6_fog_modifiers: Vec::new(),
+            t6_flicker: Vec::new(),
             t6_lights_loaded: Default::default(),
             t6_fog_bank: 0,
+            t6_exposure_volumes: Default::default(),
+            t6_lut: None,
+            t6_lut_volumes: Default::default(),
+            t6_lut_pick: [0.0; 4],
+            t6_lut_script: None,
+            t6_light_tweaks: None,
+            t6_sun_sky_scale: [1.0; 4],
             t6_probes: Default::default(),
             primary_light_types: Vec::new(),
             primary_light_cull: Vec::new(),
@@ -858,10 +906,24 @@ impl WorldScene {
             t5_tree_scatter_intensity: None,
             t5_tree_scatter_amount: None,
             t5_exposure_volume_count: 0,
+            t6_vision_saturation: None,
+            t6_sky_parms: None,
+            t6_vision_grade: None,
+            t6_vision_grade_loaded: None,
+            t6_script_grades: Default::default(),
             t6_lights: Default::default(),
             t6_fog_banks: Vec::new(),
+            t6_fog_modifiers: Vec::new(),
+            t6_flicker: Vec::new(),
             t6_lights_loaded: Default::default(),
             t6_fog_bank: 0,
+            t6_exposure_volumes: Default::default(),
+            t6_lut: None,
+            t6_lut_volumes: Default::default(),
+            t6_lut_pick: [0.0; 4],
+            t6_lut_script: None,
+            t6_light_tweaks: None,
+            t6_sun_sky_scale: [1.0; 4],
             t6_probes: Default::default(),
             primary_light_types: Vec::new(),
             primary_light_cull: Vec::new(),
@@ -1611,9 +1673,23 @@ pub fn world_scene_from_draw(
     scene.t5_tree_scatter_intensity = draw.t5_tree_scatter_intensity;
     scene.t5_tree_scatter_amount = draw.t5_tree_scatter_amount;
     scene.t5_exposure_volume_count = draw.t5_exposure_volume_count;
+    scene.t6_vision_saturation = draw.t6_vision_saturation;
+    scene.t6_sky_parms = draw.t6_sky_parms;
+    scene.t6_vision_grade = draw.t6_vision_grade;
+    scene.t6_vision_grade_loaded = draw.t6_vision_grade;
+    scene.t6_script_grades = std::sync::Arc::new(draw.t6_script_grades.clone());
     scene.t6_lights = std::sync::Arc::new(draw.t6_lights.clone());
     scene.t6_lights_loaded = std::sync::Arc::clone(&scene.t6_lights);
     scene.t6_fog_banks = draw.t6_fog_banks.clone();
+    scene.t6_fog_modifiers = draw.t6_fog_modifiers.clone();
+    scene.t6_exposure_volumes = std::sync::Arc::new(draw.t6_exposure_volumes.clone());
+    scene.t6_lut = draw.t6_lut.clone();
+    scene.t6_lut_volumes = std::sync::Arc::new(draw.t6_lut_volumes.clone());
+    scene.t6_lut_pick = [0.0, 0.0, 1.0, if draw.t6_lut.is_some() { 1.0 } else { 0.0 }];
+    scene.t6_lut_script = None;
+    scene.t6_light_tweaks = draw.t6_light_tweaks;
+    scene.t6_sun_sky_scale = [1.0; 4];
+    scene.t6_flicker = draw.t6_flicker.clone();
     scene.t6_fog_bank = 0;
     scene.t6_probes = std::sync::Arc::new(draw.t6_probes.clone());
     scene.primary_light_types = draw

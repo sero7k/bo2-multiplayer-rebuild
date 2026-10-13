@@ -47,6 +47,9 @@ impl core::fmt::Display for SignonFailReason {
             Self::SessionClosed(SessionCloseReason::Overload) => {
                 write!(f, "session closed: control overload")
             }
+            Self::SessionClosed(SessionCloseReason::Kicked) => {
+                write!(f, "kicked from the party")
+            }
         }
     }
 }

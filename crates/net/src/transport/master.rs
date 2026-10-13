@@ -86,6 +86,7 @@ pub fn content_names(flags: ContentFlags) -> String {
     if flags.0 & CONTENT_T6 != 0 {
         names.push("t6");
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/transport/master.rs
     if flags.0 & CONTENT_IW3 != 0 {
         names.push("iw3");
     }
@@ -93,6 +94,9 @@ pub fn content_names(flags: ContentFlags) -> String {
         names.push("t4");
     }
     if flags.0 & !CONTENT_KNOWN != 0 {
+=======
+    if flags.0 & !(CONTENT_IW4 | CONTENT_IW5 | CONTENT_T5 | CONTENT_T6) != 0 {
+>>>>>>> /tmp/claude-0/zmhead/crates/net/src/transport/master.rs
         names.push("unknown");
     }
     names.join(",")
@@ -381,6 +385,14 @@ impl MasterLaunchIntent {
             (Some(_), Some(_)) => {
                 Err("set only one of IW4L_MASTER_HOST_NAME or IW4L_MASTER_JOIN".into())
             }
+            // bo2zm H28: Black Ops II's front end looks the relay's games up
+            // itself (Public Match joins one or hosts its own).
+            (None, None) if frame::bo2_frontend().is_some() => {
+                Ok(Self(MasterLaunchMode::Browser(BrowserConfig {
+                    target,
+                    have,
+                })))
+            }
             _ => Err("IW4L_MASTER_ADDR requires IW4L_MASTER_HOST_NAME or IW4L_MASTER_JOIN".into()),
         }
     }
@@ -509,6 +521,10 @@ pub enum MasterMenuAction {
         mode: String,
     },
     VoteToSkip,
+    // bo2zm: BO2's "kickplayer <xuid>" from the host's lobby.
+    Kick {
+        member_id: MemberId,
+    },
     LeaveLobby,
 }
 
@@ -523,6 +539,9 @@ enum MasterBridgeCommand {
         mode: String,
     },
     VoteToSkip,
+    Kick {
+        member_id: MemberId,
+    },
     MapLoaded {
         epoch: u32,
         map: u64,
@@ -644,6 +663,30 @@ impl MasterBridgeState {
         }
     }
 
+    /// bo2zm H28: the lobby's other players, in the room's order (the same order as other_names).
+    pub fn other_ids(&self) -> Vec<MemberId> {
+        let me = self.identity().member_id;
+        self.members()
+            .iter()
+            .copied()
+            .filter(|id| *id != me)
+            .collect()
+    }
+
+    /// bo2zm H28: the lobby's other players' names, in the room's order.
+    pub fn other_names(&self) -> Vec<String> {
+        let me = self.identity().member_id;
+        let names = match self {
+            Self::Hosting { member_names, .. } | Self::Joined { member_names, .. } => member_names,
+            _ => return Vec::new(),
+        };
+        self.members()
+            .iter()
+            .filter(|id| **id != me)
+            .map(|id| names.get(id).cloned().unwrap_or_else(|| "Player".into()))
+            .collect()
+    }
+
     pub fn skip_votes(&self) -> u8 {
         match *self {
             Self::Hosting { skip_votes, .. } | Self::Joined { skip_votes, .. } => skip_votes,
@@ -656,6 +699,23 @@ impl MasterBridgeState {
             Self::Hosting { in_match, .. } | Self::Joined { in_match, .. } => in_match,
             _ => false,
         }
+    }
+
+    /// bo2zm H28: the room's host removed him (BO2's PartyClient_HandleKicked).
+    pub fn kicked(&self) -> bool {
+        matches!(
+            self,
+            Self::Closed {
+                reason: SessionCloseReason::Kicked,
+                ..
+            }
+        )
+    }
+
+    /// bo2zm H28: the room closed under him for any other reason (its host
+    /// left or stopped answering: BO2's PartyClient_HostTimedOut).
+    pub fn host_gone(&self) -> bool {
+        matches!(self, Self::Closed { reason, .. } if *reason != SessionCloseReason::Kicked)
     }
 
     pub fn is_terminal(&self) -> bool {
@@ -863,7 +923,11 @@ pub fn arm_master_bridge(
             if *role != frame::RuntimeRole::Listen || udp_hub.is_some() {
                 return;
             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/transport/master.rs
             let relay = spawn_host(config.clone(), settings.player_name.clone());
+=======
+            let relay = spawn_host(config.clone(), settings.shown_name());
+>>>>>>> /tmp/claude-0/zmhead/crates/net/src/transport/master.rs
             diag::info!(
                 Net,
                 "master public lobby arming for {}",
@@ -875,7 +939,11 @@ pub fn arm_master_bridge(
             if *role != frame::RuntimeRole::Client || udp_link.is_some() {
                 return;
             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/transport/master.rs
             let relay = spawn_join(config.clone(), settings.player_name.clone());
+=======
+            let relay = spawn_join(config.clone(), settings.shown_name());
+>>>>>>> /tmp/claude-0/zmhead/crates/net/src/transport/master.rs
             diag::info!(
                 Net,
                 "master joining lobby advert {} through {} ({}/{})",
@@ -969,6 +1037,14 @@ fn apply_master_menu_action(
             }
             return;
         }
+        MasterMenuAction::Kick { member_id } => {
+            if let Some(bridge) = bridge {
+                bridge.send(MasterBridgeCommand::Kick { member_id });
+            } else {
+                diag::warn!(Net, "master lobby kick requested without a live bridge");
+            }
+            return;
+        }
         MasterMenuAction::LeaveLobby => {
             if let Some(bridge) = bridge {
                 bridge.leave();
@@ -1005,6 +1081,7 @@ fn apply_master_menu_action(
         | MasterMenuAction::UpdateLobby { .. }
         | MasterMenuAction::StartMatch { .. }
         | MasterMenuAction::VoteToSkip
+        | MasterMenuAction::Kick { .. }
         | MasterMenuAction::LeaveLobby => unreachable!(),
         MasterMenuAction::Host { map, mode } => {
             let requires = match content_required_by_map(&map) {
@@ -1014,6 +1091,8 @@ fn apply_master_menu_action(
                     return;
                 }
             };
+            // bo2zm H28: a BO2 Zombies lobby holds 4 ("1 Player (4 Max)").
+            let zombies = map.starts_with("t6:");
             intent.0 = MasterLaunchMode::Host(HostConfig {
                 auto_start_map: false,
                 target: browser.target,
@@ -1021,6 +1100,7 @@ fn apply_master_menu_action(
                 map,
                 mode,
                 max_players: match parse_max_players() {
+                    Ok(value) if zombies => value.min(4),
                     Ok(value) => value,
                     Err(error) => {
                         diag::warn!(Net, "master host settings: {error}");
@@ -2235,6 +2315,16 @@ fn handle_command(
                 ControlFrame::Request(ControlRequest {
                     request_id: take_id(request_id),
                     body: RequestBody::VoteToSkip,
+                }),
+                role,
+            )?;
+        }
+        MasterBridgeCommand::Kick { member_id } => {
+            enqueue_control(
+                control_tx,
+                ControlFrame::Request(ControlRequest {
+                    request_id: take_id(request_id),
+                    body: RequestBody::KickMember { member_id },
                 }),
                 role,
             )?;

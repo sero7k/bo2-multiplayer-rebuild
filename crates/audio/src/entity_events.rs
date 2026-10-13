@@ -342,7 +342,6 @@ fn movement_sound(
     mut gear: MessageWriter<WeaponSound>,
     mut play: MessageWriter<crate::AliasCommand>,
     mut land: MessageWriter<LandSound>,
-    bank: Option<Res<SoundBank>>,
 ) {
     let Ok(identity) = identities.get(sound.entity) else {
         diag::warn!(
@@ -423,6 +422,7 @@ fn movement_sound(
         EntityEventKind::FOOTSTEP_PRONE => StepGait::Prone,
         _ => unreachable!("footstep arm is only the four EV_FOOTSTEP_* values plus EV_JUMP"),
     };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/entity_events.rs
     // bo2mp: a jump in Black Ops II is also his launch exertion (its gear
     // rides as the alias's secondary).
     if sound.event.event == EntityEventKind::JUMP
@@ -463,6 +463,8 @@ fn movement_sound(
         });
         return;
     }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/audio/src/entity_events.rs
     let surface_flags = u32::from(sound.event.payload.surf_type) << 20;
     let (alias, fallback) = footstep_aliases(gait, surface_flags, player_view, quieter);
     footsteps.write(Footstep {
@@ -471,6 +473,23 @@ fn movement_sound(
         origin_inches,
         snd_ent: Some(u32::from(identity.number())),
     });
+    // bo2zm: inside a step trigger (Nuketown's porches, the truck bed) the
+    // map's client script sets a sound each of his steps also plays.
+    if player_view
+        && let Some(step) = presented
+            .snapshot()
+            .and_then(|snap| snap.meta.script_dvars(local.0).string("bo2zm_step"))
+            .filter(|s| !s.is_empty() && *s != "none")
+    {
+        // Only the T6 sim sets this dvar, and the alias is in BO2's bank.
+        play.write(crate::AliasCommand::Play(PlayAlias {
+            namespace: asset_core::AssetNamespace::T6,
+            alias: step.to_owned(),
+            fallback: None,
+            origin_inches: None,
+            snd_ent: Some(u32::from(identity.number())),
+        }));
+    }
     gear.write(WeaponSound {
         namespace: asset_core::AssetNamespace::Iw4,
         alias: gear_rattle_alias(gait, player_view).to_owned(),

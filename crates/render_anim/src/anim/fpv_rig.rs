@@ -462,6 +462,8 @@ impl PreparedFpvRig {
             tracker_light: assembly.tags.tracker_light,
             flash_left: assembly.tags.flash_left,
             brass_left: assembly.tags.brass_left,
+            wrist: assembly.tags.wrist,
+            weapon: assembly.tags.weapon,
         };
         let parts = assembly.dobj.all_parts();
 

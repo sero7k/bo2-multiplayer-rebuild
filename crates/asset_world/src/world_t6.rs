@@ -127,6 +127,16 @@ pub struct T6WorldLighting {
     /// The sky material's `skyBoxRotation` x, y, z, then its brightness
     /// (`skyColorParm` y), negative when the rotation's w flips z.
     pub sky: [f32; 4],
+    /// The saturation of the map's vision (`vc_FSM` w of
+    /// `vision/<map>.vision`; 1 when it has none), `None` without one.
+    pub saturation: Option<f32>,
+    /// The sky material's `skyColorParm` x (above 0: the cube is `rgb / a`,
+    /// else `rgb^2`) and w (how much of the fog the sky takes; Buried 0.16).
+    pub sky_parms: [f32; 2],
+    /// The map's vision colour grade, as the game's colour table shader
+    /// reads it (tone band slopes and offsets, the nine tone matrix rows,
+    /// gamma, saturation, blend), `None` without a vision.
+    pub grade: Option<[[f32; 4]; 14]>,
 }
 
 /// One T6 lightmap as the engine's world lightmap. A T6 lightmap is one
@@ -439,8 +449,18 @@ pub fn build_t6_world_draw(
         t5_tree_scatter_intensity: None,
         t5_tree_scatter_amount: None,
         t5_exposure_volume_count: 0,
+        t6_vision_saturation: lighting.and_then(|l| l.saturation),
+        t6_sky_parms: lighting.map(|l| l.sky_parms),
+        t6_vision_grade: lighting.and_then(|l| l.grade),
+        t6_script_grades: Vec::new(),
         t6_lights: Vec::new(),
         t6_fog_banks: Vec::new(),
+        t6_fog_modifiers: Vec::new(),
+        t6_exposure_volumes: Vec::new(),
+        t6_lut: None,
+        t6_lut_volumes: Vec::new(),
+        t6_light_tweaks: None,
+        t6_flicker: Vec::new(),
         t6_probes: Vec::new(),
         t6_layer_uvs: layer_uvs,
     })

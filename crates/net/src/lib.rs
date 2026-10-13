@@ -145,8 +145,12 @@ pub use transport::master::{
     TransportFault, content_inventory, content_names, content_required_by_map, set_friend_identity,
     set_friends,
 };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/lib.rs
 pub use master_protocol::FriendStatus;
 pub use master_protocol;
+=======
+pub use master_protocol::MemberId;
+>>>>>>> /tmp/claude-0/zmhead/crates/net/src/lib.rs
 pub use transport::meta_wire::{
     SnapshotMetaSectionBytes, WORLD_SYNC_PERIOD_TICKS, WorldObjectSyncDecoder,
     WorldObjectSyncEncoder, decode_world_object_sync_wire, encode_world_object_sync,

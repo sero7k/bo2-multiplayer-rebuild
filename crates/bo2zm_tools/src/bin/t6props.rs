@@ -42,6 +42,14 @@ fn main() -> ExitCode {
                 m.coll_lod,
                 m.coll_surfs.len()
             );
+            println!("  lighting origin offset {:?} range {}", m.lighting_origin_offset, m.lighting_origin_range);
+        for k in m.materials.iter().flatten() {
+                let mat = &capture.materials[k.index];
+                let ts = mat.technique_set.map_or("-".to_owned(), |t| {
+                    capture.technique_sets[t.index].name.clone()
+                });
+                println!("  material {} techset {ts} sort {}", mat.name, mat.sort_key);
+            }
             for c in &m.coll_surfs {
                 println!(
                     "  coll surf: {} tris, {:?}..{:?}, contents {:#x}, surf flags {:#x}",

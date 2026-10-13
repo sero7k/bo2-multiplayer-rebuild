@@ -26,6 +26,7 @@ pub(crate) fn rounds_test() -> bool {
     *ON.get_or_init(|| std::env::var("IW4L_T6_AUTOPLAY").is_ok_and(|v| v == "2"))
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
 /// BO2MP_AUTOPLAY=1: the multiplayer test player. Client 0 aims at the
 /// nearest enemy player it can see and fires, reloading when empty; with
 /// none in sight it faces the nearest. It does not move. (So a headless run
@@ -139,6 +140,67 @@ fn drive_mp(world: &mut World, now: i64) {
 }
 
 fn look(from: [f32; 3], to: [f32; 3]) -> [f32; 3] {
+=======
+/// IW4L_T6_AUTOPLAY_SEEK=1: with none in shooting range the player turns
+/// to the nearest zombie and walks up to it (Tranzit's depot sleepers).
+fn seek() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("IW4L_T6_AUTOPLAY_SEEK").is_ok_and(|v| v == "1"))
+}
+
+/// IW4L_T6_AUTOPLAY_FROM=secs: the test player only takes over from then,
+/// and its gun comes 8 s after (other test aids drive him before that).
+fn from_ms() -> i64 {
+    static MS: OnceLock<i64> = OnceLock::new();
+    *MS.get_or_init(|| {
+        std::env::var("IW4L_T6_AUTOPLAY_FROM")
+            .ok()
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .map_or(0, |s| (s * 1000.0) as i64)
+    })
+}
+
+/// IW4L_T6_AUTOPLAY_UNTIL=secs: the test player lets go again then, so other
+/// test aids drive him after (TranZit's EMP lamp hops after the tower kills).
+fn until_ms() -> i64 {
+    static MS: OnceLock<i64> = OnceLock::new();
+    *MS.get_or_init(|| {
+        std::env::var("IW4L_T6_AUTOPLAY_UNTIL")
+            .ok()
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .map_or(i64::MAX, |s| (s * 1000.0) as i64)
+    })
+}
+
+/// IW4L_T6_AUTOPLAY_RANGE=units: the test player only shoots ones this near
+/// (450 by default); TranZit's tower kills count within 420 of the tower.
+fn fire_range() -> f32 {
+    static R: OnceLock<f32> = OnceLock::new();
+    *R.get_or_init(|| {
+        std::env::var("IW4L_T6_AUTOPLAY_RANGE")
+            .ok()
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .unwrap_or(450.0)
+    })
+}
+
+/// IW4L_T6_AUTOPLAY_KNIFE=1: the test player never shoots, only knifes the
+/// ones that reach it (the knife's blood gets seen every run).
+fn knife_only() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("IW4L_T6_AUTOPLAY_KNIFE").is_ok_and(|v| v == "1"))
+}
+
+/// IW4L_T6_AUTOPLAY_KNIFE=0: the test player never knifes, and shoots the
+/// ones in reach too (Richtofen's tower step counts only explosive and
+/// projectile kills inside the tower, where they crowd him).
+fn never_knife() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("IW4L_T6_AUTOPLAY_KNIFE").is_ok_and(|v| v == "0"))
+}
+
+pub(super) fn look(from: [f32; 3], to: [f32; 3]) -> [f32; 3] {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
     let d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
     let yaw = d[1].atan2(d[0]).to_degrees();
     let flat = (d[0] * d[0] + d[1] * d[1]).sqrt();
@@ -166,6 +228,17 @@ fn head_of(world: &mut World, n: u32, close: bool) -> Option<[f32; 3]> {
             .iter()
             .find(|row| row.owner.script_model() == Some(id))?;
         let bones = &row.dobj.as_ref()?.current_collision.as_ref()?.bones;
+        // IW4L_T6_AIM_PART=<part>[,<part>...]: those boxes (BO2's part
+        // classes: 2 head, 4-6 torso, 13-16 legs, 17-18 feet).
+        static AIM: OnceLock<Vec<u8>> = OnceLock::new();
+        let aim = AIM.get_or_init(|| {
+            std::env::var("IW4L_T6_AIM_PART")
+                .map(|v| v.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+                .unwrap_or_default()
+        });
+        if let Some(b) = bones.iter().find(|b| aim.contains(&b.part_classification)) {
+            return Some(b.center);
+        }
         // The head up close, else the chest (the biggest box, steady
         // while it walks).
         let (first, second) = if close { (2, 4) } else { (4, 2) };
@@ -179,20 +252,36 @@ fn head_of(world: &mut World, n: u32, close: bool) -> Option<[f32; 3]> {
 }
 
 pub(crate) fn drive(world: &mut World, now: i64) {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
     if mp_enabled() && world.resource::<Zm>().mp {
         drive_mp(world, now);
+=======
+    if !enabled() || now < from_ms() || now >= until_ms() {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
         return;
     }
-    if !enabled() {
+    // An IW4L_T6_PLACE entry drives him meanwhile.
+    if super::use_test::placing(now) {
         return;
     }
     let client = ClientId(0);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
     if rounds_test() {
+=======
+    // The rounds test's gun and ammo; with IW4L_T6_AUTOPLAY_GUN named the
+    // damage-on player gets them too (a soak that lasts past round 9).
+    if rounds_test() || std::env::var_os("IW4L_T6_AUTOPLAY_GUN").is_some() {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
         rounds_kit(world, now, client);
     }
     let Some(ps) = frame(world).player(client).copied() else {
         return;
     };
+    // Fire with equipment in hand sets it down (TranZit's turbine): he
+    // holds still until he has a gun up again.
+    if super::weapon_text(world, ps.weapon as u32).starts_with("equip_") {
+        return;
+    }
     let eye = [
         ps.origin[0],
         ps.origin[1],
@@ -235,7 +324,20 @@ pub(crate) fn drive(world: &mut World, now: i64) {
         zm.autoplay_fire = !zm.autoplay_fire;
         zm.autoplay_fire
     };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
     let view = target.map_or(ps.viewangles, |t| look(eye, t));
+=======
+    // None in sight: face the nearest one (Tranzit's depot zombies lie
+    // asleep until a player comes close; nothing comes to him).
+    let mut view = match (target, closest) {
+        (Some(t), _) => look(eye, t),
+        (None, Some((_, o))) if seek() => {
+            let v = look(eye, [o[0], o[1], o[2] + 30.0]);
+            [0.0, v[1], 0.0]
+        }
+        _ => ps.viewangles,
+    };
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
     let (clip, stock) = {
         let f = frame(world);
         (
@@ -245,12 +347,17 @@ pub(crate) fn drive(world: &mut World, now: i64) {
     };
     // Aim down the sights at one in range; shoot it when near enough to hit.
     let range = seen.first().map_or(f32::MAX, |s| s.0);
+    // A Jet Gun is held, not tapped: past a fifth of its spin it pulls and
+    // grinds (`_zm_weap_jetgun`); a player lets go before it overheats.
+    let jet = super::jetgun::owns_trigger(&super::weapon_text(world, ps.weapon));
     let mut press = 0;
-    if range < 700.0 {
+    if range < 700.0 && !jet {
         press |= buttons::ADS;
     }
-    let close = closest.is_some_and(|(d, _)| d < 64.0);
-    if close {
+    let close = closest.is_some_and(|(d, _)| d < 64.0) && !never_knife();
+    if jet && target.is_some() && range < fire_range() && super::jetgun::heat(world, client.0) < 85.0 {
+        press |= buttons::ATTACK;
+    } else if close {
         // Knife one in reach (a fresh press each time).
         if fire_phase {
             press |= weapon_iw4::BUTTON_MELEE;
@@ -260,6 +367,7 @@ pub(crate) fn drive(world: &mut World, now: i64) {
         if fire_phase {
             press |= buttons::RELOAD;
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
     } else if target.is_some() && range < 450.0 && ps.f_weapon_pos_frac > 0.9 && fire_phase {
         press |= buttons::ATTACK;
     }
@@ -269,11 +377,62 @@ pub(crate) fn drive(world: &mut World, now: i64) {
         && (64.0..110.0).contains(&d)
     {
         let wish = [ps.origin[0] - o[0], ps.origin[1] - o[1]];
+=======
+    } else if target.is_some()
+        && range < fire_range()
+        && ps.f_weapon_pos_frac > 0.9
+        && fire_phase
+        && !knife_only()
+    {
+        press |= buttons::ATTACK;
+    } else if seek()
+        && target.is_none()
+        && closest.is_some_and(|(d, _)| d < 2400.0)
+        && clip > 0
+        && now % 3000 < i64::from(crate::MATCH_TICK_MS)
+    {
+        // Nothing in sight but one near: a shot every 3 s, as a player
+        // would, wakes the sleepers a gunshot reaches (2400 units).
+        press |= buttons::ATTACK;
+    }
+    // Back away from one that is close; walk up to the nearest when none
+    // is in shooting range (knifed or woken once in reach).
+    let (mut forward, mut right) = (0i8, 0i8);
+    let walk_to = match closest {
+        Some((d, o)) if seek() && d >= 64.0 && range >= 450.0 => Some((1.0, o)),
+        Some((d, o)) if (64.0..110.0).contains(&d) => Some((-1.0, o)),
+        _ => None,
+    };
+    if let Some((sign, o)) = walk_to {
+        let wish = [(ps.origin[0] - o[0]) * -sign, (ps.origin[1] - o[1]) * -sign];
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
         let len = (wish[0] * wish[0] + wish[1] * wish[1]).sqrt().max(1e-3);
         let (s, c) = view[1].to_radians().sin_cos();
         let (fw, rt) = ([c, s], [s, -c]);
         forward = (((wish[0] * fw[0] + wish[1] * fw[1]) / len) * 127.0).round() as i8;
         right = (((wish[0] * rt[0] + wish[1] * rt[1]) / len) * 127.0).round() as i8;
+    }
+    // Mob of the Dead: a ghost in Afterlife walks back to its body and
+    // holds Use on it.
+    if let Some(corpse) = super::autoplay_prison::afterlife_corpse(world, client) {
+        let toward = super::autoplay_prison::body_waypoint(world, ps.origin, corpse);
+        (press, forward, right, view) =
+            super::autoplay_prison::revive_keys_via(ps.origin, eye, corpse, toward);
+        if let Some(aim) = super::autoplay_prison::ghost_zap_brutus(world, now, ps.origin, eye) {
+            // Tapped, so a one-shot weapon fires again.
+            let tap = if now % 400 < 200 { buttons::ATTACK } else { 0 };
+            (press, forward, right, view) = (tap, 0, 0, aim);
+        }
+        if now % 5000 < i64::from(crate::MATCH_TICK_MS) {
+            diag::info!(
+                Sim,
+                "bo2zm t6 autoplay afterlife at {}s: at {:?} body {:?} walking to {:?}",
+                now / 1000,
+                ps.origin.map(f32::round),
+                corpse.map(f32::round),
+                toward.map(f32::round)
+            );
+        }
     }
     // The view turns the way a script's setplayerangles turns it: the delta
     // under the client's own command angles, so the client's camera follows.
@@ -302,7 +461,7 @@ pub(crate) fn drive(world: &mut World, now: i64) {
     }
     // A status line every five seconds.
     if now % 5000 < i64::from(crate::MATCH_TICK_MS) {
-        let (round, score) = with_vm(world, |vm, world| {
+        let (round, score, threads) = with_vm(world, |vm, world| {
             let level = vm.level;
             let round = {
                 let f = vm.intern("round_number");
@@ -318,18 +477,43 @@ pub(crate) fn drive(world: &mut World, now: i64) {
                     vm.get_field(world, o, f)
                 })
                 .unwrap_or_default();
-            (vm.to_text(&round), vm.to_text(&score))
+            (vm.to_text(&round), vm.to_text(&score), vm.thread_count())
         })
         .unwrap_or_default();
         diag::info!(
             Sim,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
             "bo2zm t6 autoplay at {}s: round {round}, points {score}, health {}, ammo {clip}+{stock}, zombies alive {}, in sight {}",
             now / 1000,
             ps.health,
             living.len(),
             seen.len()
+=======
+            "bo2zm t6 autoplay at {}s: round {round}, points {score}, health {}, ammo {clip}+{stock}, zombies alive {}, in sight {}, at ({:.0} {:.0} {:.0}), nearest {:.0}, threads {threads}",
+            now / 1000,
+            ps.health,
+            living.len(),
+            seen.len(),
+            ps.origin[0],
+            ps.origin[1],
+            ps.origin[2],
+            closest.map_or(-1.0, |c| c.0)
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
         );
     }
+}
+
+/// Census: a zombie tilted off upright (pitch or roll past 5) or linked to
+/// an entity, e.g. " tilt (80 90 0) on 1234".
+fn tilt_text(e: &super::Ent) -> String {
+    let mut t = String::new();
+    if e.angles[0].abs() > 5.0 || e.angles[2].abs() > 5.0 {
+        t += &format!(" tilt ({:.0} {:.0} {:.0})", e.angles[0], e.angles[1], e.angles[2]);
+    }
+    if let Some((p, ..)) = e.link {
+        t += &format!(" on {p}");
+    }
+    t
 }
 
 /// IW4L_T6_CENSUS=1: every 10 s, each living zombie: state, animation,
@@ -375,9 +559,20 @@ pub(crate) fn census_test(world: &mut World, now: i64) {
     };
     let mut last = LAST.lock().unwrap();
     let prev = last.get_or_insert_with(Default::default);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
     // Each zombie's walk/run/sprint (the scripts' zombie_move_speed).
+=======
+    // Each zombie's walk/run/sprint (the scripts' zombie_move_speed), and
+    // the script fields named in IW4L_T6_CENSUS_FIELDS=a,b,... as [a=.. b=..].
+    let extra = std::env::var("IW4L_T6_CENSUS_FIELDS").unwrap_or_default();
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
     let speeds: std::collections::BTreeMap<u32, String> = with_vm(world, |vm, world| {
         let f = vm.intern("zombie_move_speed");
+        let fields: Vec<(&str, _)> = extra
+            .split(',')
+            .filter(|k| !k.is_empty())
+            .map(|k| (k, vm.intern(k)))
+            .collect();
         let zm = world.resource::<Zm>();
         let objs: Vec<(u32, _)> = zm
             .actors
@@ -386,7 +581,21 @@ pub(crate) fn census_test(world: &mut World, now: i64) {
             .filter_map(|(n, _)| Some((*n, zm.ents.get(n)?.obj?)))
             .collect();
         objs.into_iter()
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
             .map(|(n, o)| (n, vm.to_text(&vm.raw_field(o, f))))
+=======
+            .map(|(n, o)| {
+                let mut t = vm.to_text(&vm.raw_field(o, f));
+                if !fields.is_empty() {
+                    let kv: Vec<String> = fields
+                        .iter()
+                        .map(|(k, id)| format!("{k}={}", vm.to_text(&vm.raw_field(o, *id))))
+                        .collect();
+                    t += &format!("[{}]", kv.join(" "));
+                }
+                (n, t)
+            })
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
             .collect()
     })
     .unwrap_or_default();
@@ -411,7 +620,8 @@ pub(crate) fn census_test(world: &mut World, now: i64) {
                     a.path_i,
                     a.path.len(),
                     a.goal.map(|g| [g[0].round(), g[1].round(), g[2].round()])
-                ) + &if (0.0..24.0).contains(&moved) && a.script == "move" {
+                ) + &tilt_text(e)
+                    + &if (0.0..24.0).contains(&moved) && a.script == "move" {
                     // A stalled one: where it is heading next.
                     let pts: Vec<String> = a
                         .path
@@ -621,13 +831,59 @@ pub(crate) fn open_all_test(world: &mut World, now: i64) {
     if buy && (5000..5000 + tick).contains(&now) {
         give_points(world, 100_000);
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
     // One a tick from 5.5 s (a door's script waits on its own trigger).
     if buy && (5500..8500).contains(&now) {
         let i = ((now - 5500) / tick) as usize;
+=======
+    // One a tick from 5.5 s, or once he is in play if later (a debris
+    // pile's script refuses a buyer who isn't alive; Origins' intro keeps
+    // him a spectator past 5.5 s). Again 15 s on for those whose flag is
+    // still clear.
+    static START: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(-1);
+    if buy && now >= 5500 && START.load(std::sync::atomic::Ordering::Relaxed) < 0 {
+        let playing = world
+            .resource::<Zm>()
+            .players
+            .get(&0)
+            .is_some_and(|p| p.sessionstate == "playing");
+        if playing {
+            START.store(now, std::sync::atomic::Ordering::Relaxed);
+            give_points(world, 100_000);
+        }
+    }
+    let first = START.load(std::sync::atomic::Ordering::Relaxed);
+    let pass = [first, first + 15000]
+        .into_iter()
+        .find(|t| first >= 0 && (*t..*t + 3000).contains(&now));
+    if let (true, Some(start)) = (buy, pass) {
+        // The next one by entity number (a bought debris pile deletes its
+        // sibling triggers, so a list index would skip some).
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        if now - start < tick {
+            NEXT.store(0, std::sync::atomic::Ordering::Relaxed);
+        }
+        let next = NEXT.load(std::sync::atomic::Ordering::Relaxed);
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
         with_vm(world, |vm, world| {
             let (tn, flag_f) = (vm.intern("targetname"), vm.intern("script_flag"));
+            let flag_k = vm.intern("flag");
+            let flags = match vm.raw_field(vm.level, flag_k) {
+                gsc_t6::Value::Array(a) => Some(a),
+                _ => None,
+            };
+            let set = |vm: &mut gsc_t6::Vm<World>, f: &str| {
+                flags.as_ref().is_some_and(|a| {
+                    a.get(&gsc_t6::Key::Str(vm.intern(f)))
+                        .is_some_and(|v| gsc_t6::truthy(&v))
+                })
+            };
             let zm = world.resource::<Zm>();
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
             let mut trigs: Vec<(u32, gsc_t6::ObjRef)> = zm
+=======
+            let mut trigs: Vec<(u32, gsc_t6::ObjRef, String)> = zm
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
                 .ents
                 .iter()
                 .filter(|(_, e)| e.classname.starts_with("trigger_use"))
@@ -636,14 +892,33 @@ pub(crate) fn open_all_test(world: &mut World, now: i64) {
                     let name = vm.to_text(&vm.raw_field(o, tn));
                     let flag = vm.to_text(&vm.raw_field(o, flag_f));
                     ((name == "zombie_door" || name == "zombie_debris")
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
                         && (only.is_empty() || only.contains(&flag)))
                     .then_some((*n, o))
+=======
+                        && (only.is_empty() || only.contains(&flag))
+                        && (start == first || !set(vm, &flag)))
+                    .then_some((*n, o, flag))
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
                 })
                 .collect();
             trigs.sort_by_key(|t| t.0);
             let player = zm.players.get(&0).map(|p| p.obj);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
             if let (Some((n, t)), Some(p)) = (trigs.get(i).copied(), player) {
                 diag::info!(Sim, "bo2zm t6 open all: buying ent{n}");
+=======
+            let state = zm.players.get(&0).map(|p| p.sessionstate.clone());
+            if let (Some((n, t, flag)), Some(p)) =
+                (trigs.iter().find(|t| t.0 >= next).cloned(), player)
+            {
+                let health = frame(world).player(ClientId(0)).map(|ps| ps.health);
+                diag::info!(
+                    Sim,
+                    "bo2zm t6 open all: buying ent{n} ({flag}); player {state:?} health {health:?}"
+                );
+                NEXT.store(n + 1, std::sync::atomic::Ordering::Relaxed);
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
                 // (who, force): forced, as the scripts' own open-all does.
                 vm.notify_str(
                     world,
@@ -654,19 +929,107 @@ pub(crate) fn open_all_test(world: &mut World, now: i64) {
             }
         });
     }
+    if buy && only.is_empty() && (8600..8600 + tick).contains(&now) {
+        break_sloth_barricades(world);
+    }
+}
+
+/// Buried's wooden barricades (`sloth_barricade` triggers: the church,
+/// jail, gun store, mansion lawn ...) only break for Leroy. Open them as his
+/// break does: the zone flag set, the pieces hidden by the map's own
+/// `hide_sloth_barrier`, the trigger's watcher ended.
+fn break_sloth_barricades(world: &mut World) {
+    with_vm(world, |vm, world| {
+        let (tn, tg, flag_f) = (
+            vm.intern("targetname"),
+            vm.intern("target"),
+            vm.intern("script_flag"),
+        );
+        let objs: Vec<gsc_t6::ObjRef> = world
+            .resource::<Zm>()
+            .ents
+            .values()
+            .filter_map(|e| e.obj)
+            .collect();
+        let named = |vm: &mut gsc_t6::Vm<World>, o, f| vm.to_text(&vm.raw_field(o, f));
+        let trigs: Vec<gsc_t6::ObjRef> = objs
+            .iter()
+            .copied()
+            .filter(|&o| named(vm, o, tn) == "sloth_barricade")
+            .collect();
+        let level = gsc_t6::Value::Object(vm.level);
+        for t in trigs {
+            let (flag, target) = (named(vm, t, flag_f), named(vm, t, tg));
+            diag::info!(Sim, "bo2zm t6 open all: breaking barricade ({flag})");
+            if flag != "undefined" && !flag.is_empty() {
+                let name = vm.string(&flag);
+                vm.spawn_named(
+                    world,
+                    "common_scripts/utility",
+                    "flag_set",
+                    level.clone(),
+                    vec![name],
+                );
+            }
+            for &p in &objs {
+                if !target.is_empty() && named(vm, p, tn) == target {
+                    vm.spawn_named(
+                        world,
+                        "maps/mp/zombies/_zm_ai_sloth",
+                        "hide_sloth_barrier",
+                        gsc_t6::Value::Object(p),
+                        Vec::new(),
+                    );
+                }
+            }
+            vm.notify_str(world, t, "maxis_minigame_opens_barricade", &[]);
+            vm.spawn_named(
+                world,
+                "maps/mp/zombies/_zm_ai_sloth",
+                "hide_sloth_barrier",
+                gsc_t6::Value::Object(t),
+                Vec::new(),
+            );
+        }
+    });
 }
 
 /// IW4L_T6_BUY=<wall weapon> (e.g. m14_zm): at 5 s the doors open and he
 /// gets 10000 points; at 6 s the player is put in front of that wall buy,
-/// looking at it, and holds use from 7 to 7.5 s; at 9 s his weapons and
-/// points are logged.
+/// looking at it, and presses use at 7, 7.7 and 8.4 s; at 9 s the stub's
+/// zone, his weapons and points are logged.
+/// `a,b,c` buys each in turn 5 s apart; `@<seconds>` starts the first at
+/// that time instead of at 5 s (Mob: after the start Afterlife).
+/// `name#n`: the n-th of that name's chalks from 0; `name#stub`: the one
+/// nearest its registered use trigger (TranZit's Galvaknuckles: other
+/// modes' chalks come first; the Diner roof's is the one spawned).
 pub(crate) fn buy_test(world: &mut World, now: i64) {
-    static WANT: OnceLock<Option<String>> = OnceLock::new();
-    let Some(want) = WANT
-        .get_or_init(|| std::env::var("IW4L_T6_BUY").ok())
+    static WANT: OnceLock<Option<(Vec<String>, i64)>> = OnceLock::new();
+    let Some((want, shift)) = WANT
+        .get_or_init(|| {
+            let v = std::env::var("IW4L_T6_BUY").ok()?;
+            let (names, at) = match v.split_once('@') {
+                Some((n, s)) => (n, s.parse::<f32>().map_or(0, |s| (s * 1000.0) as i64 - 5000)),
+                None => (v.as_str(), 0),
+            };
+            Some((names.split(',').map(str::to_owned).collect(), at))
+        })
         .clone()
     else {
         return;
+    };
+    for (k, w) in want.iter().enumerate() {
+        buy_one(world, now - shift - 5000 * k as i64, w);
+    }
+}
+
+fn buy_one(world: &mut World, now: i64, want: &str) {
+    // `#stub`: the chalk nearest its registered use trigger (the one the
+    // map spawned; the others are other modes' chalks).
+    let (want, nth) = match want.split_once('#') {
+        Some((w, "stub")) => (w, None),
+        Some((w, n)) => (w, Some(n.parse::<usize>().unwrap_or(0))),
+        None => (want, Some(0)),
     };
     let client = ClientId(0);
     let tick = i64::from(crate::MATCH_TICK_MS);
@@ -686,22 +1049,56 @@ pub(crate) fn buy_test(world: &mut World, now: i64) {
             };
             let key = vm.intern("zombie_weapon_upgrade");
             let (o, a) = (vm.intern("origin"), vm.intern("angles"));
+            let mut chalks = Vec::new();
             for v in arr.snapshot().values_in_order() {
                 let gsc_t6::Value::Object(s) = v else {
                     continue;
                 };
                 let name = vm.raw_field(*s, key);
-                if vm.to_text(&name) == want {
-                    let origin = vm.raw_field(*s, o).as_vec3()?;
+                if vm.to_text(&name) == want
+                    && let Some(origin) = vm.raw_field(*s, o).as_vec3()
+                {
                     let angles = vm.raw_field(*s, a).as_vec3().unwrap_or([0.0; 3]);
-                    return Some((origin, angles));
+                    chalks.push((origin, angles));
                 }
             }
-            None
+            if let Some(n) = nth {
+                return chalks.get(n).copied();
+            }
+            let (ut, ts) = (vm.intern("_unitriggers"), vm.intern("trigger_stubs"));
+            let stub = match vm.raw_field(vm.level, ut).as_obj().map(|u| vm.raw_field(u, ts)) {
+                Some(gsc_t6::Value::Array(a)) => a
+                    .read()
+                    .values_in_order()
+                    .filter_map(gsc_t6::Value::as_obj)
+                    .find(|&s| vm.to_text(&vm.raw_field(s, key)) == want)
+                    .and_then(|s| vm.raw_field(s, o).as_vec3()),
+                _ => None,
+            }?;
+            let d = |p: &[f32; 3]| (0..3).map(|i| (p[i] - stub[i]).powi(2)).sum::<f32>();
+            chalks.into_iter().min_by(|x, y| d(&x.0).total_cmp(&d(&y.0)))
         })
         .flatten();
         let Some((origin, angles)) = spot else {
-            diag::warn!(Sim, "bo2zm t6 buy test: no wall buy {want}");
+            let names = with_vm(world, |vm, _| {
+                let f = vm.intern("struct");
+                let gsc_t6::Value::Array(arr) = vm.raw_field(vm.level, f) else {
+                    return String::new();
+                };
+                let key = vm.intern("zombie_weapon_upgrade");
+                let mut out = Vec::new();
+                for v in arr.snapshot().values_in_order() {
+                    if let gsc_t6::Value::Object(s) = v {
+                        let n = vm.raw_field(*s, key);
+                        if !matches!(n, gsc_t6::Value::Undefined) {
+                            out.push(vm.to_text(&n));
+                        }
+                    }
+                }
+                out.join(" ")
+            })
+            .unwrap_or_default();
+            diag::warn!(Sim, "bo2zm t6 buy test: no wall buy {want}; the map has [{names}]");
             return;
         };
         // A wall buy faces its struct's left (the scripts' require_look_from
@@ -749,7 +1146,21 @@ pub(crate) fn buy_test(world: &mut World, now: i64) {
             view[1]
         );
     }
-    if (7000..7500).contains(&now) {
+    // Three fresh presses, as a player presses again when nothing happens:
+    // the room's use trigger can reach him only after the first one (the
+    // unitrigger manager hands out only stubs in active zones). Not at 7.7 s
+    // once he has the gun; the 8.4 s press is always made: on a gun bought
+    // with full ammo it must charge nothing (BO2's `ammo_give`).
+    if [7000, 7700, 8400].iter().any(|t| (*t..*t + 300).contains(&now)) {
+        let has = {
+            let f = frame(world);
+            crate::script_player::weapons(&f, client, crate::script_player::WeaponList::All)
+                .into_iter()
+                .any(|w| crate::script_player::weapon_name(&f, w).starts_with(want))
+        };
+        if has && now < 8400 {
+            return;
+        }
         let mut req = world.resource_mut::<crate::step::StepRequest>();
         for (id, cmd) in &mut req.input.cmds {
             if *id == client {
@@ -758,6 +1169,7 @@ pub(crate) fn buy_test(world: &mut World, now: i64) {
         }
     }
     if (9000..9000 + tick).contains(&now) {
+        diag::info!(Sim, "bo2zm t6 buy test: {want} {}", wallbuy_stub(world, want));
         let names: Vec<String> = {
             let f = frame(world);
             crate::script_player::weapons(&f, client, crate::script_player::WeaponList::All)
@@ -771,9 +1183,70 @@ pub(crate) fn buy_test(world: &mut World, now: i64) {
             .get(&0)
             .cloned()
             .unwrap_or_default();
-        diag::info!(Sim, "bo2zm t6 buy test: weapons {names:?}, hint {hint:?}");
+        let score = frame(world).client_meta(client).map_or(0, |m| m.score);
+        // The gun's clip/stock after the buy and the press on a full gun.
+        let ammo = super::weapon(world, want).ok().map(|w| {
+            let f = frame(world);
+            (
+                crate::script_player::ammo_clip(&f, client, w),
+                crate::script_player::ammo_stock(&f, client, w),
+            )
+        });
+        diag::info!(
+            Sim,
+            "bo2zm t6 buy test: weapons {names:?}, points {score}, ammo {ammo:?}, hint {hint:?}"
+        );
     }
 }
+
+/// The wall buy's unitrigger stub as the manager sees it (it only offers
+/// stubs whose `in_zone` is in `level.active_zone_names`): zone, place,
+/// box size, and the active zones.
+fn wallbuy_stub(world: &mut World, want: &str) -> String {
+    with_vm(world, |vm, _| {
+        let (ut, ts, wu) = (
+            vm.intern("_unitriggers"),
+            vm.intern("trigger_stubs"),
+            vm.intern("zombie_weapon_upgrade"),
+        );
+        let (iz, o, azn) = (vm.intern("in_zone"), vm.intern("origin"), vm.intern("active_zone_names"));
+        let size = [
+            vm.intern("script_length"),
+            vm.intern("script_width"),
+            vm.intern("script_height"),
+        ];
+        let active: Vec<String> = match vm.raw_field(vm.level, azn) {
+            gsc_t6::Value::Array(a) => {
+                let vals: Vec<gsc_t6::Value> = a.read().values_in_order().cloned().collect();
+                vals.iter().map(|v| vm.to_text(v)).collect()
+            }
+            _ => Vec::new(),
+        };
+        let stubs: Vec<gsc_t6::ObjRef> = match vm.raw_field(vm.level, ut).as_obj().map(|u| vm.raw_field(u, ts)) {
+            Some(gsc_t6::Value::Array(a)) => a.read().values_in_order().filter_map(gsc_t6::Value::as_obj).collect(),
+            _ => Vec::new(),
+        };
+        let Some(s) = stubs.into_iter().find(|&s| vm.to_text(&vm.raw_field(s, wu)) == want) else {
+            return format!("no stub; active zones {active:?}");
+        };
+        let at = vm.raw_field(s, o).as_vec3().unwrap_or_default();
+        let dims: Vec<String> = size.iter().map(|&k| vm.to_text(&vm.raw_field(s, k))).collect();
+        format!(
+            "stub in_zone {:?} at ({:.0} {:.0} {:.0}) box {}; active zones {active:?}",
+            vm.to_text(&vm.raw_field(s, iz)),
+            at[0],
+            at[1],
+            at[2],
+            dims.join(" ")
+        )
+    })
+    .unwrap_or_default()
+}
+
+/// When the box test's clock starts (its "11.5 s"), if not at 0: Mob's
+/// door sweep once it is done.
+pub(crate) static BOX_BASE: std::sync::atomic::AtomicI64 =
+    std::sync::atomic::AtomicI64::new(i64::MIN);
 
 /// IW4L_T6_BOX=1: the magic box. At 12 s the player gets 10000 points and
 /// is put on the active box's use side, looking at it; he presses use at
@@ -784,6 +1257,21 @@ pub(crate) fn box_test(world: &mut World, now: i64) {
     if !*ON.get_or_init(|| std::env::var("IW4L_T6_BOX").is_ok_and(|v| v != "move" && v != "bear")) {
         return;
     }
+    // With Mob's door sweep the clock starts when every door is bought.
+    let base = BOX_BASE.load(std::sync::atomic::Ordering::Relaxed);
+    if base == i64::MIN && std::env::var_os("IW4L_T6_DOORS").is_some() {
+        return;
+    }
+    // IW4L_T6_BOX_AT=<seconds>: the "12 s" step comes then instead
+    // (Ascension's intro lander holds the player until about 25 s).
+    static AT: OnceLock<i64> = OnceLock::new();
+    let shift = *AT.get_or_init(|| {
+        std::env::var("IW4L_T6_BOX_AT")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+            .map_or(0, |s| (s * 1000.0) as i64 - 12000)
+    });
+    let now = if base == i64::MIN { now - shift } else { now - base };
     let client = ClientId(0);
     let tick = i64::from(crate::MATCH_TICK_MS);
     if (11000..11000 + tick).contains(&now) {
@@ -823,7 +1311,7 @@ pub(crate) fn box_test(world: &mut World, now: i64) {
 
 /// The doors and debris opened (the box may start behind them): the zone
 /// flags Nuketown's own zone init names.
-fn open_all_zones(world: &mut World) {
+pub(super) fn open_all_zones(world: &mut World) {
     with_vm(world, |vm, world| {
         let level = gsc_t6::Value::Object(vm.level);
         for f in [
@@ -847,11 +1335,39 @@ fn open_all_zones(world: &mut World) {
                 vec![name],
             );
         }
+        // Other maps: every zone in `level.zones` enabled by the zone
+        // manager's own enable_zone (Tranzit's bus stops, the box spots).
+        let zones = vm.intern("zones");
+        let names: Vec<gsc_t6::Value> = match vm.raw_field(vm.level, zones) {
+            gsc_t6::Value::Array(a) => a
+                .read()
+                .keys()
+                .filter_map(|k| match k {
+                    gsc_t6::Key::Str(s) => Some(gsc_t6::Value::Str(s)),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        diag::info!(Sim, "bo2zm t6: open all zones: {} zones enabled", names.len());
+        for name in names {
+            vm.spawn_named(
+                world,
+                "maps/mp/zombies/_zm_zonemgr",
+                "enable_zone",
+                level.clone(),
+                vec![name],
+            );
+        }
     });
 }
 
 /// Player 0's points set (the scripts' `score`).
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
 fn give_points(world: &mut World, points: i32) {
+=======
+pub(super) fn give_points(world: &mut World, points: i32) {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
     with_vm(world, |vm, world| {
         if let Some(p) = world.resource::<Zm>().players.get(&0).map(|p| p.obj) {
             let f = vm.intern("score");
@@ -891,8 +1407,122 @@ fn active_box(world: &mut World) -> Option<([f32; 3], [f32; 3])> {
 /// The player put on the showing box's use side, looking at it; the box's
 /// place.
 fn stand_at_box(world: &mut World, client: ClientId) -> Option<[f32; 3]> {
+    stand_at_box_side(world, client, 0.0)
+}
+
+/// The showing box's use trigger as BO2's script made it
+/// (`level.chests[level.chest_index].unitrigger_stub`): its origin, angles
+/// and box (script_width, script_length, script_height).
+fn box_stub(world: &mut World) -> Option<([f32; 3], [f32; 3], [f32; 3])> {
+    with_vm(world, |vm, _| {
+        let (ch, ci, us) = (vm.intern("chests"), vm.intern("chest_index"), vm.intern("unitrigger_stub"));
+        let index = usize::try_from(vm.raw_field(vm.level, ci).as_int()?).ok()?;
+        let chest = match vm.raw_field(vm.level, ch) {
+            gsc_t6::Value::Array(a) => a.snapshot().values_in_order().nth(index).cloned(),
+            _ => None,
+        }?;
+        let stub = vm.raw_field(chest.as_obj()?, us).as_obj()?;
+        let mut field = |name: &str| {
+            let f = vm.intern(name);
+            vm.raw_field(stub, f)
+        };
+        let origin = field("origin").as_vec3()?;
+        let angles = field("angles").as_vec3().unwrap_or([0.0; 3]);
+        let dims = ["script_width", "script_length", "script_height"]
+            .map(|n| field(n).as_float().unwrap_or(64.0));
+        Some((origin, angles, dims))
+    })
+    .flatten()
+}
+
+/// The player put on the floor inside the showing box's use trigger,
+/// looking at it: BO2 offers the box only to a player touching that
+/// trigger whose origin + 35 is within 42 units of the trigger's height
+/// (`get_closest_unitriggers`). Die Rise's first box stands in the
+/// upside-down building, turned over, so the side its turn points to is not
+/// its use side and the floor is not under its origin: the trigger is the
+/// script's own answer. False: no trigger, or no floor inside it.
+fn stand_in_box_stub(world: &mut World, client: ClientId, box_at: [f32; 3], box_angles: [f32; 3]) -> bool {
+    use crate::bullet_collision::{MASK_PLAYER_SOLID, PLAYER_MAXS, PLAYER_MINS};
+    use gsc_t6::math::{angle_vectors, dot};
+    let Some((at, angles, [w, l, h])) = box_stub(world) else {
+        return false;
+    };
+    let (f, r, u) = angle_vectors(angles);
+    let half: [f32; 3] = std::array::from_fn(|i| (PLAYER_MAXS[i] - PLAYER_MINS[i]) * 0.5);
+    let reach = |a: [f32; 3]| a[0].abs() * half[0] + a[1].abs() * half[1] + a[2].abs() * half[2];
+    // From the trigger's edge away from the box, in towards it and past.
+    let out = [at[0] - box_at[0], at[1] - box_at[1], 0.0];
+    let sign = if dot(out, r) >= 0.0 { 1.0 } else { -1.0 };
+    let edge = l * 0.5 + reach(r) - 2.0;
+    let mut spot = None;
+    'search: for step in 0..=18 {
+        let ro = sign * (edge - step as f32 * 4.0);
+        for fo in [0.0, 16.0, -16.0, 32.0, -32.0] {
+            let x = at[0] + f[0] * fo + r[0] * ro;
+            let y = at[1] + f[1] * fo + r[1] * ro;
+            // From just over the trigger, or lower when that starts in the
+            // ceiling (the upside-down box hangs from it, a hull's height up).
+            let down = [x, y, at[2] - 80.0];
+            let Some((top, t)) = [at[2] + 6.0, at[2] - 30.0].into_iter().find_map(|z| {
+                let top = [x, y, z];
+                let t = frame(world).trace_static_world(top, down, PLAYER_MINS, PLAYER_MAXS, MASK_PLAYER_SOLID);
+                (t.startsolid == 0).then_some((top, t))
+            }) else {
+                continue;
+            };
+            if t.fraction >= 1.0 {
+                continue;
+            }
+            let feet: [f32; 3] = std::array::from_fn(|i| top[i] + (down[i] - top[i]) * t.fraction);
+            if (feet[2] + 35.0 - at[2]).abs() > 42.0 {
+                continue;
+            }
+            let c: [f32; 3] =
+                std::array::from_fn(|i| feet[i] + (PLAYER_MINS[i] + PLAYER_MAXS[i]) * 0.5 - at[i]);
+            if dot(c, f).abs() <= w * 0.5 + reach(f)
+                && dot(c, r).abs() <= l * 0.5 + reach(r)
+                && dot(c, u).abs() <= h * 0.5 + reach(u)
+            {
+                spot = Some(feet);
+                break 'search;
+            }
+        }
+    }
+    diag::info!(
+        Sim,
+        "bo2zm t6 box stand: box ({:.0} {:.0} {:.0}) turned ({:.0} {:.0} {:.0}); use trigger ({:.0} {:.0} {:.0}) turned ({:.0} {:.0} {:.0}) {w}x{l}x{h}; feet {}",
+        box_at[0],
+        box_at[1],
+        box_at[2],
+        box_angles[0],
+        box_angles[1],
+        box_angles[2],
+        at[0],
+        at[1],
+        at[2],
+        angles[0],
+        angles[1],
+        angles[2],
+        spot.map_or("none".to_string(), |p| format!("({:.0} {:.0} {:.0})", p[0], p[1], p[2]))
+    );
+    let Some(feet) = spot else {
+        return false;
+    };
+    let eye = [feet[0], feet[1], feet[2] + 60.0];
+    super::teleport_player(world, client, feet);
+    super::set_player_view(world, client, look(eye, at));
+    true
+}
+
+/// [`stand_at_box`] from a side turned `turn` degrees about the box
+/// (IW4L_T6_BOX_SIDES: the move test tries each side in turn).
+fn stand_at_box_side(world: &mut World, client: ClientId, turn: f32) -> Option<[f32; 3]> {
     let (origin, angles) = active_box(world)?;
-    let (_, rt, _) = gsc_t6::math::angle_vectors([0.0, angles[1], 0.0]);
+    if turn == 0.0 && stand_in_box_stub(world, client, origin, angles) {
+        return Some(origin);
+    }
+    let (_, rt, _) = gsc_t6::math::angle_vectors([0.0, angles[1] + turn, 0.0]);
     let stand = [
         origin[0] - rt[0] * 48.0,
         origin[1] - rt[1] * 48.0,
@@ -906,7 +1536,28 @@ fn stand_at_box(world: &mut World, client: ClientId) -> Option<[f32; 3]> {
         crate::bullet_collision::PLAYER_MAXS,
         crate::bullet_collision::MASK_PLAYER_SOLID,
     );
-    let feet: [f32; 3] = std::array::from_fn(|i| stand[i] + (down[i] - stand[i]) * t.fraction);
+    let mut feet: [f32; 3] =
+        std::array::from_fn(|i| stand[i] + (down[i] - stand[i]) * t.fraction);
+    // Started inside something (Die Rise's box stands by a wall): the hull
+    // stays where it began, in the air. Drop a point instead.
+    if t.startsolid != 0 {
+        let p = frame(world).trace_static_world(
+            stand,
+            down,
+            [0.0; 3],
+            [0.0; 3],
+            crate::bullet_collision::MASK_PLAYER_SOLID,
+        );
+        feet = std::array::from_fn(|i| stand[i] + (down[i] - stand[i]) * p.fraction);
+        diag::info!(
+            Sim,
+            "bo2zm t6 box stand: hull started solid at ({:.0} {:.0} {:.0}), point drop to z {:.0}",
+            stand[0],
+            stand[1],
+            stand[2],
+            feet[2]
+        );
+    }
     let eye = [feet[0], feet[1], feet[2] + 60.0];
     let view = look(eye, [origin[0], origin[1], origin[2] + 20.0]);
     super::teleport_player(world, client, feet);
@@ -942,9 +1593,13 @@ pub(crate) fn box_move_test(world: &mut World, now: i64) {
         return;
     }
     let t = (now - 12000) % 9000;
+    // IW4L_T6_BOX_SIDES=1: each round of the test stands on the next side
+    // of the box (0, 90, 180, 270 degrees from the use side).
+    let sides = std::env::var_os("IW4L_T6_BOX_SIDES").is_some();
+    let turn = if sides { ((now - 12000) / 9000 % 4) as f32 * 90.0 } else { 0.0 };
     if t < tick {
         give_points(world, 10000);
-        if stand_at_box(world, client).is_none() {
+        if stand_at_box_side(world, client, turn).is_none() {
             diag::info!(
                 Sim,
                 "bo2zm t6 box move test at {}s: no box showing",
@@ -953,6 +1608,18 @@ pub(crate) fn box_move_test(world: &mut World, now: i64) {
         }
     }
     if active_box(world).is_some() && ((1000..1300).contains(&t) || (7000..7300).contains(&t)) {
+        if t < 1000 + tick || (7000..7000 + tick).contains(&t) {
+            let hint = world.resource::<Zm>().hints.get(&0).cloned().unwrap_or_default();
+            let at = frame(world).player(client).map(|p| p.origin).unwrap_or_default();
+            diag::info!(
+                Sim,
+                "bo2zm t6 box move test at {:.1}s: side {turn}, player ({:.0} {:.0} {:.0}), hint {hint:?}",
+                now as f32 / 1000.0,
+                at[0],
+                at[1],
+                at[2]
+            );
+        }
         press_use(world, client);
     }
     if (8500..8500 + tick).contains(&t) {
@@ -979,6 +1646,535 @@ pub(crate) fn box_move_test(world: &mut World, now: i64) {
             now / 1000,
             place.unwrap_or_else(|| "away".to_owned())
         );
+    }
+}
+
+/// IW4L_T6_KNIFE_AT=x,y,z: from 10 s, the nearest damage trigger to that
+/// spot (Nuketown's bunker hatch) is knifed once a second for 6 s, from the
+/// first clear spot 40 units round it.
+pub(crate) fn knife_at_test(world: &mut World, now: i64) {
+    static AT: OnceLock<Option<[f32; 3]>> = OnceLock::new();
+    let Some(at) = *AT.get_or_init(|| {
+        let v: Vec<f32> = std::env::var("IW4L_T6_KNIFE_AT")
+            .ok()?
+            .split(',')
+            .filter_map(|x| x.trim().parse().ok())
+            .collect();
+        (v.len() == 3).then(|| [v[0], v[1], v[2]])
+    }) else {
+        return;
+    };
+    if !(10000..16000).contains(&now) {
+        return;
+    }
+    let client = ClientId(0);
+    let trig = world
+        .resource::<Zm>()
+        .ents
+        .values()
+        .filter(|e| e.classname == "trigger_damage")
+        .cloned()
+        .min_by(|a, b| {
+            let d = |e: &super::Ent| gsc_t6::math::length(gsc_t6::math::sub(e.origin, at));
+            d(a).total_cmp(&d(b))
+        });
+    let target = trig.as_ref().map_or(at, |e| super::triggers::center(world, e));
+    let Some(ps) = frame(world).player(client).copied() else {
+        return;
+    };
+    let tick = i64::from(crate::MATCH_TICK_MS);
+    if now < 10000 + tick {
+        diag::info!(Sim, "bo2zm t6 test: knife trigger at {target:?} ({:?})", trig.map(|e| e.origin));
+    }
+    let mut pick = None;
+    for a in (0..16).map(|i| (i as f32 * 22.5).to_radians()) {
+        let stand = [target[0] + a.cos() * 40.0, target[1] + a.sin() * 40.0, target[2] + 40.0];
+        let down = [stand[0], stand[1], stand[2] - 200.0];
+        let f = frame(world);
+        let t = f.trace_static_world(
+            stand,
+            down,
+            crate::bullet_collision::PLAYER_MINS,
+            crate::bullet_collision::PLAYER_MAXS,
+            crate::bullet_collision::MASK_PLAYER_SOLID,
+        );
+        if t.startsolid != 0 {
+            continue;
+        }
+        let feet: [f32; 3] = std::array::from_fn(|i| stand[i] + (down[i] - stand[i]) * t.fraction);
+        pick = Some((feet, [feet[0], feet[1], feet[2] + ps.view_height_current]));
+        break;
+    }
+    let Some((feet, eye)) = pick else { return };
+    super::teleport_player(world, client, feet);
+    super::set_player_view(world, client, look(eye, target));
+    if (now - 10000) % 1000 < tick && now >= 10500 {
+        let mut req = world.resource_mut::<crate::step::StepRequest>();
+        for (id, cmd) in &mut req.input.cmds {
+            if *id == client {
+                cmd.buttons |= weapon_iw4::BUTTON_MELEE;
+            }
+        }
+    }
+}
+
+/// IW4L_T6_VIEW=fx,fy,fz,tx,ty,tz (pictures): from 5 s the player stands
+/// with his feet at f, looking at t. A tour: `;` between views, each with
+/// `@<seconds>` (`...@40;...@48`, in time order); each holds until the next.
+/// `off@<seconds>` lets him go (a use test can then move him).
+/// `ent:<targetname or script_noteworthy>:<dist>[:<up>]@<seconds>` follows an entity every tick
+/// (a perk machine riding a Die Rise car): feet <dist> units in front of it
+/// and <up> above its origin, looking at it; its origin is logged every 2 s
+/// so the pictures taken while the car stands at a floor can be picked.
+/// `door:<name>:<dist>[:<up>]@<seconds>` follows it the same way but stands
+/// <dist> units out from the nearest `*_indicator` (the shaft door's floor
+/// light), on the landing looking into the car whichever way the machine is
+/// turned (Die Rise's machines ride their cars back to front).
+pub(crate) fn view_test(world: &mut World, now: i64) {
+    enum View {
+        Off,
+        At([f32; 6]),
+        Ent(String, f32, f32, bool),
+    }
+    static AT: OnceLock<Vec<(View, i64)>> = OnceLock::new();
+    let views = AT.get_or_init(|| {
+        let Ok(v) = std::env::var("IW4L_T6_VIEW") else {
+            return Vec::new();
+        };
+        v.split(';')
+            .filter_map(|v| {
+                let (p, s) = v.split_once('@').unwrap_or((v, "5"));
+                let at = s.trim().parse::<f32>().map_or(5000, |s| (s * 1000.0) as i64);
+                let p = p.trim();
+                if p == "off" {
+                    return Some((View::Off, at));
+                }
+                let door = p.starts_with("door:");
+                if let Some(e) = p.strip_prefix("ent:").or_else(|| p.strip_prefix("door:")) {
+                    let mut it = e.split(':');
+                    let name = it.next()?.to_owned();
+                    let dist = it.next().and_then(|x| x.parse().ok()).unwrap_or(170.0);
+                    let up = it.next().and_then(|x| x.parse().ok()).unwrap_or(0.0);
+                    return Some((View::Ent(name, dist, up, door), at));
+                }
+                let n: Vec<f32> = p.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                (n.len() == 6).then(|| (View::At([n[0], n[1], n[2], n[3], n[4], n[5]]), at))
+            })
+            .collect()
+    });
+    let Some((view, _)) = views.iter().rev().find(|(_, at)| now >= *at) else {
+        return;
+    };
+    let v = match view {
+        View::Off => return,
+        View::At(v) => *v,
+        View::Ent(name, dist, up, door) => {
+            let found = with_vm(world, |vm, world| {
+                let tn = vm.intern("targetname");
+                let sn = vm.intern("script_noteworthy");
+                let ents = &world.resource::<Zm>().ents;
+                let (origin, angles) = ents.values().find_map(|e| {
+                    let o = e.obj?;
+                    [tn, sn]
+                        .iter()
+                        .any(|f| vm.to_text(&vm.raw_field(o, *f)) == *name)
+                        .then_some((e.origin, e.angles))
+                })?;
+                let flat = |p: [f32; 3]| (p[0] - origin[0]).hypot(p[1] - origin[1]);
+                let light = if *door {
+                    ents.values()
+                        .filter(|e| e.obj.is_some_and(|o| vm.to_text(&vm.raw_field(o, tn)).ends_with("_indicator")))
+                        .map(|e| e.origin)
+                        .min_by(|a, b| flat(*a).total_cmp(&flat(*b)))
+                } else {
+                    None
+                };
+                Some((origin, angles, light))
+            })
+            .flatten();
+            let Some((origin, angles, light)) = found else {
+                return;
+            };
+            // A machine faces 90 degrees right of its angles (as perk_test);
+            // a door view stands out from the shaft door's light instead.
+            let (mut fw, _, _) = gsc_t6::math::angle_vectors([0.0, angles[1] - 90.0, 0.0]);
+            let mut from = origin;
+            if let Some(l) = light {
+                let len = (l[0] - origin[0]).hypot(l[1] - origin[1]).max(1.0);
+                fw = [(l[0] - origin[0]) / len, (l[1] - origin[1]) / len, 0.0];
+                from = [l[0], l[1], origin[2]];
+            }
+            if now % 2000 < i64::from(crate::MATCH_TICK_MS) {
+                diag::info!(
+                    Sim,
+                    "bo2zm t6 view: {name} at ({:.0} {:.0} {:.0}) yaw {:.0}",
+                    origin[0],
+                    origin[1],
+                    origin[2],
+                    angles[1]
+                );
+            }
+            [
+                from[0] + fw[0] * dist,
+                from[1] + fw[1] * dist,
+                origin[2] + up,
+                origin[0],
+                origin[1],
+                origin[2] + 50.0,
+            ]
+        }
+    };
+    let client = ClientId(0);
+    let Some(ps) = frame(world).player(client).copied() else {
+        return;
+    };
+    let feet = [v[0], v[1], v[2]];
+    super::teleport_player(world, client, feet);
+    let eye = [feet[0], feet[1], feet[2] + ps.view_height_current];
+    super::set_player_view(world, client, look(eye, [v[3], v[4], v[5]]));
+}
+
+/// IW4L_T6_NOHUD=1 (pictures): no HUD at all, through the same flags the
+/// game-over screen uses.
+pub(crate) fn nohud_test(world: &mut World) {
+    static ON: OnceLock<bool> = OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var("IW4L_T6_NOHUD").is_ok_and(|v| v.trim() == "1")) {
+        return;
+    }
+    for key in ["bo2zm_hud_hidden", "bo2zm_ammo_hide", "bo2zm_score_hide"] {
+        super::set_client_dvar(world, 0, key, "1");
+    }
+}
+
+/// IW4L_T6_BEARS=<secs>: the hidden song's three teddy bears (zm_nuked's
+/// sndmusegg2 origins). From then, 8 s at each: the player stands 30 units
+/// off it, faces it, and holds Use for half a second 3 s in.
+pub(crate) fn bears_test(world: &mut World, now: i64) {
+    const BEARS: [[f32; 3]; 3] = [[-1998.0, 632.0, -48.0], [-80.0, 35.0, -18.0], [617.0, 313.0, 152.0]];
+    static AT: OnceLock<Option<i64>> = OnceLock::new();
+    let Some(at) = *AT.get_or_init(|| std::env::var("IW4L_T6_BEARS").ok()?.trim().parse::<i64>().ok())
+    else {
+        return;
+    };
+    let t = now - at * 1000;
+    if t < 0 || t >= 8000 * BEARS.len() as i64 {
+        return;
+    }
+    let bear = BEARS[(t / 8000) as usize];
+    let client = ClientId(0);
+    let Some(ps) = frame(world).player(client).copied() else {
+        return;
+    };
+    let feet = [bear[0] + 21.0, bear[1] + 21.0, bear[2] - 20.0];
+    super::teleport_player(world, client, feet);
+    let eye = [feet[0], feet[1], feet[2] + ps.view_height_current];
+    super::set_player_view(world, client, look(eye, bear));
+    if (3000..3500).contains(&(t % 8000)) {
+        let mut req = world.resource_mut::<crate::step::StepRequest>();
+        for (id, cmd) in &mut req.input.cmds {
+            if *id == client {
+                cmd.buttons |= buttons::USE;
+            }
+        }
+    }
+}
+
+/// IW4L_T6_PERK_DROP=1: while a perk machine is flying in, the player
+/// stands 100 units in front of where it lands, facing it (inside the
+/// landing's 300-unit knockdown).
+pub(crate) fn perk_drop_test(world: &mut World, now: i64) {
+    static ON: OnceLock<bool> = OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var_os("IW4L_T6_PERK_DROP").is_some()) {
+        return;
+    }
+    if now % 500 >= i64::from(crate::MATCH_TICK_MS) {
+        return;
+    }
+    let spot = with_vm(world, |vm, world| {
+        let (tn, fx, pos, ang) = (
+            vm.intern("targetname"),
+            vm.intern("fx"),
+            vm.intern("original_pos"),
+            vm.intern("original_angles"),
+        );
+        world.resource::<Zm>().ents.values().find_map(|e| {
+            let o = e.obj?;
+            if !vm.to_text(&vm.raw_field(o, tn)).starts_with("vending_")
+                || matches!(vm.raw_field(o, fx), gsc_t6::Value::Undefined)
+            {
+                return None;
+            }
+            let p = vm.raw_field(o, pos).as_vec3()?;
+            // Landed: leave the player where he is.
+            if (e.origin[2] - p[2]).abs() < 30.0 {
+                return None;
+            }
+            Some((p, vm.raw_field(o, ang).as_vec3().unwrap_or([0.0; 3])))
+        })
+    })
+    .flatten();
+    let Some((pos, ang)) = spot else {
+        return;
+    };
+    // The machine's front (the script's anglestoforward(angles - (0, 90, 0))).
+    let yaw = (ang[1] - 90.0).to_radians();
+    let feet = [pos[0] + yaw.cos() * 100.0, pos[1] + yaw.sin() * 100.0, pos[2]];
+    let client = ClientId(0);
+    let Some(ps) = frame(world).player(client).copied() else {
+        return;
+    };
+    super::teleport_player(world, client, feet);
+    let eye = [feet[0], feet[1], feet[2] + ps.view_height_current];
+    super::set_player_view(world, client, look(eye, [pos[0], pos[1], pos[2] + 40.0]));
+}
+
+/// IW4L_T6_EGG1=1 (with the rounds test): the first song's egg. The player
+/// leaves the power-up behind the door (`level.door_powerup`, back each time
+/// the doomsday clock moves) until the population sign reads 15, then
+/// stands on it.
+pub(crate) fn egg1_test(world: &mut World, now: i64) {
+    static ON: OnceLock<bool> = OnceLock::new();
+    static LAST: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+    if !*ON.get_or_init(|| std::env::var_os("IW4L_T6_EGG1").is_some()) {
+        return;
+    }
+    if now % 500 >= i64::from(crate::MATCH_TICK_MS) {
+        return;
+    }
+    let spot = with_vm(world, |vm, world| {
+        let (pc, dp) = (vm.intern("population_count"), vm.intern("door_powerup"));
+        let pop = vm.raw_field(vm.level, pc).as_int().unwrap_or(-1);
+        let o = vm.raw_field(vm.level, dp).as_obj();
+        let at = o.and_then(|o| {
+            world
+                .resource::<Zm>()
+                .ents
+                .values()
+                .find(|e| e.obj == Some(o))
+                .map(|e| e.origin)
+        });
+        (pop, at)
+    });
+    let Some((pop, at)) = spot else {
+        return;
+    };
+    if LAST.swap(pop, std::sync::atomic::Ordering::Relaxed) != pop {
+        diag::info!(Sim, "bo2zm t6 egg1 test: population sign {pop}, door power-up {at:?}");
+    }
+    let (15, Some(at)) = (pop, at) else {
+        return;
+    };
+    super::teleport_player(world, ClientId(0), at);
+}
+
+/// IW4L_T6_MANNEQUIN=<n> (default 1): the breakable props (map
+/// `destructibledef` naming "male": Nuketown's mannequins) in turn. From 10 s, every 4 s
+/// the player stands 90 units in front of the next one, looks at its head
+/// and fires a tick of attack every 0.3 s for 2 s. IW4L_T6_MANNEQUIN_HOW=knife
+/// stands 45 units off and knifes it twice; =nade stands 160 off and throws a
+/// frag at its feet once (give frags with IW4L_T6_NADES). Past the last one
+/// it goes round again, each pass from the next clear spot.
+pub(crate) fn mannequin_test(world: &mut World, now: i64) {
+    static HOW: OnceLock<String> = OnceLock::new();
+    let how = HOW.get_or_init(|| std::env::var("IW4L_T6_MANNEQUIN_HOW").unwrap_or_default());
+    static WANT: OnceLock<Option<usize>> = OnceLock::new();
+    let Some(want) = *WANT.get_or_init(|| {
+        std::env::var("IW4L_T6_MANNEQUIN")
+            .ok()
+            .map(|v| v.parse().unwrap_or(1))
+    }) else {
+        return;
+    };
+    if now < 10000 {
+        return;
+    }
+    let slot = ((now - 10000) / 4000) as usize;
+    let within = (now - 10000) % 4000;
+    if slot >= want {
+        return;
+    }
+    let client = ClientId(0);
+    let targets: Vec<(u32, [f32; 3], f32, String)> = {
+        let zm = world.resource::<Zm>();
+        zm.ents
+            .iter()
+            .filter(|(_, e)| e.destructible.contains("male") && !e.hidden)
+            .map(|(n, e)| (*n, e.origin, e.angles[1], e.destructible.clone()))
+            .collect()
+    };
+    // Past the last one it goes round again (a second pass shoots from
+    // the next clear spot, for a head the first spot's shots missed).
+    let pass = slot / targets.len().max(1);
+    let Some((n, origin, yaw, def)) = targets.get(slot % targets.len().max(1)).cloned() else {
+        return;
+    };
+    let tick = i64::from(crate::MATCH_TICK_MS);
+    if within < tick {
+        // Its hit boxes (none = bullets pass through it).
+        let id = world.resource::<Zm>().presences.by_ent.get(&n).map(|s| s.id);
+        let model = world.resource::<Zm>().ents.get(&n).map(|e| e.model.clone()).unwrap_or_default();
+        let (row, destr, bones) = id.map_or((false, false, 0), |id| {
+            let f = frame(world);
+            let row = f
+                .entity_collision_capabilities()
+                .iter()
+                .find(|row| row.owner.script_model() == Some(id));
+            let dobj = row.and_then(|r| r.dobj.as_ref());
+            if let Some(d) = dobj {
+                diag::info!(
+                    Sim,
+                    "bo2zm t6 test: mannequin dobj cap={} contents={:?} coll={} err={:?} surfs={:?}",
+                    d.capability.is_some(),
+                    d.capability.as_ref().map(|c| c.contents),
+                    d.current_collision.is_some(),
+                    d.materialize_error,
+                    d.capability.as_ref().map(|c| c
+                        .coll_surfs
+                        .iter()
+                        .map(|s| (s.bone, s.contents, s.surf_flags, s.tris.len()))
+                        .collect::<Vec<_>>())
+                );
+            }
+            (
+                row.is_some(),
+                dobj.is_some_and(|d| d.t5_destructible.is_some()),
+                dobj.and_then(|d| d.current_collision.as_ref())
+                    .map_or(0, |c| c.bones.len()),
+            )
+        });
+        diag::info!(
+            Sim,
+            "bo2zm t6 test: mannequin {}/{} ent{n} {def} at ({:.0} {:.0} {:.0}) presence={} row={row} destructible={destr} boxes={bones} model={}",
+            slot % targets.len().max(1) + 1,
+            targets.len(),
+            origin[0],
+            origin[1],
+            origin[2],
+            id.is_some(),
+            model
+        );
+    }
+    let Some(ps) = frame(world).player(client).copied() else {
+        return;
+    };
+    // Its head piece's box (the bone named for the head).
+    let head = world
+        .resource::<Zm>()
+        .presences
+        .by_ent
+        .get(&n)
+        .map(|s| s.id)
+        .and_then(|id| {
+            let f = frame(world);
+            let d = f
+                .entity_collision_capabilities()
+                .iter()
+                .find(|row| row.owner.script_model() == Some(id))?
+                .dobj
+                .as_ref()?;
+            let names = &d.capability.as_ref()?.pose.bone_names;
+            d.current_collision
+                .as_ref()?
+                .bones
+                .iter()
+                .find(|b| names.get(usize::from(b.bone)).is_some_and(|nm| nm.contains("head")))
+                .map(|b| b.center)
+        })
+        .or_else(|| head_of(world, n, true))
+        .unwrap_or([origin[0], origin[1], origin[2] + 60.0]);
+    // The first spot round it (in front first) with a clear line to its
+    // head.
+    let mut pick = None;
+    let mut clear = 0;
+    for (i, off) in [0.0f32, 180.0, 90.0, 270.0, 45.0, 315.0, 135.0, 225.0]
+        .into_iter()
+        .enumerate()
+    {
+        let a = (yaw + off).to_radians();
+        let reach = match how.as_str() {
+            "knife" => 45.0,
+            "nade" => 160.0,
+            _ => 90.0,
+        };
+        let stand = [origin[0] + a.cos() * reach, origin[1] + a.sin() * reach, origin[2] + 40.0];
+        let down = [stand[0], stand[1], stand[2] - 200.0];
+        let f = frame(world);
+        let t = f.trace_static_world(
+            stand,
+            down,
+            crate::bullet_collision::PLAYER_MINS,
+            crate::bullet_collision::PLAYER_MAXS,
+            crate::bullet_collision::MASK_PLAYER_SOLID,
+        );
+        let feet: [f32; 3] = std::array::from_fn(|i| stand[i] + (down[i] - stand[i]) * t.fraction);
+        let eye = [feet[0], feet[1], feet[2] + ps.view_height_current];
+        let sight = f.trace_static_world(
+            eye,
+            head,
+            [0.0; 3],
+            [0.0; 3],
+            crate::bullet_collision::MASK_BULLET_WORLD,
+        );
+        if t.startsolid != 0 || sight.fraction < 0.98 {
+            if i == 0 {
+                pick = Some((feet, eye));
+            }
+            continue;
+        }
+        pick = Some((feet, eye));
+        clear += 1;
+        if clear > pass {
+            break;
+        }
+    }
+    let Some((feet, eye)) = pick else { return };
+    super::teleport_player(world, client, feet);
+    let aim = if how == "nade" { [origin[0], origin[1], origin[2] + 8.0] } else { head };
+    // IW4L_T6_MANNEQUIN_LOOK=floor: from 2.5 s on, look where its thrown
+    // head or arm landed.
+    static FLOOR: OnceLock<bool> = OnceLock::new();
+    if *FLOOR.get_or_init(|| std::env::var("IW4L_T6_MANNEQUIN_LOOK").is_ok_and(|v| v == "floor"))
+        && within >= 2500
+    {
+        // The newest thrown piece, else its feet.
+        let piece = {
+            let zm = world.resource::<Zm>();
+            zm.gibs.last().and_then(|(g, _)| zm.ents.get(g)).map(|e| e.origin)
+        };
+        super::set_player_view(world, client, look(eye, piece.unwrap_or(origin)));
+        return;
+    }
+    super::set_player_view(world, client, look(eye, aim));
+    if how == "knife" || how == "nade" {
+        let press = if how == "knife" {
+            (within % 1000 < tick && (500..2500).contains(&within))
+                .then_some(weapon_iw4::BUTTON_MELEE)
+        } else {
+            (500..700).contains(&within).then_some(buttons::FRAG)
+        };
+        if let Some(press) = press {
+            let mut req = world.resource_mut::<crate::step::StepRequest>();
+            for (id, cmd) in &mut req.input.cmds {
+                if *id == client {
+                    cmd.buttons |= press;
+                }
+            }
+        }
+        return;
+    }
+    if (500..2500).contains(&within) && within % 300 < tick {
+        {
+            let mut f = frame(world);
+            if let Some(w) = f.player(client).map(|p| p.weapon) {
+                crate::script_player::set_ammo_clip(&mut f, client, w, 8);
+            }
+        }
+        let mut req = world.resource_mut::<crate::step::StepRequest>();
+        for (id, cmd) in &mut req.input.cmds {
+            if *id == client {
+                cmd.buttons |= buttons::ATTACK;
+            }
+        }
     }
 }
 
@@ -1115,7 +2311,25 @@ pub(crate) fn door_test(world: &mut World, now: i64) {
     if (6000..6000 + tick).contains(&now) {
         give_points(world, 10000);
         let Some((trig, aim)) = find(world) else {
-            diag::warn!(Sim, "bo2zm t6 door test: no door or debris for {want}");
+            let flags = with_vm(world, |vm, world| {
+                let (flag_f, tn) = (vm.intern("script_flag"), vm.intern("targetname"));
+                let mut out: Vec<String> = world
+                    .resource::<Zm>()
+                    .ents
+                    .values()
+                    .filter(|e| e.classname.starts_with("trigger_use"))
+                    .filter_map(|e| e.obj)
+                    .filter_map(|o| {
+                        let name = vm.to_text(&vm.raw_field(o, tn));
+                        (name == "zombie_door" || name == "zombie_debris")
+                            .then(|| format!("{name}:{}", vm.to_text(&vm.raw_field(o, flag_f))))
+                    })
+                    .collect();
+                out.sort();
+                out.join(" ")
+            })
+            .unwrap_or_default();
+            diag::warn!(Sim, "bo2zm t6 door test: no door or debris for {want}; the map has [{flags}]");
             return;
         };
         let c = super::triggers::center(world, &trig);
@@ -1427,6 +2641,7 @@ pub(crate) fn floor_map(world: &mut World, now: i64) {
     }
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
 /// IW4L_T6_WALK="x y z yaw secs": at 12 s the player stands at x y z facing
 /// yaw, then walks forward for secs; his place is logged every 250 ms (does
 /// a door or debris stop him).
@@ -1439,16 +2654,46 @@ pub(crate) fn walk_test(world: &mut World, now: i64) {
             .filter_map(|s| s.parse().ok())
             .collect();
         (v.len() == 5).then(|| [v[0], v[1], v[2], v[3], v[4]])
+=======
+/// IW4L_T6_WALK="x y z yaw secs [at]": at 12 s (or `at` s) the player
+/// stands at x y z facing yaw, then walks forward for secs; his place is
+/// logged every 250 ms (does a door or debris stop him). Several walks
+/// split by `;` follow one another (each 1.5 s after the last one ends,
+/// unless it gives its own `at`); each logs where it ended.
+pub(crate) fn walk_test(world: &mut World, now: i64) {
+    static WANT: OnceLock<Vec<[f32; 6]>> = OnceLock::new();
+    let walks = WANT.get_or_init(|| {
+        let mut out: Vec<[f32; 6]> = Vec::new();
+        for part in std::env::var("IW4L_T6_WALK").unwrap_or_default().split(';') {
+            let v: Vec<f32> = part.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+            if v.len() != 5 && v.len() != 6 {
+                continue;
+            }
+            let next = out.last().map_or(12.0, |w| w[5] + 0.3 + w[4] + 1.5);
+            out.push([v[0], v[1], v[2], v[3], v[4], v.get(5).copied().unwrap_or(next)]);
+        }
+        out
+    });
+    let Some((i, &[x, y, z, yaw, secs, at])) = walks.iter().enumerate().find(|(_, w)| {
+        let t0 = (w[5] * 1000.0) as i64;
+        (t0..t0 + 300 + (w[4] * 1000.0) as i64 + 1500).contains(&now)
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
     }) else {
         return;
     };
     let client = ClientId(0);
     let tick = i64::from(crate::MATCH_TICK_MS);
-    if (12000..12000 + tick).contains(&now) {
+    let t0 = (at * 1000.0) as i64;
+    // "0 0 0": he walks from where he stands.
+    if (t0..t0 + tick).contains(&now) && [x, y, z] != [0.0; 3] {
         super::teleport_player(world, client, [x, y, z]);
         super::set_player_view(world, client, [0.0, yaw, 0.0]);
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
     let end = 12300 + (secs * 1000.0) as i64;
+=======
+    let end = t0 + 300 + (secs * 1000.0) as i64;
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
     // IW4L_T6_WALK_CLIENT: the console's +forward walks him instead (his
     // client predicts the walk: does it clip as the server does).
     let pushed = std::env::var_os("IW4L_T6_WALK_CLIENT").is_none();
@@ -1456,8 +2701,13 @@ pub(crate) fn walk_test(world: &mut World, now: i64) {
     let jump_at = std::env::var("IW4L_T6_WALK_JUMP")
         .ok()
         .and_then(|v| v.parse::<i64>().ok())
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
         .map(|ms| 12300 + ms);
     if pushed && (12300..end).contains(&now) {
+=======
+        .map(|ms| t0 + 300 + ms);
+    if pushed && (t0 + 300..end).contains(&now) {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
         let jump = jump_at.is_some_and(|t| (t..t + 100).contains(&now));
         let mut req = world.resource_mut::<crate::step::StepRequest>();
         for (id, cmd) in &mut req.input.cmds {
@@ -1496,11 +2746,27 @@ pub(crate) fn walk_test(world: &mut World, now: i64) {
             }
         }
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
     if (12000..end + 1500).contains(&now) && (now - 12000) % 250 < tick {
+=======
+    if (t0..end + 1500).contains(&now) && (now - t0) % 250 < tick {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
         if let Some(ps) = frame(world).player(client) {
             diag::info!(
                 Sim,
                 "bo2zm t6 walk test at {now}ms: ({:.0} {:.0} {:.0})",
+                ps.origin[0],
+                ps.origin[1],
+                ps.origin[2]
+            );
+        }
+    }
+    if walks.len() > 1 && (end..end + tick).contains(&now) {
+        if let Some(ps) = frame(world).player(client) {
+            let d = ((ps.origin[0] - x).powi(2) + (ps.origin[1] - y).powi(2)).sqrt();
+            diag::info!(
+                Sim,
+                "bo2zm t6 walk {i} yaw {yaw:.0} ended at ({:.0} {:.0} {:.0}) after {d:.0} units",
                 ps.origin[0],
                 ps.origin[1],
                 ps.origin[2]
@@ -1514,6 +2780,16 @@ pub(crate) fn walk_test(world: &mut World, now: i64) {
 pub(crate) fn face_test(world: &mut World) {
     static ON: OnceLock<bool> = OnceLock::new();
     if !*ON.get_or_init(|| std::env::var_os("IW4L_T6_FACE").is_some()) {
+        return;
+    }
+    // IW4L_T6_FACE_STOP=<seconds>: then the view holds where it was (to
+    // watch what happens to the zombie it was on).
+    static STOP: OnceLock<Option<i64>> = OnceLock::new();
+    let stop = *STOP.get_or_init(|| {
+        let s = std::env::var("IW4L_T6_FACE_STOP").ok()?;
+        Some((s.trim().parse::<f32>().ok()? * 1000.0) as i64)
+    });
+    if stop.is_some_and(|s| world.resource::<Zm>().now_ms >= s) {
         return;
     }
     let client = ClientId(0);
@@ -1667,23 +2943,193 @@ pub(crate) fn game_over_test(world: &mut World, now: i64) {
     }
 }
 
-/// IW4L_T6_DOWN=<seconds>: then a zombie's blow takes all his health (he
-/// goes down; solo with no Quick Revive that is the game over). Every
-/// second after, his eye height and view are logged (down-glitch test).
-pub(crate) fn down_test(world: &mut World, now: i64) {
+/// IW4L_T6_SPRINTLOG=1: every start and end of his sprint (how long it
+/// ran, whether sprint must be pressed again, the flags then).
+pub(crate) fn sprint_log(world: &mut World, now: i64) {
+    static ON: OnceLock<bool> = OnceLock::new();
+    static WAS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+    if !*ON.get_or_init(|| std::env::var_os("IW4L_T6_SPRINTLOG").is_some()) {
+        return;
+    }
+    let f = frame(world);
+    let Some(ps) = f.player(ClientId(0)) else {
+        return;
+    };
+    // And each change of his dive state (dive, slide, stay prone).
+    static DIVE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let dive = ps.pm_flags & 0x0700_0000;
+    if DIVE.swap(dive, std::sync::atomic::Ordering::Relaxed) != dive {
+        diag::info!(Sim, "bo2zm t6 dive state {dive:#x} at {now}ms, pm_flags {:#x}", ps.pm_flags);
+    }
+    let on = ps.pm_flags & playerstate_iw4::pm_flags::SPRINTING != 0;
+    let was = WAS.swap(u8::from(on), std::sync::atomic::Ordering::Relaxed);
+    if was != 2 && was != u8::from(on) {
+        diag::info!(
+            Sim,
+            "bo2zm t6 sprint {} at {now}ms: ran {}ms, press again {}, pm_flags {:#x}, weapon state {:#x}, max {}ms",
+            if on { "on" } else { "off" },
+            ps.last_sprint_end.wrapping_sub(ps.last_sprint_start),
+            ps.sprint_button_up_required,
+            ps.pm_flags,
+            ps.weaponstate_primary,
+            ps.sprint_start_max_length
+        );
+    }
+}
+
+/// IW4L_T6_PRESS="<frag|smoke|attack> <seconds>[, ...]": then each button
+/// is held for 200 ms (the throw a player's G or 4 key makes, a click).
+pub(crate) fn press_test(world: &mut World, now: i64) {
+    static WANT: OnceLock<Vec<(u32, i64)>> = OnceLock::new();
+    let want = WANT.get_or_init(|| {
+        let Ok(v) = std::env::var("IW4L_T6_PRESS") else {
+            return Vec::new();
+        };
+        v.split(',')
+            .filter_map(|one| {
+                let (b, t) = one.trim().split_once(' ')?;
+                let b = match b {
+                    "frag" => buttons::FRAG,
+                    "smoke" => buttons::SMOKE,
+                    "attack" => buttons::ATTACK,
+                    _ => return None,
+                };
+                Some((b, (t.trim().parse::<f32>().ok()? * 1000.0) as i64))
+            })
+            .collect()
+    });
+    let button = want
+        .iter()
+        .filter(|(_, at)| (*at..*at + 200).contains(&now))
+        .fold(0, |held, (b, _)| held | b);
+    if button != 0 {
+        let mut req = world.resource_mut::<crate::step::StepRequest>();
+        for (id, cmd) in &mut req.input.cmds {
+            if *id == ClientId(0) {
+                cmd.buttons |= button;
+            }
+        }
+    }
+}
+
+/// IW4L_T6_GIVE="<weapon>@<seconds>[,<weapon>@<seconds>...]": then the
+/// scripts give him that weapon the way a wall buy or the box does
+/// (`weapon_give`: the Time Bomb's own give runs).
+pub(crate) fn give_test(world: &mut World, now: i64) {
+    static WANT: OnceLock<Vec<(String, i64)>> = OnceLock::new();
+    let want = WANT.get_or_init(|| {
+        std::env::var("IW4L_T6_GIVE")
+            .unwrap_or_default()
+            .split(',')
+            .filter_map(|item| {
+                let (w, t) = item.trim().split_once('@')?;
+                Some((w.to_owned(), (t.trim().parse::<f32>().ok()? * 1000.0) as i64))
+            })
+            .collect()
+    });
+    let tick = i64::from(crate::MATCH_TICK_MS);
+    for (name, at) in want.iter().filter(|(_, at)| (*at..*at + tick).contains(&now)) {
+        with_vm(world, |vm, world| {
+            if let Some(p) = world.resource::<Zm>().players.get(&0).map(|p| p.obj) {
+                let g = vm.string(name);
+                vm.spawn_named(world, "maps/mp/zombies/_zm_weapons", "weapon_give", gsc_t6::Value::Object(p), vec![g]);
+            }
+        });
+        diag::info!(Sim, "bo2zm t6 give test: {name} at {}s", at / 1000);
+    }
+}
+
+/// IW4L_T6_NADES=<seconds>: then two frag grenades in his hand (BO2 gives
+/// none on round 1; a test of the throw key without playing a round).
+pub(crate) fn nades_test(world: &mut World, now: i64) {
     static AT: OnceLock<Option<i64>> = OnceLock::new();
-    let Some(at) = *AT.get_or_init(|| std::env::var("IW4L_T6_DOWN").ok().and_then(|s| s.parse::<i64>().ok()))
+    let Some(at) = *AT.get_or_init(|| std::env::var("IW4L_T6_NADES").ok().and_then(|s| s.parse::<i64>().ok()))
     else {
         return;
     };
     let tick = i64::from(crate::MATCH_TICK_MS);
+    if (at * 1000..at * 1000 + tick).contains(&now)
+        && let Ok(w) = super::weapon(world, "frag_grenade_zm")
+    {
+        crate::script_player::set_ammo_clip(&mut frame(world), ClientId(0), w, 2);
+        diag::info!(Sim, "bo2zm t6 nades test: 2 frag grenades at {at}s");
+    }
+}
+
+/// IW4L_T6_DOWN=<seconds>[@<client>]: when the down test's blow lands,
+/// and on whom (client 0, the host, unless `@1` names player 2).
+fn down_at() -> Option<(i64, u32)> {
+    static AT: OnceLock<Option<(i64, u32)>> = OnceLock::new();
+    *AT.get_or_init(|| {
+        let v = std::env::var("IW4L_T6_DOWN").ok()?;
+        let (s, who) = v.split_once('@').unwrap_or((v.as_str(), "0"));
+        Some((s.trim().parse().ok()?, who.trim().parse().ok()?))
+    })
+}
+
+/// A party's test clock (IW4L_T6_PLAYERS 2+): from when every expected
+/// player is first playing, since the second can still be loading a minute
+/// after the host and a blow before he is in is a solo game over. Solo, the
+/// match's own clock. None until they are all in.
+fn party_clock(world: &mut World, now: i64) -> Option<i64> {
+    let want = super::expected_players();
+    if want < 2 {
+        return Some(now);
+    }
+    if let Some(t) = world.resource::<Zm>().party_in_at {
+        return Some(now - t);
+    }
+    let playing = world
+        .resource::<Zm>()
+        .players
+        .values()
+        .filter(|p| p.sessionstate == "playing")
+        .count();
+    if (playing as i32) < want {
+        return None;
+    }
+    world.resource_mut::<Zm>().party_in_at = Some(now);
+    diag::info!(Sim, "bo2zm t6 party: all {want} playing at {}s", now / 1000);
+    Some(0)
+}
+
+/// IW4L_T6_DOWN=<seconds>[@<client>]: then a zombie's blow takes all his
+/// health (he goes down; solo with no Quick Revive that is the game over),
+/// even under IW4L_T6_GOD (so a Quick Revive test can buy it first). Every
+/// second after, his eye height and view are logged (down-glitch test). In
+/// a party the seconds count from when everyone is playing.
+pub(crate) fn down_test(world: &mut World, now: i64) {
+    let Some((at, who)) = down_at() else {
+        return;
+    };
+    let Some(now) = party_clock(world, now) else {
+        return;
+    };
+    let tick = i64::from(crate::MATCH_TICK_MS);
     if (at * 1000..at * 1000 + tick).contains(&now) {
+        // What decides a solo death (_zm player_damage_override): his
+        // perks, his `lives`, and the game's cached `using_solo_revive`.
+        let (perks, obj) = world
+            .resource::<Zm>()
+            .players
+            .get(&who)
+            .map_or((Vec::new(), None), |p| (p.perks.iter().cloned().collect::<Vec<_>>(), Some(p.obj)));
+        let (lives, solo) = with_vm(world, |vm, world| {
+            let lf = vm.intern("lives");
+            let sf = vm.intern("using_solo_revive");
+            let lives = obj.map(|o| vm.get_field(world, o, lf));
+            let solo = vm.get_field(world, vm.level, sf);
+            (lives.map_or("-".to_owned(), |v| vm.to_text(&v)), vm.to_text(&solo))
+        })
+        .unwrap_or_default();
+        diag::info!(Sim, "bo2zm t6 down test: before the blow perks {perks:?} lives {lives} using_solo_revive {solo}");
         with_vm(world, |vm, world| {
-            let point = frame(world).player(ClientId(0)).map_or([0.0; 3], |ps| ps.origin);
+            let point = frame(world).player(ClientId(who)).map_or([0.0; 3], |ps| ps.origin);
+            super::natives_ai::TEST_BLOW.store(true, std::sync::atomic::Ordering::Relaxed);
             super::natives_ai::player_damage(
                 vm,
                 world,
-                0,
+                who,
                 gsc_t6::Value::Undefined,
                 gsc_t6::Value::Undefined,
                 1000,
@@ -1701,9 +3147,9 @@ pub(crate) fn down_test(world: &mut World, now: i64) {
         let (down, linked) = world
             .resource::<Zm>()
             .players
-            .get(&0)
+            .get(&who)
             .map_or((false, None), |p| (p.laststand, p.linked));
-        if let Some(ps) = frame(world).player(ClientId(0)) {
+        if let Some(ps) = frame(world).player(ClientId(who)) {
             diag::info!(
                 Sim,
                 "bo2zm t6 down test +{}ms: down {down} linked {linked:?} z {:.1} view_h {:.1} pm_type {} eflags {:#x} pm_flags {:#x}",
@@ -1716,8 +3162,43 @@ pub(crate) fn down_test(world: &mut World, now: i64) {
             );
         }
     }
+    // The 1.5 s after he is up again, every tick: the stance target, its
+    // lerp, his stance buttons and the last events (stood-up-prone trace).
+    static UP_AT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(i64::MIN);
+    static WAS_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    use std::sync::atomic::Ordering::Relaxed;
+    let down = world.resource::<Zm>().players.get(&who).is_some_and(|p| p.laststand);
+    if down {
+        WAS_DOWN.store(true, Relaxed);
+    } else if WAS_DOWN.swap(false, Relaxed) {
+        UP_AT.store(now, Relaxed);
+    }
+    let up = UP_AT.load(Relaxed);
+    if up != i64::MIN && now - up <= 1500 {
+        let buttons = frame(world).old_buttons(ClientId(who)).unwrap_or(0);
+        if let Some(ps) = frame(world).player(ClientId(who)) {
+            diag::info!(
+                Sim,
+                "bo2zm t6 up trace +{}ms: pm_type {} pm_flags {:#x} target {} lerp_time {} lerp_target {} view_h {:.1} buttons {:#x} seq {} ev [{} {} {} {}]",
+                now - up,
+                ps.pm_type,
+                ps.pm_flags,
+                ps.view_height_target,
+                ps.view_height_lerp_time,
+                ps.view_height_lerp_target,
+                ps.view_height_current,
+                buttons,
+                ps.event_sequence,
+                ps.events_0,
+                ps.events_1,
+                ps.events_2,
+                ps.events_3
+            );
+        }
+    }
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
 /// IW4L_T6_PERK=<machine targetname> (e.g. vending_revive, or `landed`
 /// for the lowest machine): at 42 s (the
 /// first perk has landed) the player gets 10000 points and stands 40 units
@@ -1731,13 +3212,125 @@ pub(crate) fn perk_test(world: &mut World, now: i64) {
     else {
         return;
     };
+=======
+/// IW4L_T6_COREVIVE=1 (two players, with IW4L_T6_DOWN): once the down
+/// test's player is down, the other is put 40 units from him (on his own
+/// side), looks at him and holds Use till he is up: BO2's revive asks him to
+/// touch the 75-unit revive trigger, face him and hold Use (_zm_laststand
+/// can_revive). Both are logged each second.
+pub(crate) fn corevive_test(world: &mut World, now: i64) {
+    static ON: OnceLock<bool> = OnceLock::new();
+    static PUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    use std::sync::atomic::Ordering::Relaxed;
+    if !*ON.get_or_init(|| std::env::var_os("IW4L_T6_COREVIVE").is_some()) {
+        return;
+    }
+    let Some((_, hurt)) = down_at() else {
+        return;
+    };
+    let aid = u32::from(hurt == 0);
+    let (Some(body), Some(me)) = (
+        frame(world).player(ClientId(hurt)).map(|p| p.origin),
+        frame(world).player(ClientId(aid)).map(|p| p.origin),
+    ) else {
+        return;
+    };
+    let (down, down2) = {
+        let zm = world.resource::<Zm>();
+        let down = |c| zm.players.get(&c).is_some_and(|p| p.laststand);
+        (down(hurt), down(aid))
+    };
+    let d = flat_dist(body, me);
+    let (n, m) = (hurt + 1, aid + 1);
+    if now % 1000 < i64::from(crate::MATCH_TICK_MS) {
+        diag::info!(
+            Sim,
+            "bo2zm t6 corevive at {}s: player {n} down {down}, player {m} down {down2} at {:?}, {d:.0} from him",
+            now / 1000,
+            me.map(f32::round)
+        );
+    }
+    if !down {
+        if PUT.swap(false, Relaxed) {
+            diag::info!(Sim, "bo2zm t6 corevive: player {n} up again at {}s", now / 1000);
+        }
+        return;
+    }
+    if !PUT.swap(true, Relaxed) && d > 40.0 {
+        let k = 40.0 / d;
+        let spot = [
+            body[0] + (me[0] - body[0]) * k,
+            body[1] + (me[1] - body[1]) * k,
+            body[2] + 8.0,
+        ];
+        super::teleport_player(world, ClientId(aid), spot);
+        diag::info!(Sim, "bo2zm t6 corevive: player {m} put beside him at {:?}", spot.map(f32::round));
+    }
+    let eye = [me[0], me[1], me[2] + 60.0];
+    super::set_player_view(world, ClientId(aid), look(eye, body));
+    let mut req = world.resource_mut::<crate::step::StepRequest>();
+    for (id, cmd) in &mut req.input.cmds {
+        if *id == ClientId(aid) {
+            cmd.buttons |= buttons::USE;
+            cmd.forwardmove = 0;
+            cmd.rightmove = 0;
+        }
+    }
+}
+
+/// When the perk test's clock starts (its "42 s"), if not at 0: `landed`, or
+/// Mob's shock test once the box is on and he is up again.
+pub(crate) static PERK_BASE: std::sync::atomic::AtomicI64 =
+    std::sync::atomic::AtomicI64::new(i64::MIN);
+
+/// IW4L_T6_PERK=<machine targetname>[@<seconds>] (e.g. vending_revive, or
+/// `landed` for the lowest machine): at 42 s (the
+/// first perk has landed) the player gets 10000 points and stands 40 units
+/// in front of the machine, looking at it; he presses use at 43 s; at 50 s
+/// his perks, weapons and points are logged. `@<seconds>` starts it then
+/// instead of at 42 s (after a power test). A comma list buys each in turn
+/// (`vending_revive@60,vending_jugg@80`: Tranzit's six machines in one run).
+pub(crate) fn perk_test(world: &mut World, now: i64) {
+    static WANT: OnceLock<Vec<(String, i64)>> = OnceLock::new();
+    let wants = WANT.get_or_init(|| {
+        let v = std::env::var("IW4L_T6_PERK").unwrap_or_default();
+        v.split(',')
+            .filter(|one| !one.is_empty())
+            .map(|one| match one.split_once('@') {
+                Some((n, s)) => (
+                    n.to_owned(),
+                    s.parse::<f32>().map_or(0, |s| (s * 1000.0) as i64 - 42000),
+                ),
+                None => (one.to_owned(), 0),
+            })
+            .collect()
+    });
+    for (want, shift) in wants {
+        perk_test_one(world, now, want, *shift);
+    }
+}
+
+fn perk_test_one(world: &mut World, now: i64, want: &str, shift: i64) {
+    let now = now - shift;
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
     let client = ClientId(0);
     let tick = i64::from(crate::MATCH_TICK_MS);
     // "landed": the test starts once a perk machine is on the ground
     // (Nuketown drops them from the sky, the first some time into round 1):
     // its times count from then as if it were 42 s.
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
     static BASE: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(i64::MIN);
     if want == "landed" && BASE.load(std::sync::atomic::Ordering::Relaxed) == i64::MIN {
+=======
+    let base = &PERK_BASE;
+    // With Mob's shock test the clock starts when that test is done.
+    if std::env::var_os("IW4L_T6_SHOCK").is_some()
+        && base.load(std::sync::atomic::Ordering::Relaxed) == i64::MIN
+    {
+        return;
+    }
+    if want == "landed" && base.load(std::sync::atomic::Ordering::Relaxed) == i64::MIN {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
         if now < 42000 || now % 1000 >= tick {
             return;
         }
@@ -1757,11 +3350,22 @@ pub(crate) fn perk_test(world: &mut World, now: i64) {
         if low > 150.0 {
             return;
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
         BASE.store(now - 42000, std::sync::atomic::Ordering::Relaxed);
     }
     let base = BASE.load(std::sync::atomic::Ordering::Relaxed);
+=======
+        base.store(now - 42000, std::sync::atomic::Ordering::Relaxed);
+    }
+    let base = base.load(std::sync::atomic::Ordering::Relaxed);
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
     let now = if base == i64::MIN { now } else { now - base };
     if (42000..42000 + tick).contains(&now) {
+        // IW4L_T6_PERK_OPEN=1: every zone opened first (Mob's Speed Cola is
+        // past doors; standing in an unopened zone gets him killed).
+        if std::env::var_os("IW4L_T6_PERK_OPEN").is_some() {
+            open_all_zones(world);
+        }
         let machine = with_vm(world, |vm, world| {
             let tn = vm.intern("targetname");
             let zm = world.resource::<Zm>();
@@ -1799,14 +3403,38 @@ pub(crate) fn perk_test(world: &mut World, now: i64) {
             origin[2] + 30.0,
         ];
         let down = [stand[0], stand[1], stand[2] - 200.0];
-        let t = frame(world).trace_static_world(
+        // trace_world, not the static world: Die Rise's machines ride elevator
+        // cars, whose floors move (the static trace fell through to the floor below).
+        let t = frame(world).trace_world(
             stand,
             down,
             crate::bullet_collision::PLAYER_MINS,
             crate::bullet_collision::PLAYER_MAXS,
             crate::bullet_collision::MASK_PLAYER_SOLID,
         );
-        let feet: [f32; 3] = std::array::from_fn(|i| stand[i] + (down[i] - stand[i]) * t.fraction);
+        // A car's floor is a turned box (highrise.rs platform_slabs), which
+        // trace_world leaves out: take the nearer of the two.
+        let mut fraction = t.fraction;
+        for b in frame(world).oriented_blockers() {
+            let brush = crate::world::SimBrush {
+                planes: b.planes().to_vec(),
+                contents: crate::bullet_collision::CONTENTS_SOLID,
+                plane_surface_flags: vec![0; 6],
+                glass_encoded: 0,
+            };
+            let o = trace_iw4::trace_box(
+                [clipmap_iw4::brush_ref(&brush)],
+                stand,
+                down,
+                crate::bullet_collision::PLAYER_MINS,
+                crate::bullet_collision::PLAYER_MAXS,
+                crate::bullet_collision::MASK_PLAYER_SOLID,
+            );
+            if o.startsolid == 0 && o.allsolid == 0 {
+                fraction = fraction.min(o.fraction);
+            }
+        }
+        let feet: [f32; 3] = std::array::from_fn(|i| stand[i] + (down[i] - stand[i]) * fraction);
         let eye = [feet[0], feet[1], feet[2] + 60.0];
         let view = look(eye, [origin[0], origin[1], origin[2] + 40.0]);
         super::teleport_player(world, client, feet);
@@ -1851,15 +3479,20 @@ pub(crate) fn perk_test(world: &mut World, now: i64) {
             .get(&0)
             .cloned()
             .unwrap_or_default();
+        let max_health = frame(world).player(client).map_or(0, |ps| ps.max_health);
         diag::info!(
             Sim,
-            "bo2zm t6 perk test: perks {perks:?}, weapons {names:?}, points {score}, hint {hint:?}"
+            "bo2zm t6 perk test: {want}: perks {perks:?}, weapons {names:?}, points {score}, max health {max_health}, hint {hint:?}"
         );
     }
 }
 
 /// An entity's object by a key's value (`targetname`, `script_noteworthy`).
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
 fn ent_by(
+=======
+pub(crate) fn ent_by(
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
     world: &mut World,
     key: &str,
     value: &str,
@@ -1879,11 +3512,26 @@ fn ent_by(
 /// by the game's own `bring_perk`; at 90 s the player, given 10000 points,
 /// stands at it and uses it with his gun; at 100 s he takes the upgraded
 /// gun back; at 106 s his weapons and points are logged.
+/// IW4L_T6_PAP=@<seconds>: a machine already there (Tranzit's is built):
+/// no bringing, he uses it at that time instead of 90 s.
 pub(crate) fn pap_test(world: &mut World, now: i64) {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
     static ON: OnceLock<bool> = OnceLock::new();
     if !*ON.get_or_init(|| std::env::var("IW4L_T6_PAP").is_ok()) {
+=======
+    static ON: OnceLock<Option<i64>> = OnceLock::new();
+    let Some(shift) = *ON.get_or_init(|| {
+        let v = std::env::var("IW4L_T6_PAP").ok()?;
+        Some(
+            v.strip_prefix('@')
+                .and_then(|s| s.parse::<f32>().ok())
+                .map_or(0, |s| (s * 1000.0) as i64 - 90000),
+        )
+    }) else {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
         return;
-    }
+    };
+    let now = now - shift;
     let client = ClientId(0);
     let tick = i64::from(crate::MATCH_TICK_MS);
     let machine = |world: &mut World| {
@@ -1895,7 +3543,11 @@ pub(crate) fn pap_test(world: &mut World, now: i64) {
         let (m, origin, angles) = ent_by(world, "targetname", &target)?;
         Some((trigger, m, origin, angles))
     };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
     if (25000..25000 + tick).contains(&now) {
+=======
+    if shift == 0 && (25000..25000 + tick).contains(&now) {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
         let Some((trigger, m, _, _)) = machine(world) else {
             diag::warn!(Sim, "bo2zm t6 pap test: no machine");
             return;
@@ -1962,18 +3614,33 @@ pub(crate) fn pap_test(world: &mut World, now: i64) {
 /// power-up drops 60 units in front of the player (the game's own
 /// specific_powerup_drop) and he walks onto it at the next second.
 pub(crate) fn powerup_test(world: &mut World, now: i64) {
-    static WANT: OnceLock<Vec<String>> = OnceLock::new();
-    let want = WANT.get_or_init(|| {
-        std::env::var("IW4L_T6_POWERUP")
-            .map(|s| s.split(',').map(str::to_owned).collect())
-            .unwrap_or_default()
+    // `@<seconds>` after the list: the first drops then instead of at 30 s.
+    static WANT: OnceLock<(Vec<String>, i64)> = OnceLock::new();
+    let (want, shift) = WANT.get_or_init(|| {
+        let v = std::env::var("IW4L_T6_POWERUP").unwrap_or_default();
+        let (names, at) = match v.split_once('@') {
+            Some((n, s)) => (n, s.parse::<f32>().map_or(0, |s| (s * 1000.0) as i64 - 30000)),
+            None => (v.as_str(), 0),
+        };
+        (names.split(',').filter(|s| !s.is_empty()).map(str::to_owned).collect(), at)
     });
-    if want.is_empty() || now < 30000 {
+    // IW4L_T6_POWERUP_AT=<secs> (30): when the first one drops (Carpenter
+    // wants the zombies to have torn some boards first).
+    static AT: OnceLock<i64> = OnceLock::new();
+    let at = *AT.get_or_init(|| {
+        std::env::var("IW4L_T6_POWERUP_AT")
+            .ok()
+            .and_then(|s| s.parse::<i64>().ok())
+            .map_or(30000, |s| s * 1000)
+    });
+    // `@<seconds>` shifts the whole list.
+    let now = now - shift;
+    if want.is_empty() || now < at {
         return;
     }
     let tick = i64::from(crate::MATCH_TICK_MS);
-    let step = (now - 30000) / 12000;
-    let into = (now - 30000) % 12000;
+    let step = (now - at) / 12000;
+    let into = (now - at) % 12000;
     let Some(name) = want.get(step as usize) else {
         return;
     };
@@ -1981,13 +3648,51 @@ pub(crate) fn powerup_test(world: &mut World, now: i64) {
     let Some(ps) = frame(world).player(client).copied() else {
         return;
     };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
     let (f, _, _) = gsc_t6::math::angle_vectors([0.0, ps.viewangles[1], 0.0]);
     let spot = [
         ps.origin[0] + f[0] * 60.0,
         ps.origin[1] + f[1] * 60.0,
         ps.origin[2],
     ];
+=======
+    // IW4L_T6_POWERUP_DIST=<units> (60): how far in front it drops;
+    // IW4L_T6_POWERUP_WALK=0: he stays put (a look at it, not a grab).
+    static DIST: OnceLock<(f32, bool)> = OnceLock::new();
+    let (dist, walk) = *DIST.get_or_init(|| {
+        (
+            std::env::var("IW4L_T6_POWERUP_DIST").ok().and_then(|s| s.parse().ok()).unwrap_or(60.0),
+            std::env::var("IW4L_T6_POWERUP_WALK").map_or(true, |s| s != "0"),
+        )
+    });
+    // In front of him, or behind or to a side when a wall is in the way (a
+    // step into a wall is out of the playable area: the game kills him and
+    // takes his Quick Revive life).
+    let spot = {
+        let up = [ps.origin[0], ps.origin[1], ps.origin[2] + 18.0];
+        let mut best = (-1.0f32, ps.origin);
+        for turn in [0.0f32, 180.0, 90.0, 270.0] {
+            let (f, _, _) = gsc_t6::math::angle_vectors([0.0, ps.viewangles[1] + turn, 0.0]);
+            let to = [up[0] + f[0] * dist, up[1] + f[1] * dist, up[2]];
+            let t = frame(world).trace_static_world(
+                up,
+                to,
+                crate::bullet_collision::PLAYER_MINS,
+                crate::bullet_collision::PLAYER_MAXS,
+                crate::bullet_collision::MASK_PLAYER_SOLID,
+            );
+            if t.startsolid == 0 && t.fraction > best.0 {
+                best = (t.fraction, [ps.origin[0] + f[0] * dist, ps.origin[1] + f[1] * dist, ps.origin[2]]);
+            }
+            if best.0 >= 1.0 {
+                break;
+            }
+        }
+        best.1
+    };
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
     if into < tick {
+        diag::info!(Sim, "bo2zm t6 powerup test: before {name}: {}", boards_and_score(world, client));
         with_vm(world, |vm, world| {
             let n = vm.string(name);
             vm.spawn_named(
@@ -2000,10 +3705,132 @@ pub(crate) fn powerup_test(world: &mut World, now: i64) {
         });
         diag::info!(Sim, "bo2zm t6 powerup test: {name} dropped");
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/autoplay.rs
     if (1000..1000 + tick).contains(&into) {
+=======
+    if walk && (1000..1000 + tick).contains(&into) {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/autoplay.rs
         super::teleport_player(world, client, spot);
         diag::info!(Sim, "bo2zm t6 powerup test: walked onto {name}");
     }
+    // A second later: the team's power-up state (`zombie_vars["allies"]`:
+    // *_on flags, point scalar) the grab should have changed.
+    if (2000..2000 + tick).contains(&into) {
+        let state = with_vm(world, |vm, _| {
+            let zv = vm.intern("zombie_vars");
+            let gsc_t6::Value::Array(vars) = vm.raw_field(vm.level, zv) else {
+                return String::new();
+            };
+            let allies = vars
+                .read()
+                .map
+                .iter()
+                .find(|(k, _)| vm.to_text(&k.value()) == "allies")
+                .map(|(_, v)| v.clone());
+            let Some(gsc_t6::Value::Array(team)) = allies else {
+                return "no allies vars".to_owned();
+            };
+            let mut out: Vec<String> = team
+                .read()
+                .map
+                .iter()
+                .map(|(k, v)| (vm.to_text(&k.value()), vm.to_text(v)))
+                .filter(|(k, _)| k.ends_with("_on") || k.contains("scalar") || k.contains("insta"))
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect();
+            out.sort();
+            out.join(" ")
+        })
+        .unwrap_or_default();
+        let ammo = {
+            let f = frame(world);
+            format!(
+                "{}+{}",
+                crate::script_player::ammo_clip(&f, client, ps.weapon),
+                crate::script_player::ammo_stock(&f, client, ps.weapon)
+            )
+        };
+        diag::info!(Sim, "bo2zm t6 powerup test: after {name}: {state}; ammo {ammo}");
+    }
+    // Carpenter puts a board back every ~0.1 s, then pays 200 points.
+    if [5000, 10000].iter().any(|t| (*t..*t + tick).contains(&into)) {
+        diag::info!(
+            Sim,
+            "bo2zm t6 powerup test: {} s after {name}: {}",
+            into / 1000,
+            boards_and_score(world, client)
+        );
+    }
+}
+
+/// Window boards (pieces of typed zbarriers, the box has no board type)
+/// not in the "closed" state, of all, and the player's points.
+fn boards_and_score(world: &mut World, client: ClientId) -> String {
+    let (mut torn, mut all) = (0, 0);
+    for z in world.resource::<Zm>().ents.values().filter_map(|e| e.zbarrier.as_ref()) {
+        if z.def.as_ref().is_none_or(|d| d.boards.is_empty()) {
+            continue;
+        }
+        all += z.pieces.len();
+        torn += z.pieces.iter().filter(|p| p.state != "closed").count();
+    }
+    let score = frame(world).client_meta(client).map_or(0, |m| m.score);
+    format!("boards torn {torn}/{all}, points {score}")
+}
+
+/// IW4L_T6_GIBTEST=<secs>[,<gib_ref>]: then the living zombie nearest the
+/// player loses that piece (right_arm by default; head, left_leg, ...) by
+/// the scripts' own zm_death::do_gib (a gore test without the aim).
+pub(crate) fn gib_test(world: &mut World, now: i64) {
+    static WANT: OnceLock<Option<(i64, String)>> = OnceLock::new();
+    let Some((at, gib_ref)) = WANT
+        .get_or_init(|| {
+            let v = std::env::var("IW4L_T6_GIBTEST").ok()?;
+            let (s, r) = v.split_once(',').unwrap_or((v.as_str(), "right_arm"));
+            Some((s.trim().parse::<i64>().ok()?, r.trim().to_owned()))
+        })
+        .clone()
+    else {
+        return;
+    };
+    let tick = i64::from(crate::MATCH_TICK_MS);
+    if !(at * 1000..at * 1000 + tick).contains(&now) {
+        return;
+    }
+    let me = frame(world).player(ClientId(0)).map_or([0.0; 3], |ps| ps.origin);
+    let target = {
+        let zm = world.resource::<Zm>();
+        zm.actors
+            .iter()
+            .filter(|(_, a)| a.alive)
+            .filter_map(|(n, a)| {
+                let o = zm.ents.get(n)?.origin;
+                let d = (o[0] - me[0]).powi(2) + (o[1] - me[1]).powi(2);
+                Some((d, *n, a.obj?))
+            })
+            .min_by(|x, y| x.0.total_cmp(&y.0))
+    };
+    let Some((_, n, obj)) = target else {
+        diag::info!(Sim, "bo2zm t6 gib test: no living zombie at {at}s");
+        return;
+    };
+    diag::info!(Sim, "bo2zm t6 gib test: zombie {n} loses {gib_ref}");
+    with_vm(world, |vm, world| {
+        let a = vm.intern("a");
+        if let gsc_t6::Value::Object(st) = vm.raw_field(obj, a) {
+            let f = vm.intern("gib_ref");
+            let v = vm.string(&gib_ref);
+            vm.set_raw_field(st, f, v);
+        }
+        vm.spawn_named(
+            world,
+            "maps/mp/animscripts/zm_death",
+            "do_gib",
+            gsc_t6::Value::Object(obj),
+            Vec::new(),
+        );
+    });
+    diag::info!(Sim, "bo2zm t6 gib test: do_gib returned");
 }
 
 /// How far in front of a machine the tests stand (IW4L_T6_STAND, 40).
@@ -2052,10 +3879,23 @@ fn stand_at(world: &mut World, client: ClientId, origin: [f32; 3], angles: [f32;
     );
 }
 
-/// The rounds test's kit: the gun at 8 s, ammo topped up every 2 s.
+/// The rounds test's kit: the gun at 8 s, ammo topped up every 2 s. Mob
+/// starts him in the Afterlife, and leaving it gives back what he had going
+/// in (`afterlife_give_loadout`), so there the gun waits until 2 s after he
+/// is back in his body.
 fn rounds_kit(world: &mut World, now: i64, client: ClientId) {
+    use std::sync::atomic::{AtomicI64, Ordering};
+    static GIVE_AT: AtomicI64 = AtomicI64::new(8000);
+    static RAISE_AT: AtomicI64 = AtomicI64::new(i64::MAX);
     let tick = i64::from(crate::MATCH_TICK_MS);
-    if (8000..8000 + tick).contains(&now) {
+    let now = now - from_ms();
+    let give_at = GIVE_AT.load(Ordering::Relaxed);
+    if give_at != i64::MAX && now >= give_at {
+        if super::autoplay_prison::afterlife_corpse(world, client).is_some() {
+            GIVE_AT.store(now + 2000, Ordering::Relaxed);
+            return;
+        }
+        GIVE_AT.store(i64::MAX, Ordering::Relaxed);
         let gun = std::env::var("IW4L_T6_AUTOPLAY_GUN").unwrap_or_else(|_| "m14_zm".to_owned());
         with_vm(world, |vm, world| {
             if let Some(p) = world.resource::<Zm>().players.get(&client.0).map(|p| p.obj) {
@@ -2070,6 +3910,22 @@ fn rounds_kit(world: &mut World, now: i64, client: ClientId) {
             }
         });
         diag::info!(Sim, "bo2zm t6 autoplay: given {gun}");
+        RAISE_AT.store(now + 1000, Ordering::Relaxed);
+    }
+    // Equipment (TranZit's Jet Gun) goes on a d-pad slot and weapon_give
+    // does not raise it; a second later he presses that slot, as a player
+    // would.
+    let raise_at = RAISE_AT.load(Ordering::Relaxed);
+    if raise_at != i64::MAX && now >= raise_at {
+        RAISE_AT.store(i64::MAX, Ordering::Relaxed);
+        let gun = std::env::var("IW4L_T6_AUTOPLAY_GUN").unwrap_or_else(|_| "m14_zm".to_owned());
+        let held = frame(world).player(client).map(|p| p.weapon as u32);
+        if let Ok(w) = super::weapon(world, &gun)
+            && held != Some(w)
+        {
+            crate::script_player::switch_to_weapon(&mut frame(world), client, w);
+            diag::info!(Sim, "bo2zm t6 autoplay: raised {gun} from its d-pad slot");
+        }
     }
     if now % 2000 < tick {
         let mut f = frame(world);
@@ -2208,4 +4064,284 @@ fn orbit_look(world: &mut World, deg: f32) {
     let eye = [feet[0], feet[1], feet[2] + ps.view_height_current];
     super::teleport_player(world, client, feet);
     super::set_player_view(world, client, look(eye, head));
+}
+
+/// IW4L_T6_USE=<targetname>[:<seconds>] (default 10 s): at that time the
+/// player gets 10000 points and stands 40 units from the first use trigger
+/// with that targetname (on the first open side with a floor), looking at
+/// it; he holds use 1 s later for 0.5 s. `<seconds>+<again>+...`: he holds
+/// use again <again> s after he was placed, fires 3 s later for 2 s, and his
+/// weapons with their clips are logged before and after the shots (Pack-a-
+/// Punch: take the upgraded gun, fire it). IW4L_T6_USE_FLAG=<flag>: that
+/// level flag is logged 1 s before and 3 s after (a power switch's power_on).
+pub(crate) fn use_test(world: &mut World, now: i64) {
+    type Want = (String, Option<String>, i64, Vec<i64>);
+    static WANT: OnceLock<Vec<Want>> = OnceLock::new();
+    let list = WANT.get_or_init(|| {
+        std::env::var("IW4L_T6_USE")
+            .unwrap_or_default()
+            .split(',')
+            .filter(|v| !v.is_empty())
+            .map(|v| {
+                let (name, secs) = v.split_once(':').unwrap_or((v, "10"));
+                let (name, note) = match name.split_once('/') {
+                    Some((n, k)) => (n.to_owned(), Some(k.to_owned())),
+                    None => (name.to_owned(), None),
+                };
+                let ms = |v: &str| (v.parse::<f32>().unwrap_or(10.0) * 1000.0) as i64;
+                let mut secs = secs.split('+');
+                let at = ms(secs.next().unwrap_or("10"));
+                (name, note, at, secs.map(ms).collect())
+            })
+            .collect()
+    });
+    for (want, note, at, again) in list {
+        use_one(world, now, want, note.as_deref(), *at, again);
+    }
+}
+
+fn use_one(world: &mut World, now: i64, want: &str, note: Option<&str>, at: i64, again: &[i64]) {
+    let client = ClientId(0);
+    let tick = i64::from(crate::MATCH_TICK_MS);
+    let log_flag = |world: &mut World, when: &str| {
+        let Ok(flag) = std::env::var("IW4L_T6_USE_FLAG") else {
+            return;
+        };
+        let on = with_vm(world, |vm, _| {
+            let (f, k) = (vm.intern("flag"), vm.intern(&flag));
+            match vm.raw_field(vm.level, f) {
+                gsc_t6::Value::Array(a) => a.get(&gsc_t6::Key::Str(k)).is_some_and(|v| gsc_t6::truthy(&v)),
+                _ => false,
+            }
+        })
+        .unwrap_or(false);
+        diag::info!(Sim, "bo2zm t6 use test {when}: flag {flag} {on}");
+    };
+    if (at - 1000..at - 1000 + tick).contains(&now) {
+        log_flag(world, "before");
+    }
+    // When he was put by it (it may be moving, as in an elevator: tried each
+    // tick for 15 s).
+    static PLACED: std::sync::Mutex<Vec<(String, i64)>> = std::sync::Mutex::new(Vec::new());
+    let key = format!("{want}/{}", note.unwrap_or(""));
+    let placed = |key: &str| {
+        PLACED.lock().ok().and_then(|l| l.iter().find(|(k, _)| k == key).map(|p| p.1))
+    };
+    if (at..at + tick).contains(&now) {
+        give_points(world, 10000);
+    }
+    if (at..at + 15000).contains(&now) && placed(&key).is_none() {
+        let trig = with_vm(world, |vm, world| {
+            let (tn, sn) = (vm.intern("targetname"), vm.intern("script_noteworthy"));
+            world
+                .resource::<Zm>()
+                .ents
+                .values()
+                .find(|e| {
+                    // Any trigger: a use press in a plain one does nothing
+                    // (Die Rise's escape pod: standing in it is the test).
+                    super::triggers::kind(&e.classname).is_some()
+                        && e.obj.is_some_and(|o| {
+                            vm.to_text(&vm.raw_field(o, tn)) == want
+                                && note.is_none_or(|k| vm.to_text(&vm.raw_field(o, sn)) == k)
+                        })
+                })
+                .cloned()
+        })
+        .flatten();
+        let Some(trig) = trig else {
+            if now + tick < at + 15000 {
+                return;
+            }
+            diag::warn!(Sim, "bo2zm t6 use test: no use trigger {want}");
+            return;
+        };
+        let c = super::triggers::center(world, &trig);
+        let (mins, maxs, mask) = (
+            crate::bullet_collision::PLAYER_MINS,
+            crate::bullet_collision::PLAYER_MAXS,
+            crate::bullet_collision::MASK_PLAYER_SOLID,
+        );
+        // Its centre, else the nearest of 8 sides (16..56 units out) the
+        // player fits on, over a floor (an elevator's too), touching the
+        // trigger (Die Rise's escape pod trigger: only its inside has room).
+        let feet = [0.0f32, 16.0, 24.0, 32.0, 40.0, 56.0].into_iter().find_map(|r| {
+            (0..8).find_map(|i| {
+                let a = (i as f32) * std::f32::consts::FRAC_PI_4;
+                let from = [c[0], c[1], c[2] + 10.0];
+                let to = [c[0] + r * a.cos(), c[1] + r * a.sin(), c[2] + 10.0];
+                let down = [to[0], to[1], to[2] - 160.0];
+                let feet: [f32; 3] = {
+                    let f = frame(world);
+                    // A centre inside something solid (a perk machine's
+                    // own collision) only rules out walls between.
+                    let side = f.trace_world(from, to, mins, maxs, mask);
+                    if side.fraction < 1.0 && side.startsolid == 0 {
+                        return None;
+                    }
+                    let t = f.trace_world(to, down, mins, maxs, mask);
+                    if t.fraction >= 1.0 || t.startsolid != 0 {
+                        return None;
+                    }
+                    std::array::from_fn(|k| to[k] + (down[k] - to[k]) * t.fraction)
+                };
+                let lo = std::array::from_fn(|k| feet[k] + mins[k]);
+                let hi = std::array::from_fn(|k| feet[k] + maxs[k]);
+                super::triggers::touches(world, &trig, lo, hi).then_some(feet)
+            })
+        });
+        let Some(feet) = feet else {
+            if now + tick < at + 15000 {
+                return;
+            }
+            diag::warn!(Sim, "bo2zm t6 use test: no room by {want} at ({:.0} {:.0} {:.0})", c[0], c[1], c[2]);
+            return;
+        };
+        if let Ok(mut l) = PLACED.lock() {
+            l.push((key.clone(), now));
+        }
+        let eye = [feet[0], feet[1], feet[2] + 60.0];
+        super::teleport_player(world, client, feet);
+        super::set_player_view(world, client, look(eye, c));
+        diag::info!(
+            Sim,
+            "bo2zm t6 use test: {want} {} brush {:?} radius {} box {:?} at ({:.0} {:.0} {:.0}); player at ({:.0} {:.0} {:.0})",
+            trig.classname,
+            trig.brush,
+            trig.radius,
+            trig.box_dims,
+            c[0],
+            c[1],
+            c[2],
+            feet[0],
+            feet[1],
+            feet[2]
+        );
+    }
+    let Some(at) = placed(&key) else {
+        return;
+    };
+    if (at + 800..at + 800 + tick).contains(&now) {
+        let hint = world.resource::<Zm>().hints.get(&0).cloned().unwrap_or_default();
+        diag::info!(Sim, "bo2zm t6 use test: hint {hint:?}");
+    }
+    if (at + 1000..at + 1500).contains(&now) {
+        press_use(world, client);
+    }
+    if [4000, 8000].iter().any(|d| (at + d..at + d + tick).contains(&now)) {
+        log_flag(world, "after");
+        let names: Vec<String> = {
+            let f = frame(world);
+            crate::script_player::weapons(&f, client, crate::script_player::WeaponList::All)
+                .into_iter()
+                .map(|w| crate::script_player::weapon_name(&f, w))
+                .collect()
+        };
+        let score = frame(world).client_meta(client).map_or(0, |m| m.score);
+        diag::info!(Sim, "bo2zm t6 use test {want} after: points {score}, weapons {names:?}");
+    }
+    for &d in again {
+        if (at + d - 200..at + d - 200 + tick).contains(&now) {
+            let hint = world.resource::<Zm>().hints.get(&0).cloned().unwrap_or_default();
+            diag::info!(Sim, "bo2zm t6 use test: hint again {hint:?}");
+        }
+        if (at + d..at + d + 500).contains(&now) {
+            press_use(world, client);
+        }
+        for (dt, when) in [(2800, "before shots"), (5500, "after shots")] {
+            if (at + d + dt..at + d + dt + tick).contains(&now) {
+                let clips: Vec<(String, i32, i32)> = {
+                    let f = frame(world);
+                    crate::script_player::weapons(&f, client, crate::script_player::WeaponList::All)
+                        .into_iter()
+                        .map(|w| {
+                            let n = crate::script_player::weapon_name(&f, w);
+                            // A dual-wield gun: its left clip too.
+                            let left = crate::script_player::left_clip(&f, client, w);
+                            (n, crate::script_player::ammo_clip(&f, client, w), left)
+                        })
+                        .collect()
+                };
+                diag::info!(Sim, "bo2zm t6 use test {want} again {when}: clips (right, left) {clips:?}");
+            }
+        }
+        if (at + d + 3000..at + d + 5000).contains(&now) {
+            let mut req = world.resource_mut::<crate::step::StepRequest>();
+            for (id, cmd) in &mut req.input.cmds {
+                if *id == client {
+                    // Taps (a pistol fires once a press).
+                    if (now / 200) % 2 == 0 {
+                        cmd.buttons |= buttons::ATTACK;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// IW4L_T6_ENTLOG=<targetname>[,...]: every 5 s each entity with that
+/// targetname logs its origin (Die Rise's escape pod going down and back).
+/// IW4L_T6_ENTLOG_FIELDS=<field>[,...] adds those script fields (a car
+/// body's `current_level`, `force_starting_floor`). The name "player" logs
+/// player 0's place as well.
+pub(crate) fn ent_log(world: &mut World, now: i64) {
+    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    static FIELDS: OnceLock<Vec<String>> = OnceLock::new();
+    let list = |var: &str| -> Vec<String> {
+        std::env::var(var)
+            .unwrap_or_default()
+            .split(',')
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+            .collect()
+    };
+    let names = NAMES.get_or_init(|| list("IW4L_T6_ENTLOG"));
+    let fields = FIELDS.get_or_init(|| list("IW4L_T6_ENTLOG_FIELDS"));
+    if names.is_empty() || now % 5000 >= i64::from(crate::MATCH_TICK_MS) {
+        return;
+    }
+    let found = with_vm(world, |vm, world| {
+        let tn = vm.intern("targetname");
+        let ids: Vec<_> = fields.iter().map(|f| (f, vm.intern(f))).collect();
+        world
+            .resource::<Zm>()
+            .ents
+            .iter()
+            .filter_map(|(n, e)| {
+                let obj = e.obj?;
+                let name = vm.to_text(&vm.raw_field(obj, tn));
+                names.contains(&name).then(|| {
+                    let extra: String = ids
+                        .iter()
+                        .map(|(f, id)| format!(" {f}={}", vm.to_text(&vm.raw_field(obj, *id))))
+                        .collect();
+                    (name, *n, e.origin, extra)
+                })
+            })
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_default();
+    for (name, n, o, extra) in found {
+        diag::info!(
+            Sim,
+            "bo2zm t6 entlog {}s: {name} ent{n} at ({:.0} {:.0} {:.0}){extra}",
+            now / 1000,
+            o[0],
+            o[1],
+            o[2]
+        );
+    }
+    // "player" in the list: player 0's place too (riding a car).
+    if names.iter().any(|n| n == "player")
+        && let Some(o) = frame(world).player(ClientId(0)).map(|p| p.origin)
+    {
+        diag::info!(
+            Sim,
+            "bo2zm t6 entlog {}s: player at ({:.0} {:.0} {:.0})",
+            now / 1000,
+            o[0],
+            o[1],
+            o[2]
+        );
+    }
 }

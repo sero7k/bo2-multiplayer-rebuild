@@ -151,6 +151,10 @@ pub struct XAnimRef {
     pub looping: bool,
     pub delta: bool,
     pub delta_trans: Vec<(u16, [f32; 3])>,
+    /// bo2zm: the root's turn keys (frame, quaternion x y z w): the delta
+    /// part's `quat` (a whole turn) or else its `quat2` (about the up axis
+    /// only, z and w). Empty when the animation does not turn its root.
+    pub delta_quat: Vec<(u16, [f32; 4])>,
     /// bo2zm M2: the whole animation, as the engine's decoder reads it.
     pub bone_count: [u8; 10],
     /// Track (bone) names, `boneCount[PART_TYPE_ALL]` of them.
@@ -264,6 +268,11 @@ pub struct XModelRef {
     pub mins: [f32; 3],
     pub maxs: [f32; 3],
     pub radius: f32,
+    /// Where the model's light is read, from its origin
+    /// (`lightingOriginOffset`), and how far that point may move before
+    /// it is read again (`lightingOriginRange`).
+    pub lighting_origin_offset: [f32; 3],
+    pub lighting_origin_range: f32,
     /// The first (most detailed) LOD's surfaces.
     pub lod0: Vec<XSurfaceRef>,
     /// bo2zm M2: the skeleton. Bone names, the root bone count, each child
@@ -403,18 +412,36 @@ pub struct WorldRef {
     /// `GfxWorld::exposureVolumes`: (exposure, increase scale, decrease
     /// scale, feather range) per volume.
     pub exposure_volumes: Vec<[f32; 4]>,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
     /// bo2mp: `GfxWorld::sunParse.initWorldSun.exposure`, the map's own
     /// exposure where no exposure volume holds the eye.
     pub init_sun_exposure: f32,
+=======
+    /// Per exposure volume its `control` word (which planes bound it).
+    pub exposure_volume_controls: Vec<u32>,
+    /// `GfxWorld::exposureVolumePlanes`: the volumes' bounding planes.
+    pub exposure_volume_planes: Vec<[f32; 4]>,
+    /// `GfxWorld::lutVolumes`: per colour table volume its `control` word
+    /// (low byte: banks; then planes as for exposure volumes), its table
+    /// (`lutIndex`) and its `lutTransitionTime`.
+    pub lut_volumes: Vec<(u32, u32, f32)>,
+    /// `GfxWorld::lutVolumePlanes`: the colour table volumes' planes.
+    pub lut_volume_planes: Vec<[f32; 4]>,
+    /// `GfxWorld::skyDynIntensity`: angle0, angle1, factor0, factor1.
+    pub sky_dyn_intensity: [f32; 4],
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
     /// `GfxWorld::lightGrid`, the static-model lighting source.
     pub light_grid: Option<LightGridRef>,
     /// `GfxWorld::lutMaterial`: the map's colour grading material.
     pub lut_material: Option<AssetKey>,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
     /// `GfxWorld::lutVolumes`: per volume its box, control word, transition
     /// time and the band of the LUT image it picks.
     pub lut_volumes: Vec<([f32; 3], [f32; 3], u32, u32, u32)>,
     /// `GfxWorld::skyDynIntensity`: angle0, angle1, factor0, factor1.
     pub sky_dyn_intensity: [f32; 4],
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
     /// The static visibility lists.
     pub dpvs: DpvsRanges,
     /// `sortedSurfIndex`: draw order -> surface.
@@ -429,9 +456,22 @@ pub struct WorldRef {
     pub primary_light_count: u32,
     /// `GfxWorld::sunParse.initWorldFog`: the fog the map starts with.
     pub init_fog: Option<WorldFogRef>,
+    /// `GfxWorld::sunParse.initWorldSun` as raw words (84 bytes; layout
+    /// still being measured: it holds the map's starting sun and exposure).
+    pub init_sun_raw: Vec<u32>,
     /// `GfxWorld::worldFogVolumes`: per volume its box, control words and
     /// fog.
     pub fog_volumes: Vec<([f32; 3], [f32; 3], u32, u32, WorldFogRef)>,
+    /// `GfxWorld::worldFogVolumePlanes`: the fog volumes' bounding planes
+    /// (their boxes are zero; the control word picks the planes, as for
+    /// exposure volumes).
+    pub fog_volume_planes: Vec<[f32; 4]>,
+    /// `GfxWorld::worldFogModifierVolumes`: per volume its control word (as
+    /// a fog volume's: banks, plane count, first plane), its transition
+    /// time, depth scale and height scale, and its colour adjust.
+    pub fog_modifier_volumes: Vec<(u32, [f32; 3], [f32; 4])>,
+    /// `GfxWorld::worldFogModifierVolumePlanes`.
+    pub fog_modifier_volume_planes: Vec<[f32; 4]>,
 }
 
 /// One `GfxWorldFog`.
@@ -728,6 +768,7 @@ pub struct StringTableRef {
     pub cells: Vec<String>,
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
 /// bo2mp: a vehicle's own weapons (`VehicleDef::turretWeapon`,
 /// `gunnerWeapon[4]`): what a scorestreak's helicopter fires.
 #[derive(Clone, Debug, Default)]
@@ -879,6 +920,23 @@ fn vehicle_button_command(name: &str) -> &'static str {
         "BUTTON_RTRIG" => "+attack",
         _ => "",
     }
+=======
+/// bo2zm: a window/box barrier type (`ZBarrierDef`, named by a map
+/// entity's `type` key): the zombie animation states it asks for.
+#[derive(Clone, Debug, Default)]
+pub struct ZBarrierDefRef {
+    pub name: String,
+    pub taunts: bool,
+    pub reach_through: bool,
+    /// Pieces torn off (state "open") stop drawing (`autoHideOpenPieces`).
+    pub auto_hide_open_pieces: bool,
+    pub taunt_state: String,
+    pub reach_through_state: String,
+    pub num_attack_slots: u32,
+    pub attack_spot_horz_offset: f32,
+    /// Per board: (tear anim state, tear anim substate).
+    pub boards: Vec<(String, String)>,
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
 }
 
 /// Everything one walk captured.
@@ -897,6 +955,8 @@ pub struct ZoneCapture {
     pub raw_files: Vec<(String, Vec<u8>)>,
     /// bo2zm M3: every StringTable (`mp/zombiemode.csv`, ...).
     pub string_tables: Vec<StringTableRef>,
+    /// bo2zm: barrier types (window boards, the box).
+    pub zbarriers: Vec<ZBarrierDefRef>,
     /// bo2zm M3: every localized string (`ZOMBIE_WEAPON_M14` -> its text),
     /// from a language zone (`zone/english/en_*.ff`).
     pub localize: Vec<(String, String)>,
@@ -930,6 +990,8 @@ pub struct ZoneCapture {
     pub fonts: Vec<crate::m2::FontRef>,
     pub fx: Vec<crate::m2::FxEffectRef>,
     pub tracers: Vec<crate::m2::TracerRef>,
+    /// Props that break in stages (Nuketown's mannequins).
+    pub destructibles: Vec<crate::m2::DestructibleRef>,
     pub impact_tables: Vec<crate::m2::ImpactTableRef>,
     pub footstep_tables: Vec<crate::m2::FootstepTableRef>,
     pub footstep_fx_tables: Vec<crate::m2::FootstepFxTableRef>,
@@ -1336,6 +1398,8 @@ impl ZoneCapture {
             mins: vec3(s, x, l::XModel::mins)?,
             maxs: vec3(s, x, l::XModel::maxs)?,
             radius: s.f32_at(x, l::XModel::radius)?,
+            lighting_origin_offset: vec3(s, x, l::XModel::lightingOriginOffset)?,
+            lighting_origin_range: s.f32_at(x, l::XModel::lightingOriginRange)?,
             lod0,
             bone_names,
             num_root_bones,
@@ -1792,6 +1856,14 @@ impl ZoneCapture {
                 s,
                 w.at(l::GfxWorld::sunParse + l::SunLightParseParams::initWorldFog),
             )?),
+            init_sun_raw: {
+                let base = l::GfxWorld::sunParse + l::SunLightParseParams::initWorldSun;
+                let mut v = Vec::with_capacity(21);
+                for i in 0..21 {
+                    v.push(s.u32_at(w, base + i * 4)?);
+                }
+                v
+            },
             fog_volumes: {
                 let n = s.u32_at(w, l::GfxWorld::worldFogVolumeCount)? as usize;
                 let mut v = Vec::with_capacity(n);
@@ -1809,6 +1881,63 @@ impl ZoneCapture {
                 }
                 v
             },
+            fog_volume_planes: {
+                let n = s.u32_at(w, l::GfxWorld::worldFogVolumePlaneCount)? as usize;
+                let mut v = Vec::with_capacity(n);
+                if let Some(arr) = deref(s, w, l::GfxWorld::worldFogVolumePlanes)? {
+                    for i in 0..n {
+                        let e = arr.at(i * l::GfxVolumePlane::SIZE);
+                        v.push([
+                            s.f32_at(e, 0)?,
+                            s.f32_at(e, 4)?,
+                            s.f32_at(e, 8)?,
+                            s.f32_at(e, 12)?,
+                        ]);
+                    }
+                }
+                v
+            },
+            fog_modifier_volumes: {
+                use l::GfxWorldFogModifierVolume as m;
+                let n = s.u32_at(w, l::GfxWorld::worldFogModifierVolumeCount)? as usize;
+                let mut v = Vec::with_capacity(n);
+                if let Some(arr) = deref(s, w, l::GfxWorld::worldFogModifierVolumes)? {
+                    for i in 0..n {
+                        let e = arr.at(i * m::SIZE);
+                        v.push((
+                            s.u32_at(e, m::control)?,
+                            [
+                                s.f32_at(e, m::transitionTime)?,
+                                s.f32_at(e, m::depthScale)?,
+                                s.f32_at(e, m::heightScale)?,
+                            ],
+                            [
+                                s.f32_at(e, m::colorAdjust)?,
+                                s.f32_at(e, m::colorAdjust + 4)?,
+                                s.f32_at(e, m::colorAdjust + 8)?,
+                                s.f32_at(e, m::colorAdjust + 12)?,
+                            ],
+                        ));
+                    }
+                }
+                v
+            },
+            fog_modifier_volume_planes: {
+                let n = s.u32_at(w, l::GfxWorld::worldFogModifierVolumePlaneCount)? as usize;
+                let mut v = Vec::with_capacity(n);
+                if let Some(arr) = deref(s, w, l::GfxWorld::worldFogModifierVolumePlanes)? {
+                    for i in 0..n {
+                        let e = arr.at(i * l::GfxVolumePlane::SIZE);
+                        v.push([
+                            s.f32_at(e, 0)?,
+                            s.f32_at(e, 4)?,
+                            s.f32_at(e, 8)?,
+                            s.f32_at(e, 12)?,
+                        ]);
+                    }
+                }
+                v
+            },
             vertex_count,
             vd0,
             vd1,
@@ -1819,6 +1948,7 @@ impl ZoneCapture {
             reflection_probes,
             sky_box_model: string_field(s, w, l::GfxWorld::skyBoxModel)?,
             lut_material: self.asset_at(s, w.at(l::GfxWorld::lutMaterial))?,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
             lut_volumes: {
                 let n = s.u32_at(w, l::GfxWorld::lutVolumeCount)? as usize;
                 let mut v = Vec::with_capacity(n);
@@ -1845,6 +1975,8 @@ impl ZoneCapture {
                     s.f32_at(d, l::GfxSkyDynamicIntensity::factor1)?,
                 ]
             },
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
             light_grid: {
                 let g = w.at(l::GfxWorld::lightGrid);
                 let u16x3 = |off: usize| -> Result<[u16; 3]> {
@@ -1918,12 +2050,15 @@ impl ZoneCapture {
                 };
                 Some(grid)
             },
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
             init_sun_exposure: s.f32_at(
                 w,
                 l::GfxWorld::sunParse
                     + l::SunLightParseParams::initWorldSun
                     + l::GfxWorldSun::exposure,
             )?,
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
             exposure_volumes: {
                 let n = s.u32_at(w, l::GfxWorld::exposureVolumeCount)? as usize;
                 let mut v = Vec::with_capacity(n);
@@ -1939,6 +2074,68 @@ impl ZoneCapture {
                     }
                 }
                 v
+            },
+            exposure_volume_controls: {
+                let n = s.u32_at(w, l::GfxWorld::exposureVolumeCount)? as usize;
+                let mut v = Vec::with_capacity(n);
+                if let Some(arr) = deref(s, w, l::GfxWorld::exposureVolumes)? {
+                    for i in 0..n {
+                        let e = arr.at(i * l::GfxExposureVolume::SIZE);
+                        v.push(s.u32_at(e, l::GfxExposureVolume::control)?);
+                    }
+                }
+                v
+            },
+            exposure_volume_planes: {
+                let n = s.u32_at(w, l::GfxWorld::exposureVolumePlaneCount)? as usize;
+                let mut v = Vec::with_capacity(n);
+                if let Some(arr) = deref(s, w, l::GfxWorld::exposureVolumePlanes)? {
+                    for i in 0..n {
+                        let e = arr.at(i * l::GfxVolumePlane::SIZE);
+                        v.push([
+                            s.f32_at(e, 0)?,
+                            s.f32_at(e, 4)?,
+                            s.f32_at(e, 8)?,
+                            s.f32_at(e, 12)?,
+                        ]);
+                    }
+                }
+                v
+            },
+            lut_volumes: {
+                let n = s.u32_at(w, l::GfxWorld::lutVolumeCount)? as usize;
+                let mut v = Vec::with_capacity(n);
+                if let Some(arr) = deref(s, w, l::GfxWorld::lutVolumes)? {
+                    for i in 0..n {
+                        let e = arr.at(i * l::GfxLutVolume::SIZE);
+                        v.push((
+                            s.u32_at(e, l::GfxLutVolume::control)?,
+                            s.u32_at(e, l::GfxLutVolume::lutIndex)?,
+                            s.f32_at(e, l::GfxLutVolume::lutTransitionTime)?,
+                        ));
+                    }
+                }
+                v
+            },
+            lut_volume_planes: {
+                let n = s.u32_at(w, l::GfxWorld::lutVolumePlaneCount)? as usize;
+                let mut v = Vec::with_capacity(n);
+                if let Some(arr) = deref(s, w, l::GfxWorld::lutVolumePlanes)? {
+                    for i in 0..n {
+                        let e = arr.at(i * l::GfxVolumePlane::SIZE);
+                        v.push([s.f32_at(e, 0)?, s.f32_at(e, 4)?, s.f32_at(e, 8)?, s.f32_at(e, 12)?]);
+                    }
+                }
+                v
+            },
+            sky_dyn_intensity: {
+                let at = l::GfxWorld::skyDynIntensity;
+                [
+                    s.f32_at(w, at)?,
+                    s.f32_at(w, at + 4)?,
+                    s.f32_at(w, at + 8)?,
+                    s.f32_at(w, at + 12)?,
+                ]
             },
             sun: match deref(s, w, l::GfxWorld::sunLight)? {
                 Some(light) => Some(SunRef {
@@ -2037,6 +2234,49 @@ impl WalkSink for ZoneCapture {
                         }
                     }
                 }
+                // The root's turn: the same keys as the translation (key
+                // count less one, one value or a frames table, frame indices
+                // unless every frame has a key), each value a quaternion in
+                // shorts (32767 = 1): `quat` all four, `quat2` z and w.
+                let mut delta_quat = Vec::new();
+                if let Some(dp) = deref(s, body, l::XAnimParts::deltaPart)? {
+                    let full = deref(s, dp, l::XAnimDeltaPart::quat)?;
+                    let part =
+                        full.map(|q| (q, 4usize))
+                            .or(deref(s, dp, l::XAnimDeltaPart::quat2)?.map(|q| (q, 2usize)));
+                    if let Some((q, n)) = part {
+                        let size = usize::from(s.u16_at(q, l::XAnimDeltaPartQuat::size)?);
+                        let u = q.at(l::XAnimDeltaPartQuat::u);
+                        let quat = |at: Ptr, k: usize| -> Result<[f32; 4]> {
+                            let c = |i: usize| -> Result<f32> {
+                                Ok(f32::from(s.i16_at(at, (k * n + i) * 2)?) / 32767.0)
+                            };
+                            Ok(if n == 4 {
+                                [c(0)?, c(1)?, c(2)?, c(3)?]
+                            } else {
+                                [0.0, 0.0, c(0)?, c(1)?]
+                            })
+                        };
+                        if size == 0 {
+                            delta_quat.push((0, quat(u, 0)?));
+                        } else if let Some(frames) =
+                            deref(s, u, l::XAnimDeltaPartQuatDataFrames::frames)?
+                        {
+                            let keys = size + 1;
+                            let idx = u.at(l::XAnimDeltaPartQuatDataFrames::indices);
+                            for k in 0..keys {
+                                let frame = if keys == usize::from(numframes) + 1 {
+                                    k as u16
+                                } else if numframes >= 256 {
+                                    s.u16_at(idx, k * 2)?
+                                } else {
+                                    u16::from(s.u8_at(idx, k)?)
+                                };
+                                delta_quat.push((frame, quat(frames, k)?));
+                            }
+                        }
+                    }
+                }
                 let mut bone_count = [0u8; 10];
                 for (k, c) in bone_count.iter_mut().enumerate() {
                     *c = s.u8_at(body, l::XAnimParts::boneCount + k)?;
@@ -2117,6 +2357,7 @@ impl WalkSink for ZoneCapture {
                     looping: s.u8_at(body, l::XAnimParts::bLoop)? != 0,
                     delta: s.u8_at(body, l::XAnimParts::bDelta)? != 0,
                     delta_trans,
+                    delta_quat,
                     bone_count,
                     names,
                     notifies,
@@ -2193,6 +2434,7 @@ impl WalkSink for ZoneCapture {
                 }
                 None
             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
             AssetType::FontIcon => {
                 // bo2mp: BO2's button pictures (`^BBUTTON_MOUSE_LEFT^`): each icon's
                 // name, picture and its size scales, and the aliases that name
@@ -2231,6 +2473,8 @@ impl WalkSink for ZoneCapture {
                 self.string_tables.push(StringTableRef { name: "bo2mp/fonticonalias.csv".to_owned(), columns: 2, rows: cells.len() / 2, cells });
                 None
             }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
             AssetType::StringTable => {
                 let name = string_field(s, body, l::StringTable::name)?;
                 let columns = s.u32_at(body, l::StringTable::columnCount)? as usize;
@@ -2247,6 +2491,33 @@ impl WalkSink for ZoneCapture {
                     rows,
                     cells,
                 });
+                None
+            }
+            AssetType::ZBarrier => {
+                let sl = |off: usize| -> Result<String> {
+                    Ok(self.script_string(s.u16_at(body, off)?).to_owned())
+                };
+                let n = (s.u32_at(body, l::ZBarrierDef::numBoardsInBarrier)? as usize).min(6);
+                let mut boards = Vec::with_capacity(n);
+                for i in 0..n {
+                    let b = l::ZBarrierDef::boards + i * l::ZBarrierBoard::SIZE;
+                    boards.push((
+                        sl(b + l::ZBarrierBoard::zombieBoardTearStateName)?,
+                        sl(b + l::ZBarrierBoard::zombieBoardTearSubStateName)?,
+                    ));
+                }
+                let def = ZBarrierDefRef {
+                    name: string_field(s, body, l::ZBarrierDef::name)?,
+                    taunts: s.u32_at(body, l::ZBarrierDef::taunts)? != 0,
+                    reach_through: s.u32_at(body, l::ZBarrierDef::reachThroughAttacks)? != 0,
+                    auto_hide_open_pieces: s.u32_at(body, l::ZBarrierDef::autoHideOpenPieces)? != 0,
+                    taunt_state: sl(l::ZBarrierDef::zombieTauntAnimState)?,
+                    reach_through_state: sl(l::ZBarrierDef::zombieReachThroughAnimState)?,
+                    num_attack_slots: s.u32_at(body, l::ZBarrierDef::numAttackSlots)?,
+                    attack_spot_horz_offset: s.f32_at(body, l::ZBarrierDef::attackSpotHorzOffset)?,
+                    boards,
+                };
+                self.zbarriers.push(def);
                 None
             }
             // Compiled scripts are kept with the rawfiles, named `script:`.
@@ -2299,6 +2570,7 @@ impl WalkSink for ZoneCapture {
                 self.weapons.push(weapon);
                 None
             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
             AssetType::Attachment => {
                 let a = self.read_attachment(s, body)?;
                 self.attachments.push(a);
@@ -2309,6 +2581,8 @@ impl WalkSink for ZoneCapture {
                 self.attachment_uniques.push(a);
                 None
             }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
             AssetType::WeaponCamo => {
                 let camo = self.read_weapon_camo(s, body)?;
                 self.weapon_camos.push(camo);
@@ -2323,6 +2597,11 @@ impl WalkSink for ZoneCapture {
                 let fx = self.read_fx(s, body)?;
                 self.fx.push(fx);
                 Some(self.fx.len() - 1)
+            }
+            AssetType::DestructibleDef => {
+                let def = self.read_destructible(s, body)?;
+                self.destructibles.push(def);
+                None
             }
             AssetType::Tracer => {
                 let tracer = self.read_tracer(s, body)?;
@@ -2353,6 +2632,7 @@ impl WalkSink for ZoneCapture {
                 self.snd_globals = Some(self.read_snd_driver_globals(s, body)?);
                 None
             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
             AssetType::VehicleDef => {
                 // Its guns are named, not pointed at (`turretWeapon`,
                 // `gunnerWeapon[4]` are strings in BO2's vehicle def).
@@ -2520,9 +2800,21 @@ impl WalkSink for ZoneCapture {
                 });
                 None
             }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
             AssetType::MapEnts => {
                 let len = s.u32_at(body, l::MapEnts::numEntityChars)? as usize;
                 let text = bytes_field(s, body, l::MapEnts::entityString, len)?;
+                let end = text.iter().position(|&b| b == 0).unwrap_or(text.len());
+                self.map_ents
+                    .push(String::from_utf8_lossy(&text[..end]).into_owned());
+                None
+            }
+            // A mode zone's extra entities (`so_zclassic_zm_buried.ff`'s
+            // `maps/mp/so_zclassic_zm_buried.mapents`), after the map's.
+            AssetType::AddonMapEnts => {
+                let len = s.u32_at(body, l::AddonMapEnts::numEntityChars)? as usize;
+                let text = bytes_field(s, body, l::AddonMapEnts::entityString, len)?;
                 let end = text.iter().position(|&b| b == 0).unwrap_or(text.len());
                 self.map_ents
                     .push(String::from_utf8_lossy(&text[..end]).into_owned());

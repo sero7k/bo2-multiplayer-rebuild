@@ -10,6 +10,7 @@ mod messages;
 mod pcm;
 mod playback;
 mod plugin;
+mod room_echo;
 mod rumble;
 mod shellshock;
 mod space;
@@ -48,6 +49,9 @@ pub use voice::VoiceOccupancy;
 
 mod destructible_loops;
 mod zm_music;
+mod dive_vox; // bo2zm
+mod laststand; // bo2zm
+mod bus_gain;
 mod match_set;
 mod match_voices;
 pub mod music;

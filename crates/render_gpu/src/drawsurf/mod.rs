@@ -5,6 +5,7 @@ mod depth_range;
 mod draw;
 mod exact_pipeline;
 mod floatz;
+mod bo2_afterlife; // bo2zm
 mod bo2_bloom; // bo2zm
 mod bo2_dof; // bo2mp
 mod geometry_diagnostic;

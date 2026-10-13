@@ -14,6 +14,8 @@ pub enum LaunchMode {
     /// (its own menus), no map until a match starts.
     FrontendT6Mp,
     Map(String),
+    /// bo2zm M4: Black Ops II's own front end first; Start loads the map.
+    Frontend(String),
     Serve(String),
     ExportGltf(String),
     Play {
@@ -95,6 +97,12 @@ pub fn parse_launch_args(mut args: impl Iterator<Item = String>) -> Result<Launc
             };
             Ok(LaunchMode::Map(zone))
         }
+        Some("frontend") => {
+            let Some(zone) = args.next().filter(|z| !z.is_empty()) else {
+                return Err("usage: iw4l frontend <zone> [--cmds '<script>']".into());
+            };
+            Ok(LaunchMode::Frontend(zone))
+        }
         Some("serve") => {
             let Some(zone) = args.next().filter(|z| !z.is_empty()) else {
                 return Err("usage: iw4l serve <zone> [--cmds '<script>']".into());
@@ -117,6 +125,7 @@ pub fn parse_launch_args(mut args: impl Iterator<Item = String>) -> Result<Launc
             Ok(LaunchMode::Menu)
         }
         Some("play") => parse_play_args(args),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bootstrap/src/args.rs
         Some("check-maps") => Ok(LaunchMode::CheckMaps),
         Some("check-guns") => Ok(LaunchMode::CheckGuns),
         Some("check-ghosts") => Ok(LaunchMode::CheckGhosts(args.next().filter(|z| !z.is_empty()))),
@@ -124,6 +133,8 @@ pub fn parse_launch_args(mut args: impl Iterator<Item = String>) -> Result<Launc
             (Some("t6mp"), None) => Ok(LaunchMode::FrontendT6Mp),
             _ => Err("usage: iw4l frontend t6mp [--cmds '<script>']".into()),
         },
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/bootstrap/src/args.rs
         Some(other) => Err(format!(
             "unknown launch args starting with `{other}` — expected: map <zone> | serve <zone> | menu | play <demo> [--cmds '<script>'] | export-gltf <zone>"
         )),

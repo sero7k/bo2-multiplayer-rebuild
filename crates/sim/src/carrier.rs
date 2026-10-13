@@ -151,6 +151,7 @@ impl SimWorld {
         crate::t6::install(&mut self.ecs, install)
     }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/carrier.rs
     /// bo2mp: path nodes for a map that has none (see `t6::adopt_path_nodes`).
     pub fn adopt_t6_path_nodes(&mut self, nodes: Vec<crate::T6PathNode>) -> bool {
         crate::t6::adopt_path_nodes(&mut self.ecs, nodes)
@@ -173,6 +174,8 @@ impl SimWorld {
         crate::t6::take_bot_leaves(&mut self.ecs)
     }
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/carrier.rs
     pub fn gsc_program_fingerprint(&self) -> Option<[u8; 32]> {
         self.ecs
             .resource::<crate::script::Runtime>()
@@ -180,10 +183,14 @@ impl SimWorld {
     }
 
     pub fn script_seats(&self) -> Vec<(ClientId, crate::ScriptSeat)> {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/carrier.rs
         let mut seats = crate::script::script_seats(&self.ecs);
         // bo2mp: Black Ops II's killcam sets the same fields on its players.
         seats.extend(crate::t6::killcam_seats(&self.ecs));
         seats
+=======
+        crate::script::script_seats(&self.ecs)
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/carrier.rs
     }
 
     pub fn take_script_fault(&mut self) -> Option<crate::script::Fault> {

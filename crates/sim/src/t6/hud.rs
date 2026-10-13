@@ -26,6 +26,9 @@ pub(crate) struct HudElem {
     pub fade: Option<(f32, i64, i64)>,
     /// A move in progress: (x, y it started from, start ms, length ms).
     pub mv: Option<([f32; 2], i64, i64)>,
+    /// A text size change in progress (`changefontscaleovertime`): (size
+    /// it started from, start ms, length ms).
+    pub grow: Option<(f32, i64, i64)>,
     /// A timer counting down from (seconds, set at ms).
     pub timer: Option<(f32, i64)>,
     /// A picture instead of text (`setshader(name, width, height)`).
@@ -111,6 +114,7 @@ fn elem_mut<'a>(zm: &'a mut Zm, s: &Value) -> Option<&'a mut HudElem> {
 }
 
 pub(super) fn bind(vm: &mut Vm<World>) {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/hud.rs
     for name in ["newhudelem", "newdebughudelem"] {
         vm.bind(name, false, |vm, world, _, _| Ok(create(vm, world, None)));
     }
@@ -152,13 +156,25 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     // bo2mp: `newdamageindicatorhudelem(player)` too: the hit marker is his
     // own (it showed every player's, so a bot's hit flashed on his screen).
     for name in ["newclienthudelem", "newscorehudelem", "newdamageindicatorhudelem"] {
+=======
+    for name in [
+        "newhudelem",
+        "newteamhudelem",
+        "newdebughudelem",
+        "newdamageindicatorhudelem",
+    ] {
+        vm.bind(name, false, |vm, world, _, _| Ok(create(vm, world, None)));
+    }
+    for name in ["newclienthudelem", "newscorehudelem"] {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/hud.rs
         vm.bind(name, false, |vm, world, _, a| {
             let client = entnum(vm, arg(a, 0));
             Ok(create(vm, world, client))
         });
     }
     vm.bind("settext", true, |vm, world, s, a| {
-        let text = super::localize(vm, world, arg(a, 0), a.get(1..).unwrap_or(&[]));
+        let args = super::name_players(vm, world, a.get(1..).unwrap_or(&[]));
+        let text = super::localize(vm, world, arg(a, 0), &args);
         if let Some(e) = elem_mut(&mut world.resource_mut::<Zm>(), s) {
             e.text = text;
             e.timer = None;
@@ -238,6 +254,20 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         }
         Ok(Value::Undefined)
     });
+    // Grief's messages land big and shrink, then grow as they fade out;
+    // without the change the size jumped and a giant faded copy hung there.
+    vm.bind("changefontscaleovertime", true, |vm, world, s, a| {
+        let secs = arg(a, 0).as_float().unwrap_or(0.0);
+        let now = world.resource::<Zm>().now_ms;
+        let Value::Object(o) = s else {
+            return Ok(Value::Undefined);
+        };
+        let from = shown_scale(vm, world, *o, now);
+        if let Some(e) = elem_mut(&mut world.resource_mut::<Zm>(), s) {
+            e.grow = Some((from, now, (secs * 1000.0) as i64));
+        }
+        Ok(Value::Undefined)
+    });
     vm.bind("destroy", true, |vm, world, s, _| {
         if let Some(o) = s.as_obj()
             && matches!(vm.kind(o), Some(ObjKind::HudElem(_)))
@@ -279,6 +309,24 @@ fn shown_alpha(vm: &mut Vm<World>, world: &World, o: ObjRef, now: i64) -> f32 {
     }
 }
 
+/// The text size an element shows now (mid-change or its field).
+fn shown_scale(vm: &mut Vm<World>, world: &World, o: ObjRef, now: i64) -> f32 {
+    let target = num(vm, o, "fontscale", 1.0);
+    match world
+        .resource::<Zm>()
+        .huds
+        .elems
+        .get(&o.index)
+        .and_then(|e| e.grow)
+    {
+        Some((from, start, len)) if len > 0 && now < start + len => {
+            let t = (now - start) as f32 / len as f32;
+            from + (target - from) * t
+        }
+        _ => target,
+    }
+}
+
 /// Each tick: every player's visible elements, sent when they change.
 pub(crate) fn publish(world: &mut World) {
     let now = world.resource::<Zm>().now_ms;
@@ -289,18 +337,23 @@ pub(crate) fn publish(world: &mut World) {
         .iter()
         .map(|(k, e)| (*k, e.clone()))
         .collect();
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/hud.rs
     // Each player's team (a team element shows to its team only).
     let players: Vec<(u32, ObjRef)> = world.resource::<Zm>().players.iter().map(|(c, p)| (*c, p.obj)).collect();
     // (client or all, team or all, row, a world picture?)
     type Row = (Option<u32>, Option<String>, String, bool);
     let (rows, teams): (Vec<Row>, Vec<(u32, String)>) = with_vm(world, |vm, world| {
         let teams: Vec<(u32, String)> = players.iter().map(|(c, o)| (*c, txt(vm, *o, "team", ""))).collect();
+=======
+    let rows: Vec<(Option<u32>, String)> = with_vm(world, |vm, world| {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/hud.rs
         let mut rows = Vec::new();
         for (_, e) in &elems {
             let Some(o) = e.obj else { continue };
             if !vm.alive(o) {
                 continue;
             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/hud.rs
             // A picture in the world: "material,x,y,z,width,height,alpha,
             // constant" (bo2mp_waypoints; the HUD projects it).
             if let (Some(constant), Some((name, w, h))) = (e.waypoint, &e.shader) {
@@ -337,10 +390,15 @@ pub(crate) fn publish(world: &mut World) {
                     text = format!("{text}{}", e.text);
                 }
             }
+=======
+            let alpha = shown_alpha(vm, world, o, now);
+            let mut text = e.text.clone();
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/hud.rs
             if let Some((secs, at)) = e.timer {
                 let left = (secs - (now - at) as f32 / 1000.0).max(0.0);
                 text = format!("{}:{:02}", left as i32 / 60, left as i32 % 60);
             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/hud.rs
             // bo2mp: a text effect: so many letters so far, then the decay.
             if let Some([at, letter, start, len]) = e.fx {
                 let t = now - at;
@@ -351,6 +409,18 @@ pub(crate) fn publish(world: &mut World) {
                 if start > 0 && t > start {
                     alpha *= (1.0 - (t - start) as f32 / len.max(1) as f32).clamp(0.0, 1.0);
                 }
+=======
+            // `label`: a game string shown before the text, or around it
+            // where it holds `&&1`. Max Ammo's "Max Ammo!" is a label alone.
+            let label = field(vm, o, "label");
+            if !matches!(label, Value::Undefined) {
+                let l = super::localize(vm, world, &label, &[]);
+                text = if l.contains("&&1") {
+                    l.replace("&&1", &text)
+                } else {
+                    format!("{l}{text}")
+                };
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/hud.rs
             }
             // A picture rides in the text field as `#shader:<name>:<w>:<h>`.
             if let (Some((name, _, _)), Some([w, h])) = (&e.shader, shown_size(e, now)) {
@@ -376,7 +446,7 @@ pub(crate) fn publish(world: &mut World) {
                 txt(vm, o, "aligny", "top"),
                 txt(vm, o, "horzalign", "fullscreen"),
                 txt(vm, o, "vertalign", "fullscreen"),
-                format!("{:.2}", num(vm, o, "fontscale", 1.0)),
+                format!("{:.2}", shown_scale(vm, world, o, now)),
                 format!("{:.2}", color[0]),
                 format!("{:.2}", color[1]),
                 format!("{:.2}", color[2]),
@@ -393,13 +463,20 @@ pub(crate) fn publish(world: &mut World) {
                 txt(vm, o, "font", "default"),
             ]
             .join(&FIELD_SEP.to_string());
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/hud.rs
             rows.push((e.client, e.team.clone(), row, false));
         }
         (rows, teams)
+=======
+            rows.push((e.client, row));
+        }
+        rows
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/hud.rs
     })
     .unwrap_or_default();
     let clients: Vec<u32> = world.resource::<Zm>().players.keys().copied().collect();
     for c in clients {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/hud.rs
         if super::is_bot(world, c) {
             continue;
         }
@@ -410,6 +487,13 @@ pub(crate) fn publish(world: &mut World) {
         let points: Vec<&str> = rows.iter().filter(|(w, t, _, p)| *p && seen(w, t)).map(|(_, _, r, _)| r.as_str()).collect();
         publish_waypoints(world, c, points.join(";"));
         let mine: Vec<&str> = rows.iter().filter(|(w, t, _, p)| !*p && seen(w, t)).map(|(_, _, r, _)| r.as_str()).collect();
+=======
+        let mine: Vec<&str> = rows
+            .iter()
+            .filter(|(who, _)| who.is_none_or(|w| w == c))
+            .map(|(_, r)| r.as_str())
+            .collect();
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/hud.rs
         let value = mine.join(&ELEM_SEP.to_string());
         if world.resource::<Zm>().huds.sent.get(&c) == Some(&value) {
             continue;
@@ -435,6 +519,7 @@ pub(crate) fn publish(world: &mut World) {
         world.resource_mut::<Zm>().huds.sent.insert(c, value);
     }
 }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/hud.rs
 
 /// bo2mp: a player's world pictures (`setwaypoint` elements he sees) as
 /// his client dvar `bo2mp_waypoints`, when they change.
@@ -455,3 +540,5 @@ fn publish_waypoints(world: &mut World, c: u32, value: String) {
     }
     world.resource_mut::<Zm>().huds.sent_points.insert(key, value);
 }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/hud.rs

@@ -952,11 +952,45 @@ async fn handle_request(
         RequestBody::VoteToSkip => forward_to_host(&state, connection_id, |member_id| {
             PeerEvent::VoteToSkip { member_id }
         }),
+        RequestBody::KickMember { member_id } => kick_member(&mut state, connection_id, member_id),
     };
     HandleOutcome {
         response: ControlResponse { request_id, body },
         publishes,
     }
+}
+
+// bo2zm: BO2's PartyHost_KickPlayer. The host removes one member; that member's session closes
+// as Kicked and the rest see the new lobby.
+fn kick_member(
+    state: &mut ServiceState,
+    connection_id: u64,
+    member_id: MemberId,
+) -> (ResponseBody, Vec<(u64, ControlFrame)>) {
+    let room_id = match state.host_of(connection_id) {
+        Ok(room_id) => room_id,
+        Err(error) => return (ResponseBody::Error(error), Vec::new()),
+    };
+    let Some(room) = state.rooms.get(&room_id) else {
+        return (ResponseBody::Error(ServiceError::UnknownAdvert), Vec::new());
+    };
+    let Some(target) = room.connection_of.get(&member_id).copied() else {
+        return (ResponseBody::Error(ServiceError::NotMember), Vec::new());
+    };
+    if target == connection_id {
+        return (ResponseBody::Error(ServiceError::Malformed), Vec::new());
+    }
+    let epoch = room.view.epoch;
+    let mut publishes = state.remove_member(target);
+    publishes.push((
+        target,
+        ControlFrame::Closed {
+            room_id,
+            epoch,
+            reason: SessionCloseReason::Kicked,
+        },
+    ));
+    (ResponseBody::Ack, publishes)
 }
 
 fn create_room(

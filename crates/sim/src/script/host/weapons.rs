@@ -195,6 +195,9 @@ pub(crate) fn sync_engine_events(world: &mut World) {
         return;
     }
     let notes = std::mem::take(&mut FrameWorld::from_world(world).weapon_notes);
+    // bo2zm: a Black Ops II game's scripts run apart (t6); they hear its
+    // shots and detonators (the Time Bomb's remote) from these notes.
+    crate::t6::weapon_notes(world, &notes);
     let runtime = world.resource::<Runtime>();
     if runtime.program.is_none() || runtime.fault.is_some() || !runtime.started {
         return;

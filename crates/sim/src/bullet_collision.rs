@@ -152,6 +152,9 @@ pub type AuthorityDObjCollisionBone = xmodel_runtime::CollisionBone;
 pub struct AuthorityDObjCollision {
     pub bones: Vec<AuthorityDObjCollisionBone>,
     pub coll: Option<AuthorityDObjCollTrace>,
+    /// The boxes' surface where no collision surface says (the model's
+    /// paint: a mannequin is plastic); 0 plays blood.
+    pub surface_flags: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -373,22 +376,32 @@ impl AuthorityDObjState {
     }
 
     pub fn set_attachments(&mut self, attachments: &[(&str, &str)]) {
+        let at: Vec<_> = attachments.iter().map(|&(m, t)| (m, t, None)).collect();
+        self.set_attachments_at(&at);
+    }
+
+    /// The same, each model optionally placed at an offset and rotation from
+    /// its tag (the parts Black Ops II hangs on a weapon's world model).
+    pub fn set_attachments_at(
+        &mut self,
+        attachments: &[(&str, &str, Option<xmodel_runtime::TagOffset>)],
+    ) {
         let mut models = vec![xmodel_runtime::DObjModelDescriptor {
             model: self.current_model.clone(),
             parent_model: None,
             attach_tag: None,
             ignore_collision: false,
+            tag_offset: None,
         }];
-        models.extend(
-            attachments
-                .iter()
-                .map(|(model, tag)| xmodel_runtime::DObjModelDescriptor {
-                    model: (*model).to_owned(),
-                    parent_model: Some(0),
-                    attach_tag: Some((*tag).to_owned()),
-                    ignore_collision: true,
-                }),
-        );
+        models.extend(attachments.iter().map(|&(model, tag, tag_offset)| {
+            xmodel_runtime::DObjModelDescriptor {
+                model: model.to_owned(),
+                parent_model: Some(0),
+                attach_tag: Some(tag.to_owned()),
+                ignore_collision: true,
+                tag_offset,
+            }
+        }));
         if self.semantic_state.composition.models == models {
             return;
         }
@@ -636,11 +649,17 @@ impl AuthorityDObjState {
             MASK_BULLET_WORLD,
         ) {
             Ok(mut bones) => {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
                 // bo2mp: a destructible's hidden pieces (broken off, or a
                 // stage not reached yet) stop nothing.
                 if self.t5_destructible.is_some() {
                     bones.retain(|b| !self.pose_request.hide_part_bits.get(usize::from(b.bone)));
                 }
+=======
+                // A hidden part (a mannequin's shot-off head) takes no hits.
+                let hide = &self.pose_request.hide_part_bits;
+                bones.retain(|b| !hide.get(usize::from(b.bone)));
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
                 let coll = coll_trace_from_capability(
                     capability,
                     &self.pose_request,
@@ -648,7 +667,15 @@ impl AuthorityDObjState {
                 );
                 match coll {
                     Ok(coll) => {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
                         self.current_collision = Some(AuthorityDObjCollision { bones, coll });
+=======
+                        self.current_collision = Some(AuthorityDObjCollision {
+                            bones,
+                            coll,
+                            surface_flags: capability.surface_flags,
+                        });
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
                         self.materialized_model_revision = Some(self.model_revision);
                         self.materialized_pose_revision = Some(self.pose_revision);
                         self.materialize_error = None;
@@ -711,6 +738,7 @@ impl AuthorityDObjState {
                 self.current_collision = Some(AuthorityDObjCollision {
                     bones: vec![bone],
                     coll: None,
+                    surface_flags: 0,
                 });
             }
         }
@@ -759,6 +787,9 @@ pub struct EntityCollisionCapabilities {
     pub linked_brushes: Vec<LinkedBrushCollisionBrush>,
     pub hidden: bool,
     pub solid: bool,
+    /// A bit per player its brushes do not stop (bo2zm: a door hidden from
+    /// him); zombies and bullets still meet them.
+    pub passes_for: u64,
     pub followed_pose: Option<([f32; 3], [f32; 3])>,
     /// bo2zm M3: made on the prediction side from a brush mover in the
     /// snapshot (`presence::adopt_brush_movers`); goes when its mover does.
@@ -778,6 +809,7 @@ impl EntityCollisionCapabilities {
             linked_brushes,
             hidden: false,
             solid: true,
+            passes_for: 0,
             followed_pose: None,
             from_snapshot: false,
         }
@@ -792,6 +824,19 @@ impl EntityCollisionCapabilities {
             &self.linked_brushes
         } else {
             &[]
+        }
+    }
+
+    /// The brushes that stop this player (`solid_brushes` less one hidden
+    /// from him).
+    pub fn solid_brushes_for(&self, client: u32) -> &[LinkedBrushCollisionBrush] {
+        if 1u64
+            .checked_shl(client)
+            .is_some_and(|bit| self.passes_for & bit != 0)
+        {
+            &[]
+        } else {
+            self.solid_brushes()
         }
     }
 
@@ -948,6 +993,7 @@ pub struct PlayerCollisionPose {
     pub life_sequence: LifeSequence,
     pub hit_volume: HitVolumeKind,
     pub bones: Vec<AuthorityDObjCollisionBone>,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
     /// The riot shield he bears (Black Ops II), if any.
     pub shield: Option<ShieldCover>,
 }
@@ -1017,6 +1063,8 @@ fn shield_hits(candidates: &mut [TraceCandidate], players: &[PlayerCollisionPose
 
 fn is_shield(collider: ColliderId) -> bool {
     matches!(collider, ColliderId::Player { hitloc: HITLOC_SHIELD, .. })
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1501,11 +1549,25 @@ fn bullet_trace_filtered(
             DObjGeometryVerdict::Unavailable => {}
         }
         for bone in &dobj_geom.bones {
+            // A prop's box keeps its model's surface (a mannequin is
+            // plastic); a body's boxes have none and play blood.
+            let surface_flags = dobj_geom.coll.as_ref().map_or(0, |c| {
+                c.model
+                    .surfs
+                    .iter()
+                    .find(|s| s.bone_idx == i32::from(bone.bone) && s.surf_flags != 0)
+                    .map_or(0, |s| s.surf_flags)
+            });
+            let surface_flags = if surface_flags != 0 {
+                surface_flags
+            } else {
+                dobj_geom.surface_flags
+            };
             let collider = ColliderId::EntityDObjBone {
                 owner: geom.owner,
                 bone: bone.bone,
                 part_classification: bone.part_classification,
-                surface_flags: 0,
+                surface_flags,
             };
             match ray_obb(query.start, query.end, bone, collider) {
                 RayAabb::StartSolid => {
@@ -1821,7 +1883,11 @@ fn fire_extended(
                     break;
                 }
                 ignore_hit = player_id(hit.collider).or(ignore_hit);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
                 if !pen.rifle_bullet || !is_player(hit.collider) || is_shield(hit.collider) {
+=======
+                if !pen.rifle_bullet || !is_player(hit.collider) {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
                     break;
                 }
                 multiplier *= RIFLE_COLLATERAL_SCALE;
@@ -1836,6 +1902,9 @@ fn fire_extended(
     }
     (segments, terminal)
 }
+
+/// bo2zm: what is left of a bullet that has gone through all it can.
+const SPENT_BULLET: f32 = 1e-3;
 
 fn fire_penetrate(
     world: &TraceWorld<'_>,
@@ -1915,11 +1984,14 @@ fn fire_penetrate(
     let mut last_hit = first;
 
     for _ in 0..MAX_PENETRATE_STEPS {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
         // A riot shield stops the bullet.
         if is_shield(last_hit.collider) {
             pen_stop_log("riot shield", last_hit.end);
             break;
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
         let mut max_depth = table.depth(pen.penetrate_type, last_surf) * pen.penetrate_multiplier;
         if max_depth <= 0.0 {
             pen_stop_log("no depth for this surface", last_hit.end);
@@ -1936,10 +2008,17 @@ fn fire_penetrate(
             break;
         };
         ignore_hit = player_id(last_hit.collider).or(ignore_hit);
+        let skip_model = body_model(last_hit.collider).or(query.ignore_model);
         start = next_start;
         seg_start = last_hit.end;
         let entry_pos = last_hit.end;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
         let fwd = decode_hit(trace_from(world, query, start, ignore_hit));
+=======
+        let fwd = decode_hit(trace_from_skipping(
+            world, query, start, ignore_hit, skip_model,
+        ));
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
         let (trace_hit, fwd_hit) = match fwd {
             Decode::Hit(hit) => (true, Some(hit)),
             Decode::StopMiss { end } => {
@@ -1973,7 +2052,11 @@ fn fire_penetrate(
                     thickness = PEN_THICKNESS_FLOOR;
                 }
                 multiplier -= thickness / max_depth;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
                 if multiplier <= 0.0 {
+=======
+                if multiplier <= SPENT_BULLET {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
                     break;
                 }
                 last_hit.end = exit;
@@ -2024,7 +2107,14 @@ fn fire_penetrate(
             mask: query.mask,
             ignore: query.ignore,
             ignore_hit: rev_ignore,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
             ignore_model: query.ignore_model,
+=======
+            ignore_model: fwd_hit
+                .as_ref()
+                .and_then(|h| body_model(h.collider))
+                .or(query.ignore_model),
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
         };
         let rev = bullet_trace_filtered(
             world.brushes,
@@ -2067,7 +2157,12 @@ fn fire_penetrate(
                 }
             }
             multiplier -= thickness / max_depth;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
             if multiplier <= 0.0 {
+=======
+            // bo2zm: a spent bullet (rounding leaves ~1e-7) hits nothing more.
+            if multiplier <= SPENT_BULLET {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
                 break;
             }
         } else if !trace_hit {
@@ -2146,6 +2241,18 @@ fn trace_from(
     start: [f32; 3],
     ignore_hit: Option<ClientId>,
 ) -> TraceOutcome {
+    trace_from_skipping(world, query, start, ignore_hit, query.ignore_model)
+}
+
+/// bo2zm: a trace that also skips one body (the zombie the bullet just went
+/// into), as IW4 skips the entity it hit.
+fn trace_from_skipping(
+    world: &TraceWorld<'_>,
+    query: &BulletTraceQuery,
+    start: [f32; 3],
+    ignore_hit: Option<ClientId>,
+    ignore_model: Option<ScriptModelId>,
+) -> TraceOutcome {
     bullet_trace_filtered(
         world.brushes,
         world.bsp,
@@ -2159,7 +2266,11 @@ fn trace_from(
             mask: query.mask,
             ignore: query.ignore,
             ignore_hit,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
             ignore_model: query.ignore_model,
+=======
+            ignore_model,
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
         },
         world.glass_is_solid,
     )
@@ -2224,6 +2335,11 @@ fn surf_type_for(collider: ColliderId) -> u8 {
         ColliderId::World { surface_flags, .. } => surface_type_from_flags(surface_flags),
         ColliderId::Player { hitloc: HITLOC_SHIELD, .. } => SURF_TYPE_RIOTSHIELD as u8,
         ColliderId::Player { .. } => SURF_TYPE_FLESH as u8,
+        // bo2zm: a body's hit boxes (zombies) are flesh: their hits play the
+        // blood effect, as a player's do.
+        ColliderId::EntityDObjBone {
+            surface_flags: 0, ..
+        } => SURF_TYPE_FLESH as u8,
         ColliderId::EntityDObjBone { surface_flags, .. }
         | ColliderId::EntityLinkedBrush { surface_flags, .. } => {
             surface_type_from_flags(surface_flags)
@@ -2244,6 +2360,10 @@ fn collider_surface_flags(collider: ColliderId) -> u32 {
         ColliderId::World { surface_flags, .. } => surface_flags,
         ColliderId::Player { hitloc: HITLOC_SHIELD, .. } => SURF_TYPE_RIOTSHIELD << 20,
         ColliderId::Player { .. } => SURF_TYPE_FLESH << 20,
+        // bo2zm: a body's hit boxes (zombies) are flesh, as a player is.
+        ColliderId::EntityDObjBone {
+            surface_flags: 0, ..
+        } => SURF_TYPE_FLESH << 20,
         ColliderId::EntityDObjBone { surface_flags, .. }
         | ColliderId::EntityLinkedBrush { surface_flags, .. } => surface_flags,
     }
@@ -2311,6 +2431,14 @@ fn is_damage_collider(collider: ColliderId) -> bool {
             | ColliderId::EntityDObjBone { .. }
             | ColliderId::EntityLinkedBrush { .. }
     )
+}
+
+/// bo2zm: the body (a zombie's posed model) a hit box belongs to.
+fn body_model(collider: ColliderId) -> Option<ScriptModelId> {
+    match collider {
+        ColliderId::EntityDObjBone { owner, .. } => owner.script_model(),
+        _ => None,
+    }
 }
 
 fn player_id(collider: ColliderId) -> Option<ClientId> {
@@ -2853,3 +2981,90 @@ pub const COLLISION_COVERAGE: &[CollisionCoverageRow] = &[
         note: "the missile world trace is the same zero-extent brush∪mesh ray as hitscan; plantable capsule hull and TR_STATIONARY rest stay open",
     },
 ];
+
+#[cfg(test)]
+mod bo2zm_penetration {
+    use super::*;
+
+    /// A zombie-sized body: one hit box 16 deep, at `x` on the shot line.
+    fn body(id: u32, x: f32) -> EntityCollisionTraceGeom {
+        EntityCollisionTraceGeom {
+            owner: AuthorityModelOwner::ScriptModel(ScriptModelId(id)),
+            epoch: EntityCollisionEpoch::CurrentTick,
+            collision: Some(AuthorityDObjCollision {
+                bones: vec![xmodel_runtime::CollisionBone {
+                    bone: 1,
+                    part_classification: 2,
+                    center: [x, 0.0, 40.0],
+                    axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    half_size: [8.0, 12.0, 30.0],
+                }],
+                coll: None,
+                surface_flags: 0,
+            }),
+            dobj_contents: None,
+            model_key: None,
+            linked_brushes: Vec::new(),
+        }
+    }
+
+    fn bodies_hit(pen_type: i32) -> Vec<(u32, f32)> {
+        // Black Ops II's flesh depths (info/bullet_penetration_mp).
+        let mut table = PenetrationDepthTable::empty();
+        table.set_depth(1, SURF_TYPE_FLESH as usize, 32.0);
+        table.set_depth(2, SURF_TYPE_FLESH as usize, 64.0);
+        let pen = BulletPenFacts {
+            penetrate_type: pen_type,
+            penetrate_multiplier: 1.0,
+            rifle_bullet: false,
+        };
+        let models = [body(1, 100.0), body(2, 150.0), body(3, 200.0)];
+        let query = BulletTraceQuery {
+            start: [0.0, 0.0, 40.0],
+            end: [1000.0, 0.0, 40.0],
+            mask: MASK_SHOT,
+            ignore: None,
+            ignore_hit: None,
+            ignore_model: None,
+        };
+        let (segments, _) = bullet_trace_segments_with_entity_models(
+            &[],
+            &SimClipBsp::default(),
+            &SimClipCmodels::default(),
+            &SimClipMesh::default(),
+            &[],
+            &models,
+            &query,
+            pen,
+            &table,
+            &|_| false,
+        );
+        segments
+            .iter()
+            .filter(|s| s.surface_flags & fx_iw4::FX_IMPACT_EXIT_SURFACE_FLAG == 0)
+            .filter_map(|s| Some((body_model(s.collider?)?.0, s.damage_mult)))
+            .collect()
+    }
+
+    #[test]
+    fn a_pistol_bullet_goes_through_a_zombie_into_the_next() {
+        let hits = bodies_hit(1);
+        assert_eq!(
+            hits.iter().map(|h| h.0).collect::<Vec<_>>(),
+            [1, 2],
+            "{hits:?}"
+        );
+        // 16 of 32 units of flesh used: half damage to the second.
+        assert!((hits[1].1 - 0.5).abs() < 0.05, "{hits:?}");
+    }
+
+    #[test]
+    fn a_rifle_bullet_goes_through_three() {
+        let hits = bodies_hit(2);
+        assert_eq!(
+            hits.iter().map(|h| h.0).collect::<Vec<_>>(),
+            [1, 2, 3],
+            "{hits:?}"
+        );
+    }
+}

@@ -860,6 +860,7 @@ pub fn decode_snapshot_meta(
             corpses,
             item_ammo,
             item_pickups,
+            follows: Vec::new(),
         },
         wire,
     ))
@@ -1207,6 +1208,7 @@ fn encode_oriented_blocker(out: &mut WireWriter, blocker: &sim::OrientedBlocker)
             out.put_f32(value);
         }
     }
+    out.put_u32(blocker.surface_flags);
 }
 
 fn decode_oriented_blocker(input: &mut WireReader<'_>) -> Result<sim::OrientedBlocker, WireError> {
@@ -1217,12 +1219,14 @@ fn decode_oriented_blocker(input: &mut WireReader<'_>) -> Result<sim::OrientedBl
             *value = input.get_f32()?;
         }
     }
+    let surface_flags = input.get_u32()?;
     Ok(sim::OrientedBlocker {
         entnum,
         origin: v[0],
         axis: [v[1], v[2], v[3]],
         mins: v[4],
         maxs: v[5],
+        surface_flags,
     })
 }
 
@@ -1384,6 +1388,7 @@ fn encode_client_meta(out: &mut WireWriter, meta: &ClientSnapshotMeta) {
     out.put_u8(meta.controls.usability_disabled.into());
     out.put_u8(meta.controls.linked.into());
     out.put_u8(meta.controls.stunned.into());
+    out.put_u8(meta.controls.slick.into());
     out.put_u32(meta.controls.switch_to);
     // bo2zm: the allow* switches, one bit each, so his own guess at his
     // movement drops the same requests the server does.
@@ -1558,6 +1563,7 @@ fn decode_client_meta(input: &mut WireReader<'_>) -> Result<ClientSnapshotMeta, 
         usability_disabled: input.get_u8()? != 0,
         linked: input.get_u8()? != 0,
         stunned: input.get_u8()? != 0,
+        slick: input.get_u8()? != 0,
         switch_to: input.get_u32()?,
         ..sim::ScriptControls::default()
     };
@@ -2838,6 +2844,15 @@ fn encode_entity_dobjs(
             out.put_u16(model.parent_model.unwrap_or(u16::MAX));
             put_optional_text(out, model.attach_tag.as_deref());
             out.put_u8(u8::from(model.ignore_collision));
+            match model.tag_offset {
+                None => out.put_u8(0),
+                Some(at) => {
+                    out.put_u8(1);
+                    for v in at.offset().into_iter().chain(at.rotation()) {
+                        out.put_f32(v);
+                    }
+                }
+            }
         }
         out.put_u32(state.pose_revision);
         put_optional_part_bits(out, state.requested_parts);
@@ -2873,6 +2888,24 @@ fn encode_entity_dobjs(
                 }
             }
         }
+        match &state.ragdoll {
+            None => out.put_u8(0),
+            Some(ragdoll) => {
+                out.put_u8(1);
+                out.put_i32(ragdoll.start_ms);
+                for axis in ragdoll.launch {
+                    out.put_f32(axis);
+                }
+                out.put_u16(ragdoll.launches);
+            }
+        }
+        match state.eye_luminance {
+            None => out.put_u8(0),
+            Some(luminance) => {
+                out.put_u8(1);
+                out.put_f32(luminance);
+            }
+        }
     }
 }
 
@@ -2899,6 +2932,19 @@ fn decode_entity_dobjs(
                 parent_model: (parent != u16::MAX).then_some(parent),
                 attach_tag: get_optional_text(input)?,
                 ignore_collision: input.get_u8()? != 0,
+                tag_offset: match input.get_u8()? {
+                    0 => None,
+                    _ => {
+                        let mut v = [0.0; 6];
+                        for x in &mut v {
+                            *x = input.get_f32()?;
+                        }
+                        Some(xmodel_runtime::TagOffset::new(
+                            [v[0], v[1], v[2]],
+                            [v[3], v[4], v[5]],
+                        ))
+                    }
+                },
             });
         }
         let pose_revision = input.get_u32()?;
@@ -2955,6 +3001,20 @@ fn decode_entity_dobjs(
             }
             _ => return Err(WireError::Malformed("unknown optional XAnim tree tag")),
         };
+        let ragdoll = match input.get_u8()? {
+            0 => None,
+            1 => Some(xmodel_runtime::DObjRagdoll {
+                start_ms: input.get_i32()?,
+                launch: [input.get_f32()?, input.get_f32()?, input.get_f32()?],
+                launches: input.get_u16()?,
+            }),
+            _ => return Err(WireError::Malformed("unknown optional ragdoll tag")),
+        };
+        let eye_luminance = match input.get_u8()? {
+            0 => None,
+            1 => Some(input.get_f32()?),
+            _ => return Err(WireError::Malformed("unknown optional eye luminance tag")),
+        };
         rows.push((
             owner,
             xmodel_runtime::DObjSemanticState {
@@ -2966,6 +3026,8 @@ fn decode_entity_dobjs(
                 tree,
                 requested_parts,
                 hide_part_bits: xmodel_runtime::HidePartBits::from_words(hide_words),
+                ragdoll,
+                eye_luminance,
             },
         ));
     }
@@ -3347,6 +3409,7 @@ mod feel_wire_tests {
     }
 
     #[test]
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/transport/meta_wire.rs
     fn a_broken_off_piece_reaches_the_second_pc_whole() {
         let meta = SnapshotMeta {
             debris: vec![DebrisRecord {
@@ -3379,6 +3442,8 @@ mod feel_wire_tests {
     }
 
     #[test]
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/net/src/transport/meta_wire.rs
     fn no_rules_sent_stays_none() {
         let mut out = WireWriter::new();
         encode_feel(&mut out, None);

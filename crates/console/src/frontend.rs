@@ -358,7 +358,11 @@ pub(crate) fn route(
             echo.write(format!("menu: {error}"));
         }
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/console/src/frontend.rs
     let mut lobby_names = vec![settings.player_name.clone()];
+=======
+    let mut lobby_names = vec![settings.shown_name()];
+>>>>>>> /tmp/claude-0/zmhead/crates/console/src/frontend.rs
     if state.public
         && let Some(bridge) = services.bridge.as_ref()
     {

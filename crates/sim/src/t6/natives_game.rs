@@ -3,8 +3,11 @@
 //! has no engine side yet (client fields, effects, sounds) - those are
 //! listed once in the log by `unbound` when a script reaches one not here.
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_game.rs
 use std::collections::BTreeMap;
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_game.rs
 use bevy_ecs::prelude::World;
 use gsc_t6::{ObjKind, ObjRef, Value, Vm};
 
@@ -24,6 +27,29 @@ pub(super) fn notify_later(
     zm.timers.push((at, obj, name.to_owned()));
 }
 
+/// `notify_later`, unless the same notify is already on its way to `obj`.
+/// BO2's engine raises `bad_path` from the actor's path state, at most once a
+/// frame; one per failed `setgoalpos` call multiplied on Origins: a zombie on
+/// the tank runs several breadcrumb threads (`set_zombie_on_tank` threads
+/// `find_flesh` again), each woken by every `bad_path`, each queueing another,
+/// till one tick ran 85 s of script.
+pub(super) fn notify_later_once(
+    vm: &mut Vm<World>,
+    world: &mut World,
+    obj: ObjRef,
+    name: &str,
+    ms: i64,
+) {
+    let pending = world
+        .resource::<Zm>()
+        .timers
+        .iter()
+        .any(|t| t.1 == obj && t.2 == name);
+    if !pending {
+        notify_later(vm, world, obj, name, ms);
+    }
+}
+
 /// Deliver due `notify_later`s.
 pub(super) fn deliver_timers(vm: &mut Vm<World>, world: &mut World, now: i64) {
     let due: Vec<(i64, ObjRef, String)> = {
@@ -37,6 +63,7 @@ pub(super) fn deliver_timers(vm: &mut Vm<World>, world: &mut World, now: i64) {
             vm.notify_str(world, o, &n, &[]);
         }
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_game.rs
     let replies: Vec<(i64, ObjRef, String, String)> = {
         let mut zm = world.resource_mut::<Zm>();
         let (due, keep): (Vec<_>, Vec<_>) = zm.menu_replies.drain(..).partition(|t| t.0 <= now);
@@ -50,6 +77,8 @@ pub(super) fn deliver_timers(vm: &mut Vm<World>, world: &mut World, now: i64) {
             vm.notify_str(world, o, "menuresponse", &[m, r]);
         }
     }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_game.rs
 }
 
 fn table_cell(world: &World, table: &str, row: usize, col: usize) -> Option<String> {
@@ -71,6 +100,7 @@ fn table_find(world: &World, table: &str, col: usize, key: &str) -> Option<usize
     })
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_game.rs
 /// bo2mp: a multiplayer game type setting from the settings files; one
 /// they do not name is 0 (as the engine's default for an unset setting).
 /// BO2MP_SETTING_<name>=<value> overrides one (a test aid: a short time
@@ -88,12 +118,41 @@ fn mp_setting(settings: &BTreeMap<String, String>, name: &str) -> Value {
         // not read as off.
         None if key == "allowannouncer" => Value::Int(1),
         None => Value::Int(0),
+=======
+/// bo2zm M4: the game settings BO2's front end picked for this game (Custom
+/// Games: starting round, difficulty, magic, headshots only), by lower-case
+/// name; they win over the defaults below.
+static FRONT_END_SETTINGS: std::sync::Mutex<Vec<(String, i32)>> = std::sync::Mutex::new(Vec::new());
+
+/// bo2zm M4: the front end's settings for the next game (all of them; an
+/// empty list = the defaults).
+pub fn set_t6_game_settings(settings: Vec<(String, i32)>) {
+    if let Ok(mut s) = FRONT_END_SETTINGS.lock() {
+        *s = settings
+            .into_iter()
+            .map(|(k, v)| (k.to_ascii_lowercase(), v))
+            .collect();
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_game.rs
     }
 }
 
 /// Game type settings Zombies reads (`getgametypesetting`); others are 0.
 fn gametype_setting(name: &str) -> Value {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_game.rs
     match name.to_ascii_lowercase().as_str() {
+=======
+    let key = name.to_ascii_lowercase();
+    // (The test aid's starting round still wins.)
+    if !(key == "startround" && std::env::var_os("IW4L_T6_START_ROUND").is_some())
+        && let Some(v) = FRONT_END_SETTINGS
+            .lock()
+            .ok()
+            .and_then(|s| s.iter().find(|(k, _)| *k == key).map(|(_, v)| *v))
+    {
+        return Value::Int(v);
+    }
+    match key.as_str() {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_game.rs
         "teamcount" => Value::Int(1),
         "roundlimit" => Value::Int(1),
         "playernumlives" => Value::Int(0),
@@ -213,6 +272,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                 .map_or(0, |t| t.rows as i32),
         ))
     });
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_game.rs
     f!("getgametypesetting", |vm, world, _, a| {
         let name = text(vm, a, 0);
         // bo2mp: a multiplayer game type's own settings (his files'
@@ -223,6 +283,11 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         }
         Ok(gametype_setting(&name))
     });
+=======
+    f!("getgametypesetting", |vm, _, _, a| Ok(gametype_setting(
+        &text(vm, a, 0)
+    )));
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_game.rs
     f!("setgametypesetting", |_, _, _, _| Ok(Value::Undefined));
     f!("sessionmodeisonlinegame", |_, _, _, _| Ok(Value::Int(0)));
     f!("sessionmodeisprivate", |_, _, _, _| Ok(Value::Int(0)));
@@ -230,9 +295,13 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         Value::Int(0)
     ));
     f!("sessionmodeissystemlink", |_, _, _, _| Ok(Value::Int(0)));
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_game.rs
     f!("sessionmodeiszombiesgame", |_, world, _, _| Ok(Value::Int(
         i32::from(!world.resource::<Zm>().mp)
     )));
+=======
+    f!("sessionmodeiszombiesgame", |_, _, _, _| Ok(Value::Int(1)));
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_game.rs
     f!("sessionmodeiscampaigngame", |_, _, _, _| Ok(Value::Int(0)));
     f!("gamemodeisusingxp", |_, _, _, _| Ok(Value::Int(0)));
     f!("gamemodeisusingstats", |_, _, _, _| Ok(Value::Int(0)));
@@ -243,12 +312,31 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     f!("ismp", |_, _, _, _| Ok(Value::Int(1)));
     f!("issplitscreen", |_, _, _, _| Ok(Value::Int(0)));
     f!("isonlinegame", |_, _, _, _| Ok(Value::Int(0)));
-    f!("getnumexpectedplayers", |_, _, _, _| Ok(Value::Int(1)));
+    // The party size, or everyone already in (onallplayersready waits until
+    // this many are playing; one means solo).
+    f!("getnumexpectedplayers", |_, world, _, _| Ok(Value::Int(
+        super::expected_players().max(world.resource::<Zm>().players.len() as i32)
+    )));
     f!("getnumconnectedplayers", |_, world, _, _| Ok(Value::Int(
         world.resource::<Zm>().players.len() as i32
     )));
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_game.rs
     f!("getlocalprofileint", |_, _, _, _| Ok(Value::Int(0)));
+=======
+    // His profile: mature content (BO2's default on; is_mature() gates
+    // heads popping off on headshots and limbs flying off).
+    f!("getlocalprofileint", |vm, _, _, a| Ok(Value::Int(
+        i32::from(
+            matches!(vm.to_text(arg(a, 0)).as_str(), "cg_mature" | "cg_blood")
+                && super::profile_mature()
+        )
+    )));
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_game.rs
     f!("hasdlcavailable", |_, _, _, _| Ok(Value::Int(1)));
+    // _zm_weapons::is_weapon_included asks the player too.
+    m!("hasdlcavailable", |_, _, _, _| Ok(Value::Int(1)));
+    // No god mode (TranZit's bus checks for it before hurting him).
+    f!("isgodmode", |_, _, _, _| Ok(Value::Int(0)));
     f!("getnorthyaw", |_, _, _, _| Ok(Value::Float(0.0)));
     f!("getaitriggerflags", |_, _, _, _| Ok(Value::Int(2)));
     f!("getvehicletriggerflags", |_, _, _, _| Ok(Value::Int(4)));
@@ -273,11 +361,15 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         zm.fx.push(name);
         Ok(Value::Int(zm.fx.len() as i32))
     });
+    // Only players in the game: one still connecting (before `begin`) is not
+    // listed, as in the engine (_visionset_mgr::monitor reads every listed
+    // player's _player_entnum, set on "connected", which follows `begin`).
     f!("getplayers", |_, world, _, _| {
         let ps: Vec<Value> = world
             .resource::<Zm>()
             .players
             .values()
+            .filter(|p| p.begun)
             .map(|p| Value::Object(p.obj))
             .collect();
         Ok(list(ps))
@@ -301,13 +393,54 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         }
         Ok(Value::bool(entnum(vm, v).is_some()))
     });
+    // An animation's length in seconds, and the times (0..1 of its length)
+    // a notetrack of it fires (Buried's head chopper slices by them).
+    f!("getanimlength", |vm, world, _, a| {
+        let len = anim_of(vm, world, arg(a, 0)).map_or(0.0, |x| {
+            if x.framerate > 0.0 {
+                f32::from(x.numframes) / x.framerate
+            } else {
+                0.0
+            }
+        });
+        Ok(Value::Float(len))
+    });
+    f!("getnotetracktimes", |vm, world, _, a| {
+        let note = text(vm, a, 1);
+        let times = anim_of(vm, world, arg(a, 0))
+            .map(|x| {
+                x.notifies
+                    .iter()
+                    .filter(|(n, _)| n.eq_ignore_ascii_case(&note))
+                    .map(|(_, t)| Value::Float(*t))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(list(times))
+    });
     f!("getwatcherweapons", |_, _, _, _| Ok(list(Vec::new())));
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_game.rs
     // Weapons a player picks back up (their weapon file's bRetrievable),
     // as `<name>_mp` (BO2's _weaponobjects strips the suffix itself).
     f!("getretrievableweapons", |vm, world, _, _| {
         let names = world.resource::<Zm>().retrievable_weapons.clone();
         let v = names.iter().map(|n| vm.string(n)).collect();
         Ok(list(v))
+=======
+    // The weapons BO2 marks retrievable (placed equipment, knives): their
+    // names, so _weaponobjects makes each a watcher ("equip_turbine").
+    f!("getretrievableweapons", |vm, world, _, _| {
+        let f = frame(world);
+        let ws: Vec<u32> = (1..f.weapon_combat_len() as u32)
+            .filter(|&w| f.weapon_combat_row(w).is_some_and(|r| r.retrievable))
+            .collect();
+        drop(f);
+        let names = ws
+            .into_iter()
+            .map(|w| vm.string(&super::weapon_text(world, w)))
+            .collect();
+        Ok(list(names))
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_game.rs
     });
     f!("getplayerspawnid", |vm, _, _, a| Ok(
         entnum(vm, arg(a, 0)).map_or(Value::Int(0), |n| Value::Int(n as i32))
@@ -434,6 +567,29 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let v = nodes_matching(vm, world, a);
         Ok(list(v))
     });
+    // Path node links the scripts change (Die Rise's escape pod, ffotd fixes).
+    f!("linknodes", |_, world, _, a| {
+        if let Some((x, y)) = node_pair(world, a) {
+            world.resource_mut::<Zm>().nav.link(x, y);
+        }
+        Ok(Value::Undefined)
+    });
+    f!("unlinknodes", |_, world, _, a| {
+        if let Some((x, y)) = node_pair(world, a) {
+            world.resource_mut::<Zm>().nav.unlink(x, y);
+        }
+        Ok(Value::Undefined)
+    });
+    f!("nodesarelinked", |_, world, _, a| {
+        let linked = node_pair(world, a).is_some_and(|(x, y)| world.resource::<Zm>().nav.linked(x, y));
+        Ok(Value::Int(linked as i32))
+    });
+    f!("deletepathnode", |_, world, _, a| {
+        if let Some(n) = node_index(world, arg(a, 0)) {
+            world.resource_mut::<Zm>().nav.delete(n);
+        }
+        Ok(Value::Undefined)
+    });
     f!("getallnodes", |_, world, _, _| {
         let v = world
             .resource::<Zm>()
@@ -443,6 +599,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             .collect();
         Ok(list(v))
     });
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_game.rs
     // BO2's GetNodesInRadius: (origin, radius, min radius, height = 512,
     // kind, at most = 256). The nodes within the radius across and the
     // height up or down, of the kind ("Cover": every cover kind; none:
@@ -508,7 +665,59 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             .filter_map(|(_, i)| zm.node_objs.get(i as usize).map(|o| Value::Object(*o)))
             .collect();
         Ok(list(out))
+=======
+    // The node nearest a point (Buried's ghosts and Leroy path from it).
+    f!("getnearestnode", |_, world, _, a| {
+        let p = arg(a, 0).as_vec3().unwrap_or([0.0; 3]);
+        let zm = world.resource::<Zm>();
+        Ok(zm
+            .nav
+            .nearest(p)
+            .and_then(|i| zm.node_objs.get(i as usize).copied())
+            .map_or(Value::Undefined, Value::Object))
+    });
+    for name in ["getnodesinradius", "getnodesinradiussorted"] {
+        vm.bind(name, false, |_, world, _, a| {
+            let center = arg(a, 0).as_vec3().unwrap_or([0.0; 3]);
+            let radius = arg(a, 1).as_float().unwrap_or(0.0);
+            let min = arg(a, 2).as_float().unwrap_or(0.0);
+            let height = arg(a, 3).as_float();
+            let zm = world.resource::<Zm>();
+            let mut hits: Vec<(f32, ObjRef)> = zm
+                .nav
+                .nodes
+                .iter()
+                .zip(&zm.node_objs)
+                .filter_map(|(n, o)| {
+                    let d = gsc_t6::math::sub(n.origin, center);
+                    let d2 = (d[0] * d[0] + d[1] * d[1]).sqrt();
+                    let ok = d2 <= radius && d2 >= min && height.is_none_or(|h| d[2].abs() <= h);
+                    ok.then_some((d2, *o))
+                })
+                .collect();
+            hits.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+            Ok(list(
+                hits.into_iter().map(|(_, o)| Value::Object(o)).collect(),
+            ))
+        });
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_game.rs
     }
+    // Every path node within a sphere (zm_prison::title_update_main_end
+    // marks the ones by the docks `no_teleport`).
+    f!("getanynodearray", |_, world, _, a| {
+        let center = arg(a, 0).as_vec3().unwrap_or([0.0; 3]);
+        let radius = arg(a, 1).as_float().unwrap_or(0.0);
+        let zm = world.resource::<Zm>();
+        let v = zm
+            .nav
+            .nodes
+            .iter()
+            .zip(&zm.node_objs)
+            .filter(|(n, _)| gsc_t6::math::length(gsc_t6::math::sub(n.origin, center)) <= radius)
+            .map(|(_, o)| Value::Object(*o))
+            .collect();
+        Ok(list(v))
+    });
     // bo2zm M3: weapon facts the scripts ask (class, fire type).
     f!("weaponclass", |vm, world, _, a| {
         let w = super::weapon(world, &text(vm, a, 0)).unwrap_or(0);
@@ -527,6 +736,19 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             .map(|(m, _)| m.to_owned())
             .unwrap_or_default();
         Ok(vm.string(&model))
+    });
+    // A weapon's localized name (a dug-up gun's pickup hint).
+    f!("getweapondisplayname", |vm, world, _, a| {
+        let w = super::weapon(world, &text(vm, a, 0)).ok();
+        let key = w.and_then(|w| {
+            super::frame(world)
+                .weapon_display_name(w)
+                .map(str::to_owned)
+        });
+        Ok(match key {
+            Some(k) => Value::IStr(vm.intern(&k)),
+            None => vm.string(""),
+        })
     });
     // Weapon facts the scripts ask about a gun by name.
     fn facts(
@@ -592,6 +814,11 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let name = super::weapon_text(world, left);
         Ok(vm.string(&name))
     });
+    f!("weaponisdualwield", |vm, world, _, a| {
+        Ok(Value::bool(
+            facts(vm, world, a).is_some_and(|f| f.dual_wield_weapon != 0),
+        ))
+    });
     f!("weaponisgasweapon", |_, _, _, _| Ok(Value::Int(0)));
     f!("weapontype", |vm, world, _, a| {
         let w = super::weapon(world, &text(vm, a, 0)).unwrap_or(0);
@@ -644,6 +871,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         "recordzombiezone",
         "uploadstats",
         "setmatchtalkflag",
+        "setmatchflag",
     ] {
         vm.bind(name, false, |_, _, _, _| Ok(Value::Undefined));
     }
@@ -760,9 +988,79 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let (s, e) = (vec3(a, 0)?, vec3(a, 1)?);
         Ok(Value::bool(world_trace(world, s, e, SHOT).0 >= 1.0))
     });
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_game.rs
     f!("physicstrace", |_, world, _, a| {
         let (s, e) = (vec3(a, 0)?, vec3(a, 1)?);
         Ok(Value::Vec3(world_trace(world, s, e, SOLID).1))
+=======
+    // ent damageconetrace(from[, ignore, dir, cone_deg]): 1 when a damage
+    // trace from `from` reaches the body's middle or a point 15 units off
+    // it (side to side, then up and down), else 0. With `dir` a point only
+    // counts inside the cone (65 degrees unless given). The Paralyzer and
+    // claymores ask this before they hurt anything.
+    m!("damageconetrace", |vm, world, s, a| {
+        let from = vec3(a, 0)?;
+        let Some(o) = super::origin_of(vm, world, s) else {
+            return Ok(Value::Float(0.0));
+        };
+        let body = entnum(vm, s).is_some_and(|n| {
+            let zm = world.resource::<Zm>();
+            zm.players.contains_key(&n) || zm.actors.contains_key(&n)
+        });
+        let mid = [o[0], o[1], o[2] + if body { 36.0 } else { 0.0 }];
+        let (dx, dy) = (from[0] - mid[0], from[1] - mid[1]);
+        let len = (dx * dx + dy * dy).sqrt();
+        let side = if len < 0.001 { [0.0, 1.0] } else { [-dy / len, dx / len] };
+        let points = [
+            mid,
+            [mid[0] + side[0] * 15.0, mid[1] + side[1] * 15.0, mid[2]],
+            [mid[0] - side[0] * 15.0, mid[1] - side[1] * 15.0, mid[2]],
+            [mid[0], mid[1], mid[2] + 15.0],
+            [mid[0], mid[1], mid[2] - 15.0],
+        ];
+        let cone = vec3(a, 2).ok().map(|d| {
+            let deg = match a.get(3) {
+                Some(Value::Float(f)) => *f,
+                Some(Value::Int(i)) => *i as f32,
+                _ => 65.0,
+            };
+            (d, deg.to_radians().cos())
+        });
+        for p in points {
+            if let Some((d, cos)) = cone {
+                let v = [p[0] - from[0], p[1] - from[1], p[2] - from[2]];
+                let (vl, dl) = (
+                    (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt(),
+                    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt(),
+                );
+                if vl > 0.001 && dl > 0.001 && (v[0] * d[0] + v[1] * d[1] + v[2] * d[2]) / (vl * dl) < cos {
+                    continue;
+                }
+            }
+            if world_trace(world, from, p, SHOT).0 >= 1.0 {
+                return Ok(Value::Float(1.0));
+            }
+        }
+        Ok(Value::Float(0.0))
+    });
+    // physicstrace(start, end[, mins, maxs, ignore]): a trace array like
+    // bullettrace's (BO2's scripts read trace["position"]), swept with the
+    // box when one is given.
+    f!("physicstrace", |vm, world, _, a| {
+        let (s, e) = (vec3(a, 0)?, vec3(a, 1)?);
+        let (mins, maxs) = (
+            vec3(a, 2).unwrap_or([0.0; 3]),
+            vec3(a, 3).unwrap_or([0.0; 3]),
+        );
+        let t = frame(world).trace_static_world(s, e, mins, maxs, SOLID);
+        let f = if t.startsolid != 0 {
+            0.0
+        } else {
+            t.fraction.clamp(0.0, 1.0)
+        };
+        let pos = std::array::from_fn(|i| s[i] + (e[i] - s[i]) * f);
+        Ok(trace_array(vm, (f, pos, t.normal)))
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_game.rs
     });
     f!("playerphysicstrace", |_, world, _, a| {
         let (s, e) = (vec3(a, 0)?, vec3(a, 1)?);
@@ -782,6 +1080,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             s[i] + (e[i] - s[i]) * f
         })))
     });
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_game.rs
     // bo2mp: a spawn on top of a living player (within a player's width,
     // a player's height) would telefrag him: the spawn scripts pick another.
     f!("positionwouldtelefrag", |_, world, _, a| {
@@ -829,6 +1128,9 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         }
         Ok(Value::Undefined)
     });
+=======
+    f!("positionwouldtelefrag", |_, _, _, _| Ok(Value::Int(0)));
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_game.rs
     // The game's end (end_game): the session takes it from here.
     f!("exitlevel", |_, world, _, _| {
         world.resource_mut::<crate::script::Runtime>().exit_level = true;
@@ -854,10 +1156,12 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         "codesetworldclientfield",
         "codesetplayerstateclientfield",
         "makedvarserverinfo",
+        "setmatchflag",
         "setmatchtalkflag",
         "setscoreboardcolumns",
         "setdemointermissionpoint",
         "setminimap",
+        "visionsetnaked",
         "visionsetnight",
         "setvisionsetnaked",
         "setsunlight",
@@ -882,6 +1186,15 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         "objective_visibleteams",
         "objective_icon",
         "objective_team",
+        // the capture bar's progress and who is capturing (_gameobjects,
+        // Origins' capture zones): the compass draws no objectives.
+        "objective_setprogress",
+        "objective_setplayerusing",
+        "objective_clearplayerusing",
+        "objective_setgamemodeflags",
+        // the MP match clock (_globallogic, Turned's zcleansed): zombies
+        // shows none.
+        "setgameendtime",
         "playfx",
         "playfxontag",
         "playfxontagforclients",
@@ -900,7 +1213,30 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         "disablezombies",
         "setdvarbool",
         "sethideonclientwhendead",
+        // a client draw distance (map mains, e.g. Tranzit)
+        "setculldist",
     ] {
         vm.bind(name, false, |_, _, _, _| Ok(Value::Undefined));
     }
+}
+
+/// The animation a script `%name` value names (its xanim's timing).
+fn anim_of(vm: &Vm<World>, world: &World, v: &Value) -> Option<super::T6Anim> {
+    let Value::Anim(i) = v else {
+        return None;
+    };
+    let (_, name) = *vm.program.anims.get(*i as usize)?;
+    world.resource::<Zm>().anims.get(vm.str(name)).cloned()
+}
+
+/// The path node index a script node object stands for.
+fn node_index(world: &World, v: &Value) -> Option<u32> {
+    let o = v.as_obj()?;
+    let zm = world.resource::<Zm>();
+    zm.node_objs.iter().position(|n| *n == o).map(|i| i as u32)
+}
+
+/// The two path nodes a link builtin names.
+fn node_pair(world: &World, a: &[Value]) -> Option<(u32, u32)> {
+    Some((node_index(world, arg(a, 0))?, node_index(world, arg(a, 1))?))
 }

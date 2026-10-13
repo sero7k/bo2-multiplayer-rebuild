@@ -188,6 +188,8 @@ pub struct ScriptControls {
     pub melee_disabled: bool,
     pub ads_disabled: bool,
     pub switch_to: u32,
+    /// bo2zm: `forceslick` (Die Rise's Sliquifier goo): the ground is ice under him.
+    pub slick: bool,
 }
 
 impl ClientMatchState {

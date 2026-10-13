@@ -2,8 +2,12 @@
 //! `t6gsc [zone.ff]...` (default the Nuketown patch zone) checks the
 //! decoder on every script (string references and import call sites read
 //! where the object's tables say) and prints what the map scripts say
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6gsc.rs
 //! about effects and ambience. `T6GSC_RAW_OUT=<dir>` also writes every raw
 //! file there.
+=======
+//! about effects and ambience.
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6gsc.rs
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -14,6 +18,7 @@ use asset_t6::{GscObject, MapScriptFacts, capture_zone};
 const DEFAULT_ZONE: &str =
     r"C:\Program Files (x86)\Steam\steamapps\common\Call of Duty Black Ops II\zone\all\zm_nuked_patch.ff";
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6gsc.rs
 /// `T6GSC_DIS=<compiled .gsc>` [`T6GSC_FN=<function>`]: print the file's
 /// functions as decoded instructions (reading BO2's own scripts).
 fn disassemble(path: &str) -> ExitCode {
@@ -53,6 +58,9 @@ fn main() -> ExitCode {
     if let Ok(path) = std::env::var("T6GSC_DIS") {
         return disassemble(&path);
     }
+=======
+fn main() -> ExitCode {
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6gsc.rs
     let mut zones: Vec<PathBuf> = std::env::args().skip(1).map(PathBuf::from).collect();
     if zones.is_empty() {
         zones.push(PathBuf::from(DEFAULT_ZONE));
@@ -61,6 +69,7 @@ fn main() -> ExitCode {
     for zone in &zones {
         match capture_zone(zone) {
             Ok(c) => {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6gsc.rs
                 // T6GSC_RAW_OUT=<dir>: write every raw file (UI scripts,
                 // tables, configs) there, `/` as `__` (a later zone wins).
                 if let Ok(dir) = std::env::var("T6GSC_RAW_OUT") {
@@ -79,6 +88,8 @@ fn main() -> ExitCode {
                     }
                     println!("{}: {} raw files, {} string tables written", zone.display(), c.raw_files.len(), c.string_tables.len());
                 }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6gsc.rs
                 for (name, bytes) in c.raw_files {
                     if let Some(name) = name.strip_prefix("script:") {
                         scripts.entry(name.to_owned()).or_insert(bytes);
@@ -120,6 +131,17 @@ fn main() -> ExitCode {
     );
     let map = std::env::var("T6GSC_MAP").unwrap_or_else(|_| "zm_nuked".to_owned());
     let facts = MapScriptFacts::read(&map, |n| scripts.get(n).cloned());
+    // T6GSC_DIS=<script name>: that script's opcodes (opcode, operand).
+    if let Ok(want) = std::env::var("T6GSC_DIS")
+        && let Some(g) = scripts.get(&want).and_then(|b| GscObject::parse(b).ok())
+    {
+        for i in 0..g.exports.len() {
+            println!("dis fn {}", g.exports[i].name);
+            for o in g.decode(i) {
+                println!("dis {:#x} {:#04x} {:?}", o.at, o.op, o.arg);
+            }
+        }
+    }
     println!("\n== {map}: {} effect table entries", facts.effects.len());
     let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
     for p in &facts.placed {

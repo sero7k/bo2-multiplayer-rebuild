@@ -17,6 +17,8 @@ use crate::playback::{MissingAliasGaps, SoundBank};
 #[derive(Component)]
 pub(crate) struct ZmMusicBed {
     alias: String,
+    /// The alias's own volume (the music slider goes over it).
+    volume: f32,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -30,7 +32,15 @@ pub(crate) fn update(
     mut gaps: ResMut<MissingAliasGaps>,
     epoch: Res<MatchEpoch>,
     playing: Query<(Entity, &ZmMusicBed)>,
+    mut sinks: Query<&mut bevy::audio::AudioSink, With<ZmMusicBed>>,
 ) {
+    // The music slider, live.
+    for (entity, bed) in &playing {
+        if let Ok(mut sink) = sinks.get_mut(entity) {
+            use bevy::audio::AudioSinkPlayback;
+            sink.set_volume(Volume::Linear(bed.volume * crate::bus_gain::music()));
+        }
+    }
     let (Some(presented), Some(local)) = (presented, local) else {
         return;
     };
@@ -75,12 +85,17 @@ pub(crate) fn update(
     let entity = crate::backend::spawn_loop(
         &mut commands,
         handle,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/zm_music.rs
         Volume::Linear(volume),
+=======
+        Volume::Linear(volume * crate::bus_gain::music()),
+>>>>>>> /tmp/claude-0/zmhead/crates/audio/src/zm_music.rs
         epoch.0,
         AudioScope::Match,
     );
     commands.entity(entity).insert(ZmMusicBed {
         alias: wanted.clone(),
+        volume,
     });
     diag::info!(Audio, "audio: zombies music `{wanted}` at {volume:.2}");
 }

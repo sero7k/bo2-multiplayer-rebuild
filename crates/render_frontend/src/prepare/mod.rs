@@ -12,7 +12,11 @@ use crate::assemble::drawsurf::{
     ColourDrawMethod, DrawSurfList, FpvDrawPlan, MaterialFrameInputs, MaterialGeneration,
     RenderFrameProducts, StaticDrawLane,
 };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/prepare/mod.rs
 use crate::prepare::scene::camera::{fly_camera, look_camera_override};
+=======
+use crate::prepare::scene::camera::fly_camera;
+>>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/prepare/mod.rs
 use crate::prepare::scene::cull::{
     DpvsFrameStats, apply_dpvs_cull, log_dpvs_stats_once, log_script_model_gaps_once,
 };
@@ -190,6 +194,7 @@ impl Plugin for RenderPreparePlugin {
             )
             .add_systems(
                 Update,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/prepare/mod.rs
                 look_camera_override
                     .after(fly_camera)
                     .after(sync_camera_from_presented)
@@ -197,6 +202,8 @@ impl Plugin for RenderPreparePlugin {
             )
             .add_systems(
                 Update,
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/prepare/mod.rs
                 apply_dpvs_cull
                     .after(fly_camera)
                     .after(stamp_prepared_scene_view)

@@ -12,6 +12,45 @@ pub struct DObjModelDescriptor {
     pub parent_model: Option<u16>,
     pub attach_tag: Option<String>,
     pub ignore_collision: bool,
+    /// bo2zm: where the model's root sits on `attach_tag`; none = on it.
+    pub tag_offset: Option<TagOffset>,
+}
+
+/// bo2zm: a model attached at an offset from its tag, the way Black Ops II
+/// hangs a gun's magazine, scope or rocket on the gun (`DObjModel_s` `trans`
+/// and `rot`, from `attachWorldModelOffsets` / `...Rotations`). Kept as bits
+/// so a descriptor stays `Eq`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TagOffset([u32; 6]);
+
+impl TagOffset {
+    /// `rotation` is pitch, yaw, roll in degrees.
+    pub fn new(offset: [f32; 3], rotation: [f32; 3]) -> Self {
+        let mut bits = [0; 6];
+        for i in 0..3 {
+            bits[i] = offset[i].to_bits();
+            bits[i + 3] = rotation[i].to_bits();
+        }
+        Self(bits)
+    }
+
+    pub fn offset(self) -> [f32; 3] {
+        std::array::from_fn(|i| f32::from_bits(self.0[i]))
+    }
+
+    pub fn rotation(self) -> [f32; 3] {
+        std::array::from_fn(|i| f32::from_bits(self.0[i + 3]))
+    }
+
+    /// The root bind `DObj::build_with_root_binds` takes: yaw about z, then
+    /// pitch about y, then roll about x (as the view model's parts).
+    pub fn root_bind(self) -> (glam::Quat, glam::Vec3) {
+        let [pitch, yaw, roll] = self.rotation().map(f32::to_radians);
+        let q = glam::Quat::from_rotation_z(yaw)
+            * glam::Quat::from_rotation_y(pitch)
+            * glam::Quat::from_rotation_x(roll);
+        (q, glam::Vec3::from_array(self.offset()))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,6 +68,7 @@ impl DObjCompositionDescriptor {
                 parent_model: None,
                 attach_tag: None,
                 ignore_collision: false,
+                tag_offset: None,
             }],
         }
     }
@@ -57,6 +97,16 @@ pub struct XAnimTreeSnapshot {
     pub nodes: Vec<XAnimSemanticNode>,
 }
 
+/// A limp body (`startragdoll`): each client drops the pose it had then under
+/// gravity, thrown by `launch` (`launchragdoll`, counted by `launches`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DObjRagdoll {
+    /// Server time it went limp (tells one fall from the next).
+    pub start_ms: i32,
+    pub launch: [f32; 3],
+    pub launches: u16,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct DObjSemanticState {
     pub composition: DObjCompositionDescriptor,
@@ -64,6 +114,10 @@ pub struct DObjSemanticState {
     pub tree: Option<XAnimTreeSnapshot>,
     pub requested_parts: Option<PartBits>,
     pub hide_part_bits: HidePartBits,
+    pub ragdoll: Option<DObjRagdoll>,
+    /// bo2zm round 1: a zombie's eye brightness (`scriptVector2.y` from its
+    /// client script: 2 alive, Origins 3, 0.25 once the eyes go out).
+    pub eye_luminance: Option<f32>,
 }
 
 impl DObjSemanticState {
@@ -74,6 +128,8 @@ impl DObjSemanticState {
             tree: None,
             requested_parts: None,
             hide_part_bits: HidePartBits::default(),
+            ragdoll: None,
+            eye_luminance: None,
         }
     }
 
@@ -107,6 +163,8 @@ impl DObjSemanticState {
             }),
             requested_parts: None,
             hide_part_bits: HidePartBits::default(),
+            ragdoll: None,
+            eye_luminance: None,
         }
     }
 

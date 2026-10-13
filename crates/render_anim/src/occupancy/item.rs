@@ -255,12 +255,15 @@ fn occupy_item_scene_ents(
 ) {
     let _slow = crate::occupancy::t6_body::SlowGuard::new("occupy_item_scene_ents");
     occupancy.rows.clear();
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/item.rs
     // bo2mp lane F: on a Black Ops II map the BO2 fallback pass draws the
     // items (occupancy::t6_body); this path's MW2 materials refuse every
     // BO2 one, so it would only prepare scene entities nobody sees.
     if t6_bodies.is_some_and(|t| t.0.is_some()) {
         return;
     }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/item.rs
     let Some(presented_inner) = presented.as_deref() else {
         return;
     };
@@ -278,9 +281,12 @@ fn occupy_item_scene_ents(
         _ => false,
     };
     if !live {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/item.rs
         if std::env::var_os("BO2MP_ITEMDRAWLOG").is_some() && at_time / 1000 != (at_time - 16) / 1000 {
             diag::info!(World, "item draw: compositions not owned by the prepared weapons");
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/item.rs
         return;
     }
     let catalog = world_weapons
@@ -293,6 +299,7 @@ fn occupy_item_scene_ents(
         .iter()
         .filter(|es| es.e_type == ET_ITEM)
         .collect();
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/item.rs
     // BO2MP_ITEMDRAWLOG=1: why each dropped item is or is not drawn (once a
     // second; debugging the BO2 lane's guns on the ground).
     let log = std::env::var_os("BO2MP_ITEMDRAWLOG").is_some() && !items.is_empty() && at_time / 1000 != (at_time - 16) / 1000;
@@ -305,11 +312,14 @@ fn occupy_item_scene_ents(
             compositions.by_weapon.len()
         );
     }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/item.rs
     let Some(catalog) = catalog else {
         return;
     };
 
     for (index, es) in items.iter().enumerate() {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/item.rs
         if log {
             let weapon = item_weapon_index(es.index);
             diag::info!(
@@ -323,6 +333,8 @@ fn occupy_item_scene_ents(
                 evaluate_origin(es, at_time)
             );
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/item.rs
         let Some(weapon) = item_weapon_index(es.index) else {
             continue;
         };

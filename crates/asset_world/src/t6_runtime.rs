@@ -28,7 +28,11 @@ pub struct T6LightSampler {
     pub sun_primary: u8,
     /// bo2zm M3 fix list 1: the map's collision, for the grid's sight
     /// checks: a grid point marked "needs trace" counts only when it can be
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_world/src/t6_runtime.rs
     /// seen from the lit point (BO2's R_LightGridLookup); without them a
+=======
+    /// seen from the lit point (as the game does); without them a
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_world/src/t6_runtime.rs
     /// zombie near the ground took the light of the points under it (black).
     pub clip: Option<Arc<crate::ClipCollision>>,
     /// Sight-checked lights by 8-unit cell (the traces cost; a zombie's

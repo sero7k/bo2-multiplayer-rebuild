@@ -18,6 +18,7 @@ use asset_t6::gsc::{GscArg, GscObject};
 
 const GAME: &str = r"C:\Program Files (x86)\Steam\steamapps\common\Call of Duty Black Ops II\zone\all";
 const PRE: [&str; 4] = ["code_post_gfx_zm", "common_zm", "patch_zm", "patch_ui_zm"];
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6census.rs
 /// Multiplayer zones read before an `mp_` map (bo2mp; the map's own zone comes last).
 const PRE_MP: [&str; 5] = [
     "code_post_gfx_mp",
@@ -28,6 +29,9 @@ const PRE_MP: [&str; 5] = [
 ];
 const OUT_ZM: &str = r"out\m3census";
 const OUT_MP: &str = r"out\mpcensus";
+=======
+const OUT: &str = r"out\m3census";
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6census.rs
 
 const GET_FUNCTION: u8 = 0x15;
 const CALL_BUILTIN: u8 = 0x29;
@@ -55,13 +59,18 @@ fn main() -> ExitCode {
         .nth(1)
         .unwrap_or_else(|| "zm_nuked".to_owned());
     let dir = PathBuf::from(std::env::var("T6CENSUS_DIR").unwrap_or_else(|_| GAME.to_owned()));
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6census.rs
     let mp = map.starts_with("mp_");
     let pre: &[&str] = if mp { &PRE_MP } else { &PRE };
     let mut zones: Vec<String> = pre.iter().map(|z| (*z).to_owned()).collect();
+=======
+    let mut zones: Vec<String> = PRE.iter().map(|z| (*z).to_owned()).collect();
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6census.rs
     if map == "zm_nuked" {
         zones.push("dlczm0_load_zm".into());
     }
     zones.push(map.clone());
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6census.rs
     if !mp {
         zones.push(format!("{map}_patch"));
     }
@@ -69,6 +78,9 @@ fn main() -> ExitCode {
     let out = std::env::var("T6CENSUS_OUT")
         .unwrap_or_else(|_| (if mp { OUT_MP } else { OUT_ZM }).to_owned());
     let out = out.as_str();
+=======
+    zones.push(format!("{map}_patch"));
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6census.rs
     if let Ok(list) = std::env::var("T6CENSUS_ZONES") {
         zones = list.split(',').map(str::to_owned).collect();
     }
@@ -90,6 +102,16 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
+        // T6CENSUS_XMODELS=<substring>: the zone's models whose name has it.
+        if let Ok(want) = std::env::var("T6CENSUS_XMODELS") {
+            let hits: Vec<&str> = cap
+                .xmodels
+                .iter()
+                .map(|m| m.name.as_str())
+                .filter(|n| n.contains(want.as_str()))
+                .collect();
+            println!("XMODELS {z}: {} of {} {hits:?}", hits.len(), cap.xmodels.len());
+        }
         if std::env::var("T6CENSUS_PATHS").is_ok() && !cap.path_nodes.is_empty() {
             let nodes = &cap.path_nodes;
             let mut types: BTreeMap<u32, usize> = BTreeMap::new();
@@ -146,6 +168,7 @@ fn main() -> ExitCode {
                 );
             }
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6census.rs
         // T6CENSUS_TABLE=<name part>: print every matching string table
         // (tab-separated rows) - bo2mp.
         if let Ok(want) = std::env::var("T6CENSUS_TABLE") {
@@ -157,6 +180,8 @@ fn main() -> ExitCode {
                 }
             }
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6census.rs
         let mut n = 0;
         for (name, bytes) in cap.raw_files {
             let Some(sname) = name.strip_prefix("script:") else {
@@ -193,8 +218,13 @@ fn main() -> ExitCode {
                 let _ = std::fs::write(path, &bytes);
             }
             if std::env::var("T6CENSUS_DUMP").is_ok_and(|d| d == key) {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6census.rs
                 let _ = std::fs::create_dir_all(out);
                 let _ = std::fs::write(format!("{out}/dump.bin"), &bytes);
+=======
+                let _ = std::fs::create_dir_all(OUT);
+                let _ = std::fs::write(format!("{OUT}/dump.bin"), &bytes);
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6census.rs
                 println!("DUMPED {key} ({} bytes)", bytes.len());
             }
             if let Some(old) = scripts.get(&key) {
@@ -363,10 +393,14 @@ fn main() -> ExitCode {
             }
             let entry = n.starts_with("codecallback_")
                 || (key == &map_key && n == "main")
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6census.rs
                 || ((key.starts_with("maps/mp/gametypes_zm/")
                     || key.starts_with("maps/mp/gametypes/"))
                     && n == "main"
                     && !key.contains("/_"))
+=======
+                || (key.starts_with("maps/mp/gametypes_zm/") && n == "main" && !key.contains("/_"))
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6census.rs
                 || key.starts_with("aitype/")
                 || key.starts_with("character/");
             if entry {
@@ -450,7 +484,11 @@ fn main() -> ExitCode {
     );
 
     // Reports.
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6census.rs
     let _ = std::fs::create_dir_all(out);
+=======
+    let _ = std::fs::create_dir_all(OUT);
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6census.rs
     let mut t = String::new();
     for (k, s) in &scripts {
         let reach = seen.iter().filter(|(kk, _)| kk == k).count();
@@ -463,7 +501,11 @@ fn main() -> ExitCode {
             s.obj.includes.join(",")
         );
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6census.rs
     let _ = std::fs::write(format!("{out}/scripts.txt"), t);
+=======
+    let _ = std::fs::write(format!("{OUT}/scripts.txt"), t);
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6census.rs
     let mut t = String::new();
     for (n, (f, m, ss)) in &builtins {
         let kind = match (*f > 0, *m > 0) {
@@ -478,38 +520,62 @@ fn main() -> ExitCode {
             ss.iter().cloned().collect::<Vec<_>>().join(",")
         );
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6census.rs
     let _ = std::fs::write(format!("{out}/builtins.txt"), t);
     let _ = std::fs::write(
         format!("{out}/unresolved.txt"),
+=======
+    let _ = std::fs::write(format!("{OUT}/builtins.txt"), t);
+    let _ = std::fs::write(
+        format!("{OUT}/unresolved.txt"),
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6census.rs
         unresolved
             .iter()
             .map(|(k, v)| format!("{v}\t{k}\n"))
             .collect::<String>(),
     );
     let _ = std::fs::write(
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6census.rs
         format!("{out}/pointer_names.txt"),
+=======
+        format!("{OUT}/pointer_names.txt"),
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6census.rs
         pointer_builtins
             .iter()
             .map(|k| format!("{k}\n"))
             .collect::<String>(),
     );
     let _ = std::fs::write(
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6census.rs
         format!("{out}/entries.txt"),
+=======
+        format!("{OUT}/entries.txt"),
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6census.rs
         entry_names
             .iter()
             .map(|k| format!("{k}\n"))
             .collect::<String>(),
     );
     let _ = std::fs::write(
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6census.rs
         format!("{out}/opcodes.txt"),
+=======
+        format!("{OUT}/opcodes.txt"),
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6census.rs
         opcodes
             .iter()
             .map(|(k, v)| format!("{k:#04x}\t{v}\n"))
             .collect::<String>(),
     );
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6census.rs
     let _ = std::fs::write(format!("{out}/overrides.txt"), overrides.join("\n"));
     let _ = std::fs::write(
         format!("{out}/rawfiles.txt"),
+=======
+    let _ = std::fs::write(format!("{OUT}/overrides.txt"), overrides.join("\n"));
+    let _ = std::fs::write(
+        format!("{OUT}/rawfiles.txt"),
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6census.rs
         raw_names
             .iter()
             .map(|(k, (z, n))| format!("{k}\t{z}\t{n}\n"))
@@ -519,7 +585,12 @@ fn main() -> ExitCode {
     for (k, i) in &seen {
         let _ = writeln!(t, "{k}::{}", scripts[k].obj.exports[*i].name);
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6census.rs
     let _ = std::fs::write(format!("{out}/reached.txt"), t);
     println!("overrides {}; reports in {out}", overrides.len());
+=======
+    let _ = std::fs::write(format!("{OUT}/reached.txt"), t);
+    println!("overrides {}; reports in {OUT}", overrides.len());
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6census.rs
     ExitCode::SUCCESS
 }

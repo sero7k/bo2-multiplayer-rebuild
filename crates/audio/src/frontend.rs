@@ -186,6 +186,7 @@ pub(crate) fn restore_frontend_audio_on_menu(
     diag::info!(Audio, "audio: frontend sound restored");
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/frontend.rs
 /// The namespace a menu's alias lives in: the bank's own game (bo2mp:
 /// Black Ops II's front end and match banks are T6; looked up as IW4 every
 /// menu sound was missing), IW4 when no game has it.
@@ -195,6 +196,17 @@ fn alias_namespace(bank: &SoundCatalog, alias: &str) -> asset_core::AssetNamespa
         .into_iter()
         .find(|ns| bank.index_in(*ns, alias).is_some())
         .unwrap_or(Ns::Iw4)
+=======
+/// bo2zm: a menu sound's namespace: MW2's, or Black Ops II's when only its
+/// bank has the alias (`cac_grid_nav`, `mus_mp_frontend`).
+fn ui_namespace(bank: &SoundCatalog, alias: &str) -> asset_core::AssetNamespace {
+    use asset_core::AssetNamespace as Ns;
+    if bank.index_in(Ns::Iw4, alias).is_none() && bank.index_in(Ns::T6, alias).is_some() {
+        Ns::T6
+    } else {
+        Ns::Iw4
+    }
+>>>>>>> /tmp/claude-0/zmhead/crates/audio/src/frontend.rs
 }
 
 fn play_ui_sound_messages(
@@ -237,8 +249,13 @@ fn play_ui_sound_messages(
             &mut shared,
             &bank.0,
             iwd.map(|a| a.as_ref()),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/frontend.rs
             namespace,
             alias,
+=======
+            ui_namespace(&bank.0, &event.alias),
+            &event.alias,
+>>>>>>> /tmp/claude-0/zmhead/crates/audio/src/frontend.rs
             None,
             None,
             &mut pick,
@@ -255,3 +272,77 @@ fn play_ui_sound_messages(
         }
     }
 }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/frontend.rs
+=======
+
+fn play_ui_music_messages(
+    mut play_events: MessageReader<UiPlayMusic>,
+    mut stop_events: MessageReader<UiStopMusic>,
+    mut commands: Commands,
+    mut looping_assets: ResMut<Assets<LoopingPcmAudio>>,
+    mut gaps: ResMut<MissingAliasGaps>,
+    mut desired: ResMut<PendingMenuBed>,
+    mut clips: Option<ResMut<ClipStore>>,
+    bank: Option<Res<SoundBank>>,
+    playing: Query<(Entity, &MenuMusicBed)>,
+) {
+    let stopped = stop_events.read().count() > 0;
+    if stopped {
+        desired.alias = None;
+        for (entity, _) in &playing {
+            crate::backend::stop(&mut commands, entity);
+        }
+        diag::info!(Audio, "audio: menu bed stopped");
+    }
+    for event in play_events.read() {
+        if event.alias.is_empty() {
+            continue;
+        }
+        desired.alias = Some(event.alias.clone());
+    }
+    let Some(alias) = desired.alias.clone() else {
+        return;
+    };
+    let Some(bank) = bank else {
+        return;
+    };
+    let Some(clips) = clips.as_mut() else {
+        return;
+    };
+    if playing.iter().any(|(_, bed)| bed.alias == alias) {
+        return;
+    }
+    for (entity, _) in playing.iter() {
+        crate::backend::stop(&mut commands, entity);
+    }
+    let Some(key) = clip_keys_for_alias(&bank.0, ui_namespace(&bank.0, &alias), &alias)
+        .into_iter()
+        .next()
+    else {
+        gaps.record(&alias);
+        desired.alias = None;
+        return;
+    };
+    clips.request(key.clone());
+    let Some(pcm) = clips.ready(&key) else {
+        return;
+    };
+    let Ok(pcm) = pcm else {
+        gaps.record(&alias);
+        desired.alias = None;
+        return;
+    };
+    let handle = looping_assets.add(pcm.into_looping());
+    let entity = crate::backend::spawn_loop(
+        &mut commands,
+        handle,
+        Volume::Linear(0.55),
+        0,
+        crate::backend::AudioScope::Menu,
+    );
+    commands.entity(entity).insert(MenuMusicBed {
+        alias: alias.clone(),
+    });
+    diag::info!(Audio, "audio: menu bed `{alias}`");
+}
+>>>>>>> /tmp/claude-0/zmhead/crates/audio/src/frontend.rs

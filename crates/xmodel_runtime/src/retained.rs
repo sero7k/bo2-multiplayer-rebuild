@@ -51,6 +51,11 @@ pub struct RetainedModelCapability {
 
     pub coll_surfs: Vec<CollSurfCollision>,
 
+    /// What a hit on a bone box shows when the model has no collision
+    /// surface there: its paint's surface (a mannequin is plastic). 0 plays
+    /// blood.
+    pub surface_flags: u32,
+
     pub bounds: Option<([f32; 3], [f32; 3])>,
 
     pub radius: Option<f32>,

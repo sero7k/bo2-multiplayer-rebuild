@@ -7,6 +7,54 @@ use gsc_t6::{Array, ObjKind, ObjRef, Value};
 
 use super::{Player, Zm, frame, with_vm};
 
+const CALLBACKS: &str = "maps/mp/gametypes_zm/_callbacksetup";
+
+/// Who each spectator watches (BO2's SpectatorClientEndFrame): a player
+/// whose `sessionstate` is "spectator" (bled out in co-op, back next round)
+/// keeps the teammate he follows while that one is still playing (down
+/// counts); else Cmd_FollowCycle_f's next playing client after him, in
+/// client order. None playing: he watches no one.
+pub(super) fn follow_sync(world: &mut World) {
+    let (spectators, playing): (Vec<u32>, Vec<u32>) = {
+        let zm = world.resource::<Zm>();
+        let of = |state: &str| -> Vec<u32> {
+            zm.players
+                .iter()
+                .filter(|(_, p)| p.sessionstate == state)
+                .map(|(c, _)| *c)
+                .collect()
+        };
+        (of("spectator"), of("playing"))
+    };
+    let was: Vec<(crate::world::ClientId, crate::world::ClientId)> = frame(world).follows().to_vec();
+    let mut follows = Vec::new();
+    for s in spectators {
+        let kept = was
+            .iter()
+            .find(|(v, _)| v.0 == s)
+            .map(|(_, f)| f.0)
+            .filter(|f| playing.contains(f));
+        let from = was.iter().find(|(v, _)| v.0 == s).map_or(s, |(_, f)| f.0);
+        let next = || {
+            playing
+                .iter()
+                .copied()
+                .filter(|c| *c != s)
+                .find(|c| *c > from)
+                .or_else(|| playing.iter().copied().find(|c| *c != s))
+        };
+        if let Some(f) = kept.or_else(next) {
+            if kept.is_none() {
+                diag::info!(Sim, "bo2zm t6 spectator {s} now watches player {f}");
+            }
+            follows.push((crate::world::ClientId(s), crate::world::ClientId(f)));
+        }
+    }
+    if follows != was {
+        frame(world).set_follows(follows);
+    }
+}
+
 pub(super) fn sync(world: &mut World) {
     if !world.resource::<Zm>().started {
         return;
@@ -26,6 +74,7 @@ pub(super) fn sync(world: &mut World) {
     let known: Vec<u32> = world.resource::<Zm>().players.keys().copied().collect();
     let now = world.resource::<Zm>().now_ms;
     for n in known {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/players.rs
         // bo2mp: a bot made by `addtestclient` waits for its client (up to
         // 15 s, then it is dropped like a disconnect).
         let waiting = world
@@ -37,6 +86,8 @@ pub(super) fn sync(world: &mut World) {
         if waiting {
             continue;
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/players.rs
         if !clients.iter().any(|(c, _)| *c == n) {
             world.resource_mut::<Zm>().bots.remove(&n);
             let p = world.resource_mut::<Zm>().players.remove(&n);
@@ -45,7 +96,11 @@ pub(super) fn sync(world: &mut World) {
                     let cb = super::mp::callbacks(world);
                     vm.spawn_named(
                         world,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/players.rs
                         &cb,
+=======
+                        CALLBACKS,
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/players.rs
                         "codecallback_playerdisconnect",
                         Value::Object(p.obj),
                         vec![],
@@ -61,12 +116,43 @@ pub(super) fn sync(world: &mut World) {
             None => {
                 with_vm(world, |vm, world| {
                     let obj = vm.alloc_object(ObjKind::Entity(c));
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/players.rs
                     // bo2mp: back from a round restart (`map_restart( 1 )`):
                     // his pers[] and whether he is a bot carry over.
                     let back = world.resource_mut::<Zm>().rejoin.remove(&c);
                     let mut player = Player::new(obj);
                     player.test_client = back.as_ref().is_some_and(|(_, bot)| *bot);
                     world.resource_mut::<Zm>().players.insert(c, player);
+=======
+                    world.resource_mut::<Zm>().players.insert(
+                        c,
+                        Player {
+                            obj,
+                            begun: false,
+                            sessionstate: "spectator".to_owned(),
+                            perks: Default::default(),
+                            linked: None,
+                            melee_weapon: None,
+                            laststand: false,
+                            last_weapon: 0,
+                            last_wstate: 0,
+                            last_clip: 0,
+                            last_attack: false,
+                            shield_raised: None,
+                            jet: Default::default(),
+                            force_throw: false,
+                            last_dive: false,
+                            last_sprint: false,
+                            stats: Default::default(),
+                            hud_fields: Vec::new(),
+                            score_fields: Vec::new(),
+                            camera: None,
+                            camera_on: false,
+                            model: String::new(),
+                            poisoned: false,
+                        },
+                    );
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/players.rs
                     let pers = vm.intern("pers");
                     let kept = back.map(|(v, _)| v).filter(|v| !matches!(v, Value::Undefined));
                     vm.set_raw_field(obj, pers, kept.unwrap_or_else(|| Value::array(Array::new())));
@@ -75,13 +161,18 @@ pub(super) fn sync(world: &mut World) {
                     if vm
                         .spawn_named(
                             world,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/players.rs
                             &cb,
+=======
+                            CALLBACKS,
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/players.rs
                             "codecallback_playerconnect",
                             Value::Object(obj),
                             vec![],
                         )
                         .is_none()
                     {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/players.rs
                         diag::warn!(Sim, "bo2zm t6: no {cb}::codecallback_playerconnect");
                     }
                 });
@@ -104,6 +195,12 @@ pub(super) fn sync(world: &mut World) {
                     );
                 });
             }
+=======
+                        diag::warn!(Sim, "bo2zm t6: no {CALLBACKS}::codecallback_playerconnect");
+                    }
+                });
+            }
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/players.rs
             Some(p) if joined && !p.begun => {
                 if let Some(pp) = world.resource_mut::<Zm>().players.get_mut(&c) {
                     pp.begun = true;
@@ -129,7 +226,10 @@ pub(super) fn sync(world: &mut World) {
                     ps.pm_type = PM_TYPE_LAST_STAND;
                 }
                 ps.pm_flags |= pm_flags::LAST_STAND;
-            } else if ps.pm_flags & pm_flags::LAST_STAND != 0 {
+            } else if ps.pm_flags & pm_flags::LAST_STAND != 0 || ps.pm_type == PM_TYPE_LAST_STAND {
+                // Up again: he stands back up. The flag can be gone by now
+                // (cleared elsewhere first), and pm_type LAST_STAND left on
+                // its own kept the low view after a self-revive.
                 ps.pm_flags &= !pm_flags::LAST_STAND;
                 if ps.pm_type == PM_TYPE_LAST_STAND {
                     ps.pm_type = 0;
@@ -137,6 +237,8 @@ pub(super) fn sync(world: &mut World) {
             }
         }
     }
+    // Down, his screen fades to the last stand's vision.
+    super::clientfields::laststand_visions(world);
     // A script camera: his eye at the camera entity, looking its way; he
     // stands frozen (intermission) and his gun is put away.
     let cams: Vec<(u32, [f32; 3], [f32; 3], bool)> = {
@@ -224,6 +326,7 @@ pub(super) fn sync(world: &mut World) {
     }
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/players.rs
 /// A shellshock that has run its time ends (the engine clears it; the
 /// script's `stopshellshock` does the same earlier).
 pub(super) fn shock_tick(world: &mut World) {
@@ -237,6 +340,25 @@ pub(super) fn shock_tick(world: &mut World) {
         .collect();
     for c in ended {
         super::natives_player::end_shock(world, c, "time ran out");
+=======
+/// The weapon tick's notes for a Black Ops II game: its shots and its
+/// detonations (a held detonator fired), told to the scripts next tick.
+pub(crate) fn weapon_notes(world: &mut World, notes: &[crate::equipment::WeaponNote]) {
+    let Some(mut zm) = world.get_resource_mut::<Zm>() else {
+        return;
+    };
+    if !zm.started {
+        return;
+    }
+    for note in notes {
+        match *note {
+            crate::equipment::WeaponNote::DetonationRequested { owner, weapon } => {
+                zm.detonated.push((owner.0, weapon));
+            }
+            crate::equipment::WeaponNote::Fired { owner } => zm.shots.push(owner.0),
+            _ => {}
+        }
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/players.rs
     }
 }
 
@@ -284,6 +406,23 @@ pub(super) fn movement_events(world: &mut World) {
 /// `reload` (the magazine went in).
 pub(super) fn weapon_events(world: &mut World) {
     use weapon_iw4::WeaponState as S;
+    // A held detonator fired (the Time Bomb's remote): `detonate` (weapon
+    // name), when the weapon tick says it went off.
+    let fired = std::mem::take(&mut world.resource_mut::<Zm>().detonated);
+    for (c, w) in fired {
+        let Some(obj) = world.resource::<Zm>().players.get(&c).map(|p| p.obj) else {
+            continue;
+        };
+        let name = super::weapon_text(world, w);
+        diag::info!(Sim, "bo2zm t6: client {c} detonates ({name})");
+        with_vm(world, |vm, world| {
+            let n = vm.string(&name);
+            vm.notify_str(world, obj, "detonate", &[n]);
+        });
+    }
+    // Shots the weapon tick fired: a gun with no clip to drop (the
+    // Paralyzer heats up instead) still tells `weapon_fired`.
+    let shots = std::mem::take(&mut world.resource_mut::<Zm>().shots);
     let clients: Vec<(u32, ObjRef, u32, i32, i32)> = world
         .resource::<Zm>()
         .players
@@ -326,7 +465,7 @@ pub(super) fn weapon_events(world: &mut World) {
         if raising(last_s) && !raising(st) && !dropping(st) {
             events.push("weapon_change_complete");
         }
-        if w == last_w && clip < last_clip && !reloading(st) {
+        if shots.contains(&c) || (w == last_w && clip < last_clip && !reloading(st)) {
             events.push("weapon_fired");
         }
         if reloading(st) && !reloading(last_s) {
@@ -334,6 +473,26 @@ pub(super) fn weapon_events(world: &mut World) {
         }
         if reloading(last_s) && !reloading(st) && clip > last_clip {
             events.push("reload");
+        }
+        // IW4L_T6_WEAPLOG=2 also logs each weapon state change and each
+        // tick fire is held while the weapon is not ready (why a throw or
+        // shot never happened).
+        if std::env::var("IW4L_T6_WEAPLOG").is_ok_and(|v| v == "2") {
+            let attack = world
+                .resource::<crate::step::StepRequest>()
+                .input
+                .cmds
+                .iter()
+                .any(|(id, cmd)| id.0 == c && cmd.buttons & playerstate_iw4::buttons::ATTACK != 0);
+            if st != last_s || (attack && st != S::Ready as i32) {
+                let name = super::weapon_text(world, w);
+                diag::info!(
+                    Sim,
+                    "bo2zm t6 weapon state: {name} {last_s} -> {st} time {} delay {} clip {clip} attack {attack}",
+                    ps.weapon_time,
+                    ps.weapon_delay
+                );
+            }
         }
         if let Some(p) = world.resource_mut::<Zm>().players.get_mut(&c) {
             p.last_weapon = w;
@@ -344,6 +503,15 @@ pub(super) fn weapon_events(world: &mut World) {
             continue;
         }
         let name = super::weapon_text(world, w);
+        // IW4L_T6_WEAPLOG: each weapon taken in hand, with its clip and
+        // whether it is a detonator.
+        if events.contains(&"weapon_change") && std::env::var_os("IW4L_T6_WEAPLOG").is_some() {
+            let det = frame(world).equipment_facts_for(w).is_some_and(|e| e.has_detonator);
+            diag::info!(Sim, "bo2zm t6 weapon in hand: {name} clip {clip} state {st} detonator {det}");
+        }
+        if events.contains(&"weapon_fired") && std::env::var_os("IW4L_T6_WEAPLOG").is_some() {
+            diag::info!(Sim, "bo2zm t6 weapon fired: {name} clip {clip}");
+        }
         with_vm(world, |vm, world| {
             let n = vm.string(&name);
             for e in events {

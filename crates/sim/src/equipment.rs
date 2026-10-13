@@ -38,6 +38,9 @@ pub struct EquipmentRuntimeFacts {
     pub timed_detonation: bool,
 
     pub proj_impact_explode: bool,
+    /// bo2zm: Black Ops II's `bBulletImpactExplode`: its bullet explodes
+    /// where it hits (`combat::bullet_impact_blast`).
+    pub bullet_impact_explode: bool,
 
     pub stick_to_players: bool,
     pub ballistic_blade: bool,
@@ -138,6 +141,11 @@ const WEAPCLASS_THROWINGKNIFE: i32 = 9;
 pub(crate) enum GrenadeLaunchKind {
     Thrown { remaining_fuse_ms: Option<i32> },
     Launcher,
+    /// bo2zm: cooked too long: it goes off in his hand (dropped where his
+    /// hand is, no fuse left), the whole explosion: effect, sound, damage.
+    InHand,
+    /// bo2zm: a script's `magicgrenadetype`: its own velocity and fuse.
+    Magic { fuse_ms: i32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -271,6 +279,14 @@ fn grenade_deadlines(
     }
     let cleanup_at_ms = cap_at;
     match kind {
+        GrenadeLaunchKind::InHand => (Some(now_ms.saturating_add(1)), cleanup_at_ms),
+        // A fuse past the cap (the buildables' 30000 s) never goes off.
+        GrenadeLaunchKind::Magic { fuse_ms } if fuse_ms >= GRENADE_FUSE_CAP_MS => {
+            (None, cleanup_at_ms)
+        }
+        GrenadeLaunchKind::Magic { fuse_ms } => {
+            (Some(now_ms.saturating_add(fuse_ms.max(1))), cleanup_at_ms)
+        }
         GrenadeLaunchKind::Launcher if facts.fuse_time_ms <= 0 => {
             if facts.projectile_activate_dist != 0 {
                 (None, cleanup_at_ms)
@@ -336,7 +352,13 @@ pub(crate) fn spawn_grenade_projectile(
     let direction = forward(angles);
     let time_ms = level_time_ms(tick);
     let (pitch_rate, roll_rate) = match kind {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/equipment.rs
         GrenadeLaunchKind::Launcher => (0.0, 0.0),
+=======
+        GrenadeLaunchKind::Launcher
+        | GrenadeLaunchKind::InHand
+        | GrenadeLaunchKind::Magic { .. } => (0.0, 0.0),
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/equipment.rs
         GrenadeLaunchKind::Thrown { .. } if facts.weap_class == WEAPCLASS_THROWINGKNIFE => {
             (entity_iw4::GRENADE_BLADE_SPIN_PITCH, 0.0)
         }
@@ -348,7 +370,15 @@ pub(crate) fn spawn_grenade_projectile(
     } else {
         init_grenade_apos(direction, time_ms, pitch_rate, roll_rate)
     };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/equipment.rs
     let velocity = grenade_launch_velocity(angles, &facts, owner_vel);
+=======
+    let velocity = if matches!(kind, GrenadeLaunchKind::InHand | GrenadeLaunchKind::Magic { .. }) {
+        owner_vel
+    } else {
+        grenade_launch_velocity(angles, &facts, owner_vel)
+    };
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/equipment.rs
     if crate::combat::shot_log() {
         diag::info!(
             Sim,
@@ -426,6 +456,17 @@ pub(crate) fn spawn_offhand_projectile(
         owner_vel,
         GrenadeLaunchKind::Thrown { remaining_fuse_ms },
     )
+}
+
+/// bo2zm: a grenade cooked too long goes off in his hand as a real
+/// grenade (its explosion effect and sound, its damage through the game's
+/// rules); false when none could spawn.
+pub(crate) fn spawn_offhand_in_hand(world: &mut FrameWorld, id: ClientId, weapon: u32, tick: Tick) -> bool {
+    let Some(ps) = world.player(id).copied() else {
+        return false;
+    };
+    let origin = [ps.origin[0], ps.origin[1], ps.origin[2] + ps.view_height_current - 8.0];
+    spawn_grenade_projectile(world, id, weapon, tick, origin, ps.viewangles, ps.velocity, GrenadeLaunchKind::InHand)
 }
 
 pub(crate) fn explode_offhand_in_hand(
@@ -729,6 +770,56 @@ pub(crate) fn think_projectile(world: &mut FrameWorld, tick: Tick, entnum: i32) 
         && (facts.is_retrievable_knife() || projectile.detonate_at_ms.is_none())
     {
         return;
+    }
+    // Test log (IW4L_SHOT_LOG): the bodies this stretch could strike, and the
+    // nearest hit box to it (a bolt that flies through a zombie).
+    if crate::combat::shot_log() {
+        let along = |p: [f32; 3]| {
+            let d: [f32; 3] = core::array::from_fn(|i| end[i] - start[i]);
+            let len2 = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).max(1e-6);
+            let t = (((p[0] - start[0]) * d[0] + (p[1] - start[1]) * d[1] + (p[2] - start[2]) * d[2])
+                / len2)
+                .clamp(0.0, 1.0);
+            vec3_length(core::array::from_fn(|i| p[i] - (start[i] + d[i] * t)))
+        };
+        let near = script_models
+            .iter()
+            .filter_map(|g| Some((g.owner, g.collision.as_ref()?)))
+            .flat_map(|(o, c)| c.bones.iter().map(move |b| (o, b.bone, b.center)))
+            .map(|(o, bone, c)| (o, bone, c.map(f32::round), along(c).round()))
+            .min_by(|a, b| a.3.total_cmp(&b.3));
+        diag::info!(
+            Sim,
+            "nade tick {time}: {} of {} models posed, nearest box {near:?}",
+            script_models.iter().filter(|g| g.collision.is_some()).count(),
+            script_models.len()
+        );
+        // The zombie nearest the path, whatever its hit boxes: why it has
+        // none (not solid, never posed, or posed then dropped).
+        let nearest = world
+            .entity_collision_capabilities()
+            .iter()
+            .filter_map(|row| {
+                let d = row.dobj.as_ref().filter(|d| d.current_model.contains("zom"))?;
+                let at = d.world_from_model.w_axis.truncate().to_array();
+                Some((along(at), row, d))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        if let Some((dist, row, d)) = nearest {
+            diag::info!(
+                Sim,
+                "nade tick {time}: nearest model {:?} {} {dist:.0} away: solid {} hidden {} boxes {} model rev {}/{:?} pose rev {}/{:?}",
+                row.owner,
+                d.current_model,
+                row.solid,
+                row.hidden,
+                d.current_collision.is_some(),
+                d.model_revision,
+                d.materialized_model_revision,
+                d.pose_revision,
+                d.materialized_pose_revision
+            );
+        }
     }
     let mut trace_start = start;
     let mut hops = 0u32;
@@ -1110,37 +1201,69 @@ pub(crate) fn think_projectile(world: &mut FrameWorld, tick: Tick, entnum: i32) 
                             surface_flags: None,
                             splash: true,
                         });
-                    } else if sticks_to_surface(facts, normal) {
-                        settle_equipment(world, tick, &mut projectile, end, normal, fraction);
-                    } else if !armed {
-                        projectile.live = false;
-                        pending_detonation = Some(PendingDetonation {
-                            projectile,
-                            origin: end,
-                            normal,
-                            surf_type: 0,
-                            geometry: ProjectileHitGeometry::Dud,
-                            terminal: Some(collider),
-                            amount: facts.impact_damage.max(0),
-                            fraction: Some(fraction),
-                            surface_flags: None,
-                            splash: false,
-                        });
                     } else {
-                        bounce_missile(world, tick, &mut projectile, end, normal, fraction, 0);
-                        impacts.push(ProjectileImpact {
-                            id: projectile.id,
-                            owner: projectile.owner,
-                            weapon: projectile.weapon,
-                            origin: end,
-                            geometry: ProjectileHitGeometry::Bounce,
-                            terminal: Some(collider),
-                            amount: 0,
-                            fraction: Some(fraction),
-                            surface_flags: None,
-                            surf_type: None,
-                            entnum: projectile.entnum,
-                        });
+                        // bo2zm: a missile that does not explode still hits the
+                        // entity it strikes for its impact damage (MOD_IMPACT),
+                        // as players are hit above: Buried's ballistic knife
+                        // kills a zombie this way (BO2's `_zm_spawner` scores a
+                        // knife_ballistic MOD_IMPACT kill as
+                        // `ballistic_knife_death`).
+                        if facts.impact_damage > 0
+                            && let ColliderId::EntityDObjBone { owner, .. }
+                            | ColliderId::EntityLinkedBrush { owner, .. } = collider
+                            && let Some(target) = owner.script_model()
+                        {
+                            let bone = match collider {
+                                ColliderId::EntityDObjBone { bone, .. } => Some(usize::from(bone)),
+                                _ => None,
+                            };
+                            entity_hits.push((
+                                DamageSource::Projectile(projectile.id),
+                                crate::script::EntityHit {
+                                    target,
+                                    amount: facts.impact_damage,
+                                    attacker: Some(projectile.owner),
+                                    means: "MOD_IMPACT",
+                                    weapon: projectile.weapon,
+                                    point: end,
+                                    dir: projectile.velocity,
+                                    bone,
+                                    flags: 0,
+                                },
+                            ));
+                        }
+                        if sticks_to_surface(facts, normal) {
+                            settle_equipment(world, tick, &mut projectile, end, normal, fraction);
+                        } else if !armed {
+                            projectile.live = false;
+                            pending_detonation = Some(PendingDetonation {
+                                projectile,
+                                origin: end,
+                                normal,
+                                surf_type: 0,
+                                geometry: ProjectileHitGeometry::Dud,
+                                terminal: Some(collider),
+                                amount: facts.impact_damage.max(0),
+                                fraction: Some(fraction),
+                                surface_flags: None,
+                                splash: false,
+                            });
+                        } else {
+                            bounce_missile(world, tick, &mut projectile, end, normal, fraction, 0);
+                            impacts.push(ProjectileImpact {
+                                id: projectile.id,
+                                owner: projectile.owner,
+                                weapon: projectile.weapon,
+                                origin: end,
+                                geometry: ProjectileHitGeometry::Bounce,
+                                terminal: Some(collider),
+                                amount: 0,
+                                fraction: Some(fraction),
+                                surface_flags: None,
+                                surf_type: None,
+                                entnum: projectile.entnum,
+                            });
+                        }
                     }
                 }
                 Some(world_collider @ ColliderId::World { .. }) => {
@@ -1344,7 +1467,9 @@ pub(crate) fn think_projectile(world: &mut FrameWorld, tick: Tick, entnum: i32) 
             let _ = crate::damage::apply_damage_attempt(world, tick, &intent);
         }
         for (source, mut hit) in std::mem::take(&mut entity_hits) {
-            hit.means = crate::script_player::means(world, source, hit.weapon, 0, false);
+            if hit.means.is_empty() {
+                hit.means = crate::script_player::means(world, source, hit.weapon, 0, false);
+            }
             crate::script::damage_entity(world.ecs(), &hit);
         }
     }
@@ -1353,6 +1478,8 @@ pub(crate) fn think_projectile(world: &mut FrameWorld, tick: Tick, entnum: i32) 
             id: info.projectile.id,
             origin: info.origin,
         });
+        // BO2's scripts get the shot's `projectile_impact` at this point.
+        crate::t6::note_detonation(world.ecs(), info.projectile.id, info.origin);
         if !info.splash {
             continue;
         }
@@ -1796,6 +1923,18 @@ fn required_projectile_facts(world: &FrameWorld, weapon: u32) -> EquipmentRuntim
                 "a missile needs a validated equipment row; bounce/damage must not default to zero"
             );
         })
+}
+
+/// A fired projectile's (impact damage, blast radius) for the BO2 scripts'
+/// `projectile_impact` and the models its path goes through.
+pub(crate) fn projectile_impact_facts(world: &FrameWorld, weapon: u32) -> Option<(i32, f32)> {
+    let f = world
+        .equipment_facts_for(weapon)
+        .or_else(|| world.missile_launch_facts(weapon))?;
+    Some((
+        f.impact_damage.max(0),
+        f.explosion_radius.max(f.explosion_radius_min).max(0) as f32,
+    ))
 }
 
 fn bounce_velocity(

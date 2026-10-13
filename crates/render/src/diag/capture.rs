@@ -79,6 +79,11 @@ impl CaptureFrameFacts {
     }
 
     fn obstruction(self) -> Option<CaptureWait> {
+        // bo2zm test aid: IW4L_CAPTURE_DURING_LOAD=1 takes the shot as the
+        // screen is (BO2's loading screen).
+        if std::env::var_os("IW4L_CAPTURE_DURING_LOAD").is_some() {
+            return None;
+        }
         if self.screen == AppScreen::Loading {
             return Some(CaptureWait::MatchLoading);
         }
@@ -307,6 +312,8 @@ pub(crate) fn capture_frame(
     stats: Option<Res<DpvsFrameStats>>,
     working: Option<Res<render_gpu::ColourWorkingSet>>,
     mut exit: MessageWriter<AppExit>,
+    mut load_frames: Local<Option<std::time::Instant>>,
+    mut last_shot: Local<u32>,
 ) {
     let submitted_batches = stats.as_ref().map(|s| s.submitted_batches).unwrap_or(0);
     let g0_world = stats
@@ -320,6 +327,35 @@ pub(crate) fn capture_frame(
         submitted_batches,
         g0_world,
     };
+
+    // bo2zm test aid: IW4L_LOADSHOT=<path> shoots the loading screen 30,
+    // 120 and 400 frames after it comes up, as <path>_<frame>.png (console
+    // commands wait for the load to end).
+    // Frames during a load are slow and uneven, so the shots go by time:
+    // <path>_<tenths of a second>.png at 0.5, 1.5, 2.5, 3.5 and 4.5 s.
+    if facts.loading_overlay {
+        let started = *load_frames.get_or_insert_with(std::time::Instant::now);
+        let tenth = (started.elapsed().as_millis() / 100) as u32;
+        // The next mark not yet shot; a stalled frame shoots it late
+        // (named by its mark) rather than skipping it.
+        let mark = if *last_shot == 0 { 5 } else { *last_shot + 10 };
+        if tenth >= mark
+            && mark <= 45
+            && let Some(path) = std::env::var_os("IW4L_LOADSHOT")
+        {
+            *last_shot = mark;
+            let tenth = mark;
+            let path = std::path::PathBuf::from(path);
+            let stem = path.with_extension("");
+            queue.push(CaptureRequest {
+                path: format!("{}_{:02}.png", stem.display(), tenth).into(),
+                exit_after_capture: false,
+            });
+        }
+    } else {
+        *load_frames = None;
+        *last_shot = 0;
+    }
 
     // bo2zm: a world drawn only through the diagnostic path (BO2 before its
     // materials have routes) has no exact hits; its diagnostic draws count.
@@ -408,6 +444,15 @@ fn take_ready_capture(commands: &mut Commands, queue: &mut CaptureQueue, facts: 
                     perf::frames::mark(perf::frames::flag::SCREENSHOT);
                     let image =
                         std::mem::replace(&mut captured.event_mut().image, emptied_readback());
+                    // The 72-byte black PNGs: say what the readback was.
+                    if image.width() <= 1 || image.height() <= 1 {
+                        warn!(
+                            "screenshot: readback for {} is {}x{} (window surface minimised or zero-size?)",
+                            path.display(),
+                            image.width(),
+                            image.height()
+                        );
+                    }
                     let path = path.clone();
                     let writes = writes.clone();
                     WRITES_IN_FLIGHT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

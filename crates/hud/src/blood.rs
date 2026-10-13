@@ -79,6 +79,7 @@ pub(crate) fn update_blood_overlay(
         request_hide(&mut job, latch.packed.is_empty());
         return;
     };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hud/src/blood.rs
     // bo2mp: a Black Ops II match draws BO2's own damage feedback (the ui
     // crate's `bo2mp_damage`), not this one (its splatter_alt material is
     // not in BO2, so it drew black blotches).
@@ -91,6 +92,8 @@ pub(crate) fn update_blood_overlay(
         request_hide(&mut job, latch.packed.is_empty());
         return;
     }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/hud/src/blood.rs
     let health_frac = get_health_fraction(ps.health, ps.max_health, ps.pm_type);
     let in_killcam = view.in_killcam();
     let in_killcam_hud_gate = in_killcam && ps.kill_cam_entity != playerstate_iw4::ENTITYNUM_NONE;

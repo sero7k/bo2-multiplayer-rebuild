@@ -851,6 +851,13 @@ impl FxSystemHost {
         Some(idx as u8)
     }
 
+    fn free_bolt_record(&mut self, idx: u8) {
+        if let Some(next) = self.bolt_next.get_mut(idx as usize) {
+            *next = self.bolt_first_free;
+            self.bolt_first_free = i32::from(idx);
+        }
+    }
+
     pub fn spawn_effect(
         &mut self,
         def_name: &str,
@@ -976,6 +983,10 @@ impl FxSystemHost {
             self.set_handle_at_ring(active_index as u32, handle);
             active_index = active_index.wrapping_add(1);
             if let Some(slot) = handle_to_slot(handle) {
+                // bo2zm: hand its bolt record back; kept, every bolted
+                // effect (muzzle flashes, Mob's ghost wrists) used one up
+                // for good and after 255 none could spawn.
+                self.free_bolt_record(self.effects[slot].bolt);
                 self.effects[slot] = FxEffectSlot::default();
             }
         }
@@ -1079,4 +1090,26 @@ fn handle_to_slot(handle: u16) -> Option<usize> {
     }
     let slot = (byte_off / FX_EFFECT_SLOT_SIZE as u32) as usize;
     (slot < FX_EFFECT_POOL_CAPACITY as usize).then_some(slot)
+}
+
+#[cfg(test)]
+mod bolt_record_tests {
+    use super::*;
+
+    #[test]
+    fn dead_bolted_effects_hand_their_bolt_record_back() {
+        let mut host = FxSystemHost::new();
+        let axis = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        for i in 0..1000 {
+            let handle = host
+                .spawn_effect("wrist", [0.0; 3], axis, i, 0x800, false, 0)
+                .unwrap_or_else(|e| panic!("bolted spawn {i} failed: {e:?}"));
+            host.play_release_ownership(handle);
+            if let Some(effect) = host.slot_for_handle_mut(handle) {
+                effect.status &= !FX_STATUS_REF_COUNT_MASK_IW4;
+            }
+            host.needs_garbage_collection = true;
+            host.run_garbage_collection();
+        }
+    }
 }

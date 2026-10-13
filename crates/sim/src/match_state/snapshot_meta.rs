@@ -137,6 +137,14 @@ pub struct SnapshotMeta {
     /// sides clips against them.
     pub oriented_blockers: Vec<OrientedBlocker>,
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/match_state/snapshot_meta.rs
+=======
+    /// bo2zm: (spectator, the teammate he watches): a player who bled out
+    /// in co-op sees through a living teammate's eyes (BO2's
+    /// SpectatorClientEndFrame). Server only, not on the wire.
+    pub follows: Vec<(ClientId, ClientId)>,
+
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/match_state/snapshot_meta.rs
     /// bo2zm: the Black Ops II movement rules the game runs with, so a
     /// second PC's own guess of its moves (it runs no scripts) follows them
     /// too. None = no rules sent yet.
@@ -144,7 +152,8 @@ pub struct SnapshotMeta {
 }
 
 /// bo2zm: a solid box at any turn: its place, its axes (forward, left,
-/// up) and its bounds along them.
+/// up) and its bounds along them. `surface_flags` are its faces' (0 for a
+/// plain wall; the ladder bit makes it climbable, as Tranzit's bus ladder).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct OrientedBlocker {
     pub entnum: u16,
@@ -152,6 +161,7 @@ pub struct OrientedBlocker {
     pub axis: [[f32; 3]; 3],
     pub mins: [f32; 3],
     pub maxs: [f32; 3],
+    pub surface_flags: u32,
 }
 
 impl OrientedBlocker {
@@ -272,6 +282,7 @@ mod oriented_blocker_tests {
             axis: [[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]],
             mins: [-64.0, -5.0, -64.0],
             maxs: [64.0, 5.0, 64.0],
+            surface_flags: 0,
         };
         let planes = wall.planes();
         let brush = trace_iw4::BrushRef {

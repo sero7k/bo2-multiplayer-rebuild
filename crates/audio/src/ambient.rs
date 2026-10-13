@@ -42,6 +42,30 @@ pub struct MapEmitter {
     pub speed: f32,
 
     pub live_pan: Option<crate::pcm::LivePan>,
+    /// bo2zm: a line emitter's other end (heard from the nearest point).
+    pub line_end_inches: Option<[f32; 3]>,
+}
+
+impl MapEmitter {
+    /// Where the listener hears it from: its place, or a line emitter's
+    /// point nearest the listener (`closest_point_on_line_to_point`).
+    pub fn heard_from(&self, ear_inches: [f32; 3]) -> [f32; 3] {
+        let Some(b) = self.line_end_inches else {
+            return self.origin_inches;
+        };
+        let a = self.origin_inches;
+        let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let len2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+        if len2 <= f32::EPSILON {
+            return a;
+        }
+        let t = (((ear_inches[0] - a[0]) * ab[0]
+            + (ear_inches[1] - a[1]) * ab[1]
+            + (ear_inches[2] - a[2]) * ab[2])
+            / len2)
+            .clamp(0.0, 1.0);
+        [a[0] + ab[0] * t, a[1] + ab[1] * t, a[2] + ab[2] * t]
+    }
 }
 
 #[derive(Resource, Clone)]
@@ -578,6 +602,40 @@ pub(crate) fn boot_map_ambient_once(
     );
 }
 
+/// bo2zm: with the sound off (`IW4L_SOUND=off`, every lane's test game) no
+/// sound bank is built, but a Black Ops II map's placed effects (fires,
+/// smoke, sparks: its createfx list, read with the sound data) still start,
+/// straight from the loaded map's sound data. Nothing plays.
+pub(crate) fn boot_silent_map_effects(
+    silent: Option<Res<crate::AudioSilent>>,
+    map_sound: Option<Res<assets::PreparedMatchSound>>,
+    mut done: Local<Option<frame::LocalLoadKey>>,
+    mut commands: Commands,
+) {
+    let (Some(_), Some(map_sound)) = (silent, map_sound) else {
+        return;
+    };
+    if *done == Some(map_sound.load_key) {
+        return;
+    }
+    *done = Some(map_sound.load_key);
+    let Some(fx) = map_sound
+        .sound
+        .as_ref()
+        .ok()
+        .and_then(|catalog| catalog.scripted_map_fx.as_ref())
+    else {
+        return;
+    };
+    diag::info!(
+        Audio,
+        "audio: Silent; createfx oneshots {} for {} (placed effects only)",
+        fx.oneshots.len(),
+        map_sound.zone
+    );
+    commands.insert_resource(asset_audio::CreateFxOneshotEmitters(fx.oneshots.clone()));
+}
+
 fn start_map_ambient_prepared(
     commands: &mut Commands,
     pcm_assets: &mut Assets<PcmAudio>,
@@ -678,6 +736,7 @@ fn start_map_ambient_prepared(
                 pcm: handle,
                 speed: 1.0,
                 live_pan: None,
+                line_end_inches: emitter.line_end_inches,
             },
             Transform::from_translation(Vec3::from_array(origin_inches)),
         ));
@@ -711,7 +770,11 @@ fn start_map_ambient_prepared(
 }
 
 pub(crate) fn emitter_gain(emitter: &MapEmitter, ear_inches: [f32; 3]) -> f32 {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/ambient.rs
     let dist = distance_inches(ear_inches, emitter.origin_inches);
+=======
+    let dist = distance_inches(ear_inches, emitter.heard_from(ear_inches));
+>>>>>>> /tmp/claude-0/zmhead/crates/audio/src/ambient.rs
     if emitter.knots.is_empty() {
         return 0.0;
     }
@@ -755,7 +818,11 @@ pub fn update_map_emitter_gain(
             entity,
             emitter_gain(&emitter, ear_inches),
             emitter.pcm.clone(),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/ambient.rs
             emitter.origin_inches,
+=======
+            emitter.heard_from(ear_inches),
+>>>>>>> /tmp/claude-0/zmhead/crates/audio/src/ambient.rs
             has_player,
         )
     }));
@@ -797,10 +864,16 @@ pub fn update_map_emitter_gain(
                     }
                 }
                 if let Ok(mut sink) = sinks.get_mut(entity) {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/ambient.rs
                     sink.set_volume(Volume::Linear(gain * settings.master_volume));
                     if (sink.speed() - speed).abs() > 0.001 {
                         sink.set_speed(speed);
                     }
+=======
+                    sink.set_volume(Volume::Linear(
+                        gain * settings.master_volume * crate::bus_gain::sfx(),
+                    ));
+>>>>>>> /tmp/claude-0/zmhead/crates/audio/src/ambient.rs
                     if sink.is_paused() {
                         sink.play();
                     }

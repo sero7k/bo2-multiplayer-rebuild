@@ -282,6 +282,10 @@ fn run_players_system(ecs: &mut World) {
     let tick = ecs.resource::<StepRequest>().tick;
     let level_time = crate::level_time_ms(tick);
     let input = ecs.resource::<StepRequest>().input.clone();
+    let authority = ecs
+        .resource::<StepRequest>()
+        .reason
+        .advances_authority_world();
     let mut world = frame_world(ecs);
     world.enter_kernel_phase(crate::gentity::KernelPhase::RunPlayers);
 
@@ -398,6 +402,7 @@ fn run_players_system(ecs: &mut World) {
                     }),
                 feel,
             );
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
             // bo2mp: the Hybrid Optic's swap key is the sprint key; tapping it while aimed
             // must not drop ADS (it only swaps the sight).
             context.ads_intent.sprint_hold_ads = facts.is_some_and(|f| f.optic_switch);
@@ -411,6 +416,11 @@ fn run_players_system(ecs: &mut World) {
             crate::script_player::constrain_cmd(&mut world, *id, &mut cmd, feel.zombies);
             // bo2mp: a scorestreak switch the scripts would refuse never starts.
             crate::t6::gate_streak_switch(world.ecs(), id.0, &mut cmd);
+=======
+            crate::script::player_commands(world.ecs(), id.0, cmd.buttons, old_buttons);
+            let mut cmd = *cmd;
+            crate::script_player::constrain_cmd(&mut world, *id, &mut cmd, feel.zombies);
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
             crate::script::select_location(world.ecs(), id.0, &mut cmd, old_buttons);
             if world
                 .client_meta(*id)
@@ -425,13 +435,19 @@ fn run_players_system(ecs: &mut World) {
             // bo2zm: the keys as sent, before the move holds any back.
             let sent_move = [cmd.forwardmove, cmd.rightmove];
             context.old_move = world.old_cmd_move(*id).unwrap_or([0, 0]);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
+=======
+            // bo2zm: a brush hidden from this player does not stop him (BO2's
+            // query_should_pass_gentity); it stops the others.
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
             let linked_brushes: Vec<LinkedBrushCollisionBrush> = world
                 .entity_collision_capabilities()
                 .iter()
-                .flat_map(|c| c.solid_brushes().iter().cloned())
+                .flat_map(|c| c.solid_brushes_for(id.0).iter().cloned())
                 .collect();
             let bodies = alive_body_clips(&world);
             let blockers = oriented_blocker_brushes(&world);
+            let slick = world.client_meta(*id).is_some_and(|m| m.controls.slick);
             let glass_damage = world.world_objects().glass_damage_pairs();
             let backend = ClipBackend {
                 brushes: &brushes,
@@ -443,10 +459,27 @@ fn run_players_system(ecs: &mut World) {
                 cmodels: &cmodel_models,
                 linked_brushes: &linked_brushes,
                 blockers: &blockers,
+                slick,
             };
             let script = world.player_anim_script();
             let mantle = world.xanims();
             let applied_mt = Cell::new(None);
+            // bo2zm: a bus rider is carried through the map's clip brushes (BO2
+            // moves him with its mover, no trace: G_PushEntity); only the
+            // movement code's own 1-unit fix runs then, not the wider unstick
+            // (runs/sl3: the bus's front sweeps through the road's player clip
+            // on its turns and shoved him 1-3 units each tick). The client's
+            // predicted step has no riders list: it starts from the server's
+            // place, so it skips it too while he stands on a mover or is off
+            // the ground (runs/sl4: 9 predicted shoves, none on the server).
+            let carried = world
+                .ecs()
+                .get_resource::<crate::t6::Zm>()
+                .is_some_and(|zm| zm.riders.carried.contains(&id.0))
+                || (!authority
+                    && world.player(*id).is_some_and(|ps| {
+                        ps.ground_entity_num != i32::from(trace_iw4::ENTITYNUM_WORLD)
+                    }));
             let (
                 walking,
                 linked_bounds,
@@ -466,6 +499,18 @@ fn run_players_system(ecs: &mut World) {
                 if ps.shellshock_time.wrapping_add(ps.shellshock_duration) < level_time {
                     ps.pm_flags &= !playerstate_iw4::pm_flags::SHELLSHOCKED;
                 }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
+=======
+                // bo2zm: a spot a hair inside a brush (Ascension's lift top is 0.1 above its
+                // spawn spots) leaves him unable to move; lift him the smallest step that clears.
+                let stuck_at = ps.origin;
+                if !carried {
+                    ps.origin = unstick_feet(&backend, ps.origin);
+                }
+                if ps.origin != stuck_at {
+                    unstick_log(&backend, stuck_at, ps.origin);
+                }
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
                 // bo2zm: BO2 sets the walk speed every frame (move-faster +7%).
                 if let Some(speed) = movement_iw4::player_speed(ps, feel) {
                     ps.speed = speed;
@@ -488,6 +533,7 @@ fn run_players_system(ecs: &mut World) {
                 );
                 let (view_w, primary) = crate::pmove_anim_weapon_ids(ps);
                 let moved_to = ps.origin;
+                stance_room_trace(&backend, ps);
                 (
                     pml.walking as i32,
                     result.bounds,
@@ -1972,6 +2018,8 @@ struct ClipBackend<'a> {
     linked_brushes: &'a [LinkedBrushCollisionBrush],
     /// bo2zm: solid collision models as turned boxes (entity number, brush).
     blockers: &'a [(u16, SimBrush)],
+    /// bo2zm: `forceslick` on him: every surface he touches is slick (SURF_SLICK 0x2).
+    slick: bool,
 }
 
 /// bo2zm M3: the world's solid collision models (Nuketown's patch walls,
@@ -1986,7 +2034,7 @@ fn oriented_blocker_brushes(world: &FrameWorld) -> Vec<(u16, SimBrush)> {
                 SimBrush {
                     planes: b.planes().to_vec(),
                     contents: crate::bullet_collision::CONTENTS_SOLID,
-                    plane_surface_flags: vec![0; 6],
+                    plane_surface_flags: vec![b.surface_flags; 6],
                     glass_encoded: 0,
                 },
             )
@@ -2023,6 +2071,197 @@ fn clip_move_to_blockers(
     hit
 }
 
+/// The lower part of his box (prone height) at `origin`, moved the shortest way out of any
+/// brush: up to 4 units sideways or 18 up. Unchanged when it is already clear, or when no
+/// spot that close is. The movement code's own fix tries only 1 unit, and Ascension's lander
+/// spawn spots overlap its centre pole by 1-2 units.
+fn unstick_feet(backend: &ClipBackend<'_>, origin: [f32; 3]) -> [f32; 3] {
+    let solid = |d: [f32; 3]| {
+        let at = [origin[0] + d[0], origin[1] + d[1], origin[2] + d[2]];
+        let tr = backend.trace(GroundTraceInput {
+            start: at,
+            end: at,
+            mins: [-15.0, -15.0, 0.0],
+            maxs: [15.0, 15.0, movement_iw4::PRONE_MAXS_Z],
+            tracemask: crate::bullet_collision::MASK_PLAYER_SOLID,
+        });
+        tr.startsolid != 0 || tr.allsolid != 0
+    };
+    if !solid([0.0; 3]) {
+        return origin;
+    }
+    let mut tries: Vec<[f32; 3]> = (-4..=4i8)
+        .flat_map(|x| (-4..=4i8).map(move |y| [f32::from(x), f32::from(y), 0.0]))
+        .chain((1..=18u8).map(|z| [0.0, 0.0, f32::from(z)]))
+        .filter(|d| *d != [0.0; 3])
+        .collect();
+    tries.sort_by(|a, b| {
+        let len = |d: &[f32; 3]| d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+        len(a).total_cmp(&len(b))
+    });
+    tries
+        .into_iter()
+        .find(|&d| !solid(d))
+        .map_or(origin, |d| [origin[0] + d[0], origin[1] + d[1], origin[2] + d[2]])
+}
+
+/// bo2zm test aid (IW4L_T6_UNSTICK_LOG or IW4L_T6_RIDELOG set): when `unstick_feet` moved him,
+/// what his feet were inside: the map's own brushes, or which linked brush
+/// model (its clip handle, origin and angles). At most 80 lines.
+fn unstick_log(backend: &ClipBackend<'_>, from: [f32; 3], to: [f32; 3]) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    static LINES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    if !*ON.get_or_init(|| std::env::var_os("IW4L_T6_UNSTICK_LOG").is_some() || std::env::var_os("IW4L_T6_RIDELOG").is_some())
+        || LINES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 80
+    {
+        return;
+    }
+    let mins = [-15.0, -15.0, 0.0];
+    let maxs = [15.0, 15.0, movement_iw4::PRONE_MAXS_Z];
+    let mask = crate::bullet_collision::MASK_PLAYER_SOLID;
+    let world_only = ClipBackend {
+        bodies: &[],
+        linked_brushes: &[],
+        blockers: &[],
+        ..*backend
+    };
+    let tr = world_only.trace(GroundTraceInput {
+        start: from,
+        end: from,
+        mins,
+        maxs,
+        tracemask: mask,
+    });
+    let map = tr.startsolid != 0 || tr.allsolid != 0;
+    let models: Vec<String> = backend
+        .linked_brushes
+        .iter()
+        .filter(|b| {
+            clipmap_iw4::clip_handle_to_model(backend.cmodels, b.cmodel_handle).is_some_and(|m| {
+                let t = clipmap_iw4::transformed_capsule_trace(
+                    m,
+                    &backend.bsp.leafbrushes,
+                    backend.brushes,
+                    from,
+                    from,
+                    mins,
+                    maxs,
+                    b.origin,
+                    b.angles,
+                    mask,
+                );
+                t.startsolid != 0 || t.allsolid != 0
+            })
+        })
+        .map(|b| {
+            format!(
+                " model {} at ({:.1} {:.1} {:.1}) angles ({:.1} {:.1} {:.1})",
+                b.cmodel_handle, b.origin[0], b.origin[1], b.origin[2], b.angles[0], b.angles[1], b.angles[2]
+            )
+        })
+        .collect();
+    diag::info!(
+        Sim,
+        "bo2zm t6 unstick: ({:.2} {:.2} {:.2}) -> ({:.2} {:.2} {:.2}), inside map brushes {map} (contents {:#x}), linked models:{}",
+        from[0],
+        from[1],
+        from[2],
+        to[0],
+        to[1],
+        to[2],
+        tr.contents,
+        if models.is_empty() { " none".to_string() } else { models.concat() }
+    );
+}
+
+/// bo2zm down test (IW4L_T6_DOWN set): while he is crouched or prone and not
+/// in last stand, what fills the stand and crouch boxes at his feet, layer
+/// by layer (after a revive the stand-up check found no room, 10-09). At
+/// most 40 lines.
+fn stance_room_trace(backend: &ClipBackend<'_>, ps: &PlayerState) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    static LINES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    if !*ON.get_or_init(|| std::env::var_os("IW4L_T6_DOWN").is_some())
+        || ps.pm_type != 0
+        || ps.pm_flags & 3 == 0
+        || LINES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 40
+    {
+        return;
+    }
+    let world_only = ClipBackend {
+        bodies: &[],
+        cmodels: &[],
+        linked_brushes: &[],
+        blockers: &[],
+        ..*backend
+    };
+    let no_bodies = ClipBackend {
+        bodies: &[],
+        ..*backend
+    };
+    let show = |t: Trace| format!("{}{} {:?}:{}", t.allsolid, t.startsolid, t.hit_type, t.hit_id);
+    let parts: Vec<String> = [
+        ("stand", movement_iw4::STAND_MAXS_Z),
+        ("crouch", movement_iw4::CROUCH_MAXS_Z),
+    ]
+    .into_iter()
+    .map(|(name, top)| {
+        let input = GroundTraceInput {
+            start: ps.origin,
+            end: ps.origin,
+            mins: [-15.0, -15.0, 0.0],
+            maxs: [15.0, 15.0, top],
+            tracemask: 0x0281_0011,
+        };
+        format!(
+            "{name} world {} +models {} +bodies {}",
+            show(world_only.trace(input)),
+            show(no_bodies.trace(input)),
+            show(backend.trace(input))
+        )
+    })
+    .collect();
+    // Which world part fills the stand hull (brushes or the triangle
+    // mesh), and from how high up it is clear.
+    let no_mesh = crate::world::SimClipMesh::default();
+    let brushes_only = ClipBackend {
+        mesh: &no_mesh,
+        ..world_only
+    };
+    let mesh_only = ClipBackend {
+        brushes: &[],
+        ..world_only
+    };
+    let stand_at = |b: &ClipBackend<'_>, up: f32| {
+        let o = [ps.origin[0], ps.origin[1], ps.origin[2] + up];
+        b.trace(GroundTraceInput {
+            start: o,
+            end: o,
+            mins: [-15.0, -15.0, 0.0],
+            maxs: [15.0, 15.0, movement_iw4::STAND_MAXS_Z],
+            tracemask: 0x0281_0011,
+        })
+    };
+    let lift: Vec<String> = [0.25_f32, 1.0, 4.0, 16.0]
+        .into_iter()
+        .map(|up| format!("+{up} {}", show(stand_at(&world_only, up))))
+        .collect();
+    let m = stand_at(&mesh_only, 0.0);
+    diag::info!(
+        Sim,
+        "bo2zm t6 stance room at {:?} pm_flags {:#x} target {}: {} | stand brushes {} mesh {} (contents {:#x} surf {:#x}) | world lifted {}",
+        ps.origin,
+        ps.pm_flags,
+        ps.view_height_target,
+        parts.join(" | "),
+        show(stand_at(&brushes_only, 0.0)),
+        show(m),
+        m.contents,
+        m.surface_flags,
+        lift.join(" ")
+    );
+}
+
 impl CollisionBackend for ClipBackend<'_> {
     fn trace(&self, input: GroundTraceInput) -> Trace {
         let world_hit = clip_trace(
@@ -2052,7 +2291,11 @@ impl CollisionBackend for ClipBackend<'_> {
             input,
         );
         let with_bodies = clip_move_to_players(with_bmodels, self.bodies, self.self_entnum, input);
-        clip_move_to_blockers(with_bodies, self.blockers, input)
+        let mut hit = clip_move_to_blockers(with_bodies, self.blockers, input);
+        if self.slick {
+            hit.surface_flags |= 2;
+        }
+        hit
     }
 }
 
@@ -2088,7 +2331,9 @@ fn clip_move_to_players(
     self_entnum: u16,
     input: GroundTraceInput,
 ) -> Trace {
-    if hit.fraction == 0.0 {
+    // bo2zm: players and zombies only stop traces that ask for bodies: BO2's
+    // stand-up (PM_CanStand), lie-down (0x810011) and mantle checks leave them out.
+    if hit.fraction == 0.0 || input.tracemask & crate::world::CONTENTS_BODY == 0 {
         return hit;
     }
     for body in bodies {
@@ -2210,7 +2455,13 @@ fn clip_move_to_players(
 /// the game ran BO2's, and a dive jumped back on every correction.
 static HOST_FEEL: std::sync::Mutex<Option<movement_iw4::Bo2Feel>> = std::sync::Mutex::new(None);
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
 /// bo2zm: the Black Ops II movement rules, on in every game. Values the scripts set win over the defaults. `predicting` = this
+=======
+/// bo2zm: the Black Ops II movement rules, on in a Black Ops II game.
+/// `BO2_FEEL=mw2` turns them off (the old MW2 movement) for side-by-side
+/// clips. Values the scripts set win over the defaults. `predicting` = this
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
 /// is the local player's guess, not the game itself; `sent` = the rules the
 /// game sent in its last snapshot.
 fn bo2_feel(
@@ -2219,6 +2470,7 @@ fn bo2_feel(
     sent: Option<movement_iw4::Bo2Feel>,
 ) -> movement_iw4::Bo2Feel {
     // The Black Ops II scripts' own dvars (setdvar); none = no T6 game.
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
     // bo2mp: no Black Ops II scripts running: Black Ops II's own defaults
     // all the same (MW2's rules never apply).
     let defaults = || bo2_feel_with(&std::collections::HashMap::<String, String>::new(), omni_movement_setting());
@@ -2235,6 +2487,21 @@ fn bo2_feel(
             *f = Some(feel);
         }
         return feel;
+=======
+    let Some(t6) = ecs.get_resource::<crate::t6::T6Runtime>() else {
+        if predicting {
+            // The game's own rules first: a second PC has no scripts (it
+            // guessed with MW2's), and a game hosted here before may have
+            // left its rules behind.
+            return sent
+                .or_else(|| HOST_FEEL.lock().ok().and_then(|f| *f))
+                .unwrap_or(movement_iw4::Bo2Feel::IW4);
+        }
+        if let Ok(mut f) = HOST_FEEL.lock() {
+            *f = None;
+        }
+        return movement_iw4::Bo2Feel::IW4;
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
     };
     let feel = bo2_feel_from(t6);
     if !predicting && let Ok(mut f) = HOST_FEEL.lock() {
@@ -2243,6 +2510,7 @@ fn bo2_feel(
     feel
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
 /// bo2mp: the MW2 rule set is gone (`BO2_FEEL=mw2` no longer exists):
 /// every game plays by Black Ops II's.
 pub(crate) fn bo2_feel_mw2() -> bool {
@@ -2254,6 +2522,19 @@ pub(crate) fn bo2_feel_mw2() -> bool {
 static OMNI_SETTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// bo2zm: the "Omni Movement" setting; the next game started here reads it.
+=======
+/// bo2zm: `BO2_FEEL=mw2`: the old MW2 rules in a Black Ops II game.
+pub(crate) fn bo2_feel_mw2() -> bool {
+    static MW2: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *MW2.get_or_init(|| std::env::var("BO2_FEEL").is_ok_and(|v| v.eq_ignore_ascii_case("mw2")))
+}
+
+/// bo2zm: his Controls setting "Omni Movement" (a tester 10-10: off by
+/// default, an option in the Controls menu for whoever wants it).
+static OMNI_SETTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// bo2zm: his "Omni Movement" setting; the next game started here reads it.
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
 pub fn set_omni_movement(on: bool) {
     OMNI_SETTING.store(on, std::sync::atomic::Ordering::Relaxed);
 }
@@ -2263,6 +2544,7 @@ pub(crate) fn omni_movement_setting() -> bool {
     OMNI_SETTING.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
 /// A dvar's number by its name in any case (the lower-case key the VM
 /// stores first, then the name as written).
 fn dvar_number<S: std::hash::BuildHasher>(
@@ -2293,6 +2575,22 @@ fn bo2_feel_with<S: std::hash::BuildHasher>(
     // default.
     let number = |name: &str, default: f32| dvar_number(dvars, name).unwrap_or(default);
     let zombies = dvars
+=======
+fn bo2_feel_from(t6: &crate::t6::T6Runtime) -> movement_iw4::Bo2Feel {
+    if bo2_feel_mw2() {
+        return movement_iw4::Bo2Feel::IW4;
+    }
+    let number = |name: &str, default: f32| {
+        t6.vm
+            .dvars
+            .get(name)
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .unwrap_or(default)
+    };
+    let zombies = t6
+        .vm
+        .dvars
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
         .get("mapname")
         .is_some_and(|m| m.starts_with("zm_"));
     movement_iw4::Bo2Feel {
@@ -2327,9 +2625,15 @@ fn bo2_feel_with<S: std::hash::BuildHasher>(
         ducked_sprint_cycle_scale: 1.0,
         dtp_cycle_scale: 1.0,
         // BO2 sprints forward only (forwardmove above
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
         // player_sprintForwardMinimum); off by default, the
         // Controls menu's "Omni Movement" turns it on (read at game start).
         omni,
+=======
+        // player_sprintForwardMinimum); a tester 10-10: off by default, his
+        // Controls menu's "Omni Movement" turns it on (read at game start).
+        omni: t6.omni,
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
         // Low climbs keep the gun in hand (defaults until real BO2 is read).
         mantle_weapon_height: number("mantle_weapon_height", 39.0),
         mantle_weapon_anim_height: number("mantle_weapon_anim_height", 32.0),
@@ -2532,6 +2836,7 @@ mod fall_damage_tests {
         assert_eq!(fall_damage(250, 150), 165);
     }
 }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
 
 #[cfg(test)]
 mod body_clip_tests {
@@ -2625,3 +2930,5 @@ mod dvar_case_tests {
         assert_eq!(dvar_number(&dvars, "bg_gravity"), Some(600.0));
     }
 }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs

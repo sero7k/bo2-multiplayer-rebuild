@@ -20,6 +20,22 @@ const T6_PRESENCE_BASE: u32 = 0x6000_0000;
 /// cannot walk through zombies.
 const ZOMBIE_SOLID: u32 = ((72 + 32) << 16) | (1 << 8) | 15;
 
+/// A model hung on a tag of another (`attach`), and for a weapon's parts
+/// where on the tag (`useweaponmodel`: the magazine, scope or rocket).
+pub(crate) type Attached = (String, String, Option<xmodel_runtime::TagOffset>);
+
+/// What `sync` draws for an entity or a box piece: origin, angles, model,
+/// what hangs on it, hidden, and the tags hidden on its model (none: left
+/// alone, a destructible's or a piece's).
+type Wanted = (
+    [f32; 3],
+    [f32; 3],
+    String,
+    Vec<Attached>,
+    bool,
+    Option<Vec<String>>,
+);
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Shown {
     pub id: ScriptModelId,
@@ -27,8 +43,11 @@ pub(crate) struct Shown {
     pub origin: [f32; 3],
     pub angles: [f32; 3],
     pub model: String,
-    pub attachments: Vec<(String, String)>,
+    pub attachments: Vec<Attached>,
     pub hidden: bool,
+    /// Hidden from some players only (`setinvisibletoplayer`): a bit per
+    /// player it is still drawn for. 0 for everything else.
+    pub shown_to: u64,
     /// It moved last tick: its client carries it on at that speed until it
     /// is told it stopped.
     pub moving: bool,
@@ -158,7 +177,7 @@ fn report_near(world: &mut World, now_ms: i64) {
                 s.origin[0],
                 s.origin[1],
                 s.origin[2],
-                s.attachments
+                s.attachments.iter().map(|(m, t, _)| (m, t)).collect::<Vec<_>>()
             );
         }
     }
@@ -179,10 +198,7 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
     report_near(world, now_ms);
     let now = now_ms as i32;
     let zm = world.resource::<Zm>();
-    let pieces: Vec<(
-        u32,
-        ([f32; 3], [f32; 3], String, Vec<(String, String)>, bool),
-    )> = zm
+    let pieces: Vec<(u32, Wanted)> = zm
         .ents
         .iter()
         .filter_map(|(n, e)| e.zbarrier.as_ref().map(|z| (*n, e, z)))
@@ -191,7 +207,8 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                 // A weapon-rise piece (a bare tag) shows the box's
                 // spinning gun while it opens, where its clip's root
                 // motion has lifted it, turned as the box turns the gun
-                // it picks (the chest's angles + 180 yaw).
+                // it picks (the chest's angles + 180 yaw), wearing its
+                // parts (magazine, scope, rocket) and hiding its hide tags.
                 let anim = zm.anims.get(&p.open_anim);
                 if let Some((gun, off)) = super::zbarrier::rise_gun(p, anim, now_ms) {
                     let (f, r, u) = gsc_t6::math::angle_vectors(e.angles);
@@ -199,9 +216,10 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                         e.origin[c] + f[c] * off[0] - r[c] * off[1] + u[c] * off[2]
                     });
                     let angles = [e.angles[0], e.angles[1] + 180.0, e.angles[2]];
+                    let parts = gun.parts.into_iter().map(|(m, t, at)| (m, t, Some(at)));
                     return Some((
                         PIECE_BIT | (n << 4) | i as u32,
-                        (origin, angles, gun, Vec::new(), e.hidden),
+                        (origin, angles, gun.model, parts.collect(), e.hidden, Some(gun.hide)),
                     ));
                 }
                 if p.model.is_empty() || p.model == "tag_origin" {
@@ -210,11 +228,19 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                 Some((
                     PIECE_BIT | (n << 4) | i as u32,
                     (
-                        e.origin,
-                        e.angles,
+                        super::zbarrier::piece_origin(zm, e, z, p, now_ms),
+                        super::zbarrier::piece_angles(zm, e, z, p, now_ms),
                         p.model.clone(),
                         Vec::new(),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/presence.rs
                         !p.shown || e.hidden,
+=======
+                        !p.shown
+                            || e.hidden
+                            || (p.state == "open"
+                                && z.def.as_ref().is_some_and(|d| d.auto_hide_open_pieces)),
+                        None,
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/presence.rs
                     ),
                 ))
             })
@@ -242,6 +268,7 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
             .find(|p| p.shown && p.model.contains("magic_box"))?;
         (!e.hidden).then(|| (*n, e.origin, e.angles, piece.model.clone()))
     }));
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/presence.rs
     // A model shown only to some players (`showtoplayer`) is drawn when one
     // of them plays at this PC: the server's own humans, not its bots.
     let humans: Vec<u32> = zm
@@ -264,19 +291,92 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                 && !e.model.starts_with('*')
                 // Spawners are never drawn (the actors they spawn are).
                 && (!e.classname.starts_with("actor_") || zm.actors.contains_key(n))
+=======
+    // Tranzit's bus: its body as boxes (`transit`), and its ladder once
+    // built (with the faces' surface flags).
+    type FlaggedBox = (([f32; 3], [f32; 3]), u32);
+    let platform_ents: Vec<(u32, [f32; 3], [f32; 3], Vec<FlaggedBox>)> = zm
+        .ents
+        .iter()
+        .filter(|(_, e)| e.platform && !e.hidden)
+        .filter_map(|(n, e)| {
+            let boxes = super::transit::platform_boxes(&e.model);
+            (!boxes.is_empty()).then(|| {
+                let mut all: Vec<FlaggedBox> = boxes.iter().map(|&b| (b, 0)).collect();
+                all.extend(super::transit::platform_ladder(zm, *n, &e.model));
+                (*n, e.origin, e.angles, all)
+            })
+        })
+        .collect();
+    // Die Rise's elevator cars: their floor and roof (`highrise`), under
+    // the car's own entity number as its clients know the car, so a
+    // player's ground entity there names it (`platform_carry` draws his
+    // ride smooth by it).
+    let slab_ents: Vec<(u32, [f32; 3], [f32; 3], String, u16)> = zm
+        .ents
+        .iter()
+        .filter(|(_, e)| {
+            e.platform && !e.hidden && !super::highrise::platform_slabs(&e.model).is_empty()
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/presence.rs
         })
         .map(|(n, e)| {
+            let number = zm
+                .presences
+                .by_ent
+                .get(n)
+                .and_then(|s| u16::try_from(s.number).ok())
+                .unwrap_or(*n as u16);
+            (*n, e.origin, e.angles, e.model.clone(), number)
+        })
+        .collect();
+    let mut wanted: BTreeMap<u32, Wanted> = zm
+        .ents
+        .iter()
+        .filter_map(|(n, e)| {
+            // A brush door (a map script_brushmodel's `*N`) draws its own
+            // surfaces; brushes.rs gives it collision.
+            let model = match &e.brush {
+                Some(b) if e.model.is_empty() && e.classname == "script_brushmodel" => b,
+                _ => &e.model,
+            };
+            (e.obj.is_some()
+                && !model.is_empty()
+                && (!model.starts_with('*') || e.classname == "script_brushmodel")
+                // Spawners are never drawn (the actors they spawn are).
+                && (!e.classname.starts_with("actor_") || zm.actors.contains_key(n)))
+            .then(|| (n, e, model.clone()))
+        })
+        .map(|(n, e, model)| {
             (
                 *n,
                 (
                     e.origin,
                     e.angles,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/presence.rs
                     e.model.clone(),
                     e.attached.clone(),
                     e.hidden
                         || e.invisible_to_all
                         || !shown_here(e)
                         || collision_only(&e.model),
+=======
+                    model,
+                    e.attached
+                        .iter()
+                        .map(|(m, t)| (m.clone(), t.clone(), None))
+                        .chain(
+                            e.weapon_parts
+                                .iter()
+                                .map(|(m, t, at)| (m.clone(), t.clone(), Some(*at))),
+                        )
+                        .collect(),
+                    // Hidden from everyone. Hidden from some players only
+                    // (Mob's afterlife doors while one is a ghost) is the
+                    // mask below.
+                    e.hidden || e.invisible_to_all || collision_only(&e.model),
+                    // A breakable prop hides its own launched parts.
+                    e.destructible.is_empty().then(|| e.hidden_parts.clone()),
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/presence.rs
                 ),
             )
         })
@@ -297,11 +397,38 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
         f.remove_collision_owner(shown.id);
         world.resource_mut::<Zm>().presences.by_ent.remove(&n);
     }
-    for (n, (origin, angles, model, attachments, hidden)) in wanted {
+    // A bit per player in the match (a player's entity number is his client).
+    let everyone: u64 = world
+        .resource::<Zm>()
+        .players
+        .keys()
+        .filter(|c| **c < 64)
+        .fold(0, |m, c| m | (1 << c));
+    for (n, (origin, angles, model, attachments, hidden, hide)) in wanted {
+        // BO2's `setinvisibletoplayer` hides it from those players only;
+        // the rest still see it (before, only player 1's view counted).
+        let mask: u64 = world.resource::<Zm>().ents.get(&n).map_or(0, |e| {
+            e.invisible_to
+                .iter()
+                .filter(|c| **c < 64)
+                .fold(0, |m, c| m | (1 << c))
+        }) & everyone;
+        // Hidden from every player: no hit boxes either (as solo was).
+        let hidden_all = hidden || (mask != 0 && mask == everyone);
+        // Not drawn by default; shown back to the players in `shown_to`.
+        let draw_hidden = hidden_all || mask != 0;
+        let shown_to = if hidden_all || mask == 0 { 0 } else { everyone & !mask };
         let existing = world.resource::<Zm>().presences.by_ent.get(&n).cloned();
         let mut shown = match existing {
             Some(s) => s,
             None => {
+                let destructible = {
+                    let zm = world.resource::<Zm>();
+                    zm.ents
+                        .get(&n)
+                        .filter(|e| !e.destructible.is_empty())
+                        .and_then(|e| zm.destructibles.get(&e.destructible).cloned())
+                };
                 let serial = {
                     let mut zm = world.resource_mut::<Zm>();
                     let s = zm.presences.next;
@@ -315,11 +442,28 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                     continue;
                 };
                 let capability = f.model_capability(&model).flatten();
+                // IW4L_T6_PRESLOG=<part of a model name>: a line as it shows.
+                if std::env::var("IW4L_T6_PRESLOG").is_ok_and(|w| model.contains(w.as_str())) {
+                    diag::info!(
+                        Sim,
+                        "bo2zm t6 presence ent{n} {model} hidden={draw_hidden} capability={}",
+                        capability.is_some()
+                    );
+                }
+                let mut dobj = AuthorityDObjState::at_pose(&model, capability, origin, angles);
+                // A map prop that breaks in stages (a mannequin's head).
+                if let Some(def) = destructible.clone() {
+                    crate::t5_destructible::install_shown(&mut dobj, def);
+                }
                 f.insert_collision_owner(EntityCollisionCapabilities::current_tick(
                     crate::AuthorityModelOwner::ScriptModel(id),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/presence.rs
                     Some(AuthorityDObjState::at_pose(
                         &model, capability, origin, angles,
                     )),
+=======
+                    Some(dobj),
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/presence.rs
                     Vec::new(),
                 ));
                 Shown {
@@ -329,7 +473,8 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                     angles,
                     model: String::new(),
                     attachments: Vec::new(),
-                    hidden: !hidden,
+                    hidden: !draw_hidden,
+                    shown_to: 0,
                     moving: false,
                 }
             }
@@ -346,6 +491,10 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                 (a.yaw_goal, still)
             });
         let prev_yaw = shown.angles[1];
+        let is_vehicle = {
+            let zm = world.resource::<Zm>();
+            vehicle_borne(&zm, n)
+        };
         let mut f = frame(world);
         let moved = !near(shown.origin, origin) || !near(shown.angles, angles);
         // A move that ended goes out once more, standing still (else the
@@ -353,6 +502,23 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
         if moved || shown.moving || yaw_goal.is_some() {
             shown.moving = moved;
             f.set_script_mover_pose(shown.number, now, origin, angles);
+            // The last send of a move that ended stands still, facing where
+            // it faces. Its turn was measured from the facing the turn below
+            // started from (a tick behind), so a zombie killed mid-turn was
+            // sent turning on with no end: its corpse spun until it went.
+            if !moved && let Some(mover) = f.script_mover_mut_by_number(shown.number) {
+                let state = &mut mover.state;
+                state.tr_type = entity_iw4::TR_STATIONARY;
+                state.tr_time = now;
+                state.tr_base = origin;
+                state.tr_delta = [0.0; 3];
+                state.tr_duration = 0;
+                state.apos_tr_type = entity_iw4::TR_STATIONARY;
+                state.apos_tr_time = now;
+                state.apos_tr_base = angles;
+                state.apos_tr_delta = [0.0; 3];
+                state.apos_tr_duration = 0;
+            }
             // bo2zm M3 fix list 2: a turning zombie's client turns it toward
             // the facing it is turning to at the server's rate and stops
             // there, as the next tick will. Carried on at the last tick's
@@ -396,6 +562,35 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                     state.apos_tr_duration = 0;
                 }
             }
+            // bo2zm: a vehicle (Tranzit's bus) turns in steps at each path
+            // node. Carried on at its last tick's speed and turn, it swung up
+            // to 14 degrees past each turn and snapped back. It is drawn
+            // easing from last tick's place to this tick's and stopping
+            // there (a tick behind the server; his ride view uses the end).
+            // What is linked to it (the driver, its doors and ladder, the
+            // zombies on it) is drawn the same way: carried on a tick ahead
+            // while the bus was a tick behind, the driver slid around in his
+            // seat (a tester's playtest, "the bus driver is sliding around").
+            if moved
+                && is_vehicle
+                && let Some(mover) = f.script_mover_mut_by_number(shown.number)
+            {
+                let tick = crate::MATCH_TICK_MS as i32;
+                let per_sec = 1000.0 / tick as f32;
+                let state = &mut mover.state;
+                state.tr_type = entity_iw4::TR_LINEAR_STOP;
+                state.tr_time = now;
+                state.tr_duration = tick;
+                state.tr_base = shown.origin;
+                state.tr_delta = std::array::from_fn(|i| (origin[i] - shown.origin[i]) * per_sec);
+                state.apos_tr_type = entity_iw4::TR_LINEAR_STOP;
+                state.apos_tr_time = now;
+                state.apos_tr_duration = tick;
+                state.apos_tr_base = shown.angles;
+                state.apos_tr_delta = std::array::from_fn(|i| {
+                    math_iw4::angle_subtract(angles[i], shown.angles[i]) * per_sec
+                });
+            }
             if let Some(row) = f.collision_owner_mut(shown.id) {
                 if let Some(dobj) = row.dobj.as_mut() {
                     dobj.set_world_pose(origin, angles);
@@ -405,20 +600,33 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
             shown.origin = origin;
             shown.angles = angles;
         }
-        if shown.hidden != hidden {
+        if shown.hidden != draw_hidden || shown.shown_to != shown_to {
             if let Some(mover) = f.script_mover_mut_by_number(shown.number) {
-                if hidden {
+                if draw_hidden {
                     mover.state.e_flags |= entity_iw4::CG_SCRIPT_MOVER_NODRAW;
                 } else {
                     mover.state.e_flags &= !entity_iw4::CG_SCRIPT_MOVER_NODRAW;
                 }
                 mover.nonsolid = true;
+                mover.shown_to = shown_to;
             }
             if let Some(row) = f.collision_owner_mut(shown.id) {
-                row.hidden = hidden;
+                row.hidden = draw_hidden;
                 row.solid = false;
             }
-            shown.hidden = hidden;
+            // IW4L_T6_SHOWNLOG=1: a line each time one is drawn for some
+            // players only (a test aid for co-op).
+            if (shown_to != 0 || shown.shown_to != 0)
+                && std::env::var_os("IW4L_T6_SHOWNLOG").is_some()
+            {
+                diag::info!(
+                    Sim,
+                    "bo2zm t6 shown ent{n} {model} to {shown_to:#b} (was {:#b})",
+                    shown.shown_to
+                );
+            }
+            shown.hidden = draw_hidden;
+            shown.shown_to = shown_to;
         }
         if shown.model != model || shown.attachments != attachments {
             let capability = f.model_capability(&model).flatten();
@@ -436,16 +644,17 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                     }
                 }
                 if let Some(dobj) = row.dobj.as_mut() {
-                    let a: Vec<(&str, &str)> = attachments
+                    let a: Vec<(&str, &str, Option<xmodel_runtime::TagOffset>)> = attachments
                         .iter()
-                        .map(|(m, t)| (m.as_str(), t.as_str()))
+                        .map(|(m, t, at)| (m.as_str(), t.as_str(), *at))
                         .collect();
-                    dobj.set_attachments(&a);
+                    dobj.set_attachments_at(&a);
                 }
             }
             shown.model = model;
             shown.attachments = attachments;
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/presence.rs
         // bo2mp: a map destructible (a mannequin, a car) breaks by its
         // definition; its shown pieces stop bullets.
         let destructible = (n & PIECE_BIT == 0)
@@ -469,6 +678,10 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                     shown.origin
                 );
             }
+=======
+        if let Some(hide) = &hide {
+            set_hidden_parts(world, hide, shown.id);
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/presence.rs
         }
         // Actors: bullets hit the living (their posed hit boxes), and the
         // playing animation goes out as the model row's one leaf.
@@ -477,7 +690,7 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
             .actors
             .get(&n)
             .is_some_and(|a| a.alive);
-        let boxes = if alive_actor && !hidden {
+        let boxes = if alive_actor && !hidden_all {
             let f = frame(world);
             let placement = f
                 .entity_collision_capabilities()
@@ -489,15 +702,36 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
         } else {
             None
         };
-        {
+        // A breakable prop (the map's `destructibledef`: Nuketown's
+        // mannequins) keeps the hit shape its model builds, so bullets
+        // reach its pieces.
+        let breakable = !hidden_all
+            && world
+                .resource::<Zm>()
+                .ents
+                .get(&n)
+                .is_some_and(|e| !e.destructible.is_empty());
+        if breakable {
+            let mut f = frame(world);
+            if let Some(row) = f.collision_owner_mut(shown.id) {
+                row.solid = true;
+            }
+        } else {
             let mut f = frame(world);
             let packed = if boxes.is_some() { ZOMBIE_SOLID } else { 0 };
-            if let Some(mover) = f.script_mover_mut_by_number(shown.number)
-                && mover.state.solid != packed
-            {
-                mover.state.solid = packed;
+            if let Some(mover) = f.script_mover_mut_by_number(shown.number) {
+                if mover.state.solid != packed {
+                    mover.state.solid = packed;
+                }
+                // The movers pass (`presence::follow_movers`, every tick)
+                // copies this onto the hit row: left non-solid from the
+                // first show, a living zombie lost its hit boxes after
+                // the tick it was posed, and the Sliquifier bolt flew
+                // through it (it only met zombies on the tick it was fired).
+                mover.nonsolid = boxes.is_none();
             }
             if let Some(row) = f.collision_owner_mut(shown.id) {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/presence.rs
                 if destructible.is_some() && !alive_actor {
                     // Its bones as posed (bullet_collision materialize).
                     row.solid = !hidden;
@@ -510,6 +744,19 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                         dobj.materialized_model_revision = Some(dobj.model_revision);
                         dobj.materialized_pose_revision = Some(dobj.pose_revision);
                     }
+=======
+                row.solid = boxes.is_some();
+                if let Some(dobj) = row.dobj.as_mut() {
+                    dobj.current_collision = boxes.map(|bones| {
+                        crate::bullet_collision::AuthorityDObjCollision {
+                            bones,
+                            coll: None,
+                            surface_flags: 0,
+                        }
+                    });
+                    dobj.materialized_model_revision = Some(dobj.model_revision);
+                    dobj.materialized_pose_revision = Some(dobj.pose_revision);
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/presence.rs
                 }
             }
         }
@@ -520,10 +767,20 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                 .ents
                 .get(&e)
                 .and_then(|e| e.zbarrier.as_ref())
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/presence.rs
                 .and_then(|z| z.pieces.get(i))
                 .and_then(|p| super::zbarrier::piece_pose(p, now_ms).1)
+=======
+                .and_then(|z| {
+                    let boards = super::zbarrier::has_boards(z);
+                    z.pieces.get(i).map(|p| (p, boards))
+                })
+                .and_then(|(p, boards)| super::zbarrier::piece_pose(p, now_ms, boards).1)
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/presence.rs
         } else {
             super::actors::present_anim(world, n, now_ms)
+                .or_else(|| super::fxanims::present(world, n, now_ms))
+                .or_else(|| script_anim(world, n, now_ms))
         };
         if let Some((clip, time, rate)) = anim {
             let mut f = frame(world);
@@ -555,6 +812,22 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                 });
             }
         }
+        // Gone limp (`startragdoll`): the clients drop the body.
+        let ragdoll = world.resource::<Zm>().ents.get(&n).and_then(|e| e.ragdoll);
+        if let Some(row) = frame(world).collision_owner_mut(shown.id)
+            && let Some(dobj) = row.dobj.as_mut()
+            && dobj.semantic_state.ragdoll != ragdoll
+        {
+            dobj.semantic_state.ragdoll = ragdoll;
+        }
+        // bo2zm round 1: its eye brightness rides along for the eye shader.
+        let eyes = world.resource::<Zm>().ents.get(&n).and_then(|e| e.eye_luminance);
+        if let Some(row) = frame(world).collision_owner_mut(shown.id)
+            && let Some(dobj) = row.dobj.as_mut()
+            && dobj.semantic_state.eye_luminance != eyes
+        {
+            dobj.semantic_state.eye_luminance = eyes;
+        }
         world.resource_mut::<Zm>().presences.by_ent.insert(n, shown);
     }
     // The collision models as turned boxes, for his movement (the server's
@@ -581,9 +854,38 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                 axis: [fw, [-rt[0], -rt[1], -rt[2]], up],
                 mins: lo,
                 maxs: hi,
+                surface_flags: 0,
             })
         })
         .collect();
+    let mut blockers = blockers;
+    for (_, origin, angles, model, number) in &slab_ents {
+        let Some((mid, half)) = f.model_capability(model).flatten().and_then(|c| c.bounds) else {
+            continue;
+        };
+        let (fw, rt, up) = gsc_t6::math::angle_vectors(*angles);
+        for &(z0, z1) in super::highrise::platform_slabs(model) {
+            blockers.push(crate::OrientedBlocker {
+                entnum: *number,
+                origin: *origin,
+                axis: [fw, [-rt[0], -rt[1], -rt[2]], up],
+                mins: [mid[0] - half[0], mid[1] - half[1], z0],
+                maxs: [mid[0] + half[0], mid[1] + half[1], z1],
+                surface_flags: 0,
+            });
+        }
+    }
+    for (n, origin, angles, boxes) in &platform_ents {
+        let (fw, rt, up) = gsc_t6::math::angle_vectors(*angles);
+        blockers.extend(boxes.iter().map(|&((mins, maxs), surface_flags)| crate::OrientedBlocker {
+            entnum: *n as u16,
+            origin: *origin,
+            axis: [fw, [-rt[0], -rt[1], -rt[2]], up],
+            mins,
+            maxs,
+            surface_flags,
+        }));
+    }
     // IW4L_T6_BLOCKERLOG=1: each blocker when the list changes (test aid).
     if std::env::var_os("IW4L_T6_BLOCKERLOG").is_some()
         && f.oriented_blockers() != blockers.as_slice()
@@ -591,7 +893,7 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
         for b in &blockers {
             diag::info!(
                 Sim,
-                "bo2zm t6 blocker ent{} at ({:.0} {:.0} {:.0}) fwd ({:.2} {:.2} {:.2}) up ({:.2} {:.2} {:.2}) bounds {:?}..{:?}",
+                "bo2zm t6 blocker ent{} at ({:.0} {:.0} {:.0}) fwd ({:.2} {:.2} {:.2}) up ({:.2} {:.2} {:.2}) bounds {:?}..{:?} flags {:#x}",
                 b.entnum,
                 b.origin[0],
                 b.origin[1],
@@ -603,9 +905,67 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                 b.axis[2][1],
                 b.axis[2][2],
                 b.mins,
-                b.maxs
+                b.maxs,
+                b.surface_flags
             );
         }
     }
     f.set_oriented_blockers(blockers);
+}
+
+/// A vehicle, or an entity linked (through its link chain) to one.
+fn vehicle_borne(zm: &Zm, mut n: u32) -> bool {
+    for _ in 0..8 {
+        if zm.vehicles.speed.contains_key(&n) {
+            return true;
+        }
+        match zm.ents.get(&n).and_then(|e| e.link) {
+            Some((p, _, _)) => n = p,
+            None => break,
+        }
+    }
+    false
+}
+
+/// The tags its scripts hid (`hidepart`) as the model's hide bits. Props
+/// that break in stages keep their own.
+fn set_hidden_parts(world: &mut World, parts: &[String], id: ScriptModelId) {
+    let mut f = frame(world);
+    let Some(dobj) = f.collision_owner_mut(id).and_then(|r| r.dobj.as_mut()) else {
+        return;
+    };
+    let mut words = [0u32; 6];
+    if let Some(cap) = &dobj.capability {
+        for (i, bone) in cap.pose.bone_names.iter().enumerate().take(192) {
+            if parts.iter().any(|p| p.eq_ignore_ascii_case(bone)) {
+                words[i / 32] |= 0x8000_0000 >> (i % 32);
+            }
+        }
+    }
+    let hide = xmodel_runtime::HidePartBits::from_words(words);
+    if hide != dobj.semantic_state.hide_part_bits {
+        dobj.semantic_state.hide_part_bits = hide;
+        dobj.pose_request.hide_part_bits = hide;
+        dobj.pose_revision = dobj.pose_revision.wrapping_add(1);
+        dobj.semantic_state.pose_revision = dobj.pose_revision;
+        dobj.current_collision = None;
+        dobj.materialized_pose_revision = None;
+    }
+}
+
+/// A script model's `setanim` clip: (clip, fraction, rate per second),
+/// looping when the clip loops, else held on its last frame.
+pub(super) fn script_anim(world: &World, n: u32, now: i64) -> Option<(String, f32, f32)> {
+    let zm = world.resource::<Zm>();
+    let (clip, start) = zm.ents.get(&n)?.anim.clone()?;
+    let a = zm.anims.get(&clip)?;
+    let len = ((f32::from(a.numframes) / a.framerate.max(1.0)) * 1000.0).max(1.0) as i64;
+    let elapsed = (now - start).max(0);
+    Some(if a.looping {
+        (clip, (elapsed % len) as f32 / len as f32, 1000.0 / len as f32)
+    } else if elapsed >= len {
+        (clip, 1.0, 0.0)
+    } else {
+        (clip, elapsed as f32 / len as f32, 1000.0 / len as f32)
+    })
 }

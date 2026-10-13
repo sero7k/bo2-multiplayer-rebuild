@@ -88,11 +88,14 @@ fn same_compositions(a: &asset_game::FpvSideAssemblies, b: &asset_game::FpvSideA
             (None, None) => true,
             _ => false,
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/fpv_present.rs
         && match (&a.ads, &b.ads) {
             (Some(a), Some(b)) => Arc::ptr_eq(a, b),
             (None, None) => true,
             _ => false,
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/fpv_present.rs
         && match (&a.rocket, &b.rocket) {
             (Some(a), Some(b)) => Arc::ptr_eq(a, b),
             (None, None) => true,
@@ -304,7 +307,11 @@ pub fn spawn_pending_fpv(
     let left = view.left.clone().map(ViewmodelController::new);
     diag::info!(
         Fpv,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/fpv_present.rs
         "fpv: viewmodel controller `{}` — {} clips{}, fireTime={}ms raiseTime={}ms (action from weapAnim)",
+=======
+        "fpv: viewmodel controller `{}` — {} clips{}, fireTime={}ms holdFireTime={}ms raiseTime={}ms (action from weapAnim); pull-back clip {:?}s",
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/fpv_present.rs
         view.right.name,
         view.right.resolved_count(),
         view.left
@@ -312,7 +319,11 @@ pub fn spawn_pending_fpv(
             .map(|left| format!(" R, {} clips L (dual DObj)", left.resolved_count()))
             .unwrap_or_else(String::new),
         view.right.fire_time_ms,
+        view.right.hold_fire_time_ms,
         view.right.raise_time_ms,
+        view.right
+            .clip(asset_game::WeaponAnimSlot::HoldFire)
+            .map(|c| c.duration()),
     );
     let idle_kind = match view.idle_name.as_deref() {
         Some(name) => format!("idle `{name}` (szXAnims[IDLE])"),
@@ -568,6 +579,24 @@ pub fn tick_fpv_viewmodel(
         product.kind = FpvPoseKind::Refuse(FpvPoseRefuse::CatalogMissing);
         return;
     };
+    // bo2zm: the script changed his hands (Mob's Afterlife): the same
+    // weapon's view from the new table.
+    if let Some(table) = table
+        && let FpvWeaponSlot::Ready(next) =
+            table.slot(session.weapon_id, session.parent_weapon, session.axis)
+        && next.script_hands != session.view.script_hands
+        && let Some(gun_index) = table.gun_index(session.weapon_id)
+    {
+        diag::info!(Fpv, "fpv: script hands changed; re-spawn the view");
+        pending.0 = Some(PendingFpvSpawnRequest {
+            gun_index,
+            catalog_id: fpv.0.identity(),
+            weapon_id: session.weapon_id,
+            parent_weapon: session.parent_weapon,
+        });
+        product.kind = FpvPoseKind::Hide;
+        return;
+    }
 
     if let Some(ps) = presented.viewweapon_player(local.0) {
         let weapon = table.map_or(get_viewmodel_weapon_index(ps), |t| {
@@ -720,11 +749,14 @@ pub fn tick_fpv_viewmodel(
                 Ok(weapon_iw4::WeaponState::MeleeInit | weapon_iw4::WeaponState::MeleeFire)
             )
         }),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/fpv_present.rs
         // bo2mp: a sight with a stripped aimed model shows it from the
         // fraction the reticle fades in at.
         ads: presented
             .viewweapon_player(local.0)
             .is_some_and(|ps| ps.f_weapon_pos_frac >= 0.75),
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/fpv_present.rs
         sample,
         predicted_fire,
         dual,
@@ -908,6 +940,8 @@ pub fn publish_fpv_dobj_pose(
     }
     bolts.tracker_screen = None;
     bolts.tracker_light = None;
+    bolts.wrist = [None, None];
+    bolts.weapon = None;
     for hand in 0..2usize {
         let Some(frame) = bolts.pose[hand].take() else {
             continue;
@@ -933,6 +967,8 @@ pub fn publish_fpv_dobj_pose(
 
         if hand == 0 && fpv_plan.placement_ok {
             bolts.tracker_light = target(frame.tags.tracker_light);
+            bolts.wrist = [target(frame.tags.wrist[0]), target(frame.tags.wrist[1])];
+            bolts.weapon = target(frame.tags.weapon);
             bolts.tracker_screen = (|| {
                 let mut points = [Vec3::ZERO; 3];
                 for (point, bone) in points.iter_mut().zip(frame.tags.tracker_screen) {
@@ -1216,8 +1252,10 @@ pub fn register_fpv_present_systems(app: &mut App) {
     app.init_resource::<LocalSpawnArmed>()
         .init_resource::<SessionViewmodel>()
         .init_resource::<PreparedFpv>()
+        .init_resource::<crate::anim::fpv_prepared::FpvHandsOverride>()
         .init_resource::<crate::anim::model_materials::PreparedModelMaterials>()
         .init_resource::<SessionViewKick>()
+        .init_resource::<crate::occupancy::platform_carry::PlatformCarry>()
         .init_resource::<GunOffset>()
         .init_resource::<ViewweaponAim>()
         .init_resource::<PendingViewHurt>()
@@ -1238,7 +1276,11 @@ pub fn register_fpv_present_systems(app: &mut App) {
             Update,
             (
                 tick_session_view_kick.after(reset_view_kick_on_life_started),
-                sync_camera_from_presented.after(tick_session_view_kick),
+                crate::occupancy::platform_carry::track_platform_carry
+                    .after(tick_session_view_kick),
+                sync_camera_from_presented
+                    .after(tick_session_view_kick)
+                    .after(crate::occupancy::platform_carry::track_platform_carry),
                 spawn_pending_fpv
                     .run_if(fpv_spawn_queued)
                     .after(sync_camera_from_presented),

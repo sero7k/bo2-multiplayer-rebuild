@@ -632,6 +632,10 @@ pub struct ScriptMoverGentity {
     pub nonsolid: bool,
 
     pub shown_to: u64,
+
+    /// A bit per player it does not stop (hidden from him); its client gets
+    /// it nonsolid. 0 for everything else.
+    pub passes_for: u64,
 }
 
 impl Default for ScriptMoverGentity {
@@ -645,6 +649,7 @@ impl Default for ScriptMoverGentity {
             link_half: [0.0; 3],
             nonsolid: false,
             shown_to: 0,
+            passes_for: 0,
         }
     }
 }

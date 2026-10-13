@@ -327,6 +327,23 @@ impl WorldVertexPayload {
     }
 }
 
+/// bo2zm: one flickering lamp: its primary light (`pl#`, the row of
+/// `WorldDraw::t6_lights`), its own intensity, and the script keys the
+/// client's `_lights.csc` hands the engine (`setmixerlightparam`): the
+/// intensity range, the delay between changes, and the electrical bursts.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct T6Flicker {
+    pub light: u16,
+    pub electrical: bool,
+    pub base: f32,
+    pub min: f32,
+    pub max: f32,
+    pub delay: [f32; 2],
+    pub burst: [f32; 2],
+    pub burst_time: f32,
+    pub wait: [f32; 2],
+}
+
 #[derive(Clone, Debug)]
 pub struct WorldDraw {
     pub batches: Vec<WorldBatch>,
@@ -413,15 +430,59 @@ pub struct WorldDraw {
 
     pub t5_exposure_volume_count: u32,
 
+    /// bo2zm: the saturation of a Black Ops II map's vision (see
+    /// `T6WorldLighting::saturation`).
+    pub t6_vision_saturation: Option<f32>,
+
+    /// bo2zm: how a Black Ops II sky decodes and fogs (see
+    /// `T6WorldLighting::sky_parms`).
+    pub t6_sky_parms: Option<[f32; 2]>,
+
+    /// bo2zm: a Black Ops II map's vision colour grade (see
+    /// `T6WorldLighting::grade`).
+    pub t6_vision_grade: Option<[[f32; 4]; 14]>,
+
+    /// bo2zm: the other visions a Black Ops II script can turn on, by file
+    /// (`vision/zm_afterlife.vision`), graded as `t6_vision_grade`.
+    pub t6_script_grades: Vec<(String, [[f32; 4]; 14])>,
+
     /// bo2zm: a Black Ops II world's primary lights for the renderer's
     /// fallback draw, four vec4 each (see `assets::lane::t6`); empty
     /// elsewhere.
     pub t6_lights: Vec<[f32; 16]>,
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_world/src/world_draw.rs
     /// bo2zm: a Black Ops II world's fog banks (its fog volumes' banks, the
     /// client scripts' `setworldfogactivebank`): per bank the two fog rows
     /// of `t6_lights` (slots 30 and 31) that bank draws with.
     pub t6_fog_banks: Vec<(u32, [[f32; 16]; 2])>,
+=======
+    /// bo2zm: a Black Ops II world's fog volumes (the client scripts'
+    /// `setworldfogactivebank` picks which banks are on); empty elsewhere.
+    pub t6_fog_banks: Vec<T6FogVolume>,
+    /// bo2zm: a Black Ops II world's fog modifier volumes (`GfxWorld::
+    /// worldFogModifierVolumes`); empty elsewhere.
+    pub t6_fog_modifiers: Vec<T6FogModifier>,
+
+    /// bo2zm: a Black Ops II world's exposure volumes (`GfxWorld::
+    /// exposureVolumes`): the camera's volume sets the exposure. Empty
+    /// elsewhere.
+    pub t6_exposure_volumes: Vec<T6ExposureVolume>,
+
+    /// bo2zm: a Black Ops II map's own colour table (`GfxWorld::lutMaterial`,
+    /// see `T6Lut`), `None` without one.
+    pub t6_lut: Option<std::sync::Arc<T6Lut>>,
+
+    /// bo2zm: the volumes that pick among its tables (`GfxWorld::lutVolumes`).
+    pub t6_lut_volumes: Vec<T6LutVolume>,
+
+    /// bo2zm: the map's sun light and sky intensity (see `T6LightTweaks`).
+    pub t6_light_tweaks: Option<T6LightTweaks>,
+    /// bo2zm: the map's flickering lamps (map `light` entities whose
+    /// targetname is one of the engine's built-in mixer behaviours,
+    /// `fire_flicker` / `electrical_flicker`); empty elsewhere.
+    pub t6_flicker: Vec<T6Flicker>,
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_world/src/world_draw.rs
 
     /// bo2zm: per reflection probe, its `lightingSH` (three vec4) for the
     /// fallback draw's reflections; empty elsewhere.
@@ -430,6 +491,81 @@ pub struct WorldDraw {
     /// bo2zm: per world vertex (parallel to `positions`), a layered
     /// Black Ops II surface's layer 1 and 2 texcoords; empty elsewhere.
     pub t6_layer_uvs: Vec<[f32; 4]>,
+}
+
+/// bo2zm: one Black Ops II fog volume (`GfxWorldFogVolume`); its box is
+/// zero in the data, its planes bound it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct T6FogVolume {
+    /// Inside where `dot(n, p) + d <= 0` for every `[n, d]` (as exposure
+    /// volumes).
+    pub planes: Vec<[f32; 4]>,
+    /// The fog banks it belongs to, a bit mask (bank 1 = bit 0); 0 = none.
+    pub banks: u32,
+    /// The two fog rows of `t6_lights` (slots 256 and 257) it draws with.
+    pub rows: [[f32; 16]; 2],
+}
+
+/// bo2zm: one Black Ops II fog modifier volume (`GfxWorldFogModifierVolume`):
+/// while the camera is in it the world fog's half distance is multiplied by
+/// its depth scale and the fog and sun fog colours and opacities by its
+/// colour adjust (the game also stores a height scale it does not draw with).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct T6FogModifier {
+    /// Inside where `dot(n, p) + d <= 0` for every `[n, d]`.
+    pub planes: Vec<[f32; 4]>,
+    /// The fog banks it belongs to, a bit mask (as `T6FogVolume::banks`).
+    pub banks: u32,
+    pub depth_scale: f32,
+    pub color_adjust: [f32; 4],
+}
+
+/// bo2zm: one Black Ops II exposure volume: the planes bounding it (inside
+/// where `dot(n, p) + d <= 0` for every `[n, d]`), its exposure in stops,
+/// its luminance increase and decrease scales and its feather range.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct T6ExposureVolume {
+    pub planes: Vec<[f32; 4]>,
+    pub exposure: f32,
+    pub increase_scale: f32,
+    pub decrease_scale: f32,
+    pub feather_range: f32,
+}
+
+/// bo2zm: a Black Ops II map's colour tables (`hdr_create_lut2dv` samples
+/// one before the vision's grade): RGBA8 rows 1024 wide, 32 slices of 32x32
+/// side by side (x % 32 red, x / 32 the blue slice, y % 32 green), one table
+/// per 32 rows (Buried 3, the others 2).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct T6Lut {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+/// bo2zm: a Black Ops II map's own values for the two lighting dvars its
+/// client scripts tweak: `r_lightTweakSunLight` (the sun's brightness,
+/// `sunParse.initWorldSun` `sunCd.w`; the sun colour is drawn times it) and
+/// the `r_sky_intensity_*` four (`GfxWorld::skyDynIntensity`: angle0,
+/// angle1, factor0, factor1), whose blend multiplies the sky; and
+/// `r_lightTweakSunColor` (`sunCd.xyz`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct T6LightTweaks {
+    pub sun_light: f32,
+    pub sun_color: [f32; 3],
+    pub sky_intensity: [f32; 4],
+}
+
+/// bo2zm: one Black Ops II colour table volume: its planes (inside where
+/// `dot(n, p) + d <= 0` for every one), the banks it belongs to (the low
+/// byte of its `control`), its table and its transition time (seconds; 0:
+/// the game's quick default).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct T6LutVolume {
+    pub planes: Vec<[f32; 4]>,
+    pub banks: u32,
+    pub table: u32,
+    pub transition_time: f32,
 }
 
 /// Zone-local sun-effects capture. Material slots are walk-local indices.
@@ -967,8 +1103,18 @@ pub fn build_world_draw(
             t5_tree_scatter_intensity: None,
             t5_tree_scatter_amount: None,
             t5_exposure_volume_count: 0,
+            t6_vision_saturation: None,
+            t6_sky_parms: None,
+            t6_vision_grade: None,
+            t6_script_grades: Vec::new(),
             t6_lights: Vec::new(),
             t6_fog_banks: Vec::new(),
+            t6_fog_modifiers: Vec::new(),
+            t6_exposure_volumes: Vec::new(),
+            t6_lut: None,
+            t6_lut_volumes: Vec::new(),
+            t6_light_tweaks: None,
+            t6_flicker: Vec::new(),
             t6_probes: Vec::new(),
             t6_layer_uvs: Vec::new(),
         },

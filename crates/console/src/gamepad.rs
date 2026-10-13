@@ -108,8 +108,20 @@ pub(crate) fn track_active_pad(
                     }
                 }
                 if matches!(event.connection, GamepadConnection::Connected { .. })
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/console/src/gamepad.rs
                     && let Ok((_, pad, _)) = gamepads.get(event.gamepad)
+=======
+                    && let Ok((_, pad, name)) = gamepads.get(event.gamepad)
+>>>>>>> /tmp/claude-0/zmhead/crates/console/src/gamepad.rs
                 {
+                    // Which pad (its maker and model pick the button pictures).
+                    diag::info!(
+                        Ui,
+                        "gamepad connected: {:?} vendor {:04x?} product {:04x?}",
+                        name.map(|n| n.as_str()),
+                        pad.vendor_id(),
+                        pad.product_id()
+                    );
                     for axis in [
                         GamepadAxis::LeftStickX,
                         GamepadAxis::LeftStickY,
@@ -152,14 +164,56 @@ pub(crate) fn track_active_pad(
     if active.0.is_none() {
         devices.pad_prompts = false;
     }
+    // Test aid: IW4L_FORCE_PAD_PROMPTS=xbox|ps shows pad prompts with no pad.
+    static FORCE: std::sync::OnceLock<Option<frame::PromptStyle>> = std::sync::OnceLock::new();
+    if let Some(style) = *FORCE.get_or_init(|| {
+        std::env::var("IW4L_FORCE_PAD_PROMPTS").ok().map(|v| {
+            if v.eq_ignore_ascii_case("ps") {
+                frame::PromptStyle::PlayStation
+            } else {
+                frame::PromptStyle::Xbox
+            }
+        })
+    }) {
+        devices.pad_prompts = true;
+        devices.style = style;
+        return;
+    }
     devices.style = match settings.pad_prompts {
         1 => frame::PromptStyle::Xbox,
         2 => frame::PromptStyle::PlayStation,
         3 => frame::PromptStyle::Generic,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/console/src/gamepad.rs
         // bo2mp: Xbox buttons whatever the pad (PlayStation's only when
         // picked in the options): the guess by the pad's name showed
         // PlayStation's buttons for pads that are not one.
         _ => frame::PromptStyle::Xbox,
+=======
+        _ => active
+            .0
+            .and_then(|entity| gamepads.get(entity).ok())
+            .map_or(frame::PromptStyle::Generic, |(_, pad, name)| {
+                let name = name.map_or("", |name| name.as_str()).to_ascii_lowercase();
+                // Sony; and Bigben / Nacon (146b), whose PS4 pads show up as
+                // an "Xbox 360 Controller" in their PC mode: the buttons on
+                // them are still the PlayStation shapes.
+                if pad.vendor_id() == Some(0x054c)
+                    || pad.vendor_id() == Some(0x146b)
+                    || name.contains("dualshock")
+                    || name.contains("dualsense")
+                    || name == "wireless controller"
+                {
+                    frame::PromptStyle::PlayStation
+                } else if pad.vendor_id() == Some(0x045e)
+                    || name.contains("xbox")
+                    || name.contains("xinput")
+                {
+                    frame::PromptStyle::Xbox
+                } else {
+                    frame::PromptStyle::Generic
+                }
+            }),
+>>>>>>> /tmp/claude-0/zmhead/crates/console/src/gamepad.rs
     };
 }
 

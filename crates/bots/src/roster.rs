@@ -123,6 +123,7 @@ impl BotRoster {
         self.bots.iter().any(|bot| bot.id == id)
     }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bots/src/roster.rs
     /// bo2mp: a bot on the client number Black Ops II's scripts gave it
     /// (`addtestclient`). No brain of ours: BO2's own bot scripts drive it.
     pub fn add_bot_with_id(&mut self, id: ClientId, name: Option<String>) -> bool {
@@ -140,6 +141,8 @@ impl BotRoster {
         true
     }
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/bots/src/roster.rs
     // `taken` are the ids real clients already own. A bot minted onto one of
     // them *is* that client as far as the roster is concerned: `is_bot` claims
     // the player, and the slot is dead weight because no system can drive an

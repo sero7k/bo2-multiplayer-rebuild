@@ -86,7 +86,9 @@ impl FrameClock {
         *self = Self::default();
     }
 
-    pub const ADJUST_TIME_DELTA_RESET_MS: i32 = 500;
+    // bo2zm: BO2's CL_AdjustTimeDelta resets past timescale x 1000 ms (MW2's RESET_TIME was 500);
+    // between 100 and 1000 it halves the gap.
+    pub const ADJUST_TIME_DELTA_RESET_MS: i32 = 1000;
 
     pub const ADJUST_TIME_DELTA_FAST_MS: i32 = 100;
 
@@ -174,11 +176,10 @@ impl FrameClock {
                     self.frac_ms = 0.0;
                     self.reset_n = self.reset_n.saturating_add(1);
                     self.last_adjust = 1;
-                    self.assign_server_time(if monotonic {
-                        server.max(self.time)
-                    } else {
-                        server
-                    });
+                    // bo2zm: BO2's CL_AdjustTimeDelta RESET sets serverTime and oldServerTime to
+                    // the snapshot's time, the one place its clock steps back. Held ahead after a
+                    // host stall, every command stayed in the host's future.
+                    self.assign_server_time(server);
                     return;
                 } else if mag > Self::ADJUST_TIME_DELTA_FAST_MS as u32 {
                     next = next.wrapping_add(skew / 2);

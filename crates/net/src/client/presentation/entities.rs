@@ -325,11 +325,14 @@ fn sync_snapshot_entities(
         if Some(*client) == seated_viewer {
             continue;
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/client/presentation/entities.rs
         // A client on the intermission is not in the world (the engine's NOCLIENT):
         // the end scoreboard's camera stands where they all stand, inside their bodies.
         if ps.pm_type == playerstate_iw4::PM_TYPE_INTERMISSION {
             continue;
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/net/src/client/presentation/entities.rs
         let Some(number) = player_entity_number(*client) else {
             gaps.raise(NetGapCause::ClientOutOfNumberSpace { client: *client });
             continue;

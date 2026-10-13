@@ -123,6 +123,7 @@ fn depth_of_field(args: &[Value]) -> Result<crate::ScriptDepthOfField, String> {
         near_blur,
         far_blur,
     ] = [0, 1, 2, 3, 4, 5].map(|i| float(args, i));
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/script/host/client_effects.rs
     depth_of_field_values(
         near_start?,
         near_end?,
@@ -143,6 +144,10 @@ pub(crate) fn depth_of_field_values(
     near_blur: f32,
     far_blur: f32,
 ) -> Result<crate::ScriptDepthOfField, String> {
+=======
+    let (near_start, near_end, far_start, far_end) = (near_start?, near_end?, far_start?, far_end?);
+    let (near_blur, far_blur) = (near_blur?, far_blur?);
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/script/host/client_effects.rs
     for (value, what) in [
         (near_start, "near start"),
         (near_end, "near end"),

@@ -88,6 +88,7 @@ path = "src/bin/t6run.rs"
 [[bin]]
 name = "t6icon"
 path = "src/bin/t6icon.rs"
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/Cargo.toml
 
 [[bin]]
 name = "t6scope"
@@ -112,3 +113,5 @@ path = "src/bin/t6fxdump.rs"
 [[bin]]
 name = "t6drop"
 path = "src/bin/t6drop.rs"
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/Cargo.toml

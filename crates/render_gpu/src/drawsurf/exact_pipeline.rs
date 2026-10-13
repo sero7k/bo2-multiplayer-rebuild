@@ -208,6 +208,7 @@ fn build_port(
     existing: Option<Arc<ShaderModule>>,
     plans: Vec<(ExactPipelineSlot, ExactPipelinePlan)>,
 ) -> PortBuild {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/exact_pipeline.rs
     // IW4L_PIPELINE_LOG=1: each build that took long (when hitches line up
     // with first-time shader building).
     let started = std::time::Instant::now();
@@ -236,6 +237,8 @@ fn build_port_inner(
     existing: Option<Arc<ShaderModule>>,
     plans: Vec<(ExactPipelineSlot, ExactPipelinePlan)>,
 ) -> PortBuild {
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/exact_pipeline.rs
     let label = format!(
         "iw4_exact_colour/{:016x}/{}{}",
         module.port.vertex_program_hash,

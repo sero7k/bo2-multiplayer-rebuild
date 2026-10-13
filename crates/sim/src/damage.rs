@@ -107,6 +107,37 @@ pub(crate) fn apply_explosion_blast(world: &mut FrameWorld, tick: Tick, blast: &
     }
     apply_glass_blast_hits(world, tick, glass);
     apply_entity_blast(world, blast);
+    crate::t6::damage_triggers(
+        world.ecs(),
+        blast.origin,
+        blast.origin,
+        blast.radius,
+        blast.inner_damage as i32,
+        blast.attacker,
+        blast.weapon,
+        crate::t6::DamageKind::Explosion,
+    );
+    // Breakable props (Nuketown's mannequins, outlets, TVs) break in blasts.
+    let broken = crate::t5_destructible::apply_blast(
+        world,
+        tick,
+        blast.origin,
+        blast.radius,
+        |d| radius_damage_amount(blast.inner_damage, blast.outer_damage, blast.radius, d, 1.0),
+    );
+    for (owner, notifies) in broken {
+        if let Some(target) = owner.script_model() {
+            for notify in notifies {
+                crate::t6::destructible_broken(
+                    world.ecs(),
+                    target,
+                    &notify,
+                    Some(blast.attacker),
+                    blast.weapon,
+                );
+            }
+        }
+    }
 }
 
 fn apply_entity_blast(world: &mut FrameWorld, blast: &ExplosionBlast) {
@@ -586,11 +617,15 @@ pub(crate) fn apply_damage_attempt(
         return DamageOutcome::Refused(DamageRefusal::StaleLife);
     }
     let mut amount = intent.amount;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/damage.rs
     // A hit the riot shield stopped carries the bullet's whole damage to
     // the scripts (BO2's callback counts what the shield blocked).
     if !matches!(intent.source, crate::DamageSource::Melee)
         && intent.hitloc != crate::bullet_collision::HITLOC_SHIELD
     {
+=======
+    if !matches!(intent.source, crate::DamageSource::Melee) {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/damage.rs
         let scale = world
             .combat_facts_for(intent.weapon)
             .map(|facts| facts.location_scale(intent.hitloc))

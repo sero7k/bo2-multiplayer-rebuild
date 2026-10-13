@@ -24,7 +24,11 @@ fn half_f32(bits: u16) -> f32 {
     }
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6mat.rs
 /// `R_HashString`: case-folded, xor with 33 times the running hash.
+=======
+/// The string hash: case-folded, xor with 33 times the running hash.
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6mat.rs
 fn hash(name: &str) -> u32 {
     name.bytes()
         .fold(0u32, |h, c| u32::from(c | 0x20) ^ h.wrapping_mul(33))
@@ -349,8 +353,9 @@ fn run(path: &Path) -> Result<(), String> {
         return Ok(());
     }
     // T6MAT_NEAR=x,y,z,r: every world surface whose bounds come within r of
-    // the point: material, technique set, lightmap, triangles and its
-    // vertices' colour range (vertex record @16, R G B A bytes).
+    // the point: material, technique set, lightmap, primary light,
+    // triangles and its vertices' colour range (vertex record @16, R G B A
+    // bytes).
     if let Ok(spec) = std::env::var("T6MAT_NEAR") {
         let v: Vec<f32> = spec
             .split(',')
@@ -391,8 +396,8 @@ fn run(path: &Path) -> Result<(), String> {
                     }
                 }
                 println!(
-                    "near surf {si}: {mname} [{tname}] lightmap {} tris {} colour min {clo:?} max {chi:?} bounds {:?}",
-                    srf.lightmap_index, srf.tri_count, srf.bounds
+                    "near surf {si}: {mname} [{tname}] lightmap {} light {} tris {} colour min {clo:?} max {chi:?} bounds {:?}",
+                    srf.lightmap_index, srf.primary_light_index, srf.tri_count, srf.bounds
                 );
             }
         }
@@ -680,7 +685,26 @@ fn run(path: &Path) -> Result<(), String> {
     );
     println!("sun: {:?}", world.sun);
     println!("exposure volumes: {:?}", world.exposure_volumes);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6mat.rs
     println!("init world sun exposure: {}", world.init_sun_exposure);
+=======
+    if std::env::var("T6MAT_EXPOSURE").is_ok() {
+        let f: Vec<f32> = world.init_sun_raw.iter().map(|w| f32::from_bits(*w)).collect();
+        println!("init world sun: words {:x?}", world.init_sun_raw);
+        println!("init world sun: floats {f:?}");
+        for (i, (v, c)) in world
+            .exposure_volumes
+            .iter()
+            .zip(&world.exposure_volume_controls)
+            .enumerate()
+        {
+            println!("exposure volume {i}: control {c:#010x} {v:?}");
+        }
+        for (i, p) in world.exposure_volume_planes.iter().enumerate() {
+            println!("exposure plane {i}: {p:?}");
+        }
+    }
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6mat.rs
     if let Some(g) = &world.light_grid {
         println!(
             "light grid: mins {:?} maxs {:?} offset {} row axis {} col axis {} rows {} raw {} entries {} colours {} sun light {}",
@@ -762,6 +786,21 @@ fn run(path: &Path) -> Result<(), String> {
         *lm.entry(s.lightmap_index).or_default() += 1;
     }
     println!("surfaces per lightmap index: {lm:?}");
+    // The materials on surfaces with no lightmap page (index 31 or below 0).
+    let mut no_lm: BTreeMap<String, usize> = BTreeMap::new();
+    for s in world.surfaces.iter().filter(|s| !(0..31).contains(&s.lightmap_index)) {
+        let name = s.material.map_or("-".to_owned(), |k| {
+            let m = &capture.materials[k.index];
+            let ts = m.technique_set.map_or("-".to_owned(), |t| {
+                capture.technique_sets[t.index].name.clone()
+            });
+            format!("{} [{ts}]", m.name)
+        });
+        *no_lm.entry(name).or_default() += 1;
+    }
+    for (name, n) in &no_lm {
+        println!("no lightmap: {n:>5} {name}");
+    }
     // Lightmap coordinates (half2 at +32 of each 36-byte vertex) per lightmap.
     let half = |bits: u16| -> f32 {
         let sign = if bits & 0x8000 != 0 { -1.0 } else { 1.0 };
@@ -1224,10 +1263,13 @@ fn run(path: &Path) -> Result<(), String> {
                 .collect::<Vec<_>>()
         );
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6mat.rs
     println!(
         "sky dyn intensity {:?}; lut volumes {:?}",
         world.sky_dyn_intensity, world.lut_volumes
     );
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6mat.rs
     if let Some(k) = world.lut_material {
         let m = &capture.materials[k.index];
         let ts = m.technique_set.map_or("(none)".to_owned(), |t| {
@@ -1295,9 +1337,13 @@ fn run(path: &Path) -> Result<(), String> {
             let Some(k) = sm.model else { continue };
             let m = &capture.xmodels[k.index];
             let want = std::env::var("T6MAT_TREES").unwrap_or_default();
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6mat.rs
             // `T6MAT_TREES=*`: every placed model.
             if want == "*"
                 || (want.len() > 1 && m.name.contains(&want))
+=======
+            if (want.len() > 1 && m.name.contains(&want))
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6mat.rs
                 || (want.len() <= 1
                     && (m.name.contains("tree")
                         || m.name.contains("foliage")
@@ -1537,6 +1583,11 @@ fn run(path: &Path) -> Result<(), String> {
         println!("init world fog: {:?}", world.init_fog);
         for (mins, maxs, control, ex, fog) in &world.fog_volumes {
             println!("fog volume {mins:?}..{maxs:?} control {control:#x} ex {ex:#x}: {fog:?}");
+            let start = (control >> 16) as usize;
+            let count = ((control >> 8) & 0xff) as usize + 1;
+            for p in world.fog_volume_planes.get(start..start + count).unwrap_or_default() {
+                println!("   plane {p:?}");
+            }
         }
     }
     // T6MAT_CULL: the static models' cull distances.

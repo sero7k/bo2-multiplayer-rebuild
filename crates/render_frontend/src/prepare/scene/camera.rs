@@ -88,6 +88,7 @@ pub(crate) fn fly_camera(
         }
     }
 }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/prepare/scene/camera.rs
 
 /// bo2mp look lane: `IW4L_LOOK_CAMERA="x y z yaw pitch"` holds the world
 /// camera at that pose whatever the player does (a test aid: views no
@@ -113,3 +114,5 @@ pub(crate) fn look_camera_override(mut q: Query<&mut Transform, With<FlyCamera>>
         *transform = held;
     }
 }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/prepare/scene/camera.rs

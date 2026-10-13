@@ -37,6 +37,10 @@ pub struct FpvAssemblyTags {
     /// (`tag_flash1`, `tag_brass1`) when it hangs on the arms.
     pub flash_left: Option<u16>,
     pub brass_left: Option<u16>,
+    /// bo2zm: the arms' wrists (`j_wrist_le`, `j_wrist_ri`) and gun tag
+    /// (`tag_weapon`), where Mob's Afterlife hangs its ghost glow.
+    pub wrist: [Option<u16>; 2],
+    pub weapon: Option<u16>,
 }
 
 #[derive(Debug)]
@@ -219,6 +223,8 @@ impl FpvAssembly {
             tracker_light: tag("tag_motion_tracker_fx"),
             flash_left: tag("tag_flash1"),
             brass_left: tag("tag_brass1"),
+            wrist: [tag("j_wrist_le"), tag("j_wrist_ri")],
+            weapon: tag("tag_weapon"),
         };
         let arms_gun = mounts.attachments.iter().any(|mount| mount.parent_model == 0);
         let paired_bones = specs[0].0.num_bones + specs[1].0.num_bones;

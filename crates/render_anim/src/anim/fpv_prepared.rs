@@ -36,6 +36,7 @@ pub struct FpvRigSet {
 }
 
 impl FpvRigSet {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/anim/fpv_prepared.rs
     pub fn pick(
         &self,
         rocket: bool,
@@ -43,15 +44,21 @@ impl FpvRigSet {
         melee: bool,
         ads: bool,
     ) -> Option<&Arc<PreparedFpvRig>> {
+=======
+    pub fn pick(&self, rocket: bool, dual: bool, melee: bool) -> Option<&Arc<PreparedFpvRig>> {
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/anim/fpv_prepared.rs
         let hand = usize::from(dual && !self.combined);
         if melee && let Some(rig) = &self.melee[hand] {
             return Some(rig);
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/anim/fpv_prepared.rs
         // (`rocket` is true for any gun with a round in it; only a gun with a
         // rocket rig has a rocket to show instead.)
         if ads && self.rocket[hand].is_none() && let Some(rig) = &self.ads[hand] {
             return Some(rig);
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/anim/fpv_prepared.rs
         match (rocket, &self.rocket[hand]) {
             (true, Some(rig)) => Some(rig),
             _ => self.bare[hand].as_ref(),
@@ -78,6 +85,9 @@ pub struct FpvWeaponView {
     pub idle_name: Option<String>,
     pub rigs: FpvRigSet,
     pub census: FpvViewCensus,
+    /// bo2zm: the script's hands this view was built with (a change re-spawns
+    /// the view).
+    pub script_hands: Option<usize>,
 }
 
 pub enum FpvWeaponSlot {
@@ -152,16 +162,29 @@ impl FpvWeaponTable {
     }
 }
 
+/// bo2zm: the hands a Black Ops II script put on (`setviewmodel`, sent as
+/// the client dvar `bo2zm_viewhands`; Mob's Afterlife turns on
+/// `c_zom_ghost_viewhands`). Hands with the same skeleton as the weapon's
+/// own replace them; any other name changes nothing.
+#[derive(Resource, Default, Clone, PartialEq, Eq, Debug)]
+pub struct FpvHandsOverride(pub Option<String>);
+
 struct FpvPreparationOwner {
     materials: Arc<RuntimeMaterialCatalog>,
     images: Arc<Vec<Option<Handle<Image>>>>,
     weapons: Arc<WeaponRegistry>,
     catalog_id: u64,
     atlas: Option<bevy::asset::AssetId<Image>>,
+    /// bo2zm: `FpvHandsOverride`'s model in the first-person catalog.
+    hands: Option<usize>,
 }
 
 impl FpvPreparationOwner {
     fn same(&self, other: &Self) -> bool {
+        self.same_but_hands(other) && self.hands == other.hands
+    }
+
+    fn same_but_hands(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.materials, &other.materials)
             && Arc::ptr_eq(&self.images, &other.images)
             && Arc::ptr_eq(&self.weapons, &other.weapons)
@@ -196,6 +219,8 @@ struct FpvPreparationJob {
     layouts_queue: Vec<(usize, Option<[u32; 6]>)>,
     next_layout: usize,
     layouts: HashMap<(usize, Option<[u32; 6]>), Result<Arc<PreparedFpvModel>, String>>,
+    /// bo2zm: a weapon's hands model -> the script's hands that replace it.
+    hands_swap: HashMap<usize, usize>,
 
     next_weapon: u32,
     alternate_queue: Vec<(u32, u32)>,
@@ -239,12 +264,16 @@ impl PreparedFpv {
     }
 
     pub fn clear(&mut self) {
+        self.cancel_job();
+        self.table = None;
+    }
+
+    fn cancel_job(&mut self) {
         if let Some(job) = self.job.take()
             && let Some(stage) = job.progress
         {
             stage.cancel();
         }
-        self.table = None;
     }
 }
 
@@ -412,6 +441,7 @@ impl FpvPreparationJob {
         let mut layouts_queue: Vec<(usize, Option<[u32; 6]>)> = Vec::new();
         let mut seen_layouts: HashSet<(usize, Option<[u32; 6]>)> = HashSet::new();
         let mut seen_assemblies: HashSet<usize> = HashSet::new();
+        let mut hand_parts: Vec<(usize, Option<[u32; 6]>)> = Vec::new();
         for (id, parent) in (1..=weapon_n)
             .map(|id| (id, 0))
             .chain(registry.alternate_fpv_pairs())
@@ -438,10 +468,39 @@ impl FpvPreparationJob {
                         }
                         if seen_layouts.insert((order, part.hide)) {
                             layouts_queue.push((order, part.hide));
+                            if part.role == asset_game::FpvPartRole::Hands {
+                                hand_parts.push((order, part.hide));
+                            }
                         }
                     }
                 }
             }
+        }
+        let mut hands_swap: HashMap<usize, usize> = HashMap::new();
+        if let Some(over) = owner.hands
+            && let Some(over_entry) = fpv.get_at(over)
+        {
+            for &(order, hide) in &hand_parts {
+                let same_bones = fpv
+                    .get_at(order)
+                    .is_some_and(|own| own.skel.bone_names == over_entry.skel.bone_names);
+                if order == over || !same_bones {
+                    continue;
+                }
+                hands_swap.insert(order, over);
+                if seen_models.insert(over) {
+                    models.push(over);
+                }
+                if seen_layouts.insert((over, hide)) {
+                    layouts_queue.push((over, hide));
+                }
+            }
+            diag::info!(
+                Fpv,
+                "fpv: script hands {} replace {} hands models",
+                over_entry.skel.name,
+                hands_swap.len()
+            );
         }
         let work_total =
             (models.len() + layouts_queue.len() + registry.alternate_fpv_pairs().count()) as u64
@@ -463,6 +522,7 @@ impl FpvPreparationJob {
             layouts_queue,
             next_layout: 0,
             layouts: HashMap::new(),
+            hands_swap,
             next_weapon: 0,
             alternate_queue: {
                 let mut pairs: Vec<_> = registry.alternate_fpv_pairs().collect();
@@ -567,7 +627,16 @@ impl FpvPreparationJob {
             return done.clone();
         }
         let layouts = &self.layouts;
+        let swap = &self.hands_swap;
         let composed = PreparedFpvComposition::compose(Arc::clone(assembly), |order, hide| {
+            // bo2zm: the script's hands, unless they failed to lay out or
+            // their material is refused (then the weapon's own).
+            if let Some(over) = swap.get(&order)
+                && let Some(Ok(model)) = layouts.get(&(*over, hide))
+                && model.refusal().is_none()
+            {
+                return Ok(Arc::clone(model));
+            }
             layouts
                 .get(&(order, hide))
                 .cloned()
@@ -747,6 +816,7 @@ impl FpvPreparationJob {
             .map(|left| left.clip_orders().to_vec())
             .unwrap_or_else(Vec::new);
         debug_assert_eq!(right_orders.len(), WEAPON_ANIM_SLOTS);
+        let script_hands = self.hands_swap.values().next().copied();
 
         let sides: [FpvWeaponSlot; 2] = [false, true].map(|axis| {
             let (Some((hands, hands_index)), Some(assemblies)) = (
@@ -807,6 +877,7 @@ impl FpvPreparationJob {
                     name: refusal.to_string(),
                 });
             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/anim/fpv_prepared.rs
             let ads = match assemblies
                 .ads
                 .as_ref()
@@ -829,6 +900,8 @@ impl FpvPreparationJob {
                     name: refusal.to_string(),
                 });
             }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/anim/fpv_prepared.rs
             let mut rigs = FpvRigSet::default();
             // bo2zm: both guns on one set of arms (Black Ops II dual
             // wield): one rig binding both hands' clips.
@@ -841,9 +914,12 @@ impl FpvPreparationJob {
                 if let Some(melee) = &melee {
                     rigs.melee[0] = Some(self.rig(melee, false, &right_orders, &left_orders));
                 }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/anim/fpv_prepared.rs
                 if let Some(ads) = &ads {
                     rigs.ads[0] = Some(self.rig(ads, false, &right_orders, &left_orders));
                 }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/anim/fpv_prepared.rs
             } else {
                 rigs.bare[0] = Some(self.rig(&bare, false, &right_orders, &[]));
                 if left.is_some() {
@@ -861,12 +937,15 @@ impl FpvPreparationJob {
                         rigs.melee[1] = Some(self.rig(melee, true, &right_orders, &left_orders));
                     }
                 }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/anim/fpv_prepared.rs
                 if let Some(ads) = &ads {
                     rigs.ads[0] = Some(self.rig(ads, false, &right_orders, &[]));
                     if left.is_some() {
                         rigs.ads[1] = Some(self.rig(ads, true, &right_orders, &left_orders));
                     }
                 }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/anim/fpv_prepared.rs
             }
             FpvWeaponSlot::Ready(Arc::new(FpvWeaponView {
                 gun_name: gun_name.clone(),
@@ -880,6 +959,7 @@ impl FpvPreparationJob {
                 idle_name: idle_name.clone(),
                 rigs,
                 census: census.clone(),
+                script_hands,
             }))
         });
         if parent == 0 && namespace != AssetNamespace::T6 && assets::t6_rules() {
@@ -1118,6 +1198,7 @@ pub struct PrepareFpvInputs<'w> {
     tess: Res<'w, TessMaterials>,
     lighting: Option<Res<'w, WorldModelLightingAtlas>>,
     load: Option<Res<'w, assets::MapLoadProcess>>,
+    hands: Option<Res<'w, FpvHandsOverride>>,
 }
 
 pub fn prepare_fpv_compositions(inputs: PrepareFpvInputs, mut prepared: ResMut<PreparedFpv>) {
@@ -1128,6 +1209,7 @@ pub fn prepare_fpv_compositions(inputs: PrepareFpvInputs, mut prepared: ResMut<P
         tess,
         lighting,
         load,
+        hands,
     } = inputs;
     let (Some(weapons), Some(fpv_meshes), Some(xanims)) = (weapons, fpv_meshes, xanims) else {
         if prepared.table.is_some() || prepared.job.is_some() {
@@ -1154,6 +1236,10 @@ pub fn prepare_fpv_compositions(inputs: PrepareFpvInputs, mut prepared: ResMut<P
         weapons: Arc::clone(&weapons.0),
         catalog_id: fpv_meshes.0.identity(),
         atlas: lighting.as_ref().map(|atlas| atlas.image.id()),
+        hands: hands
+            .as_deref()
+            .and_then(|h| h.0.as_deref())
+            .and_then(|name| fpv_meshes.0.index_by_name(AssetNamespace::T6, name)),
     };
     if prepared.job.is_none()
         && prepared
@@ -1168,7 +1254,17 @@ pub fn prepare_fpv_compositions(inputs: PrepareFpvInputs, mut prepared: ResMut<P
         .as_ref()
         .is_none_or(|job| !job.owner.same(&owner));
     if restart {
-        prepared.clear();
+        // bo2zm: only the script's hands changed: the old table draws until
+        // the new one is ready.
+        if prepared
+            .table
+            .as_ref()
+            .is_some_and(|(settled, _)| settled.same_but_hands(&owner))
+        {
+            prepared.cancel_job();
+        } else {
+            prepared.clear();
+        }
         let shared_refusal = if !sorted_ready {
             Some((
                 RenderGapCause::FpvCatalogMissing,

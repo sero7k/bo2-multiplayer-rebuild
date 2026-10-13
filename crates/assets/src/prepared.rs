@@ -56,6 +56,7 @@ pub struct MapFacts {
     pub t6_hud_fonts: T6HudFonts,
     /// bo2zm M4: Black Ops II's own UI scripts and what they read.
     pub t6_ui: T6Ui,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/prepared.rs
     /// bo2mp: the third-person player animation script and its anim types
     /// (every client poses other players with it).
     pub t6_playeranim: Option<(String, String)>,
@@ -64,6 +65,14 @@ pub struct MapFacts {
     /// bo2mp: each player animation's move speed (units/s, from its root
     /// motion): a legs animation plays at the player's speed over this.
     pub t6_anim_speeds: Vec<(String, f32)>,
+=======
+    /// bo2zm: Black Ops II's bullet penetration depths
+    /// (`info/bullet_penetration_mp` in patch_zm), how far a bullet goes
+    /// through each surface (flesh: 32 small, 64 medium, 112 large).
+    pub t6_pen_table: Option<weapon_iw4::PenetrationDepthTable>,
+    /// bo2zm: the full-screen filters the map's scripts turn on.
+    pub t6_screen_filters: T6ScreenFilters,
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/prepared.rs
 }
 
 /// bo2zm: Black Ops II's HUD fonts: the English `fonts/720/*` bitmap fonts,
@@ -102,15 +111,30 @@ pub struct T6Ui {
     pub strings: std::sync::Arc<Vec<(String, String)>>,
     /// (name, columns, rows, cells row-major).
     pub tables: std::sync::Arc<Vec<(String, usize, usize, Vec<String>)>>,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/prepared.rs
     /// bo2mp: the zones' config files (`default_private.cfg`, ...) by
     /// name, for the menus' `exec <file>`.
     pub configs: std::sync::Arc<Vec<(String, String)>>,
+=======
+    /// bo2zm M4: the game settings' defaults (`gametype_setting <name>
+    /// <value>` in zm_gamesettings_default.cfg, then _zstandard.cfg): what
+    /// Custom Games shows before he changes anything.
+    pub game_settings: std::sync::Arc<Vec<(String, f32)>>,
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/prepared.rs
 }
 
 impl PartialEq for T6Ui {
     fn eq(&self, other: &Self) -> bool {
         self.scripts.len() == other.scripts.len()
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/prepared.rs
             && self.scripts.iter().zip(&other.scripts).all(|(a, b)| a.0 == b.0 && a.1.len() == b.1.len())
+=======
+            && self
+                .scripts
+                .iter()
+                .zip(&other.scripts)
+                .all(|(a, b)| a.0 == b.0 && a.1.len() == b.1.len())
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/prepared.rs
             && self.strings.len() == other.strings.len()
             && self.tables.len() == other.tables.len()
     }
@@ -124,6 +148,41 @@ pub struct T6HudIcons(pub Vec<(String, std::sync::Arc<bevy::prelude::Image>)>);
 impl PartialEq for T6HudIcons {
     fn eq(&self, other: &Self) -> bool {
         self.0.len() == other.0.len() && self.0.iter().zip(&other.0).all(|(a, b)| a.0 == b.0)
+    }
+}
+
+/// bo2zm: a Black Ops II full-screen filter (a `generic_filter_*`
+/// material; Mob's Afterlife is `generic_filter_afterlife_alcatraz`): its
+/// pictures by image name, read from the packs, and its constants by name
+/// (the zones keep the first 12 letters: `VignetteColo`).
+#[derive(Clone, Debug, Default)]
+pub struct T6ScreenFilter {
+    pub material: String,
+    pub images: Vec<(String, std::sync::Arc<bevy::prelude::Image>)>,
+    pub constants: Vec<(String, [f32; 4])>,
+}
+
+impl T6ScreenFilter {
+    pub fn constant(&self, name: &str) -> Option<[f32; 4]> {
+        self.constants.iter().find(|(n, _)| n == name).map(|(_, v)| *v)
+    }
+
+    /// The first picture whose image name holds `part`.
+    pub fn image(&self, part: &str) -> Option<&std::sync::Arc<bevy::prelude::Image>> {
+        self.images.iter().find(|(n, _)| n.contains(part)).map(|(_, i)| i)
+    }
+}
+
+/// bo2zm: the map's full-screen filters, by material name.
+#[derive(Clone, Debug, Default, Resource)]
+pub struct T6ScreenFilters(pub Vec<T6ScreenFilter>);
+
+impl PartialEq for T6ScreenFilters {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.len() == other.0.len()
+            && self.0.iter().zip(&other.0).all(|(a, b)| {
+                a.material == b.material && a.constants == b.constants && a.images.len() == b.images.len()
+            })
     }
 }
 

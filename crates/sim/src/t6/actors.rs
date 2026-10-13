@@ -1,6 +1,10 @@
 //! Actors (zombies): spawned from spawners (`spawnactor`), driven by the
 //! game's own animscripts the way the engine drives them, measured from
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
 //! the scripts (see docs/):
+=======
+//! the scripts (notes kept outside the repo):
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
 //! - one animscript runs at a time: `killanimscript`, then the new state's
 //!   `maps/mp/animscripts/zm_<state>::main` (init on spawn; stop, move,
 //!   combat, death, scripted, traverse/<node animscript>);
@@ -37,7 +41,23 @@ pub(crate) struct Playing {
     /// Root position at the start (scripted anims move by root motion).
     pub root_from: [f32; 3],
     pub yaw_from: f32,
+    /// A linked actor's parent (or tag) pose when it began: the clip plays
+    /// in that frame, carried by the parent's move since (BO2: an
+    /// animscripted zombie on the bus's window tag rides the moving bus).
+    pub parent_from: Option<([f32; 3], [f32; 3])>,
     pub ended: bool,
+    /// `setentityanimrate`: the clip plays this fast (1 is normal; the
+    /// Paralyzer and the Time Bomb slow it), and the clip time it had
+    /// played when the rate last changed (ms, at `start_ms`).
+    pub rate: f32,
+    pub base_ms: i64,
+}
+
+impl Playing {
+    /// The clip time played by `now` (ms), at its rate.
+    pub(crate) fn elapsed(&self, now: i64) -> i64 {
+        (self.base_ms + ((now - self.start_ms).max(0) as f32 * self.rate) as i64).max(0)
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -78,9 +98,22 @@ pub(crate) struct Actor {
     pub yaw_goal: Option<f32>,
     pub script: String,
     pub scripted: Option<Scripted>,
+    /// Counts `animscripted`/`startscriptedanim` calls: a scripted clip's
+    /// `end` that starts the next scripted clip keeps the actor scripted.
+    pub scripted_starts: u32,
+    /// `setentityanimrate` other than 1 (the Paralyzer's slow-down): its
+    /// clips and the walking they drive play this fast.
+    pub anim_rate: Option<f32>,
+    /// `animcustom`: the script function playing its animations; its AI
+    /// waits until that thread ends (Die Rise's Jumping Jack wall leaps).
+    pub custom: Option<gsc_t6::ThreadId>,
     pub traverse: Option<Traverse>,
     pub goal: Option<[f32; 3]>,
     pub goal_sent: bool,
+    /// `setgoalpos`'s angles: the yaw it turns to once there, then
+    /// "orientdone" (a window tear waits for it, up to a second, before its
+    /// clip starts at the window's angles).
+    pub goal_yaw: Option<f32>,
     /// The node a goal routes to, and the goal it was picked for.
     pub goal_node: Option<(u32, [f32; 3])>,
     pub path: Vec<[f32; 3]>,
@@ -106,10 +139,18 @@ pub(crate) struct Actor {
     /// then (the scripts set the goal again several times a second, and
     /// each straight plan walked it back into what stopped it).
     pub no_straight_until: i64,
+    /// The goal its last plan found no way to: `setgoalpos` to it again
+    /// says nothing new (no second `bad_path`). Buried's breadcrumb loop
+    /// sets an unreachable fallback goal again on every `bad_path`, each try
+    /// adding 100 ms to the ghost's path timer: one `bad_path` a frame grew
+    /// the timer faster than the clock and the ghost never chose again.
+    pub failed_goal: Option<[f32; 3]>,
     /// It has stood clear of solid since it spawned: from then on no step
     /// takes it into solid (monster clip keeps zombies out of places; only a
     /// zombie spawned inside scenery may walk out of it).
     pub clear: bool,
+    /// How fast it moved over the last tick (`getvelocity`).
+    pub velocity: [f32; 3],
 }
 
 /// An actor's goal also holds it only this close in height (the engine's
@@ -188,13 +229,27 @@ pub(crate) fn set_state(
     state: &str,
     sub: &Value,
 ) -> Option<usize> {
+    let now = world.resource::<Zm>().now_ms;
     let (asd, missing_legs) = {
         let zm = world.resource::<Zm>();
         let a = zm.actors.get(&n)?;
         (a.asd.clone(), a.missing_legs)
     };
+    let found = {
+        let zm = world.resource::<Zm>();
+        zm.asds.get(&asd).is_some_and(|def| {
+            def.state(state, false)
+                .or_else(|| def.state(state, missing_legs))
+                .is_some_and(|st| !st.substates.is_empty())
+        })
+    };
+    if !found {
+        vm.report_once(format!("bo2zm t6: animstatedef {asd} has no state {state}"));
+        return None;
+    }
     let picked = {
         let zm = world.resource::<Zm>();
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
         // bo2mp: a K9 Unit dog has no animstatedef; BO2's exe plays its
         // states itself (`dog_state_anim`), each notifying "done".
         let Some(def) = zm.asds.get(&asd) else {
@@ -203,12 +258,12 @@ pub(crate) fn set_state(
             let looping = zm.anims.get(anim).is_some_and(|x| x.looping);
             return Some(start_state(world, n, state, 0, anim, "done", !looping, sub));
         };
+=======
+        let def = zm.asds.get(&asd)?;
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
         let st = def
             .state(state, false)
             .or_else(|| def.state(state, missing_legs))?;
-        if st.substates.is_empty() {
-            return None;
-        }
         let i = match sub {
             Value::Int(i) => (*i).clamp(0, st.substates.len() as i32 - 1) as usize,
             Value::Float(f) => (*f as i32).clamp(0, st.substates.len() as i32 - 1) as usize,
@@ -230,6 +285,7 @@ pub(crate) fn set_state(
         )
     };
     let (state_name, i, anim, notify, restart) = picked;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     Some(start_state(world, n, &state_name, i, &anim, &notify, restart, sub))
 }
 
@@ -247,6 +303,8 @@ fn start_state(
 ) -> usize {
     let now = world.resource::<Zm>().now_ms;
     let (state_name, anim, notify) = (state_name.to_owned(), anim.to_owned(), notify.to_owned());
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
     let (length_ms, looping) = {
         let zm = world.resource::<Zm>();
         match zm.anims.get(&anim) {
@@ -260,10 +318,15 @@ fn start_state(
             .get(&n)
             .map_or(([0.0; 3], 0.0), |e| (e.origin, e.angles[1]))
     };
+    let parent_from = super::movers::link_parent_pose(world, n);
     let mut zm = world.resource_mut::<Zm>();
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     let Some(a) = zm.actors.get_mut(&n) else {
         return i;
     };
+=======
+    let a = zm.actors.get_mut(&n)?;
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
     // A looping state already playing goes on unless asked to restart.
     if let Some(p) = &a.playing
         && p.state == state_name
@@ -271,7 +334,11 @@ fn start_state(
         && !restart
         && matches!(sub, Value::Undefined)
     {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
         return i;
+=======
+        return Some(i);
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
     }
     // IW4L_T6_ANIMLOG=1: every animation start (test aid): actor, state,
     // clip, and whether it restarts the clip already playing.
@@ -299,8 +366,12 @@ fn start_state(
         cycle: 0,
         root_from: origin,
         yaw_from: yaw,
+        parent_from,
         ended: false,
+        rate: a.anim_rate.unwrap_or(1.0),
+        base_ms: 0,
     });
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     i
 }
 
@@ -423,6 +494,9 @@ fn dog_enemy(
         }
     }
     best.map(|(_, o)| o)
+=======
+    Some(i)
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
 }
 
 /// Switch actor `n` to animscript `script` (killanimscript first).
@@ -440,6 +514,7 @@ pub(crate) fn run_script(vm: &mut Vm<World>, world: &mut World, n: u32, script: 
     };
     let Some(obj) = obj else { return };
     vm.notify_str(world, obj, "killanimscript", &[]);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     // bo2mp: a K9 Unit dog runs BO2's dog animscripts.
     let kind = if world.resource::<Zm>().actors.get(&n).is_some_and(is_mp_dog) {
         "dog"
@@ -450,6 +525,12 @@ pub(crate) fn run_script(vm: &mut Vm<World>, world: &mut World, n: u32, script: 
         format!("{ANIMSCRIPTS}/traverse/{rest}")
     } else {
         format!("{ANIMSCRIPTS}/{kind}_{script}")
+=======
+    let path = if let Some(rest) = script.strip_prefix("traverse/") {
+        format!("{ANIMSCRIPTS}/traverse/{rest}")
+    } else {
+        format!("{ANIMSCRIPTS}/zm_{script}")
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
     };
     if vm
         .spawn_named(world, &path, "main", Value::Object(obj), vec![])
@@ -496,8 +577,48 @@ pub(crate) fn can_walk(world: &mut World, from: [f32; 3], to: [f32; 3], r: f32, 
     let (mins, maxs) = body(r, h);
     let s = [from[0], from[1], from[2] + STEP];
     let e = [to[0], to[1], to[2] + STEP];
-    let t = frame(world).trace_static_world(s, e, mins, maxs, MASK_AI);
+    let plats = platform_brushes(world, lerp3(from, to, 0.5), dist2(from, to) * 0.5);
+    let t = clip_platforms(
+        frame(world).trace_static_world(s, e, mins, maxs, MASK_AI),
+        &plats,
+        (s, e),
+        (mins, maxs),
+    );
     t.startsolid == 0 && t.fraction >= 1.0
+}
+
+/// Is there ground all along a straight walk from `from` to `to`, no drop
+/// deeper than a walk steps down? `can_walk` only checks the body is clear:
+/// at Buried's start, zombies in through one window walked straight at the
+/// player off the ledge between, fell 144 units and stood in the room below
+/// till distance tracking took them (soak 2).
+fn floor_along(world: &mut World, from: [f32; 3], to: [f32; 3], r: f32, h: f32) -> bool {
+    let (mins, maxs) = body(r, h);
+    let f = frame(world);
+    let len = ((to[0] - from[0]).powi(2) + (to[1] - from[1]).powi(2)).sqrt();
+    let n = ((len / 32.0).ceil() as usize).max(1);
+    (1..=n).all(|i| {
+        let q = lerp3(from, to, i as f32 / n as f32);
+        let s = [q[0], q[1], q[2] + STEP];
+        let e = [q[0], q[1], q[2] - 48.0];
+        f.trace_static_world(s, e, mins, maxs, MASK_AI).fraction < 1.0
+            || f.trace_world(s, e, mins, maxs, MASK_AI).fraction < 1.0
+            // A thin turned box is ground too, as in `walk_move`.
+            || f.oriented_blockers().iter().any(|b| {
+                if b.maxs[2] - b.mins[2] > 16.0 {
+                    return false;
+                }
+                let d = [q[0] - b.origin[0], q[1] - b.origin[1], q[2] - b.origin[2]];
+                let dot = |a: [f32; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
+                let (lx, ly) = (dot(b.axis[0]), dot(b.axis[1]));
+                if lx < b.mins[0] || lx > b.maxs[0] || ly < b.mins[1] || ly > b.maxs[1] {
+                    return false;
+                }
+                let top =
+                    b.origin[2] + b.axis[0][2] * lx + b.axis[1][2] * ly + b.axis[2][2] * b.maxs[2];
+                top >= e[2] && top <= s[2]
+            })
+    })
 }
 
 /// Walk `d` from `from` (sliding along walls, stepping up `STEP`, down to
@@ -513,6 +634,7 @@ pub(crate) fn walk_move(
     clear: bool,
 ) -> ([f32; 3], bool) {
     let (mins, maxs) = body(r, h);
+    let plats = platform_brushes(world, from, d[0].abs() + d[1].abs());
     let f = frame(world);
     let mut p = [from[0], from[1], from[2] + STEP];
     let mut rem = d;
@@ -521,7 +643,12 @@ pub(crate) fn walk_move(
             break;
         }
         let end = [p[0] + rem[0], p[1] + rem[1], p[2]];
-        let t = f.trace_static_world(p, end, mins, maxs, MASK_AI);
+        let t = clip_platforms(
+            f.trace_static_world(p, end, mins, maxs, MASK_AI),
+            &plats,
+            (p, end),
+            (mins, maxs),
+        );
         if t.startsolid != 0 {
             // Inside the world already. One spawned in it walks out
             // freely; one that was clear (pushed in, dropped in) only takes
@@ -529,7 +656,19 @@ pub(crate) fn walk_move(
             // monster clip and stand there for good (the sprinters in the
             // clipped ditch behind the ledge, M4 retest 1).
             let inside = f.trace_static_world(end, end, mins, maxs, MASK_AI).startsolid != 0;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
             if !clear || !inside {
+=======
+            // A walking step is ~1 unit: one left just inside a window's
+            // clip by its climb-in anim never got a step that ends outside
+            // and stood there till the scripts killed it (Origins round 1
+            // never ended). A step on a heading that is out within 16 units
+            // is fine.
+            let len = (rem[0] * rem[0] + rem[1] * rem[1]).sqrt().max(1e-3);
+            let ahead = [p[0] + rem[0] / len * 16.0, p[1] + rem[1] / len * 16.0, p[2]];
+            let out_ahead = || f.trace_static_world(ahead, ahead, mins, maxs, MASK_AI).startsolid == 0;
+            if !clear || !inside || (len < 16.0 && out_ahead()) {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
                 p = end;
             }
             break;
@@ -550,11 +689,154 @@ pub(crate) fn walk_move(
         p = [p[0] + n[0] * 0.125, p[1] + n[1] * 0.125, p[2]];
     }
     let down = [p[0], p[1], p[2] - STEP - 48.0];
-    let t = f.trace_static_world(p, down, mins, maxs, MASK_AI);
+    let t = clip_platforms(
+        f.trace_static_world(p, down, mins, maxs, MASK_AI),
+        &plats,
+        (p, down),
+        (mins, maxs),
+    );
     if t.startsolid != 0 {
         return ([p[0], p[1], from[2]], false);
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     (lerp3(p, down, t.fraction), true)
+=======
+    // A brush model under it is ground too, and so is a thin turned box (a
+    // floor slab of a Die Rise elevator car or the crashed escape pod over
+    // its pit: the zombies that came in fell through it).
+    let on = f.trace_world(p, down, mins, maxs, MASK_AI);
+    let frac = if on.startsolid == 0 { on.fraction.min(t.fraction) } else { t.fraction };
+    let mut at = lerp3(p, down, frac);
+    for b in f.oriented_blockers() {
+        if b.maxs[2] - b.mins[2] > 16.0 {
+            continue;
+        }
+        let d = [at[0] - b.origin[0], at[1] - b.origin[1], at[2] - b.origin[2]];
+        let dot = |a: [f32; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
+        let (lx, ly) = (dot(b.axis[0]), dot(b.axis[1]));
+        if lx < b.mins[0] || lx > b.maxs[0] || ly < b.mins[1] || ly > b.maxs[1] {
+            continue;
+        }
+        let top = b.origin[2] + b.axis[0][2] * lx + b.axis[1][2] * ly + b.axis[2][2] * b.maxs[2];
+        if top > at[2] && top <= p[2] {
+            at[2] = top;
+        }
+    }
+    (at, true)
+}
+
+/// The solid boxes of the moving platforms near `p`, where they are now
+/// (Tranzit's bus: its floor, door steps, walls and roof, `transit`): BO2's
+/// actors walk on and against the bus's collision as players do. Ours only
+/// met its thin roof: they walked through its walls and stood inside it at
+/// the road's height, sunk through its floor. `reach`: how far from `p`
+/// the move goes.
+fn platform_brushes(world: &World, p: [f32; 3], reach: f32) -> Vec<crate::world::SimBrush> {
+    let zm = world.resource::<Zm>();
+    let mut out = Vec::new();
+    for n in zm.riders.poses.keys() {
+        let Some(e) = zm.ents.get(n) else {
+            continue;
+        };
+        let boxes = super::transit::platform_boxes(&e.model);
+        if e.hidden || boxes.is_empty() || dist2(e.origin, p) > 720.0 + reach {
+            continue;
+        }
+        let (fw, rt, up) = gsc_t6::math::angle_vectors(e.angles);
+        for &(mins, maxs) in boxes {
+            let b = crate::OrientedBlocker {
+                entnum: *n as u16,
+                origin: e.origin,
+                axis: [fw, [-rt[0], -rt[1], -rt[2]], up],
+                mins,
+                maxs,
+                surface_flags: 0,
+            };
+            out.push(crate::world::SimBrush {
+                planes: b.planes().to_vec(),
+                contents: crate::bullet_collision::CONTENTS_SOLID,
+                plane_surface_flags: vec![0; 6],
+                glass_encoded: 0,
+            });
+        }
+    }
+    out
+}
+
+/// A trace of the world cut short by the platforms' boxes. One the body
+/// starts inside never holds it (it walks out), as with players; one
+/// already in the world's solid keeps that.
+fn clip_platforms(
+    mut t: trace_iw4::Trace,
+    plats: &[crate::world::SimBrush],
+    (s, e): ([f32; 3], [f32; 3]),
+    (mins, maxs): ([f32; 3], [f32; 3]),
+) -> trace_iw4::Trace {
+    if t.startsolid != 0 {
+        return t;
+    }
+    for b in plats {
+        let o = trace_iw4::trace_box([clipmap_iw4::brush_ref(b)], s, e, mins, maxs, MASK_AI);
+        if o.startsolid != 0 || o.allsolid != 0 || o.fraction >= t.fraction {
+            continue;
+        }
+        t = o;
+    }
+    t
+}
+
+/// BO2's `maymovetopoint`: can the actor walk straight on from `from` to `to`,
+/// stepping up and down as its walk does? No sliding round what is in the
+/// way and no drop of more than a step. Buried's, Die Rise's and Origins'
+/// distance tracking ask it after a `bad_path` and send a zombie that can not
+/// reach anyone off to respawn; ours said yes always, so one with no route
+/// kept the player as its enemy and stood still for good.
+pub(crate) fn may_move(world: &mut World, from: [f32; 3], to: [f32; 3], r: f32, h: f32) -> bool {
+    let d = [to[0] - from[0], to[1] - from[1]];
+    let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+    if len > 4096.0 {
+        return false;
+    }
+    let n = ((len / 16.0).ceil() as usize).max(1);
+    let step = [d[0] / n as f32, d[1] / n as f32];
+    let mut p = from;
+    let mut clear = false;
+    for _ in 0..n {
+        let want = [p[0] + step[0], p[1] + step[1]];
+        let (at, ok) = walk_move(world, p, step, r, h, clear);
+        let off = (at[0] - want[0]).powi(2) + (at[1] - want[1]).powi(2);
+        if (clear && !ok) || off > 1.0 || at[2] < p[2] - 24.0 {
+            return false;
+        }
+        clear |= ok;
+        p = at;
+    }
+    (p[2] - to[2]).abs() <= 64.0
+}
+
+/// Where an actor put at `p` (`forceteleport`) comes to stand: the floor
+/// under it, within 1024 units (else `p`). BO2's actors fall; ours only step
+/// down while they walk, and one with no route doesn't walk: the zombies
+/// alive when Buried's ghost round starts turn into ghosts that the map drops
+/// from its drop-down spots (280 units over the street), and ours hung there
+/// with no route anywhere, so the ghost round never ended.
+pub(crate) fn floor_below(world: &mut World, p: [f32; 3], r: f32, h: f32) -> [f32; 3] {
+    let (mins, maxs) = body(r, h);
+    let f = frame(world);
+    let from = [p[0], p[1], p[2] + STEP];
+    let down = [p[0], p[1], p[2] - 1024.0];
+    let t = f.trace_static_world(from, down, mins, maxs, MASK_AI);
+    if t.startsolid != 0 {
+        return p;
+    }
+    let on = f.trace_world(from, down, mins, maxs, MASK_AI);
+    let frac = if on.startsolid == 0 { on.fraction.min(t.fraction) } else { t.fraction };
+    if frac >= 1.0 {
+        return p;
+    }
+    let at = lerp3(from, down, frac);
+    if at[2] < p[2] { at } else { p }
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
 }
 
 /// The node a goal routes to: the nearest one that walks to it.
@@ -569,7 +851,7 @@ fn goal_node(world: &mut World, goal: [f32; 3], r: f32, h: f32) -> Option<u32> {
             .collect()
     };
     for (i, o) in near {
-        if can_walk(world, o, goal, r, h) {
+        if can_walk(world, o, goal, r, h) && floor_along(world, o, goal, r, h) {
             return Some(i);
         }
     }
@@ -587,6 +869,11 @@ pub(crate) fn drop_nodes_to_floor(world: &mut World, nodes: &mut [super::T6PathN
     let f = frame(world);
     let (mut moved, mut total, mut most, mut solid, mut none) = (0usize, 0.0f32, 0.0f32, 0usize, 0usize);
     for n in nodes.iter_mut() {
+        // One on a mover (a Die Rise car) stands on it, not on the floor
+        // under it.
+        if n.spawnflags & super::nav::NODE_ON_MOVER != 0 {
+            continue;
+        }
         let from = [n.origin[0], n.origin[1], n.origin[2] + 16.0];
         let to = [n.origin[0], n.origin[1], n.origin[2] - 512.0];
         let t = f.trace_static_world(from, to, [-4.0, -4.0, 0.0], [4.0, 4.0, 4.0], MASK_AI);
@@ -674,8 +961,12 @@ pub(crate) fn plan(world: &mut World, n: u32, goal: [f32; 3]) -> bool {
     }) else {
         return false;
     };
-    // Straight there when the way is clear.
-    if straight && dist(from, goal) < 1024.0 && can_walk(world, from, goal, r, h) {
+    // Straight there when the way is clear and has floor all along.
+    if straight
+        && dist(from, goal) < 1024.0
+        && can_walk(world, from, goal, r, h)
+        && floor_along(world, from, goal, r, h)
+    {
         set_path(world, n, goal, Vec::new(), None);
         return true;
     }
@@ -708,7 +999,7 @@ pub(crate) fn plan(world: &mut World, n: u32, goal: [f32; 3]) -> bool {
     };
     let mut seeds: Vec<(u32, f32)> = Vec::new();
     for (i, d, o) in near {
-        if can_walk(world, from, o, r, h) {
+        if can_walk(world, from, o, r, h) && floor_along(world, from, o, r, h) {
             seeds.push((i, d));
         }
     }
@@ -764,13 +1055,40 @@ pub(crate) fn plan(world: &mut World, n: u32, goal: [f32; 3]) -> bool {
     true
 }
 
-/// Path length from actor `n` to `to` (calcpathlength).
-pub(crate) fn path_length(world: &World, from: [f32; 3], to: [f32; 3]) -> Option<f32> {
+/// Path length from `from` to `to` (calcpathlength, findpath) for a body of
+/// radius `r` and height `h`: its route starts at the nodes it can walk to
+/// and ends at the nearest node that walks to `to`, as its own route does
+/// (`plan`, `goal_node`). Each end was the single nearest node before, which
+/// can stand behind a wall: Mob's Brutus 124 from the player read "no way
+/// there", BO2's get_closest_player_using_paths skips a player with a 0
+/// length past 36 units, and he stood idle (prison bhit11, 90-200 s).
+pub(crate) fn path_length(world: &mut World, from: [f32; 3], to: [f32; 3], r: f32, h: f32) -> Option<f32> {
+    let near: Vec<(u32, f32, [f32; 3])> = {
+        let nav = &world.resource::<Zm>().nav;
+        nav.within(from, 400.0)
+            .into_iter()
+            .take(8)
+            .map(|(i, d)| (i, d, nav.nodes[i as usize].origin))
+            .collect()
+    };
+    let mut seeds: Vec<(u32, f32)> = Vec::new();
+    for (i, d, o) in near {
+        if can_walk(world, from, o, r, h) {
+            seeds.push((i, d));
+        }
+    }
+    if seeds.is_empty() {
+        let nav = &world.resource::<Zm>().nav;
+        let a = nav.nearest(from)?;
+        seeds.push((a, dist(from, nav.nodes[a as usize].origin)));
+    }
+    let b = match goal_node(world, to, r, h) {
+        Some(b) => b,
+        None => world.resource::<Zm>().nav.nearest(to)?,
+    };
     let zm = world.resource::<Zm>();
     let nav = &zm.nav;
-    let a = nav.nearest(from)?;
-    let b = nav.nearest(to)?;
-    let nodes = nav.path(a, b)?;
+    let nodes = nav.path_from(&seeds, b)?;
     let mut len = dist(from, nav.nodes[nodes[0] as usize].origin);
     for w in nodes.windows(2) {
         len += dist(
@@ -789,12 +1107,74 @@ pub(crate) fn think(world: &mut World, now: i64) {
     if ids.is_empty() {
         return;
     }
+    let before: Vec<(u32, [f32; 3])> = {
+        let zm = world.resource::<Zm>();
+        ids.iter()
+            .filter_map(|n| zm.ents.get(n).map(|e| (*n, e.origin)))
+            .collect()
+    };
     with_vm(world, |vm, world| {
         for n in ids {
             think_one(vm, world, n, now);
         }
+        // His number of corpses (BO2's `ai_corpseCount`): past it the
+        // oldest goes, as the 15-second clock takes them.
+        let cap = super::corpse_limit();
+        let mut dead: Vec<(i64, u32, Option<ObjRef>)> = world
+            .resource::<Zm>()
+            .actors
+            .iter()
+            .filter(|(_, a)| !a.alive)
+            .filter_map(|(n, a)| a.dead_since.map(|t| (t, *n, a.obj)))
+            .collect();
+        if dead.len() > cap {
+            dead.sort_unstable_by_key(|d| (d.0, d.1));
+            let extra = dead.len() - cap;
+            for (_, n, obj) in dead.into_iter().take(extra) {
+                world.resource_mut::<Zm>().actors.remove(&n);
+                world.resource_mut::<Zm>().ents.remove(&n);
+                if let Some(obj) = obj
+                    && vm.alive(obj)
+                {
+                    vm.free_object(world, obj);
+                }
+            }
+        }
     });
     separate(world);
+    // What `getvelocity` says: how far each went this tick (none for the
+    // dead, or for a jump no walk makes in a tick, a teleport).
+    let dt = f32::from(crate::MATCH_TICK_MS as u16) / 1000.0;
+    let mut zm = world.resource_mut::<Zm>();
+    for (n, was) in before {
+        let Some(at) = zm.ents.get(&n).map(|e| e.origin) else {
+            continue;
+        };
+        if let Some(a) = zm.actors.get_mut(&n) {
+            let v: [f32; 3] = std::array::from_fn(|i| (at[i] - was[i]) / dt);
+            let fast = v.iter().map(|x| x * x).sum::<f32>() > 2000.0 * 2000.0;
+            a.velocity = if a.alive && !fast { v } else { [0.0; 3] };
+        }
+    }
+    // IW4L_T6_TEARLOG=1 (test aid): every living actor's place, clip and
+    // scripted flag each tick (a board pull's jumps between its clips).
+    static TEARLOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *TEARLOG.get_or_init(|| std::env::var_os("IW4L_T6_TEARLOG").is_some()) {
+        for (n, a) in zm.actors.iter().filter(|(_, a)| a.alive) {
+            let Some(e) = zm.ents.get(n) else { continue };
+            let clip = a.playing.as_ref().map_or("-", |p| p.anim.as_str());
+            diag::info!(
+                Sim,
+                "bo2zm t6 tear {n} t{now} s{} {} {clip} ({:.1} {:.1} {:.1}) y{:.0}",
+                u8::from(a.scripted.is_some()),
+                a.script,
+                e.origin[0],
+                e.origin[1],
+                e.origin[2],
+                e.angles[1]
+            );
+        }
+    }
 }
 
 fn think_one(vm: &mut Vm<World>, world: &mut World, n: u32, now: i64) {
@@ -820,6 +1200,7 @@ fn think_one(vm: &mut Vm<World>, world: &mut World, n: u32, now: i64) {
         advance_anim(vm, world, n, obj, now, dt);
         return;
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     let dog = is_mp_dog(&a);
     let here = world
         .resource::<Zm>()
@@ -829,6 +1210,9 @@ fn think_one(vm: &mut Vm<World>, world: &mut World, n: u32, now: i64) {
         .unwrap_or([0.0; 3]);
     // Enemy: the favorite enemy when not ignoring all (a dog finds its
     // own).
+=======
+    // Enemy: the favorite enemy when not ignoring all.
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
     let ignoreall = gsc_t6::truthy(&field(vm, obj, "ignoreall"));
     let fav = field(vm, obj, "favoriteenemy");
     let enemy = match fav {
@@ -849,6 +1233,7 @@ fn think_one(vm: &mut Vm<World>, world: &mut World, n: u32, now: i64) {
         .get(&n)
         .map(|e| e.origin)
         .unwrap_or([0.0; 3]);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     let scripted = a.scripted.is_some();
     let traversing = a.traverse.is_some();
     let mut a = a;
@@ -882,13 +1267,34 @@ fn think_one(vm: &mut Vm<World>, world: &mut World, n: u32, now: i64) {
         if let Some(x) = world.resource::<Zm>().actors.get(&n).cloned() {
             a = x;
         }
+=======
+    let custom = a.custom.is_some_and(|t| vm.thread_running(t));
+    if a.custom.is_some() && !custom {
+        if let Some(act) = world.resource_mut::<Zm>().actors.get_mut(&n) {
+            act.custom = None;
+            act.script.clear();
+        }
+        diag::info!(
+            Sim,
+            "bo2zm t6 animcustom ent{n} done at ({:.0} {:.0} {:.0})",
+            me[0],
+            me[1],
+            me[2]
+        );
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
     }
+    let scripted = a.scripted.is_some() || custom;
+    let traversing = a.traverse.is_some();
     if !scripted && !traversing && a.script != "init" {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
         let fight = if dog {
             dog_attack_range(world)
         } else {
             field_num(vm, obj, "pathenemyfightdist", 64.0).max(1.0)
         };
+=======
+        let fight = field_num(vm, obj, "pathenemyfightdist", 64.0).max(1.0);
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
         let goalradius = field_num(vm, obj, "goalradius", 32.0).max(1.0);
         let goalheight = field_num(vm, obj, "goalheight", GOAL_HEIGHT).max(1.0);
         let near_enemy = enemy
@@ -940,7 +1346,14 @@ fn think_one(vm: &mut Vm<World>, world: &mut World, n: u32, now: i64) {
         Some(a) => a,
         None => return,
     };
-    // Movement.
+    // Movement. A linked actor goes where its parent takes it (a zombie
+    // held on the bus's window between its clips): no walk or turn of its
+    // own, which the link put back each tick.
+    let linked = world
+        .resource::<Zm>()
+        .ents
+        .get(&n)
+        .is_some_and(|e| e.link.is_some());
     if let Some(tr) = &a.traverse {
         let f = ((now - tr.start_ms) as f32 / tr.length_ms.max(1) as f32).clamp(0.0, 1.0);
         let p: [f32; 3] = std::array::from_fn(|i| tr.from[i] + (tr.to[i] - tr.from[i]) * f);
@@ -956,9 +1369,15 @@ fn think_one(vm: &mut Vm<World>, world: &mut World, n: u32, now: i64) {
                 act.script.clear();
             }
         }
-    } else if a.scripted.is_none() && a.script == "move" {
+    } else if a.scripted.is_none() && a.script == "move" && !linked {
         follow_path(vm, world, n, obj, &a, me, dt, now);
-    } else if a.script == "combat" || a.script == "stop" {
+    } else if a.scripted.is_none()
+        && !linked
+        && (a.script == "combat" || a.script == "stop")
+        && !(a.goal_sent && a.goal_yaw.is_some())
+    {
+        // A scripted clip (a window tear) keeps the angles it began with;
+        // turning to the player there spun the zombie off its window.
         face(vm, world, n, obj, &a, me, None);
     }
     // Goal reached.
@@ -972,6 +1391,7 @@ fn think_one(vm: &mut Vm<World>, world: &mut World, n: u32, now: i64) {
             vm.notify_str(world, obj, "goal", &[]);
         }
     }
+    orient_at_goal(vm, world, n, obj);
     pitch_to_ground(world, n, a.pitch_orient);
     advance_anim(vm, world, n, obj, now, dt);
 }
@@ -1091,6 +1511,38 @@ fn face(
     }
 }
 
+/// There with `setgoalpos`'s angles: turn to them at the turn rate, then
+/// "orientdone" (once; the facing is then spent). Before, a window tear
+/// waited its full second unturned and snapped round when its clip began.
+fn orient_at_goal(vm: &mut Vm<World>, world: &mut World, n: u32, obj: ObjRef) {
+    let Some(want) = world
+        .resource::<Zm>()
+        .actors
+        .get(&n)
+        .filter(|a| a.goal_sent && a.scripted.is_none())
+        .and_then(|a| a.goal_yaw)
+    else {
+        return;
+    };
+    let cur = world
+        .resource::<Zm>()
+        .ents
+        .get(&n)
+        .map_or(want, |e| e.angles[1]);
+    let delta = gsc_t6::math::angle_clamp180(want - cur);
+    let step = TURN_DEG_PER_S * 0.05;
+    set_yaw(world, n, cur + delta.clamp(-step, step));
+    if let Some(act) = world.resource_mut::<Zm>().actors.get_mut(&n) {
+        act.yaw_goal = Some(want);
+        if delta.abs() <= step {
+            act.goal_yaw = None;
+        }
+    }
+    if delta.abs() <= step {
+        vm.notify_str(world, obj, "orientdone", &[]);
+    }
+}
+
 /// How fast a zombie turns toward its facing (18 degrees a 50 ms tick).
 pub(crate) const TURN_DEG_PER_S: f32 = 360.0;
 
@@ -1198,7 +1650,7 @@ fn follow_path(
                             act.goal_node = a.goal_node;
                             act.path_nodes = a.path_nodes.clone();
                         }
-                        super::natives_game::notify_later(vm, world, obj, "bad_path", 50);
+                        super::natives_game::notify_later_once(vm, world, obj, "bad_path", 50);
                     }
                 }
                 return;
@@ -1250,7 +1702,8 @@ fn follow_path(
         .as_ref()
         .and_then(|p| world.resource::<Zm>().anims.get(&p.anim).map(anim_speed))
         .filter(|s| *s > 1.0)
-        .unwrap_or(60.0);
+        .unwrap_or(60.0)
+        * a.anim_rate.unwrap_or(1.0);
     // The step along the path's points (x, y; the ground gives the height).
     let mut step = speed * dt;
     let mut at = [me[0], me[1]];
@@ -1448,7 +1901,7 @@ fn advance_anim(vm: &mut Vm<World>, world: &mut World, n: u32, obj: ObjRef, now:
         return;
     }
     let anim = world.resource::<Zm>().anims.get(&p.anim).cloned();
-    let elapsed = (now - p.start_ms).max(0);
+    let elapsed = p.elapsed(now);
     let cycle = if p.looping { elapsed / p.length_ms } else { 0 };
     let frac = if p.looping {
         (elapsed % p.length_ms) as f32 / p.length_ms as f32
@@ -1460,6 +1913,10 @@ fn advance_anim(vm: &mut Vm<World>, world: &mut World, n: u32, obj: ObjRef, now:
         .as_ref()
         .map(|x| x.notifies.clone())
         .unwrap_or_default();
+    // Clips whose notetracks carry their own `end` send it once: a second
+    // one would wake the wait the script starts on the first (the window
+    // boards' tear in, then out, cut the out short).
+    let own_end = notes.iter().any(|(name, _)| name == "end");
     let mut sent = p.sent;
     let mut cur_cycle = p.cycle;
     while cur_cycle < cycle {
@@ -1467,7 +1924,9 @@ fn advance_anim(vm: &mut Vm<World>, world: &mut World, n: u32, obj: ObjRef, now:
         for (name, _) in notes.iter().skip(sent) {
             events.push(name.clone());
         }
-        events.push("end".to_owned());
+        if !own_end {
+            events.push("end".to_owned());
+        }
         sent = 0;
         cur_cycle += 1;
     }
@@ -1480,13 +1939,20 @@ fn advance_anim(vm: &mut Vm<World>, world: &mut World, n: u32, obj: ObjRef, now:
         for (name, _) in notes.iter().skip(sent) {
             events.push(name.clone());
         }
-        events.push("end".to_owned());
+        if !own_end {
+            events.push("end".to_owned());
+        }
         sent = notes.len();
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     // Scripted animations move by their root motion from where they began
     // (and a dog's leap: its attack carries it at him).
     let leap = is_mp_dog(&a) && p.state.starts_with("combat_attack");
     if (a.scripted.is_some() || leap)
+=======
+    // Scripted animations move by their root motion from where they began.
+    if (a.scripted.is_some() || a.custom.is_some())
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
         && let Some(anim) = &anim
     {
         let root = anim_root(anim, frac);
@@ -1496,12 +1962,26 @@ fn advance_anim(vm: &mut Vm<World>, world: &mut World, n: u32, obj: ObjRef, now:
             root[0] * s + root[1] * c,
             root[2],
         ];
-        let pos = [
+        let mut pos = [
             p.root_from[0] + off[0],
             p.root_from[1] + off[1],
             p.root_from[2] + off[2],
         ];
-        set_origin(world, n, pos);
+        // Linked (a zombie on the bus's window or roof tag): the clip is
+        // carried by its parent's move and turn since it began, and the
+        // link keeps the place it reached (BO2's linked animscripted).
+        let carry = p
+            .parent_from
+            .and_then(|from| super::movers::link_parent_pose(world, n).map(|now| (from, now)));
+        if let Some(((o0, a0), (o1, a1))) = carry {
+            pos = super::riders::to_world(super::riders::to_local(pos, o0, a0), o1, a1);
+            let yaw = p.yaw_from + math_iw4::angle_subtract(a1[1], a0[1]);
+            set_origin(world, n, pos);
+            set_yaw(world, n, yaw);
+            super::movers::relink_here(world, n);
+        } else {
+            set_origin(world, n, pos);
+        }
     }
     if let Some(act) = world.resource_mut::<Zm>().actors.get_mut(&n)
         && let Some(pp) = act.playing.as_mut()
@@ -1519,11 +1999,37 @@ fn advance_anim(vm: &mut Vm<World>, world: &mut World, n: u32, obj: ObjRef, now:
         let note = vm.string(&ev);
         vm.notify_str(world, obj, &p.notify, &[note]);
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     // A scripted animation's end hands the actor back to its AI.
     if finished && a.scripted.is_some() && a.alive {
+=======
+    // A scripted animation's end hands the actor back to its AI, unless its
+    // `end` already started the next scripted one (the window boards' tear
+    // in, out). A plain `setanimstatefromasd` there does not keep it
+    // scripted (Buried's ghost: spawn clip, then its run: it stood still).
+    let restarted = world
+        .resource::<Zm>()
+        .actors
+        .get(&n)
+        .is_some_and(|x| x.scripted_starts != a.scripted_starts);
+    if finished && a.scripted.is_some() && a.alive && !restarted {
+        // The anim put it where it ends, like a spawn: one it left inside
+        // solid walks out freely (Buried's candy store, middle window: the
+        // climb-in ends in solid and it walked in place till the round
+        // could not end; the left and right climbs end clear).
+        let at = world.resource::<Zm>().ents.get(&n).map(|e| e.origin);
+        let inside = at.is_some_and(|q| {
+            let (mins, maxs) = body(a.radius, a.height);
+            let q = [q[0], q[1], q[2] + STEP];
+            frame(world).trace_static_world(q, q, mins, maxs, MASK_AI).startsolid != 0
+        });
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
         if let Some(act) = world.resource_mut::<Zm>().actors.get_mut(&n) {
             act.scripted = None;
             act.script.clear();
+            if inside {
+                act.clear = false;
+            }
         }
         vm.notify_str(world, obj, "end_sequence", &[]);
         vm.notify_str(world, obj, "killanimscript", &[]);
@@ -1549,6 +2055,18 @@ pub(crate) fn spawn_actor(
     for f in vm.field_names(spawner) {
         let v = vm.raw_field(spawner, f);
         vm.set_raw_field(obj, f, v);
+    }
+    if std::env::var_os("IW4L_T6_SPAWNLOG").is_some() {
+        let f = vm.intern("spawn_funcs");
+        let funcs = match vm.raw_field(spawner, f) {
+            Value::Array(a) => a.snapshot().len(),
+            _ => 0,
+        };
+        diag::info!(
+            Sim,
+            "bo2zm t6 spawnactor: ent{n} {obj:?} {aitype} from spawner ent{sn} {spawner:?} at {:?}, {funcs} spawn_funcs",
+            sp.origin
+        );
     }
     for (k, v) in [("isdog", Value::Int(0)), ("delayeddeath", Value::Int(0))] {
         let f = vm.intern(k);
@@ -1594,14 +2112,32 @@ pub(crate) fn spawn_actor(
     if let Some(act) = world.resource_mut::<Zm>().actors.get_mut(&n) {
         act.asd = asd;
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     let kind = if aitype.ends_with("dog_mp") { "dog" } else { "zm" };
     vm.spawn_named(
         world,
         &format!("{ANIMSCRIPTS}/{kind}_init"),
+=======
+    let team = field(vm, obj, "team");
+    vm.spawn_named(
+        world,
+        &format!("{ANIMSCRIPTS}/zm_init"),
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
         "main",
         Value::Object(obj),
         vec![],
     );
+    // zm_init puts every actor on level.zombie_team; the aitype's own team
+    // wins (Origins' giant robots are "neutral": on axis they counted as
+    // round enemies and round 1 never ended).
+    if let Value::Str(_) = team {
+        let f = vm.intern("team");
+        let text = vm.to_text(&team);
+        vm.set_raw_field(obj, f, team);
+        if let Some(act) = world.resource_mut::<Zm>().actors.get_mut(&n) {
+            act.team = text;
+        }
+    }
     if let Some(act) = world.resource_mut::<Zm>().actors.get_mut(&n) {
         act.script.clear();
     }
@@ -1636,7 +2172,11 @@ pub(crate) fn die(
     let cb = super::mp::callbacks(world);
     vm.spawn_named(
         world,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
         &cb,
+=======
+        "maps/mp/gametypes_zm/_callbacksetup",
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
         "codecallback_actorkilled",
         Value::Object(obj),
         args,
@@ -1694,7 +2234,11 @@ pub(crate) fn damage(
     let cb = super::mp::callbacks(world);
     vm.spawn_named(
         world,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
         &cb,
+=======
+        "maps/mp/gametypes_zm/_callbacksetup",
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
         "codecallback_actordamage",
         Value::Object(obj),
         args,
@@ -1751,7 +2295,7 @@ pub(crate) fn hitboxes(
         let a = zm.actors.get(&n)?;
         a.playing.as_ref().and_then(|p| {
             let clip = zm.clips.get(&p.anim)?.clone();
-            let elapsed = (now - p.start_ms).max(0);
+            let elapsed = p.elapsed(now);
             let frac = if p.looping {
                 (elapsed % p.length_ms) as f32 / p.length_ms as f32
             } else {
@@ -1804,7 +2348,7 @@ pub(crate) fn present_anim(world: &World, n: u32, now: i64) -> Option<(String, f
     let zm = world.resource::<Zm>();
     let a = zm.actors.get(&n)?;
     let p = a.playing.as_ref()?;
-    let elapsed = (now - p.start_ms).max(0);
+    let elapsed = p.elapsed(now);
     let frac = if p.looping {
         (elapsed % p.length_ms) as f32 / p.length_ms as f32
     } else {
@@ -1813,9 +2357,51 @@ pub(crate) fn present_anim(world: &World, n: u32, now: i64) -> Option<(String, f
     let rate = if p.ended && !p.looping {
         0.0
     } else {
-        1000.0 / p.length_ms as f32
+        1000.0 / p.length_ms as f32 * p.rate
     };
     Some((p.anim.clone(), frac, rate))
+}
+
+/// Show `anim` on actor `n` from its first frame, outside its
+/// animstatedef and sending no notetracks (a dead zombie standing in for
+/// BO2's client clone: Mob's wolf-head feeding); its length in ms.
+pub(crate) fn show_clip(world: &mut World, n: u32, anim: &str, now: i64) -> i64 {
+    let mut zm = world.resource_mut::<Zm>();
+    let (length_ms, looping) = zm
+        .anims
+        .get(anim)
+        .map_or((1000, false), |a| (anim_length_ms(a).max(1), a.looping));
+    if let Some(a) = zm.actors.get_mut(&n) {
+        a.playing = Some(Playing {
+            anim: anim.to_owned(),
+            start_ms: now,
+            length_ms,
+            looping,
+            ended: true,
+            rate: 1.0,
+            ..Playing::default()
+        });
+    }
+    length_ms
+}
+
+/// `setentityanimrate`: actor `n`'s clips (and the walking they drive)
+/// play at `rate` from `now` on, the playing clip keeping its place.
+pub(crate) fn set_anim_rate(world: &mut World, n: u32, rate: f32, now: i64) {
+    let mut zm = world.resource_mut::<Zm>();
+    let Some(a) = zm.actors.get_mut(&n) else {
+        return;
+    };
+    let rate = rate.max(0.0);
+    if std::env::var_os("IW4L_T6_ANIMLOG").is_some() && a.anim_rate.unwrap_or(1.0) != rate {
+        diag::info!(Sim, "bo2zm t6 anim rate {n} t{now}: {rate}");
+    }
+    a.anim_rate = (rate != 1.0).then_some(rate);
+    if let Some(p) = a.playing.as_mut() {
+        p.base_ms = p.elapsed(now);
+        p.start_ms = now;
+        p.rate = rate;
+    }
 }
 
 #[allow(dead_code)]

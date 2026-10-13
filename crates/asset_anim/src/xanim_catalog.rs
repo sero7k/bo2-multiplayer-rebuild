@@ -554,7 +554,11 @@ impl XAnimBuild {
         self.insert_in(
             namespace,
             CapturedXAnim {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_anim/src/xanim_catalog.rs
                 namespace,
+=======
+                namespace: AssetNamespace::T6,
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_anim/src/xanim_catalog.rs
                 root_motion: if anim.delta {
                     t6_root_motion(&anim.delta_trans).map(Arc::new)
                 } else {

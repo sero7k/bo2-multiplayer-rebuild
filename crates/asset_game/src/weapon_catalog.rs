@@ -122,6 +122,7 @@ pub struct WeaponBodyFacts {
 
     pub ads_zoom_fov: f32,
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
     /// bo2mp: Black Ops II's `bHoldBreathToSteady` (snipers): Sprint / Hold
     /// Breath steadies the scope.
     pub hold_breath_to_steady: bool,
@@ -143,6 +144,8 @@ pub struct WeaponBodyFacts {
     /// weapon's `alternate_weapon` is the other mode.
     pub optic_switch: bool,
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
     pub ads_dof: Option<[f32; 2]>,
 
     pub ads_zoom_in_frac: f32,
@@ -263,7 +266,19 @@ pub struct WeaponBodyFacts {
 
     pub no_partial_reload: bool,
 
+    /// BO2 unlimitedAmmo: fires with an empty clip and never uses ammo
+    /// (Mob of the Dead's Afterlife lightning hands).
+    pub unlimited_ammo: bool,
+
     pub bolt_action: bool,
+
+    /// bo2zm: Black Ops II `bRetrievable` (equipment and knives the player
+    /// picks back up; the scripts' `getretrievableweapons`).
+    pub retrievable: bool,
+
+    /// bo2zm: Black Ops II's own `weapType` (7 melee, 4 gas), before the
+    /// remap to IW4's `weap_type`: the HUD's `Engine.IsWeaponType` reads it.
+    pub t6_weap_type: i32,
 
     pub segmented_reload: bool,
 
@@ -299,6 +314,9 @@ pub struct WeaponBodyFacts {
     pub timed_detonation: bool,
 
     pub proj_impact_explode: bool,
+    /// bo2zm: Black Ops II's `bBulletImpactExplode`: a bullet weapon whose
+    /// bullet explodes where it hits (the explosion radius and damages).
+    pub bullet_impact_explode: bool,
 
     pub stick_to_players: bool,
     pub explosion_radius: i32,
@@ -650,11 +668,20 @@ pub struct CatalogWeapon {
     /// bo2zm: a Black Ops II weapon's attachment view models (magazine,
     /// sniper scope) and where each sits on the gun.
     pub view_attachments: Vec<(String, asset_model::FpvMountOffset)>,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
     /// bo2mp: the same list while aimed, when a sight swaps its model for a
     /// stripped one (a Rangefinder's `viewModelADS`); empty: no swap.
     pub ads_view_attachments: Vec<(String, asset_model::FpvMountOffset)>,
+=======
+    /// bo2zm: the same for the gun everyone else sees, on a wall or in the
+    /// box (`attachWorldModel`): an empty tag means the gun's `tag_weapon`.
+    pub world_attachments: Vec<(String, asset_model::FpvMountOffset)>,
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
     /// bo2zm: a Black Ops II dual-wield weapon's left-hand weapon.
     pub dual_wield_weapon: Option<String>,
+    /// bo2zm: the grenade weapon a Black Ops II shot becomes for the
+    /// scripts (`szSpawnedGrenadeWeaponName`).
+    pub spawned_grenade: Option<String>,
 
     pub sounds: WeaponSoundAliases,
 
@@ -926,12 +953,15 @@ pub struct WeaponSoundAliases {
 
     pub fire_last_player: Option<String>,
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
     /// bo2mp: Black Ops II's aim-down-sight sounds (`adsRaiseSoundPlayer`,
     /// `adsLowerSoundPlayer`, `adsZoomSound`: a scope's zoom click).
     pub ads_raise_player: Option<String>,
     pub ads_lower_player: Option<String>,
     pub ads_zoom: Option<String>,
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
     pub leftover_sound_overrides: Vec<LeftoverSoundOverride>,
 
     pub fire_ptr_kind: Option<&'static str>,
@@ -1544,8 +1574,13 @@ impl WeaponCatalog {
             sz_xanims_left,
             hide_tags,
             view_attachments: Vec::new(),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
             ads_view_attachments: Vec::new(),
+=======
+            world_attachments: Vec::new(),
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
             dual_wield_weapon: None,
+            spawned_grenade: None,
             sounds: WeaponSoundAliases {
                 notetrack_convention: NotetrackConvention::SoundMap,
                 fire: geometry
@@ -1816,7 +1851,10 @@ impl WeaponCatalog {
                 reload_ammo_add: geometry.reload_ammo_add,
                 reload_start_add: geometry.reload_start_add,
                 no_partial_reload: geometry.no_partial_reload,
+                unlimited_ammo: false,
                 bolt_action: geometry.bolt_action,
+                retrievable: false,
+                t6_weap_type: 0,
                 segmented_reload: geometry.segmented_reload,
                 sprint_raise_time_ms: geometry.sprint_raise_time_ms,
                 sprint_loop_time_ms: geometry.sprint_loop_time_ms,
@@ -1835,6 +1873,7 @@ impl WeaponCatalog {
                 projectile_rotates: geometry.projectile_rotates,
                 timed_detonation: geometry.timed_detonation,
                 proj_impact_explode: geometry.proj_impact_explode,
+                bullet_impact_explode: false,
                 stick_to_players: geometry.stick_to_players,
                 explosion_radius: geometry.explosion_radius,
                 explosion_radius_min: geometry.explosion_radius_min,
@@ -2327,8 +2366,13 @@ impl WeaponCatalog {
             sz_xanims_left: [const { None }; WEAPON_ANIM_SLOTS],
             hide_tags: read_hide_tags_iw5(stream, strings, geometry.hide_tags),
             view_attachments: Vec::new(),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
             ads_view_attachments: Vec::new(),
+=======
+            world_attachments: Vec::new(),
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
             dual_wield_weapon: None,
+            spawned_grenade: None,
             sounds: leftover_iw5_sounds(stream, strings, &geometry),
             combat_fx: read_iw5_combat_fx(stream, &geometry, fx_name_at_slot),
             combat_slots: CombatFxSlots::default(),
@@ -2468,8 +2512,13 @@ impl WeaponCatalog {
             sz_xanims_left: [const { None }; WEAPON_ANIM_SLOTS],
             hide_tags: read_hide_tags_t5(stream, strings, geometry.hide_tags),
             view_attachments: Vec::new(),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
             ads_view_attachments: Vec::new(),
+=======
+            world_attachments: Vec::new(),
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
             dual_wield_weapon: None,
+            spawned_grenade: None,
             sounds: leftover_t5_sounds(stream, strings, &geometry),
             combat_fx: WeaponCombatFx::default(),
             combat_slots: CombatFxSlots::default(),
@@ -4896,6 +4945,9 @@ fn merge_body_facts(dst: &mut WeaponBodyFacts, src: WeaponBodyFacts) {
     if !dst.proj_impact_explode {
         dst.proj_impact_explode = src.proj_impact_explode;
     }
+    if !dst.bullet_impact_explode {
+        dst.bullet_impact_explode = src.bullet_impact_explode;
+    }
     if !dst.stick_to_players {
         dst.stick_to_players = src.stick_to_players;
     }
@@ -4987,6 +5039,9 @@ fn merge_body_facts(dst: &mut WeaponBodyFacts, src: WeaponBodyFacts) {
     }
     if !dst.no_partial_reload && src.no_partial_reload {
         dst.no_partial_reload = true;
+    }
+    if !dst.unlimited_ammo && src.unlimited_ammo {
+        dst.unlimited_ammo = true;
     }
     if !dst.segmented_reload && src.segmented_reload {
         dst.segmented_reload = true;
@@ -5089,8 +5144,12 @@ struct WeaponRow {
     /// II); none for one the mount plan places itself.
     attachment_view_offsets: Vec<Option<asset_model::FpvMountOffset>>,
     attachment_world_models: Vec<String>,
+    /// bo2zm: see `CatalogWeapon::world_attachments`.
+    world_parts: Vec<(String, asset_model::FpvMountOffset)>,
     /// bo2zm: a Black Ops II dual-wield weapon's left-hand weapon.
     dual_wield_weapon: Option<String>,
+    /// bo2zm: see `CatalogWeapon::spawned_grenade`.
+    spawned_grenade: Option<String>,
 
     iw5_configuration: Option<(u32, Iw5AttachmentSelection)>,
     prepared_attachments: Vec<String>,
@@ -5181,7 +5240,9 @@ impl Default for WeaponRow {
             attachment_view_models: Vec::new(),
             attachment_view_offsets: Vec::new(),
             dual_wield_weapon: None,
+            spawned_grenade: None,
             attachment_world_models: Vec::new(),
+            world_parts: Vec::new(),
             iw5_configuration: None,
             prepared_attachments: Vec::new(),
             iw5_attachment_slots: std::array::from_fn(|_| None),
@@ -5629,6 +5690,7 @@ impl WeaponBuild {
                 .iter()
                 .map(|name| fpv_model_edge(Some(name), row.namespace, fpv))
                 .collect();
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
             let plan = |edges: &[AssetEdge<FpvMeshSpace>],
                         offsets_of: &[Option<asset_model::FpvMountOffset>]| {
                 row.gun_xmodel_edge.bound_index().and_then(|gun| {
@@ -5645,8 +5707,24 @@ impl WeaponBuild {
                             }
                             (None, _) if offset.is_some() => {}
                             _ => attachments = None,
+=======
+            row.fpv_mount_plan = row.gun_xmodel_edge.bound_index().and_then(|gun| {
+                // bo2zm: a Black Ops II attachment (authored placement) the
+                // catalog lacks is left off; the gun still draws.
+                let mut attachments = Some(Vec::new());
+                let mut offsets = Vec::new();
+                for (i, edge) in row.attachment_view_model_edges.iter().enumerate() {
+                    let offset = row.attachment_view_offsets.get(i).cloned().flatten();
+                    match (edge.bound_index(), &mut attachments) {
+                        (Some(index), Some(list)) => {
+                            list.push(crate::FpvMeshIndex::from_order(index));
+                            offsets.push(offset);
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
                         }
+                        (None, _) if offset.is_some() => {}
+                        _ => attachments = None,
                     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
                     let rocket = if row.rocket_model_edge.is_absent() {
                         Some(None)
                     } else {
@@ -5675,6 +5753,24 @@ impl WeaponBuild {
             } else {
                 plan(&ads_edges, &row.ads_view_offsets)
             };
+=======
+                }
+                let rocket = if row.rocket_model_edge.is_absent() {
+                    Some(None)
+                } else {
+                    row.rocket_model_edge
+                        .bound_index()
+                        .map(|index| Some(crate::FpvMeshIndex::from_order(index)))
+                }?;
+                Some(asset_model::plan_fpv_mounts(
+                    fpv,
+                    crate::FpvMeshIndex::from_order(gun),
+                    &attachments?,
+                    &offsets,
+                    rocket,
+                ))
+            });
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
         }
     }
 
@@ -5682,6 +5778,7 @@ impl WeaponBuild {
         &mut self,
         fpv: &crate::FpvMeshCatalog,
         bodies: &asset_model::BodyMeshCatalog,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
     ) -> FpvHandsCensus {
         let mut census = FpvHandsCensus::default();
         // bo2mp: a match with Black Ops II's guns plays by Black Ops II's
@@ -5694,6 +5791,11 @@ impl WeaponBuild {
             .rows
             .iter()
             .any(|row| row.namespace == crate::AssetNamespace::T6);
+=======
+    ) -> String {
+        // How many rows drew each pair of arms (or none), for the load report.
+        let mut picked: std::collections::BTreeMap<String, usize> = Default::default();
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
         for row in &mut self.registry.rows {
             // bo2mp: a Black Ops II gun takes Black Ops II's arms on every
             // map, as on a BO2 map. Keyed off the map's game, a T6 gun on an
@@ -5724,6 +5826,7 @@ impl WeaponBuild {
                 }
                 Some((choice, crate::FpvMeshIndex::from_order(index)))
             });
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
             if row.namespace == crate::AssetNamespace::T6 {
                 for side in &row.fpv_hands {
                     match side {
@@ -5739,6 +5842,16 @@ impl WeaponBuild {
             }
         }
         census
+=======
+            let label = match &row.fpv_hands[0] {
+                Some((choice, _)) => format!("{choice:?}"),
+                None => "none".to_owned(),
+            };
+            *picked.entry(label).or_default() += 1;
+        }
+        let picked: Vec<String> = picked.iter().map(|(k, n)| format!("{k} x{n}")).collect();
+        format!("FPV hands (side 0): {}", picked.join(", "))
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
     }
 
     pub fn resolve_fpv_assemblies(
@@ -5785,10 +5898,13 @@ impl WeaponBuild {
             let Some(Ok(mounts)) = &row.fpv_mount_plan else {
                 continue;
             };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
             let ads_mounts = match &row.fpv_mount_plan_ads {
                 Some(Ok(mounts)) => Some(mounts),
                 _ => None,
             };
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
             let clips: std::collections::BTreeSet<usize> = row
                 .sz_xanim_edges
                 .iter()
@@ -5858,12 +5974,15 @@ impl WeaponBuild {
                             Err(error) => return Some(Err(error)),
                         },
                     };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
                     // bo2mp: the gun as it looks aimed, when a sight swaps.
                     let ads = match ads_mounts.map(|ads| assemble(*hands, ads, false, None)) {
                         None => None,
                         Some(Ok(ads)) => Some(ads),
                         Some(Err(error)) => return Some(Err(error)),
                     };
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
                     Some(Ok(crate::FpvSideAssemblies {
                         bare,
                         rocket,
@@ -6221,6 +6340,7 @@ impl WeaponBuild {
                 attachment_view_model_edges: Vec::new(),
                 fpv_hands: [None, None],
                 fpv_mount_plan: None,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
                 ads_view_models: entry
                     .ads_view_attachments
                     .iter()
@@ -6232,6 +6352,8 @@ impl WeaponBuild {
                     .map(|(_, at)| Some(at.clone()))
                     .collect(),
                 fpv_mount_plan_ads: None,
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
                 fpv_assemblies: [None, None],
                 world_model: entry.world_model,
                 world_model_edge: AssetEdge::Absent,
@@ -6255,12 +6377,14 @@ impl WeaponBuild {
                     .map(|(model, _)| model.clone())
                     .collect(),
                 dual_wield_weapon: entry.dual_wield_weapon.clone(),
+                spawned_grenade: entry.spawned_grenade.clone(),
                 attachment_view_offsets: entry
                     .view_attachments
                     .into_iter()
                     .map(|(_, at)| Some(at))
                     .collect(),
                 attachment_world_models: Vec::new(),
+                world_parts: entry.world_attachments,
                 iw5_configuration: None,
                 prepared_attachments: Vec::new(),
                 iw5_attachment_slots: entry.iw5_attachment_slots,
@@ -6811,6 +6935,7 @@ impl WeaponRegistry {
                     .unwrap_or(0);
             }
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
         // bo2mp: a Hybrid Optic gun's two modes are one gun: Black Ops II's defs
         // give `dualoptic_hk416_mp` and `hk416_mp` the same ammoName and clipName,
         // so they count one magazine and one reserve.  Both rows key their ammo
@@ -6827,6 +6952,8 @@ impl WeaponRegistry {
                 self.rows[row].facts.clip_index = key;
             }
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
     }
 
     /// bo2mp: another game's row named for a BO2 match: `ak74u_reflex_rf`
@@ -7323,16 +7450,24 @@ impl WeaponRegistry {
             return index;
         };
         // bo2zm: Black Ops II guns melee with the player's melee weapon
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
         // (`knife_zm` in Zombies, bo2mp: `knife_mp` in multiplayer), as
         // Black Ops' do with `knife`.
         let knives: &[&str] = match row.namespace {
             crate::AssetNamespace::T5 => &["knife"],
             crate::AssetNamespace::T6 => &["knife_zm", "knife"],
+=======
+        // (`knife_zm` in Zombies), as Black Ops' do with `knife`.
+        let knife = match row.namespace {
+            crate::AssetNamespace::T5 => "knife",
+            crate::AssetNamespace::T6 => "knife_zm",
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
             _ => return index,
         };
         if row.facts.use_as_melee {
             return index;
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
         knives
             .iter()
             .find_map(|knife| {
@@ -7340,6 +7475,12 @@ impl WeaponRegistry {
                     r.namespace == row.namespace
                         && r.name.strip_suffix("_mp").unwrap_or(&r.name) == *knife
                 })
+=======
+        self.rows
+            .iter()
+            .position(|r| {
+                r.namespace == row.namespace && r.name.strip_suffix("_mp").unwrap_or(&r.name) == knife
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
             })
             .map_or(index, |i| i as u32)
     }
@@ -7351,6 +7492,13 @@ impl WeaponRegistry {
     }
 
     /// bo2zm: a Black Ops II dual-wield weapon's left-hand weapon (0: none).
+    pub fn spawned_grenade_of(&self, index: u32) -> u32 {
+        self.rows
+            .get(index as usize)
+            .and_then(|row| row.spawned_grenade.as_deref())
+            .map_or(0, |name| self.index_of(name))
+    }
+
     pub fn dual_wield_weapon_of(&self, index: u32) -> u32 {
         self.rows
             .get(index as usize)
@@ -7453,12 +7601,36 @@ impl WeaponRegistry {
         gsc_weapon_script_name(self.name_of(index))
     }
 
+    /// bo2zm: each weapon's world parts (see `CatalogWeapon::world_attachments`):
+    /// (model, tag, offset, rotation), the tag never empty.
+    pub fn world_parts_table(&self) -> Vec<Vec<(String, String, [f32; 3], [f32; 3])>> {
+        self.rows
+            .iter()
+            .map(|row| {
+                row.world_parts
+                    .iter()
+                    .map(|(model, at)| {
+                        let tag = if at.tag.is_empty() { "tag_weapon" } else { at.tag.as_str() };
+                        (model.clone(), tag.to_owned(), at.offset, at.rotation)
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
     pub fn world_models_table(&self) -> Vec<(String, Vec<String>)> {
         (0..self.rows.len() as u32)
             .map(|i| {
                 let model = self.world_model_of(i).unwrap_or_default().to_owned();
                 (model, self.hide_tags_of(i).to_vec())
             })
+            .collect()
+    }
+
+    /// Each weapon's display name key (`ZMWEAPON_...`), empty if none.
+    pub fn display_names_table(&self) -> Vec<String> {
+        (0..self.rows.len() as u32)
+            .map(|i| self.display_name_key_of(i).unwrap_or_default().to_owned())
             .collect()
     }
 
@@ -8177,9 +8349,13 @@ pub fn gsc_weapon_script_name(catalog_bare: &str) -> String {
     if catalog_bare.is_empty() {
         return String::new();
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog.rs
     // bo2mp: a Black Ops II gun with a sight (`mp7_mp+reflex`) is named
     // as BO2's scripts name it.
     if catalog_bare.ends_with("_mp") || catalog_bare.contains("_mp+") {
+=======
+    if catalog_bare.ends_with("_mp") {
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog.rs
         catalog_bare.to_owned()
     } else {
         format!("{catalog_bare}_mp")

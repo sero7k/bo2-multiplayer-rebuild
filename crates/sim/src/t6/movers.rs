@@ -65,6 +65,19 @@ pub(crate) struct Move {
     pub rot: Option<Track>,
     /// Launch origin, velocity, start, duration.
     pub gravity: Option<([f32; 3], [f32; 3], i64, i64)>,
+    pub vibe: Option<Vibe>,
+}
+
+/// A `vibrate`: the angles it rocks about, the tilt per degree of
+/// amplitude (pitch, roll), the amplitude, period and time.
+#[derive(Clone, Debug)]
+pub(crate) struct Vibe {
+    base: [f32; 3],
+    tilt: [f32; 2],
+    amp: f32,
+    period_ms: f32,
+    start_ms: i64,
+    dur_ms: i64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -82,7 +95,11 @@ impl Movers {
             if rot {
                 m.rot = None;
             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/movers.rs
             if m.pos.is_none() && m.rot.is_none() && m.gravity.is_none() {
+=======
+            if m.pos.is_none() && m.rot.is_none() && m.gravity.is_none() && m.vibe.is_none() {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/movers.rs
                 self.list.remove(&n);
             }
         }
@@ -131,6 +148,28 @@ impl Movers {
         });
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn vibrate(
+        &mut self,
+        n: u32,
+        base: [f32; 3],
+        dir: [f32; 3],
+        amp: f32,
+        period: f32,
+        now: i64,
+        secs: f32,
+    ) {
+        let len = (dir[0] * dir[0] + dir[1] * dir[1]).sqrt().max(1e-3);
+        self.list.entry(n).or_default().vibe = Some(Vibe {
+            base,
+            tilt: [dir[0] / len, dir[1] / len],
+            amp,
+            period_ms: (period * 1000.0).max(1.0),
+            start_ms: now,
+            dur_ms: (secs * 1000.0).round() as i64,
+        });
+    }
+
     pub(crate) fn gravity(&mut self, n: u32, from: [f32; 3], vel: [f32; 3], now: i64, secs: f32) {
         let m = self.list.entry(n).or_default();
         m.pos = None;
@@ -138,7 +177,7 @@ impl Movers {
     }
 }
 
-const GRAVITY: f32 = 800.0;
+pub(crate) const GRAVITY: f32 = 800.0;
 
 /// Advance every mover to `now`; then linked entities follow their parents.
 pub(crate) fn advance(world: &mut World, now: i64) {
@@ -180,7 +219,22 @@ pub(crate) fn advance(world: &mut World, now: i64) {
                     done.push((n, "rotatedone"));
                 }
             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/movers.rs
             if m.pos.is_none() && m.rot.is_none() && m.gravity.is_none() {
+=======
+            if let Some(v) = &m.vibe {
+                let t = now - v.start_ms;
+                if t >= v.dur_ms {
+                    e.angles = v.base;
+                    m.vibe = None;
+                } else {
+                    let fade = 1.0 - t as f32 / v.dur_ms.max(1) as f32;
+                    let w = (std::f32::consts::TAU * t as f32 / v.period_ms).sin() * v.amp * fade;
+                    e.angles = [v.base[0] + w * v.tilt[0], v.base[1], v.base[2] + w * v.tilt[1]];
+                }
+            }
+            if m.pos.is_none() && m.rot.is_none() && m.gravity.is_none() && m.vibe.is_none() {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/movers.rs
                 finished.push(n);
             }
         }
@@ -205,28 +259,14 @@ pub(crate) fn advance(world: &mut World, now: i64) {
 /// Linked entities: origin = parent's + offset turned by the parent's yaw;
 /// angles = parent's + offset.
 pub(crate) fn follow_links(world: &mut World) {
-    let links: Vec<(u32, u32, [f32; 3], [f32; 3])> = world
+    let links: Vec<(u32, u32, [f32; 3], [f32; 3], Option<String>)> = world
         .resource::<Zm>()
         .ents
         .iter()
-        .filter_map(|(n, e)| e.link.map(|(p, o, a)| (*n, p, o, a)))
+        .filter_map(|(n, e)| e.link.map(|(p, o, a)| (*n, p, o, a, e.link_tag.clone())))
         .collect();
-    for (n, parent, off, aoff) in links {
-        let parent_pose = {
-            let is_player = world.resource::<Zm>().players.contains_key(&parent);
-            if is_player {
-                frame(world)
-                    .player(ClientId(parent))
-                    .map(|ps| (ps.origin, [0.0, ps.viewangles[1], 0.0]))
-            } else {
-                world
-                    .resource::<Zm>()
-                    .ents
-                    .get(&parent)
-                    .map(|e| (e.origin, e.angles))
-            }
-        };
-        let Some((po, pa)) = parent_pose else {
+    for (n, parent, off, aoff, tag) in links {
+        let Some((po, pa)) = parent_pose(world, parent, tag.as_deref()) else {
             continue;
         };
         let (f, r, u) = gsc_t6::math::angle_vectors(pa);
@@ -241,4 +281,66 @@ pub(crate) fn follow_links(world: &mut World) {
         }
     }
     let _ = Value::Undefined;
+}
+
+/// Where a link parent is this tick (on a tag: where the parent's posed
+/// model has it): what `follow_links` places its children by.
+fn parent_pose(
+    world: &mut World,
+    parent: u32,
+    tag: Option<&str>,
+) -> Option<([f32; 3], [f32; 3])> {
+    if let Some(on_tag) = tag
+        .and_then(|t| super::tags::tag_world(world, parent, t))
+        .map(|(o, axes)| (o, super::tags::axis_to_angles(axes)))
+    {
+        return Some(on_tag);
+    }
+    if world.resource::<Zm>().players.contains_key(&parent) {
+        return frame(world)
+            .player(ClientId(parent))
+            .map(|ps| (ps.origin, [0.0, ps.viewangles[1], 0.0]));
+    }
+    world
+        .resource::<Zm>()
+        .ents
+        .get(&parent)
+        .map(|e| (e.origin, e.angles))
+}
+
+/// Where entity `n`'s link parent (or the tag it is linked on) is now;
+/// none when it is not linked.
+pub(crate) fn link_parent_pose(world: &mut World, n: u32) -> Option<([f32; 3], [f32; 3])> {
+    let (parent, tag) = world
+        .resource::<Zm>()
+        .ents
+        .get(&n)
+        .and_then(|e| e.link.map(|(p, _, _)| (p, e.link_tag.clone())))?;
+    parent_pose(world, parent, tag.as_deref())
+}
+
+/// A linked entity moved by its own animation keeps the place it is at
+/// now relative to its parent (BO2's G_CalcTagAxis after an animscripted
+/// think): `follow_links` carries it from there, and it stays there when
+/// the animation ends.
+pub(crate) fn relink_here(world: &mut World, n: u32) {
+    let Some((po, pa)) = link_parent_pose(world, n) else {
+        return;
+    };
+    let mut zm = world.resource_mut::<Zm>();
+    let Some(e) = zm.ents.get_mut(&n) else {
+        return;
+    };
+    let Some((parent, _, _)) = e.link else {
+        return;
+    };
+    let (f, r, u) = gsc_t6::math::angle_vectors(pa);
+    let d = gsc_t6::math::sub(e.origin, po);
+    let off = [
+        gsc_t6::math::dot(d, f),
+        -gsc_t6::math::dot(d, r),
+        gsc_t6::math::dot(d, u),
+    ];
+    let aoff = [0, 1, 2].map(|i| e.angles[i] - pa[i]);
+    e.link = Some((parent, off, aoff));
 }

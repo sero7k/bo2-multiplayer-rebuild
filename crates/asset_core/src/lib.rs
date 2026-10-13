@@ -12,7 +12,11 @@ pub use ident::{
     TechniqueSetIndex, TechniqueSetSpace, TracerIndex, TracerSpace, WalkLocalMaterialIndex,
     WorldWeaponIndex, WorldWeaponSpace, XAnimIndex, XAnimSpace, ZoneOwner, bound_zone_names,
 };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_core/src/lib.rs
 pub use t6_draw::{
     T6Blend, T6Cull, T6Draw, T6Layers, T6StateBits, t6_fast, t6_set_fast, t6_water_kind,
 };
+=======
+pub use t6_draw::{T6Blend, T6Cull, T6Draw, T6Layers, T6StateBits, t6_aniso, t6_fast, t6_set_aniso, t6_set_fast};
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_core/src/lib.rs
 pub use zone_game::ZoneGame;

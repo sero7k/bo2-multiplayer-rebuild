@@ -241,7 +241,11 @@ pub fn decode_entry(stored: &[u8], file_at: u64, out: &mut Vec<u8>) -> Result<()
     }
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ipak_t6/src/lib.rs
 /// Black Ops II's string hash for asset names (`R_HashString`, seed 0):
+=======
+/// Black Ops II's string hash for asset names (seed 0):
+>>>>>>> /tmp/claude-0/zmhead/crates/ipak_t6/src/lib.rs
 /// lower-cased ASCII, `h = h * 33 ^ c`.
 pub fn hash_name(name: &str) -> u32 {
     let mut h = 0u32;

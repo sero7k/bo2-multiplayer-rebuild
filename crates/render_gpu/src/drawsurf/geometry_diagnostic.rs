@@ -144,6 +144,7 @@ pub struct ExtractedDiagnosticGeometry {
     pub world_surface_draw: Arc<Vec<u32>>,
     /// bo2zm: per world surface, its lightmap page (`u8::MAX` = none).
     pub world_surface_lightmap: Arc<Vec<u8>>,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     /// bo2zm: the T6 sun direction and exposure scale, the sun colour, then
     /// the sky's rotation and brightness.
     pub t6_lighting: Option<[[f32; 4]; 3]>,
@@ -153,16 +154,31 @@ pub struct ExtractedDiagnosticGeometry {
     pub t6_bloom: bool,
     /// bo2mp: the map's `sm_sunSampleSizeNear`; 0 = not set.
     pub t6_sun_sample_size_near: f32,
+=======
+    /// bo2zm: the T6 sun direction and exposure scale, the sun colour, the
+    /// sky's rotation and brightness, the vision grade, then the colour
+    /// tables drawn (first rows of A and B, A's weight, on).
+    pub t6_lighting: Option<[[f32; 4]; 19]>,
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     /// bo2zm: Black Ops II props: `[surface, colour slot, draw code,
     /// instance]` per first-LOD surface of each placement.
     pub t6_props: Arc<Vec<[u32; 4]>>,
     /// bo2zm: per prop draw, its normal and specular map slots (shine).
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     pub t6_prop_shine: Arc<Vec<[u32; 3]>>,
     /// bo2zm: per prop instance, world-from-local columns, light, then
     /// primary light and its visibility.
     pub t6_prop_instances: Arc<Vec<[f32; 24]>>,
     /// bo2zm: what the props were built from (generation, placements).
     pub t6_props_key: Option<(MaterialGenerationId, usize)>,
+=======
+    pub t6_prop_shine: Arc<Vec<[u32; 2]>>,
+    /// bo2zm: per prop instance, world-from-local columns, light, then
+    /// primary light and its visibility.
+    pub t6_prop_instances: Arc<Vec<[f32; 24]>>,
+    /// bo2zm: what the props were built from (generation, placements, exposure bits).
+    pub t6_props_key: Option<(MaterialGenerationId, usize, u32)>,
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     /// bo2zm: the uploaded slot of the Black Ops II sky's cube map.
     pub t6_sky_slot: Option<u32>,
     /// bo2zm: per world surface, its primary light index.
@@ -180,6 +196,8 @@ pub struct ExtractedDiagnosticGeometry {
     /// `lightingSH`.
     pub t6_probe_slot: Option<u32>,
     pub t6_probes: Arc<Vec<[[f32; 4]; 3]>>,
+    /// bo2zm: the world's colour tables (`GfxWorld::lutMaterial`).
+    pub t6_lut: Option<Arc<asset_world::T6Lut>>,
 }
 
 /// bo2zm: one Black Ops II thing that moves, drawn by the fallback pass
@@ -556,10 +574,16 @@ struct DiagnosticGeometry {
     world_surface_color: Arc<Vec<u32>>,
     world_surface_draw: Arc<Vec<u32>>,
     world_surface_lightmap: Arc<Vec<u8>>,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     t6_lighting: Option<[[f32; 4]; 3]>,
     t6_sun_sample_size_near: f32,
     t6_props: Arc<Vec<[u32; 4]>>,
     t6_prop_shine: Arc<Vec<[u32; 3]>>,
+=======
+    t6_lighting: Option<[[f32; 4]; 19]>,
+    t6_props: Arc<Vec<[u32; 4]>>,
+    t6_prop_shine: Arc<Vec<[u32; 2]>>,
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     world_surface_primary: Arc<Vec<u8>>,
     t6_lights: Arc<Vec<[f32; 16]>>,
     world_surface_layers: Arc<Vec<[u32; 2]>>,
@@ -567,6 +591,7 @@ struct DiagnosticGeometry {
     world_surface_shine: Arc<Vec<[u32; 3]>>,
     t6_probe_slot: Option<u32>,
     t6_probes: Arc<Vec<[[f32; 4]; 3]>>,
+    t6_lut: Option<Arc<asset_world::T6Lut>>,
     /// bo2zm: the world's layer texcoords, parallel to its vertices.
     world_layer_vertex: Option<Buffer>,
     world_layer_uvs: Arc<Vec<[f32; 4]>>,
@@ -592,13 +617,20 @@ struct DiagnosticWorldLightmaps {
     generation: MaterialGenerationId,
     sampler: Option<Sampler>,
     constants: Option<Buffer>,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     written: Option<[[f32; 4]; 3]>,
+=======
+    written: Option<[[f32; 4]; 19]>,
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     bind_groups: HashMap<u8, BindGroup>,
     /// The sky: its cube map's slot and bind group (cube, sampler, lighting).
     sky: Option<(u32, BindGroup)>,
     /// The primary lights uniform (`T6_LIGHTS_BYTES`) and what it holds.
     lights: Option<Buffer>,
     lights_written: Option<Arc<Vec<[f32; 16]>>>,
+    /// The world's colour tables (a 1x1 white texel without them) and the
+    /// table they came from.
+    lut: Option<(Option<Arc<asset_world::T6Lut>>, bevy::render::render_resource::TextureView)>,
     /// Group 2 for surfaces without a lightmap: lighting and lights only.
     lighting_group: Option<BindGroup>,
     /// The lights effects throw (`T6_DYN_BYTES`), rewritten every frame.
@@ -609,9 +641,10 @@ struct DiagnosticWorldLightmaps {
 const T6_DYN_LIGHTS: usize = 16;
 const T6_DYN_BYTES: u64 = (16 + T6_DYN_LIGHTS * 32) as u64;
 
-/// bo2zm: the primary lights uniform: 32 lights of four vec4.
-const T6_MAX_LIGHTS: usize = 32;
-const T6_LIGHTS_BYTES: u64 = (T6_MAX_LIGHTS * 64) as u64;
+/// bo2zm: the primary lights uniform: 256 lights of four vec4 (a surface's
+/// light index is a byte; Die Rise has 214), then the two fog rows.
+const T6_LIGHT_ROWS: usize = 258;
+const T6_LIGHTS_BYTES: u64 = (T6_LIGHT_ROWS * 64) as u64;
 
 /// bo2zm: Black Ops II draw codes (see `asset_core::T6Draw::code`).
 const T6_BLEND_MASK: u32 = 0x0f;
@@ -627,11 +660,19 @@ const T6_ALPHA_TEST: u32 = 0x80;
 const T6_RASTER_MASK: u32 = 0x0f00;
 
 /// Style bit: the surface reads its lightmap (lit codes only).
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
 const STYLE_LIGHTMAPPED: u16 = 0x20;
 /// Style bit: a lit lightmapped opaque surface with a normal or specular
 /// map draws with BO2's shine: normal map, gloss highlight, reflection
 /// probe (group 1 bindings 8, 9; group 3).
 const STYLE_SHINE: u16 = 0x08;
+=======
+const STYLE_LIGHTMAPPED: u32 = 0x20;
+/// Style bit: a lit lightmapped opaque surface with a normal or specular
+/// map draws with BO2's shine: normal map, gloss highlight, reflection
+/// probe (group 1 bindings 8, 9; group 3).
+const STYLE_SHINE: u32 = 0x08;
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
 /// The reflection probe table: per probe its `lightingSH`, three vec4.
 const T6_MAX_PROBES: usize = 32;
 const T6_PROBES_BYTES: u64 = (T6_MAX_PROBES * 48) as u64;
@@ -639,6 +680,8 @@ const T6_PROBES_BYTES: u64 = (T6_MAX_PROBES * 48) as u64;
 /// 1 and 2 (24..25, 26..27).
 const T6_UNLIT_SCALE_MASK: u32 = 0x7000;
 const T6_LAYER_SHIFT: u32 = 24;
+/// Draw-code bits: the high bit of extra layers 1 and 2's kinds (30, 31).
+const T6_LAYER_HIGH: u32 = 30;
 
 /// The sort key a draw code carries (blended surfaces draw in its order).
 fn t6_sort_key(code: u32) -> u32 {
@@ -653,6 +696,7 @@ fn t6_blended(code: u32) -> bool {
 /// The pipeline style of a world surface: blend (bits 0..1), unlit (4),
 /// lightmapped (5), layered (6), alpha tested (7), cull (8..9), polygon
 /// offset (10..11). A surface with no BO2 draw is style 0.
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
 fn world_style(code: u32, lightmapped: bool) -> u16 {
     if code == T6_NONE {
         return 0;
@@ -682,10 +726,32 @@ fn world_style(code: u32, lightmapped: bool) -> u16 {
     // bo2mp: a test layer 1 (`t1c1`): bit 2 with layer 1's kind blend.
     if code & T6_TEST1 != 0 && style_layers(style) && (style >> 12) & 3 == 1 {
         style |= STYLE_WORLD_OWN;
+=======
+fn world_style(code: u32, lightmapped: bool) -> u32 {
+    if code == T6_NONE {
+        return 0;
+    }
+    let mut style = code & (3 | T6_UNLIT | T6_RASTER_MASK);
+    if code & T6_UNLIT != 0 {
+        style |= code & T6_UNLIT_SCALE_MASK;
+    }
+    if lightmapped && code & T6_UNLIT == 0 {
+        style |= STYLE_LIGHTMAPPED | (code & T6_LAYERED);
+        // Lit lightmapped styles keep the extra layers' kinds in bits
+        // 16..18 and 19..21.
+        for k in 0..2 {
+            let kind = ((code >> (T6_LAYER_SHIFT + 2 * k)) & 3) | ((code >> (T6_LAYER_HIGH + k)) & 1) << 2;
+            style |= kind << (STYLE_LAYER_SHIFT + 3 * k);
+        }
+    }
+    if code & T6_ALPHA_TEST != 0 && code & 3 == 0 {
+        style |= T6_ALPHA_TEST;
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     }
     style
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
 /// Draw-code bit of a lit code: layer 1 is a test layer (`t1c1`).
 const T6_TEST1: u32 = 0x2000;
 
@@ -726,6 +792,8 @@ fn style_water(style: u16) -> bool {
         && style & (STYLE_WORLD_OWN | STYLE_LAYER_MASK) == STYLE_WATER
 }
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
 /// Draw-code bit / prop style bit: a BO2 effect technique (props are never
 /// lightmapped, so the bit is free in prop styles).
 const T6_EFFECT: u32 = 0x20;
@@ -735,11 +803,16 @@ const T6_CLOUD: u32 = 0x8000;
 /// Prop style bit: an effect drawn with soft edges (BO2's zfeather pixel
 /// shaders), reading the scene depth (group 3). Props are never layered,
 /// so the layered bit is free in prop styles.
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
 const STYLE_SOFT: u16 = 0x40;
+=======
+const STYLE_SOFT: u32 = 0x40;
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
 /// Draw-code bit: BO2's objective technique (the box's question marks).
 const T6_OBJECTIVE: u32 = 0x1000_0000;
 /// Prop style bit: an objective surface (bit 2 is free in prop styles: the
 /// blend keeps bits 0..1).
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
 const STYLE_OBJECTIVE: u16 = 0x04;
 
 /// Draw-code bit: BO2's foliage technique (`treecanopy`): the vertex colour
@@ -760,10 +833,44 @@ fn prop_style(code: u32) -> u16 {
     }
     if code & T6_ALPHA_TEST != 0 && code & 3 == 0 {
         style |= T6_ALPHA_TEST as u16;
+=======
+const STYLE_OBJECTIVE: u32 = 0x04;
+/// Draw-code bit: BO2's projected decal technique (the blood a hit paints
+/// on a zombie): its box paints what lies inside it, from the scene depth.
+const T6_DECAL: u32 = 0x2000_0000;
+/// Prop style bit: a projected decal (lit, so the unlit scale's bit 12 is
+/// free); it draws only with the scene depth (`STYLE_SOFT`, group 3).
+const STYLE_DECAL: u32 = 0x1000;
+/// Draw-code bits: BO2's ghost technique (Mob's Afterlife ghost hands),
+/// both the objective and the decal bit.
+const T6_GHOST: u32 = T6_OBJECTIVE | T6_DECAL;
+/// Prop style bit: a ghost surface (lit, so the unlit scale's bit 13 is
+/// free).
+const STYLE_GHOST: u32 = 0x2000;
+
+/// The pipeline style of a prop surface (never lightmapped or layered).
+fn prop_style(code: u32) -> u32 {
+    if code == T6_NONE {
+        return 0;
+    }
+    let mut style = code & (3 | T6_UNLIT | T6_RASTER_MASK | T6_EFFECT | T6_CLOUD);
+    if code & T6_UNLIT != 0 {
+        style |= code & T6_UNLIT_SCALE_MASK;
+    }
+    if code & T6_ALPHA_TEST != 0 && code & 3 == 0 {
+        style |= T6_ALPHA_TEST;
+    }
+    if code & T6_GHOST == T6_GHOST {
+        if code & T6_UNLIT == 0 {
+            style |= STYLE_GHOST;
+        }
+        return style;
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     }
     if code & T6_OBJECTIVE != 0 {
         style |= STYLE_OBJECTIVE;
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     if code & T6_FOLIAGE != 0 && code & T6_UNLIT == 0 {
         style |= STYLE_FOLIAGE;
     }
@@ -777,10 +884,15 @@ fn prop_style(code: u32) -> u16 {
     // diffuse's (gloss). A tile blend sets both bits (tile and flag).
     if code & T6_FLAG != 0 && code & T6_UNLIT == 0 {
         style = (style & !(T6_ALPHA_TEST as u16)) | STYLE_PROP_FLAG;
+=======
+    if code & T6_DECAL != 0 && code & T6_UNLIT == 0 {
+        style |= STYLE_DECAL;
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     }
     style
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
 /// The prop kind among emissive tile, tattered flag and tile blend.
 fn prop_own_kind(style: u16) -> u16 {
     if style & T6_UNLIT as u16 != 0 {
@@ -883,6 +995,8 @@ fn note_dynamic_skip(slot: u32, code: u32, style: u16, pipeline_known: bool, pip
     );
 }
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
 /// bo2zm: one dynamic list (marks, projectiles, effects, the gun) into a
 /// pass: the draws `keep` admits, opaque first, then blended by sort key;
 /// effects with soft edges when `soft` (the scene depth) is given. Returns
@@ -938,12 +1052,22 @@ fn draw_dynamic_list<'w>(
         let shine_group = (prop_shine_code(code) && (normal != u32::MAX || specular != u32::MAX))
             .then(|| world_textures.probes.as_ref())
             .flatten()
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
             .and_then(|_| {
                 world_textures
                     .shine
                     .get(&(slot, normal, specular, u32::MAX))
             });
         let soft_here = soft.filter(|_| soft_code(code));
+=======
+            .and_then(|_| world_textures.shine.get(&(slot, normal, specular)));
+        let soft_here = soft.filter(|_| soft_code(code) || decal_code(code));
+        // A projected decal without the scene depth has nothing to paint
+        // (its box itself is never drawn).
+        if decal_code(code) && soft_here.is_none() {
+            continue;
+        }
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
         let style = prop_style(code)
             | if shine_group.is_some() { STYLE_SHINE } else { 0 }
             | if soft_here.is_some() { STYLE_SOFT } else { 0 };
@@ -1123,7 +1247,24 @@ fn soft_code(code: u32) -> bool {
     code != T6_NONE && code & T6_EFFECT != 0 && code & T6_CLOUD == 0 && t6_blended(code)
 }
 
+/// bo2zm 27c: a cloud sheet code (the cloud bit without the effect bit;
+/// Die Rise's `scrolling_zfeather` cloud floor): its texture drifts, and with
+/// the scene depth it fades where what is behind it is near.
+fn sheet_code(code: u32) -> bool {
+    code != T6_NONE && code & T6_CLOUD != 0 && code & T6_EFFECT == 0
+}
+
+/// bo2zm M4 retest 5: a projected decal code (lit, not an effect).
+fn decal_code(code: u32) -> bool {
+    code != T6_NONE
+        && code & T6_DECAL != 0
+        && code & T6_GHOST != T6_GHOST
+        && code & T6_UNLIT == 0
+        && code & T6_EFFECT == 0
+}
+
 /// bo2zm: a prop or dynamic code that can draw with shine: lit, opaque or
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
 /// blended (glass), not an effect.
 fn prop_shine_code(code: u32) -> bool {
     code != T6_NONE && code & T6_UNLIT == 0 && code & 3 <= 1 && code & T6_EFFECT == 0
@@ -1139,6 +1280,24 @@ fn style_layers(style: u16) -> bool {
         && style & STYLE_LAYER_MASK != 0
         && !style_water(style)
         && !style_flow(style)
+=======
+/// blended (glass), not an effect or a projected decal.
+fn prop_shine_code(code: u32) -> bool {
+    code != T6_NONE
+        && code & T6_UNLIT == 0
+        && code & 3 <= 1
+        && code & T6_EFFECT == 0
+        && code & T6_DECAL == 0
+}
+
+/// Style bits of a lit lightmapped style's extra layers' kinds (16..21).
+const STYLE_LAYER_SHIFT: u32 = 16;
+const STYLE_LAYER_MASK: u32 = 0x3f << STYLE_LAYER_SHIFT;
+
+/// A style draws extra layers (lit, lightmapped, with layer kinds).
+fn style_layers(style: u32) -> bool {
+    style & STYLE_LIGHTMAPPED != 0 && style & T6_UNLIT == 0 && style & STYLE_LAYER_MASK != 0
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
 }
 
 /// Every textured pipeline the codes need: each lit world code with and
@@ -1152,6 +1311,7 @@ fn t6_styles(world: &[u32], props: &[[u32; 4]]) -> Vec<DiagnosticTess> {
         styles.insert(DiagnosticTess::WorldTextured(world_style(code, false)));
         styles.insert(DiagnosticTess::WorldTextured(world_style(code, true)));
         // Layered: also the base-layer-only style (layer maps missing).
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
         styles.insert(DiagnosticTess::WorldTextured(strip_layers(world_style(
             code, true,
         ))));
@@ -1167,6 +1327,16 @@ fn t6_styles(world: &[u32], props: &[[u32; 4]]) -> Vec<DiagnosticTess> {
                 world_style(code, true) | STYLE_SHINE,
             ));
         }
+=======
+        styles.insert(DiagnosticTess::WorldTextured(
+            world_style(code, true) & !STYLE_LAYER_MASK,
+        ));
+        // Opaque lit lightmapped: also with shine.
+        let lit = world_style(code, true) & !STYLE_LAYER_MASK;
+        if lit & STYLE_LIGHTMAPPED != 0 && lit & 3 <= 1 {
+            styles.insert(DiagnosticTess::WorldTextured(lit | STYLE_SHINE));
+        }
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     }
     for draw in props {
         let code = draw[2];
@@ -1177,6 +1347,9 @@ fn t6_styles(world: &[u32], props: &[[u32; 4]]) -> Vec<DiagnosticTess> {
             styles.insert(DiagnosticTess::PropTextured(prop_style(code) | STYLE_SHINE));
         }
         styles.insert(DiagnosticTess::PropTextured(prop_style(code)));
+        if sheet_code(code) {
+            styles.insert(DiagnosticTess::PropTextured(prop_style(code) | STYLE_SOFT));
+        }
     }
     styles.into_iter().collect()
 }
@@ -1188,6 +1361,8 @@ fn t6_styles(world: &[u32], props: &[[u32; 4]]) -> Vec<DiagnosticTess> {
 struct DiagnosticWorldTextures {
     generation: MaterialGenerationId,
     sampler: Option<Sampler>,
+    /// The anisotropy the sampler was made with (his texture filtering).
+    aniso: u16,
     bind_groups: HashMap<u32, BindGroup>,
     /// bo2zm: layered surfaces' group 1, by (colour, layer 1, layer 2)
     /// slots; a missing layer reuses the colour map (its weight is still
@@ -1195,7 +1370,11 @@ struct DiagnosticWorldTextures {
     layered: HashMap<(u32, u32, u32), BindGroup>,
     /// bo2zm: shine surfaces' group 1, by (colour, normal, specular)
     /// slots; a missing map binds a flat normal / black specular.
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     shine: HashMap<(u32, u32, u32, u32), BindGroup>,
+=======
+    shine: HashMap<(u32, u32, u32), BindGroup>,
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     /// bo2zm: 1x1 stand-ins: a flat normal, a black specular map.
     flat_normal: Option<bevy::render::render_resource::TextureView>,
     no_specular: Option<bevy::render::render_resource::TextureView>,
@@ -1250,9 +1429,15 @@ enum DiagnosticTess {
     World,
     /// bo2zm: world surfaces with a colour map (group 1 = colour map), by
     /// style (`world_style`).
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     WorldTextured(u16),
     /// bo2zm: Black Ops II props with a colour map, by style (`prop_style`).
     PropTextured(u16),
+=======
+    WorldTextured(u32),
+    /// bo2zm: Black Ops II props with a colour map, by style (`prop_style`).
+    PropTextured(u32),
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     /// bo2zm: the Black Ops II sky, a full-screen triangle at the far plane
     /// sampling its cube map (group 1, bindings 3..5).
     Sky,
@@ -1273,26 +1458,43 @@ impl SpecializedRenderPipeline for DiagnosticPipeline {
                             "UNLIT_SCALE".into(),
                             1u32 << ((style >> 12) & 7),
                         )];
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                         if style & T6_UNLIT as u16 != 0 {
+=======
+                        if style & T6_UNLIT != 0 {
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                             defs.push("UNLIT".into());
                             if style & 3 == 3 {
                                 defs.push("MULTIPLY".into());
                             }
+                            if style & 3 == 2 {
+                                defs.push("ADD".into());
+                            }
                         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                         if style & T6_ALPHA_TEST as u16 != 0 {
                             defs.push("ALPHA_TEST".into());
                         }
                         if style & STYLE_LIGHTMAPPED != 0 && style & T6_LAYERED as u16 != 0 {
+=======
+                        if style & T6_ALPHA_TEST != 0 {
+                            defs.push("ALPHA_TEST".into());
+                        }
+                        if style & STYLE_LIGHTMAPPED != 0 && style & T6_LAYERED != 0 {
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                             defs.push("UNTINTED".into());
                         }
                         if style & STYLE_SHINE != 0 {
                             defs.push("SHINE".into());
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                             if style_water(style) {
                                 defs.push("WATER".into());
                             }
                             if style_flow(style) {
                                 defs.push("FLOW".into());
                             }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                         }
                         if matches!(key.tess, DiagnosticTess::PropTextured(_))
                             && style & STYLE_OBJECTIVE != 0
@@ -1300,6 +1502,7 @@ impl SpecializedRenderPipeline for DiagnosticPipeline {
                             defs.push("OBJECTIVE".into());
                         }
                         if matches!(key.tess, DiagnosticTess::PropTextured(_))
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                             && style & T6_UNLIT as u16 == 0
                             && style & STYLE_FOLIAGE != 0
                         {
@@ -1325,6 +1528,14 @@ impl SpecializedRenderPipeline for DiagnosticPipeline {
                         }
                         if matches!(key.tess, DiagnosticTess::PropTextured(_))
                             && style & T6_EFFECT as u16 != 0
+=======
+                            && style & STYLE_GHOST != 0
+                        {
+                            defs.push("GHOST".into());
+                        }
+                        if matches!(key.tess, DiagnosticTess::PropTextured(_))
+                            && style & T6_EFFECT != 0
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                         {
                             defs.push("EFFECT".into());
                             match style & 3 {
@@ -1332,15 +1543,39 @@ impl SpecializedRenderPipeline for DiagnosticPipeline {
                                 3 => defs.push("EFFECT_MULTIPLY".into()),
                                 _ => {}
                             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                             if u32::from(style) & T6_CLOUD != 0 {
+=======
+                            if style & T6_CLOUD != 0 {
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                                 defs.push("CLOUD".into());
                             }
                             if style & STYLE_SOFT != 0 {
                                 defs.push("SOFT".into());
                             }
                         }
+                        if matches!(key.tess, DiagnosticTess::PropTextured(_))
+                            && style & T6_CLOUD != 0
+                            && style & T6_EFFECT == 0
+                        {
+                            defs.push("SCROLL".into());
+                            if style & STYLE_SOFT != 0 {
+                                defs.push("SOFT".into());
+                            }
+                        }
+                        // (An unlit style's colour scale shares the decal
+                        // bit; decals are lit.)
+                        if matches!(key.tess, DiagnosticTess::PropTextured(_))
+                            && style & STYLE_DECAL != 0
+                            && style & STYLE_SOFT != 0
+                            && style & T6_UNLIT == 0
+                        {
+                            defs.push("DECAL".into());
+                            defs.push("SOFT".into());
+                        }
                         if style_layers(style) {
                             defs.push("LAYERS".into());
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                             for (k, shift) in [(1, 12), (2, 14)] {
                                 match (style >> shift) & 3 {
                                     1 if k == 1 && style & STYLE_WORLD_OWN != 0 => {
@@ -1349,6 +1584,14 @@ impl SpecializedRenderPipeline for DiagnosticPipeline {
                                     1 => defs.push(format!("LAYER{k}_BLEND").into()),
                                     2 => defs.push(format!("LAYER{k}_MULTIPLY").into()),
                                     3 => defs.push(format!("LAYER{k}_ADD").into()),
+=======
+                            for k in 1..=2 {
+                                match (style >> (STYLE_LAYER_SHIFT + 3 * (k - 1))) & 7 {
+                                    1 => defs.push(format!("LAYER{k}_BLEND").into()),
+                                    2 => defs.push(format!("LAYER{k}_MULTIPLY").into()),
+                                    3 => defs.push(format!("LAYER{k}_TESTED").into()),
+                                    4 => defs.push(format!("LAYER{k}_ADD").into()),
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                                     _ => {}
                                 }
                             }
@@ -1387,7 +1630,14 @@ impl SpecializedRenderPipeline for DiagnosticPipeline {
                     self.lightmap_layout.clone(),
                 ],
                 DiagnosticTess::PropTextured(style)
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                     if style & STYLE_SOFT != 0 && style & T6_EFFECT as u16 != 0 =>
+=======
+                    if style & STYLE_SOFT != 0
+                        && (style & T6_EFFECT != 0
+                            || style & STYLE_DECAL != 0
+                            || style & T6_CLOUD != 0) =>
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                 {
                     vec![
                         self.view_layout.clone(),
@@ -1517,7 +1767,11 @@ impl SpecializedRenderPipeline for DiagnosticPipeline {
 
 /// bo2zm: the colour blend for a Black Ops II draw code: alpha blend, add,
 /// or multiply what is behind; opaque has none.
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
 fn t6_blend_state(code: u16) -> Option<BlendState> {
+=======
+fn t6_blend_state(code: u32) -> Option<BlendState> {
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     let keep_alpha = BlendComponent {
         src_factor: BlendFactor::Zero,
         dst_factor: BlendFactor::One,
@@ -1707,11 +1961,17 @@ fn init_pipeline(mut commands: Commands, asset_server: Res<AssetServer>) {
                 (
                     (3, texture_cube(TextureSampleType::Float { filterable: true })),
                     (4, sampler(SamplerBindingType::Filtering)),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                     (5, uniform_buffer_sized(false, std::num::NonZeroU64::new(48))),
+=======
+                    (5, uniform_buffer_sized(false, std::num::NonZeroU64::new(304))),
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                     (
                         6,
                         uniform_buffer_sized(false, std::num::NonZeroU64::new(T6_LIGHTS_BYTES)),
                     ),
+                    (10, texture_2d(TextureSampleType::Float { filterable: true })),
+                    (11, sampler(SamplerBindingType::Filtering)),
                 ),
             ),
         ),
@@ -1722,12 +1982,20 @@ fn init_pipeline(mut commands: Commands, asset_server: Res<AssetServer>) {
                 (
                     texture_2d(TextureSampleType::Float { filterable: true }),
                     sampler(SamplerBindingType::Filtering),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                     uniform_buffer_sized(false, std::num::NonZeroU64::new(48)),
                     uniform_buffer_sized(false, std::num::NonZeroU64::new(T6_LIGHTS_BYTES)),
                     uniform_buffer_sized(false, std::num::NonZeroU64::new(T6_DYN_BYTES)),
                     texture_2d_array(TextureSampleType::Depth),
                     sampler(SamplerBindingType::Comparison),
                     uniform_buffer_sized(false, std::num::NonZeroU64::new(sun_shadow::PARAMS_BYTES)),
+=======
+                    uniform_buffer_sized(false, std::num::NonZeroU64::new(304)),
+                    uniform_buffer_sized(false, std::num::NonZeroU64::new(T6_LIGHTS_BYTES)),
+                    uniform_buffer_sized(false, std::num::NonZeroU64::new(T6_DYN_BYTES)),
+                    texture_2d(TextureSampleType::Float { filterable: true }),
+                    sampler(SamplerBindingType::Filtering),
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                 ),
             ),
         ),
@@ -1748,7 +2016,11 @@ fn init_pipeline(mut commands: Commands, asset_server: Res<AssetServer>) {
             &BindGroupLayoutEntries::with_indices(
                 ShaderStages::FRAGMENT,
                 (
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                     (2, uniform_buffer_sized(false, std::num::NonZeroU64::new(48))),
+=======
+                    (2, uniform_buffer_sized(false, std::num::NonZeroU64::new(304))),
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                     (
                         3,
                         uniform_buffer_sized(false, std::num::NonZeroU64::new(T6_LIGHTS_BYTES)),
@@ -1757,6 +2029,7 @@ fn init_pipeline(mut commands: Commands, asset_server: Res<AssetServer>) {
                         4,
                         uniform_buffer_sized(false, std::num::NonZeroU64::new(T6_DYN_BYTES)),
                     ),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                     (5, texture_2d_array(TextureSampleType::Depth)),
                     (6, sampler(SamplerBindingType::Comparison)),
                     (
@@ -1766,6 +2039,10 @@ fn init_pipeline(mut commands: Commands, asset_server: Res<AssetServer>) {
                             std::num::NonZeroU64::new(sun_shadow::PARAMS_BYTES),
                         ),
                     ),
+=======
+                    (5, texture_2d(TextureSampleType::Float { filterable: true })),
+                    (6, sampler(SamplerBindingType::Filtering)),
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                 ),
             ),
         ),
@@ -1778,10 +2055,13 @@ fn init_pipeline(mut commands: Commands, asset_server: Res<AssetServer>) {
                     (1, sampler(SamplerBindingType::Filtering)),
                     (8, texture_2d(TextureSampleType::Float { filterable: true })),
                     (9, texture_2d(TextureSampleType::Float { filterable: true })),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                     (
                         10,
                         texture_2d(TextureSampleType::Float { filterable: true }),
                     ),
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                 ),
             ),
         ),
@@ -1813,9 +2093,15 @@ fn upload_geometry(
     if !geometry_diagnostic_enabled() {
         return;
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     // bo2zm: BO2's bloom and final colour on a Black Ops II map (it has T6
     // lighting). (`IW4L_T6_NO_BLOOM` turns the bloom off, not the colour.)
     bloom.0 = source.t6_lighting.is_some() && source.t6_bloom;
+=======
+    // bo2zm: BO2's bloom on a Black Ops II map (it has T6 lighting).
+    // (`IW4L_T6_NO_BLOOM` turns it off: a test aid for comparing.)
+    bloom.0 = source.t6_lighting.is_some() && std::env::var_os("IW4L_T6_NO_BLOOM").is_none();
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     if source.overlay_gpu_wait {
         use std::sync::atomic::{AtomicBool, Ordering};
         static SKIPPED: AtomicBool = AtomicBool::new(false);
@@ -1923,6 +2209,7 @@ fn upload_geometry(
     geometry.world_surface_shine = Arc::clone(&source.world_surface_shine);
     geometry.t6_probe_slot = source.t6_probe_slot;
     geometry.t6_probes = Arc::clone(&source.t6_probes);
+    geometry.t6_lut = source.t6_lut.clone();
     if !Arc::ptr_eq(&geometry.world_layer_uvs, &source.world_layer_uvs) {
         geometry.world_layer_uvs = Arc::clone(&source.world_layer_uvs);
         geometry.world_layer_vertex = (!source.world_layer_uvs.is_empty()
@@ -2272,13 +2559,14 @@ fn prepare_world_lightmaps(
         .as_ref()
         .is_none_or(|have| !Arc::ptr_eq(have, &geometry.t6_lights))
     {
-        let mut table = vec![[0.0f32; 16]; T6_MAX_LIGHTS];
+        let mut table = vec![[0.0f32; 16]; T6_LIGHT_ROWS];
         for (row, light) in table.iter_mut().zip(geometry.t6_lights.iter()) {
             *row = *light;
         }
         queue.write_buffer(&lights, 0, bytemuck::cast_slice(&table));
         lightmaps.lights_written = Some(Arc::clone(&geometry.t6_lights));
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     if lightmaps.lighting_group.is_none() {
         lightmaps.lighting_group = Some(device.create_bind_group(
             "bo2zm_world_lighting_only",
@@ -2293,6 +2581,8 @@ fn prepare_world_lightmaps(
             )),
         ));
     }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     let sampler = lightmaps
         .sampler
         .get_or_insert_with(|| {
@@ -2307,6 +2597,64 @@ fn prepare_world_lightmaps(
             })
         })
         .clone();
+    // bo2zm: the world's colour tables (read with that sampler, linear and
+    // clamped); every group holding them is remade when the map changes.
+    if lightmaps.lut.as_ref().is_none_or(|(have, _)| match (have, &geometry.t6_lut) {
+        (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+        (None, None) => false,
+        _ => true,
+    }) {
+        use bevy::render::render_resource::{TextureDescriptor, TextureUsages, TextureViewDescriptor};
+        use bevy::render::render_resource::{Extent3d, TextureDimension};
+        let (width, height, texels) = match geometry.t6_lut.as_deref() {
+            Some(lut) if lut.rgba.len() == (lut.width * lut.height * 4) as usize => {
+                (lut.width, lut.height, lut.rgba.as_slice())
+            }
+            _ => (1, 1, &[255u8, 255, 255, 255][..]),
+        };
+        let texture = device.create_texture_with_data(
+            &queue,
+            &TextureDescriptor {
+                label: Some("bo2zm_world_lut"),
+                size: Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+            bevy::render::render_resource::TextureDataOrder::LayerMajor,
+            texels,
+        );
+        lightmaps.lut = Some((
+            geometry.t6_lut.clone(),
+            texture.create_view(&TextureViewDescriptor::default()),
+        ));
+        lightmaps.bind_groups.clear();
+        lightmaps.sky = None;
+        lightmaps.lighting_group = None;
+    }
+    let Some(lut) = lightmaps.lut.as_ref().map(|(_, view)| view.clone()) else {
+        return;
+    };
+    if lightmaps.lighting_group.is_none() {
+        lightmaps.lighting_group = Some(device.create_bind_group(
+            "bo2zm_world_lighting_only",
+            &cache.get_bind_group_layout(&pipeline.lighting_layout),
+            &BindGroupEntries::with_indices((
+                (2, constants.as_entire_binding()),
+                (3, lights.as_entire_binding()),
+                (4, dyn_lights.as_entire_binding()),
+                (5, &lut),
+                (6, &sampler),
+            )),
+        ));
+    }
     if let Some(slot) = geometry.t6_sky_slot
         && lightmaps.sky.as_ref().is_none_or(|(have, _)| *have != slot)
         && let Some(Some(Ok(view))) = registry.material_images.get(slot as usize)
@@ -2327,6 +2675,8 @@ fn prepare_world_lightmaps(
                 (4, &sky_sampler),
                 (5, constants.as_entire_binding()),
                 (6, lights.as_entire_binding()),
+                (10, &lut),
+                (11, &sampler),
             )),
         );
         lightmaps.sky = Some((slot, sky));
@@ -2351,9 +2701,14 @@ fn prepare_world_lightmaps(
                 constants.as_entire_binding(),
                 lights.as_entire_binding(),
                 dyn_lights.as_entire_binding(),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                 &shadow.array,
                 &shadow.sampler,
                 shadow.params.as_entire_binding(),
+=======
+                &lut,
+                &sampler,
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
             )),
         );
         lightmaps.bind_groups.insert(page, bind_group);
@@ -2394,6 +2749,16 @@ fn prepare_world_textures(
         textures.probes = None;
         textures.generation = registry.generation_id;
     }
+    // His texture filtering row changed: a new sampler, new bind groups.
+    let aniso = asset_core::t6_aniso().min(if asset_core::t6_fast() { 4 } else { 16 });
+    if textures.aniso != aniso {
+        textures.bind_groups.clear();
+        textures.layered.clear();
+        textures.shine.clear();
+        textures.probes = None;
+        textures.sampler = None;
+        textures.aniso = aniso;
+    }
     let sampler = textures
         .sampler
         .get_or_insert_with(|| {
@@ -2405,8 +2770,14 @@ fn prepare_world_textures(
                 mag_filter: FilterMode::Linear,
                 min_filter: FilterMode::Linear,
                 mipmap_filter: MipmapFilterMode::Linear,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                 // bo2zm: 16x, 4x at the fast quality setting.
                 anisotropy_clamp: if asset_core::t6_fast() { 4 } else { 16 },
+=======
+                // bo2zm: his texture filtering (low 1x, medium 4x, high
+                // 16x), 4x at most at the fast quality setting.
+                anisotropy_clamp: aniso,
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                 ..Default::default()
             })
         })
@@ -2504,6 +2875,7 @@ fn prepare_world_shine(
     sampler: &Sampler,
 ) {
     let no_shine = |s: &[u32; 2]| s[0] == u32::MAX && s[1] == u32::MAX;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     let dynamic_shine: Vec<(u32, u32, u32, u32)> = dynamic
         .into_iter()
         .flat_map(|d| [d.viewmodel.as_ref()].into_iter().flatten())
@@ -2516,6 +2888,24 @@ fn prepare_world_shine(
             .t6_prop_shine
             .iter()
             .all(|s| no_shine(&[s[0], s[1]]))
+=======
+    // The gun in his hands, things in flight and moving script models (the
+    // power-ups), and the script models that hold still.
+    let dynamic_shine: Vec<(u32, u32, u32)> = dynamic
+        .into_iter()
+        .flat_map(|d| {
+            [d.viewmodel.as_ref(), d.missiles.as_ref()]
+                .into_iter()
+                .flatten()
+                .flat_map(|draw| draw.draws.iter())
+                .chain(d.script_static.iter().flat_map(|draw| draw.draws.iter()))
+        })
+        .filter(|d| !no_shine(&[d[5], d[6]]))
+        .map(|d| (d[2], d[5], d[6]))
+        .collect();
+    if geometry.world_surface_shine.iter().all(|s| no_shine(&[s[0], s[1]]))
+        && geometry.t6_prop_shine.iter().all(no_shine)
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
         && dynamic_shine.is_empty()
     {
         return;
@@ -2561,6 +2951,7 @@ fn prepare_world_shine(
         .world_surface_shine
         .iter()
         .zip(geometry.world_surface_color.iter())
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
         .enumerate()
         .map(|(i, (sh, &colour))| {
             // bo2mp: an emissive flow surface's remap and constants.
@@ -2578,10 +2969,14 @@ fn prepare_world_shine(
             };
             (colour, sh[0], sh[1], aux)
         });
+=======
+        .map(|(sh, &colour)| (colour, sh[0], sh[1]));
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     let prop_keys = geometry
         .t6_prop_shine
         .iter()
         .zip(geometry.t6_props.iter())
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
         .map(|(sh, draw)| {
             let flow = prop_style(draw[2]) & (STYLE_PROP_FLOW | STYLE_PROP_TILE) != 0
                 || (prop_style(draw[2]) & STYLE_PROP_FLAG != 0 && draw[2] & T6_UNLIT == 0);
@@ -2591,6 +2986,12 @@ fn prepare_world_shine(
         world_keys.chain(prop_keys).chain(dynamic_shine).collect();
     for key in keys {
         let (colour, n, s, aux) = key;
+=======
+        .map(|(sh, draw)| (draw[1], sh[0], sh[1]));
+    let keys: Vec<(u32, u32, u32)> = world_keys.chain(prop_keys).chain(dynamic_shine).collect();
+    for key in keys {
+        let (colour, n, s) = key;
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
         if n == u32::MAX && s == u32::MAX {
             continue;
         }
@@ -2600,13 +3001,18 @@ fn prepare_world_shine(
         let Some(base) = view_of(colour) else { continue };
         let normal = if n == u32::MAX { textures.flat_normal.clone() } else { view_of(n) };
         let specular = if s == u32::MAX { textures.no_specular.clone() } else { view_of(s) };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
         let aux = if aux == u32::MAX { textures.no_specular.clone() } else { view_of(aux) };
         let (Some(normal), Some(specular), Some(aux)) = (normal, specular, aux) else {
+=======
+        let (Some(normal), Some(specular)) = (normal, specular) else {
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
             continue;
         };
         let bind_group = device.create_bind_group(
             "bo2zm_world_shine_maps",
             &layout,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
             &BindGroupEntries::with_indices((
                 (0, &base),
                 (1, sampler),
@@ -2614,6 +3020,9 @@ fn prepare_world_shine(
                 (9, &specular),
                 (10, &aux),
             )),
+=======
+            &BindGroupEntries::with_indices(((0, &base), (1, sampler), (8, &normal), (9, &specular))),
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
         );
         textures.shine.insert(key, bind_group);
     }
@@ -2708,7 +3117,11 @@ fn prepare_views(
                 if prop_shine_code(code) {
                     styles.insert(DiagnosticTess::PropTextured(prop_style(code) | STYLE_SHINE));
                 }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                 if soft_code(code) {
+=======
+                if soft_code(code) || decal_code(code) {
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                     styles.insert(DiagnosticTess::PropTextured(prop_style(code) | STYLE_SOFT));
                 }
             }
@@ -3006,7 +3419,14 @@ fn draw_geometry_diagnostic(
     let mut xmodel_skipped = 0u32;
     let mut fx_skipped = 0u32;
     let mut prop_draws = 0u32;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     let mut prop_batch_draws = 0u32;
+=======
+    let mut props_culled = 0u32;
+    // bo2zm 27c: cloud sheets draw in the effects pass, over the sky and
+    // with soft edges (`IW4L_T6_NO_SOFT`: here, hard-edged).
+    let soft_sheets = std::env::var_os("IW4L_T6_NO_SOFT").is_none();
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     // bo2zm: world surfaces drawn untextured (diagnostic colours), a few ids.
     let mut untextured: Vec<u16> = Vec::new();
     let mut untextured_n = 0u32;
@@ -3060,6 +3480,7 @@ fn draw_geometry_diagnostic(
                         .unwrap_or(u8::MAX);
                     let lightmap = (code != T6_NONE && code & T6_UNLIT == 0)
                         .then(|| world_lightmaps.bind_groups.get(&page))
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                         .flatten()
                         .map(|g| (g, u16::from(page)))
                         .or_else(|| {
@@ -3082,6 +3503,12 @@ fn draw_geometry_diagnostic(
                     // Group 2: the page's lightmap group, else lighting only.
                     let group2 = match lightmap {
                         Some(group) => Some(group),
+=======
+                        .flatten();
+                    // Group 2: the page's lightmap group, else lighting only.
+                    let group2 = match lightmap {
+                        Some(group) => Some((group, u16::from(page))),
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                         None => world_lightmaps.lighting_group.as_ref().map(|g| (g, u16::MAX)),
                     };
                     let mut style = world_style(code, lightmap.is_some());
@@ -3096,7 +3523,11 @@ fn draw_geometry_diagnostic(
                         .then(|| world_textures.layered.get(&(colour_slot, layers[0], layers[1])))
                         .flatten();
                     if style_layers(style) && layered_group.is_none() {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                         style = strip_layers(style);
+=======
+                        style &= !STYLE_LAYER_MASK;
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                     }
                     // Shine: an opaque lit lightmapped surface with a normal or
                     // specular map, when the probes are ready.
@@ -3110,6 +3541,7 @@ fn draw_geometry_diagnostic(
                         && style & 3 <= 1
                         && lightmap.is_some()
                         && world_textures.probes.is_some())
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                     .then(|| {
                         // bo2mp: emissive flow (lava) binds its colour remap
                         // and constants (layer 1's slot) beside its maps.
@@ -3124,6 +3556,12 @@ fn draw_geometry_diagnostic(
                         // waits for its normal maps and the probes.
                         world_skipped = world_skipped.saturating_add(1);
                         continue;
+=======
+                    .then(|| world_textures.shine.get(&(colour_slot, shine[0], shine[1])))
+                    .flatten();
+                    if shine_group.is_some() {
+                        style |= STYLE_SHINE;
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                     }
                     let key = DiagnosticTess::WorldTextured(style);
                     let group1 = match (shine_group, layered_group) {
@@ -3154,7 +3592,11 @@ fn draw_geometry_diagnostic(
                         let texture_key = (
                             colour_slot,
                             layered_group.map(|_| layers),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                             shine_group.map(|_| [shine[0], shine[1], layers[0]]),
+=======
+                            shine_group.map(|_| [shine[0], shine[1]]),
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                         );
                         if bound_texture != Some(texture_key) {
                             pass.set_bind_group(1, bind_group, &[]);
@@ -3369,6 +3811,9 @@ fn draw_geometry_diagnostic(
                 if code != T6_NONE && code & T6_BLEND_MASK >= T6_SHADOW_ONLY {
                     continue;
                 }
+                if soft_sheets && sheet_code(code) {
+                    continue;
+                }
                 if let Some(row) = instances_cpu.get(instance as usize)
                     && row[22] > 0.0
                 {
@@ -3394,17 +3839,25 @@ fn draw_geometry_diagnostic(
                     continue;
                 };
                 // Shine: a lit opaque prop with a normal or specular map.
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                 let shine = geometry.t6_prop_shine.get(i).copied().unwrap_or([u32::MAX; 3]);
                 let flow = prop_style(code) & (STYLE_PROP_FLOW | STYLE_PROP_TILE) != 0
                     || (prop_style(code) & STYLE_PROP_FLAG != 0 && code & T6_UNLIT == 0);
+=======
+                let shine = geometry.t6_prop_shine.get(i).copied().unwrap_or([u32::MAX; 2]);
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                 let shine_group = (prop_shine_code(code)
                     && (shine[0] != u32::MAX || shine[1] != u32::MAX))
                     .then(|| world_textures.probes.as_ref())
                     .flatten()
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                     .and_then(|_| {
                         let aux = if flow { shine[2] } else { u32::MAX };
                         world_textures.shine.get(&(slot, shine[0], shine[1], aux))
                     });
+=======
+                    .and_then(|_| world_textures.shine.get(&(slot, shine[0], shine[1])));
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
                 let style = prop_style(code) | if shine_group.is_some() { STYLE_SHINE } else { 0 };
                 let key = DiagnosticTess::PropTextured(style);
                 let (Some(pipeline), Some(bind_group)) = (
@@ -3523,6 +3976,66 @@ fn draw_geometry_diagnostic(
             multiview_mask: None,
         });
     pass.set_bind_group(0, &view_bind.bind_group, &[view_offset.offset]);
+    // bo2zm 27c: Black Ops II's cloud sheets (Die Rise's cloud floor,
+    // `scrolling_zfeather`), by sort key: over the sky, fading where the
+    // scene behind them is near (its depth is read-only here).
+    if soft_sheets
+        && let (Some(vertex), Some(index_buffer), Some(instances), Some(lighting_group)) = (
+            geometry.smodel_vertex.as_ref(),
+            geometry.smodel_index.as_ref(),
+            geometry.t6_prop_instance_buffer.as_ref(),
+            world_lightmaps.lighting_group.as_ref(),
+        )
+    {
+        let eye = extracted_view.world_from_view.translation();
+        let cull_scale = if asset_core::t6_fast() { 0.6 } else { 1.0 };
+        let mut bound = false;
+        for &i in &geometry.t6_blended_props {
+            let [surface, slot, code, instance] = geometry.t6_props[i];
+            if !sheet_code(code) {
+                continue;
+            }
+            if let Some(row) = geometry.t6_prop_instances.get(instance as usize)
+                && row[22] > 0.0
+            {
+                let d = Vec3::new(row[12], row[13], row[14]) - eye;
+                let cull = row[22] * cull_scale;
+                if d.length_squared() > cull * cull {
+                    props_culled += 1;
+                    continue;
+                }
+            }
+            let Some(&(start, count)) = geometry.smodel_surface_ranges.get(surface as usize)
+            else {
+                continue;
+            };
+            let (Some(pipeline), Some(bind_group)) = (
+                t6_pipeline(DiagnosticTess::PropTextured(prop_style(code) | STYLE_SOFT)),
+                world_textures.bind_groups.get(&slot),
+            ) else {
+                continue;
+            };
+            if count == 0 {
+                continue;
+            }
+            if !bound {
+                if vp_w > 0.0 && vp_h > 0.0 {
+                    let (depth_min, depth_max) = reverse_z_viewport_depth(0);
+                    pass.set_viewport(vp_x, vp_y, vp_w, vp_h, depth_min, depth_max);
+                }
+                pass.set_bind_group(2, lighting_group, &[]);
+                pass.set_bind_group(3, &soft_group, &[]);
+                pass.set_vertex_buffer(0, vertex.slice(..));
+                pass.set_vertex_buffer(1, instances.slice(..));
+                pass.set_index_buffer(index_buffer.slice(..), IndexFormat::Uint32);
+                bound = true;
+            }
+            pass.set_render_pipeline(pipeline);
+            pass.set_bind_group(1, bind_group, &[]);
+            pass.draw_indexed(start..start.saturating_add(count), 0, instance..instance + 1);
+            prop_draws = prop_draws.saturating_add(1);
+        }
+    }
     viewmodel_draws += draw_dynamic_list(
         &mut pass,
         dynamic.effects.as_ref(),
@@ -3588,12 +4101,15 @@ fn draw_geometry_diagnostic(
     if let Some(prev) = perf.last_frame {
         let ms = now.duration_since(prev).as_secs_f32() * 1000.0;
         perf.worst_ms = perf.worst_ms.max(ms);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
         // IW4L_PIPELINE_LOG=1: a frame that took over half a second, as it
         // happens (to line up with what was built or loaded then).
         static LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if ms >= 500.0 && *LOG.get_or_init(|| std::env::var_os("IW4L_PIPELINE_LOG").is_some()) {
             diag::info!(World, "slow frame: {ms:.0} ms");
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     }
     perf.last_frame = Some(now);
     perf.frames += 1;
@@ -3659,7 +4175,11 @@ pub(super) fn register(app: &mut App) {
     bevy::asset::embedded_asset!(app, "geometry_diagnostic.wgsl");
     bevy::asset::embedded_asset!(app, "t6_sun_shadow.wgsl");
     super::bo2_bloom::register(app);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     super::bo2_dof::register(app);
+=======
+    super::bo2_afterlife::register(app);
+>>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.rs
     let Some(render_app) = app.get_sub_app_mut(bevy::render::RenderApp) else {
         return;
     };

@@ -185,6 +185,7 @@ pub(crate) fn update(
                 pcm: pcm.add(audio),
                 speed: f32::from(row.pitch.max(1)) / 100.0,
                 live_pan: None,
+                line_end_inches: None,
             },
             Transform::from_translation(Vec3::from_array(row.origin)),
         ));

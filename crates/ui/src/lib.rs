@@ -1,15 +1,21 @@
+mod bo2_font;
+mod bo2_globe;
+mod cheat_menu; // bo2zm: the solo cheat menu (Num 1)
 pub mod classes;
+mod frame_rate; // bo2zm: Draw FPS, Max FPS
 pub mod frontend;
 mod gap_hud;
 mod launch_report;
 mod layers;
 mod load_table;
 mod loading;
+mod lui_hud; // bo2zm M4
 mod menu;
 mod menu_load;
 mod options;
 mod plugin;
 mod screen;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/lib.rs
 mod bo2_font;
 mod scope_hint; // bo2mp scope lane
 mod overhead_names; // bo2mp: names over heads in BO2's font
@@ -34,6 +40,10 @@ mod lui_scene; // bo2mp menus: the front end's 3D backdrop
 mod bo2mp_damage; // bo2mp lane C
 pub use lui_frontend::{Bo2mpFrontend, Bo2mpFrontendAssets};
 pub mod lui_omni_row; // bo2zm: Controls > Move "Omni Movement"
+=======
+mod zm_hud; // bo2zm M4: the Zombies globe
+pub mod lui_omni_row; // bo2zm: Controls > Move "Omni Movement" (a tester 10-10)
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/src/lib.rs
 
 pub use classes::equip_txn::{
     EquipTxnWatch, apply_pending_class_equip, resolve_class_equip_transaction,

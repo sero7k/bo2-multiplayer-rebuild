@@ -395,21 +395,28 @@ pub(crate) fn think_item_move(world: &mut FrameWorld, time_ms: i32, number: i32)
     if fraction >= 1.0 {
         return;
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/item.rs
     // bo2mp lane F: an item dropped where its box already touches the world
     // (startsolid) lies where it is, and one that meets a wall drops
     // straight down from there; both used to stay put on the server while
     // their trajectory fell on through the floor on every client.
     if hit.allsolid != 0 || hit.startsolid != 0 || hit.normal[2] > 0.0 {
+=======
+    if hit.allsolid != 0 || hit.normal[2] > 0.0 {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/item.rs
         item.falling = false;
         item.state.tr_type = TR_STATIONARY;
         item.state.tr_base = endpos;
         item.state.tr_delta = [0.0; 3];
         item.state.tr_time = 0;
         item.state.tr_duration = 0;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/item.rs
     } else {
         item.state.tr_base = endpos;
         item.state.tr_delta = [0.0; 3];
         item.state.tr_time = time_ms;
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/item.rs
     }
 }
 

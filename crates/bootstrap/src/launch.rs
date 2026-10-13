@@ -147,6 +147,7 @@ pub fn launch(
             }
             run_menu(games, artifacts);
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bootstrap/src/launch.rs
         LaunchMode::FrontendT6Mp => {
             if acceptance.is_some() {
                 fatal("render acceptance requires `iw4l map <zone>` (not frontend)");
@@ -178,6 +179,14 @@ pub fn launch(
             assets::set_t6_rules(true);
             run_map(games, artifacts, zone, None, Role::Dedicated, None)
         }
+=======
+        LaunchMode::Map(zone) => run_map(games, artifacts, zone, acceptance, Role::Listen, None),
+        LaunchMode::Frontend(zone) => {
+            frame::set_bo2_frontend(&zone);
+            run_map(games, artifacts, zone, None, Role::Listen, None)
+        }
+        LaunchMode::Serve(zone) => run_map(games, artifacts, zone, None, Role::Dedicated, None),
+>>>>>>> /tmp/claude-0/zmhead/crates/bootstrap/src/launch.rs
         LaunchMode::ExportGltf(zone) => {
             if acceptance.is_some() {
                 fatal("render acceptance is not available for export-gltf");
@@ -451,6 +460,7 @@ fn run_menu(games: asset_transport::GamesRoot, artifacts: PathBuf) {
     let _ = flush_perf();
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bootstrap/src/launch.rs
 /// bo2mp lane C: Black Ops II's multiplayer front end and no map: his MP UI
 /// zones (scripts, pictures, fonts, tables, English text) read here, then
 /// the menu screen runs BO2's own menus (`ui::Bo2mpFrontend`, drawn by the
@@ -589,6 +599,8 @@ fn run_frontend_t6mp(games: asset_transport::GamesRoot, artifacts: PathBuf) {
     let _ = flush_perf();
 }
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/bootstrap/src/launch.rs
 fn run_play(
     games: asset_transport::GamesRoot,
     artifacts: PathBuf,
@@ -655,7 +667,10 @@ fn run_map(
 
     let master_intent = if role == Role::Replay {
         net::MasterLaunchIntent::disabled()
-    } else if have.0 & net::CONTENT_IW4 == 0 {
+    } else if have.0 & net::CONTENT_IW4 == 0
+        // bo2zm: a Black Ops II map needs only Black Ops II (co-op).
+        && !(requires.0 & net::CONTENT_T6 != 0 && have.0 & net::CONTENT_T6 != 0)
+    {
         diag::warn!(
             Net,
             "master launch disabled: IW4 common_mp.ff is not installed"
@@ -742,7 +757,14 @@ fn run_map(
             ..default()
         },
     ));
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bootstrap/src/launch.rs
     if let Ok(path) = &zone_ff {
+=======
+    // bo2zm M4: `iw4l frontend <zone>` opens on Black Ops II's own menu
+    // (its menu files read on a worker); Start loads the map.
+    let frontend = frame::bo2_frontend().is_some();
+    if !frontend && let Ok(path) = &zone_ff {
+>>>>>>> /tmp/claude-0/zmhead/crates/bootstrap/src/launch.rs
         app.insert_resource(LoadingPreviewSource {
             path: path.clone(),
             map_name: zone.clone(),
@@ -750,10 +772,41 @@ fn run_map(
         });
     }
     let ui_games_root = asset_game::ui_games_root(&games).ok().map(|root| root.0);
-    app.insert_resource(launch_identity(&config))
+    let mut identity = launch_identity(&config);
+    if frontend {
+        identity.zone.clear();
+    }
+    app.insert_resource(identity)
         .insert_resource(probe)
         .insert_resource(menus)
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bootstrap/src/launch.rs
         .insert_resource(MatchLoadRequest {
+=======
+        .insert_resource(UiAssetRoot(ui_games_root))
+        .insert_resource(StartupCommands {
+            lines: console::startup_commands(),
+        })
+        .insert_resource(WorldScene::default())
+        .insert_resource(ClearColor(Color::BLACK));
+    if frontend {
+        let dir = zone_ff
+            .as_ref()
+            .ok()
+            .and_then(|p| p.parent())
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| fatal(&format!("frontend: `{zone}` was not found")));
+        let task = assets::load_pool().spawn(async move { assets::load_t6_frontend(&dir) });
+        app.insert_resource(T6FrontendTask(task, std::time::Instant::now()))
+            .add_systems(Update, install_t6_frontend)
+            .insert_resource(AppScreen::MainMenu)
+            .insert_resource({
+                let mut layers = UiLayers::default();
+                layers.show_only([UiLayer::Shell, UiLayer::Overlay]);
+                layers
+            });
+    } else {
+        app.insert_resource(MatchLoadRequest {
+>>>>>>> /tmp/claude-0/zmhead/crates/bootstrap/src/launch.rs
             request_id: 0,
             load_key: Default::default(),
             zone: zone.clone(),
@@ -766,18 +819,22 @@ fn run_map(
             loading_title,
             sim::host_game_mode_kind().display_name().to_owned(),
         ))
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bootstrap/src/launch.rs
         .insert_resource(UiAssetRoot(ui_games_root))
         .insert_resource(StartupCommands {
             lines: console::startup_commands(),
         })
         .insert_resource(WorldScene::default())
         .insert_resource(ClearColor(Color::BLACK))
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/bootstrap/src/launch.rs
         .insert_resource(AppScreen::Loading)
         .insert_resource({
             let mut layers = UiLayers::default();
             layers.show_only([UiLayer::Loading, UiLayer::Overlay]);
             layers
         });
+    }
     if let Some(run) = acceptance_run {
         diag::info!(
             Launch,
@@ -829,7 +886,51 @@ fn run_map(
     }
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bootstrap/src/launch.rs
 fn content_flags(trees: &NamespaceTrees, games: &asset_transport::GamesRoot) -> master_protocol::ContentFlags {
+=======
+/// bo2zm M4: Black Ops II's front end being read (and since when).
+#[derive(Resource)]
+struct T6FrontendTask(bevy::tasks::Task<assets::T6Frontend>, std::time::Instant);
+
+/// bo2zm M4: the front end, once read: its scripts, pictures and fonts for
+/// the menu (the HUD's fonts and pictures until a map brings its own).
+fn install_t6_frontend(mut commands: Commands, task: Option<ResMut<T6FrontendTask>>) {
+    let Some(mut task) = task else {
+        return;
+    };
+    let Some(front) = bevy::tasks::futures_lite::future::block_on(
+        bevy::tasks::futures_lite::future::poll_once(&mut task.0),
+    ) else {
+        return;
+    };
+    for line in &front.report {
+        diag::info!(Launch, "front end: {line}");
+    }
+    diag::info!(
+        Launch,
+        "front end: read in {:.0} ms",
+        task.1.elapsed().as_secs_f64() * 1000.0
+    );
+    commands.remove_resource::<T6FrontendTask>();
+    commands.insert_resource(front.icons.clone());
+    commands.insert_resource(front.fonts.clone());
+    // Its sounds: the menu's bank now, and again whenever a game ends.
+    if let Some(bank) = front.sound.clone() {
+        let iwd = std::sync::Arc::new(NamespaceSoundIwd::default());
+        commands.insert_resource(SoundBank(std::sync::Arc::clone(&bank)));
+        commands.insert_resource(SoundIwd(std::sync::Arc::clone(&iwd)));
+        commands.insert_resource(audio::ClipStore::start(
+            std::sync::Arc::clone(&bank),
+            Some(std::sync::Arc::clone(&iwd)),
+        ));
+        commands.insert_resource(audio::FrontendAudio { bank, iwd });
+    }
+    commands.insert_resource(front);
+}
+
+fn content_flags(trees: &NamespaceTrees) -> master_protocol::ContentFlags {
+>>>>>>> /tmp/claude-0/zmhead/crates/bootstrap/src/launch.rs
     let mut flags = net::content_inventory(
         trees.get(asset_core::AssetNamespace::Iw4).is_some(),
         trees.get(asset_core::AssetNamespace::Iw5).is_some(),

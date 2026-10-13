@@ -279,6 +279,18 @@ pub struct WeaponSetup {
     pub attachments: Vec<String>,
 }
 
+/// bo2zm: a part Black Ops II hangs on a gun's world model (its magazine,
+/// scope or rocket, `attachWorldModel`): the model, the gun's bone it sits on
+/// (`tag_weapon` when the weapon names none) and its offset and rotation
+/// (degrees: pitch, yaw, roll) from that bone.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WeaponPart {
+    pub model: String,
+    pub tag: String,
+    pub offset: [f32; 3],
+    pub rotation: [f32; 3],
+}
+
 #[derive(Debug, Default)]
 pub struct SimContentBuilder {
     clip_brushes: Vec<SimBrush>,
@@ -303,8 +315,11 @@ pub struct SimContentBuilder {
     vehicle_compass: std::collections::BTreeMap<String, ([String; 2], [i32; 2])>,
     weapon_setups: Arc<[Option<WeaponSetup>]>,
     weapon_world_models: Vec<(String, Vec<String>)>,
+    weapon_world_parts: Vec<Vec<WeaponPart>>,
+    weapon_display_names: Vec<String>,
     weapon_projectile_models: Vec<String>,
     weapon_melee_only: Vec<bool>,
+    weapon_melee_damage: Vec<i32>,
     weapon_script_sounds: Vec<WeaponScriptSounds>,
     equipment_runtime: Vec<EquipmentRuntimeFacts>,
     team_voice_prefix_allies: Option<String>,
@@ -409,12 +424,24 @@ impl SimContentBuilder {
         self.weapon_world_models = models;
     }
 
+    pub fn set_weapon_world_parts(&mut self, parts: Vec<Vec<WeaponPart>>) {
+        self.weapon_world_parts = parts;
+    }
+
+    pub fn set_weapon_display_names(&mut self, names: Vec<String>) {
+        self.weapon_display_names = names;
+    }
+
     pub fn set_weapon_projectile_models(&mut self, models: Vec<String>) {
         self.weapon_projectile_models = models;
     }
 
     pub fn set_weapon_melee_only(&mut self, rows: Vec<bool>) {
         self.weapon_melee_only = rows;
+    }
+
+    pub fn set_weapon_melee_damage(&mut self, rows: Vec<i32>) {
+        self.weapon_melee_damage = rows;
     }
 
     pub fn set_weapon_script_sounds(&mut self, rows: Vec<WeaponScriptSounds>) {
@@ -459,6 +486,7 @@ impl SimContentBuilder {
     }
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
 /// bo2mp: how far from the way a riot shield faces a bullet may come and
 /// still be taken for a hit on it, for a shield whose model gives no boxes
 /// to shoot (the fallback only). BO2 registers `shieldPlayerBulletProtectionDegrees`
@@ -468,6 +496,8 @@ impl SimContentBuilder {
 /// side at 18 in front: 43 degrees).
 pub(crate) const SHIELD_PROTECTION_DEGREES: f32 = 50.0;
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
 #[derive(Component, Clone, Debug)]
 pub struct SimState {
     content: Arc<SimContent>,
@@ -554,6 +584,12 @@ pub struct SimState {
     debris: Vec<crate::DebrisRecord>,
     /// bo2zm: solid turned boxes (see `SnapshotMeta::oriented_blockers`).
     oriented_blockers: Vec<crate::OrientedBlocker>,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
+=======
+    /// bo2zm: (spectator, the teammate he watches) (see
+    /// `SnapshotMeta::follows`).
+    follows: Vec<(ClientId, ClientId)>,
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
     /// bo2zm: the movement rules (see `SnapshotMeta::feel`): the game's own,
     /// or on the guessing side the ones from the last snapshot.
     feel: Option<movement_iw4::Bo2Feel>,
@@ -670,6 +706,10 @@ impl Default for SimState {
             pellet_fx: Vec::new(),
             debris: Vec::new(),
             oriented_blockers: Vec::new(),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
+=======
+            follows: Vec::new(),
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
             feel: None,
             world_objects: WorldObjectState::default(),
             script_gaps: ScriptGaps::default(),
@@ -1133,6 +1173,16 @@ impl SimState {
         self.content.data.weapon_script_sounds.get(weapon as usize)
     }
 
+    /// A weapon's own knife damage (its weapon file's melee damage).
+    pub(crate) fn weapon_melee_damage(&self, weapon: u32) -> i32 {
+        self.content
+            .data
+            .weapon_melee_damage
+            .get(weapon as usize)
+            .copied()
+            .unwrap_or(0)
+    }
+
     pub(crate) fn weapon_is_melee_only(&self, weapon: u32) -> bool {
         self.content
             .data
@@ -1142,12 +1192,31 @@ impl SimState {
             .unwrap_or(false)
     }
 
+    /// A weapon's display name key (`getweapondisplayname`).
+    pub(crate) fn weapon_display_name(&self, weapon: u32) -> Option<&str> {
+        self.content
+            .data
+            .weapon_display_names
+            .get(weapon as usize)
+            .map(String::as_str)
+            .filter(|s| !s.is_empty())
+    }
+
     pub(crate) fn weapon_world_model(&self, weapon: u32) -> Option<(&str, &[String])> {
         self.content
             .data
             .weapon_world_models
             .get(weapon as usize)
             .map(|(model, tags)| (model.as_str(), tags.as_slice()))
+    }
+
+    /// The parts Black Ops II hangs on a weapon's world model.
+    pub(crate) fn weapon_world_parts(&self, weapon: u32) -> &[WeaponPart] {
+        self.content
+            .data
+            .weapon_world_parts
+            .get(weapon as usize)
+            .map_or(&[], Vec::as_slice)
     }
 
     pub fn vehicle_compass(&self, name: &str) -> Option<&([String; 2], [i32; 2])> {
@@ -2092,6 +2161,7 @@ impl SimState {
             let Some(ps) = player(*id) else {
                 continue;
             };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
             // (A BO2 body's boxes move with its animations and aim, so they are
             // placed again each time.)
             if meta.t6_hit_bones.is_none()
@@ -2101,6 +2171,13 @@ impl SimState {
                         && pose.origin == ps.origin
                 })
             {
+=======
+            if let Some(pose) = reuse.iter().find(|pose| {
+                pose.client == *id
+                    && pose.life_sequence == meta.life_sequence
+                    && pose.origin == ps.origin
+            }) {
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
                 poses.push(pose.clone());
                 continue;
             }
@@ -2111,12 +2188,15 @@ impl SimState {
                     Vec::new()
                 }
             };
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
             // bo2mp: a Black Ops II player's boxes (his body's own, posed),
             // placed where he stands and facing his view.
             let bones = match (&meta.t6_hit_bones, bones.is_empty()) {
                 (Some(t6), true) => t6_world_bones(t6, &ps),
                 _ => bones,
             };
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
             poses.push(PlayerCollisionPose {
                 client: *id,
                 origin: ps.origin,
@@ -2128,6 +2208,7 @@ impl SimState {
                 shield: None,
             });
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
         // bo2mp: the riot shield each one bears, as he faces now.
         for pose in &mut poses {
             pose.shield = self.client_meta(pose.client).and_then(|m| m.riot_shield).and_then(|held| {
@@ -2140,6 +2221,8 @@ impl SimState {
                 })
             });
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
         poses.extend(
             self.prediction_remote_bodies
                 .iter()
@@ -2158,6 +2241,7 @@ impl SimState {
         poses
     }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
     /// bo2mp: his BO2 hit boxes this tick (his own space), or none.
     pub(crate) fn set_t6_hit_bones(
         &mut self,
@@ -2172,6 +2256,8 @@ impl SimState {
         self.client_meta_mut(id).riot_shield = held;
     }
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
     fn player_dobj_request(
         &self,
         id: ClientId,
@@ -2728,6 +2814,10 @@ impl SimState {
                 pellet_fx: self.pellet_fx.clone(),
                 debris: self.debris.clone(),
                 oriented_blockers: self.oriented_blockers.clone(),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
+=======
+                follows: self.follows.clone(),
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
                 feel: self.feel,
                 sound_aliases: self.sound_alias_cs.occupied(),
                 effect_names: self.effect_name_cs.occupied(),
@@ -3092,6 +3182,17 @@ impl SimState {
         }
     }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
+=======
+    pub(crate) fn follows(&self) -> &[(ClientId, ClientId)] {
+        &self.follows
+    }
+
+    pub(crate) fn set_follows(&mut self, follows: Vec<(ClientId, ClientId)>) {
+        self.follows = follows;
+    }
+
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
     pub(crate) fn feel(&self) -> Option<movement_iw4::Bo2Feel> {
         self.feel
     }
@@ -3517,6 +3618,7 @@ impl HitvolControllerCensus {
     }
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
 /// bo2mp: a BO2 player's hit boxes (his own space) where he stands, facing
 /// his view (as his body is drawn).
 fn t6_world_bones(
@@ -3539,6 +3641,8 @@ fn t6_world_bones(
         .collect()
 }
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
 fn player_controller_input(ps: &PlayerState) -> xmodel_runtime::PlayerControllerInput {
     xmodel_runtime::PlayerControllerInput {
         view_pitch_deg: ps.viewangles[0],

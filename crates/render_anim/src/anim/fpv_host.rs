@@ -47,6 +47,10 @@ pub struct FpvBoltTargets {
     pub brass: [Option<fx::FxBoltTarget>; 2],
     pub knife: [Option<fx::FxBoltTarget>; 2],
     pub laser: [Option<fx::FxBoltTarget>; 2],
+    /// bo2zm: the arms' wrists (left, right) and gun tag, for Mob's
+    /// Afterlife ghost glow.
+    pub wrist: [Option<fx::FxBoltTarget>; 2],
+    pub weapon: Option<fx::FxBoltTarget>,
 }
 
 impl FpvBoltTargets {
@@ -58,6 +62,8 @@ impl FpvBoltTargets {
         self.brass = [None, None];
         self.knife = [None, None];
         self.laser = [None, None];
+        self.wrist = [None, None];
+        self.weapon = None;
     }
 
     pub fn set_pose(&mut self, hand: usize, bolt: FpvBoltFrame) {
@@ -187,7 +193,11 @@ pub fn generate_fpv_pose(args: FpvGenerateArgs<'_>) -> FpvPoseKind {
         })
     });
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/anim/fpv_host.rs
     let Some(prepared) = rigs.pick(rocket, dual_drawn, melee, ads) else {
+=======
+    let Some(prepared) = rigs.pick(rocket, dual_drawn, melee) else {
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/anim/fpv_host.rs
         *active = None;
         return FpvPoseKind::Refuse(FpvPoseRefuse::EyePoseFailed {
             gun_xmodel: equipped.gun_xmodel.clone(),

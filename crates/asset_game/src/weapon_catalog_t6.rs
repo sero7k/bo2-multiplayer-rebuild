@@ -247,6 +247,7 @@ fn t6_body_facts(w: &asset_t6::WeaponRef) -> WeaponBodyFacts {
     f.fire_delay_ms = w.def_i32(d::iFireDelay);
     f.hold_fire_time_ms = w.def_i32(d::iHoldFireTime);
     f.weap_type = remap_t6_weap_type(w.def_i32(d::weapType));
+    f.t6_weap_type = w.def_i32(d::weapType);
     f.player_anim_type = w.def_i32(d::playerAnimType);
     f.weap_class = remap_t6_weap_class(w.def_i32(d::weapClass));
     f.offhand_class = remap_t6_offhand_class(w.def_i32(d::offhandClass));
@@ -323,8 +324,13 @@ fn t6_body_facts(w: &asset_t6::WeaponRef) -> WeaponBodyFacts {
         idle_prone_factor: w.def_f32(d::fIdleProneFactor),
     };
     f.penetrate_type = w.def_i32(d::penetrateTWeaponAttachmentype);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog_t6.rs
     // bo2mp: a Black Ops II gun has no penetration multiplier of its own;
     // the depth table is used as is (only the FMJ perk scales it).
+=======
+    // bo2zm: T6 has no per-weapon penetration scale; the table's depths
+    // are the whole story.
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog_t6.rs
     f.penetrate_multiplier = 1.0;
     f.rifle_bullet = w.def_u8(d::bRifleBullet) != 0;
     let var_vec3 = |off: usize| [w.var_f32(off), w.var_f32(off + 4), w.var_f32(off + 8)];
@@ -373,7 +379,11 @@ fn t6_body_facts(w: &asset_t6::WeaponRef) -> WeaponBodyFacts {
     f.reload_ammo_add = w.def_i32(d::iReloadAmmoAdd);
     f.reload_start_add = w.def_i32(d::iReloadStartAdd);
     f.no_partial_reload = w.def_u8(d::bNoPartialReload) != 0;
+    // An overheating gun (Buried's Paralyzer, clip 0) heats up instead of
+    // spending ammo, so it fires with an empty clip.
+    f.unlimited_ammo = w.def_u8(d::unlimitedAmmo) != 0 || w.def_u8(d::overheatWeapon) != 0;
     f.bolt_action = w.def_u8(d::bBoltAction) != 0;
+    f.retrievable = w.def_u8(d::bRetrievable) != 0;
     f.segmented_reload = w.def_u8(d::bSegmentedReload) != 0;
     f.sprint_raise_time_ms = w.def_i32(d::sprintInTime);
     f.sprint_loop_time_ms = w.def_i32(d::sprintLoopTime);
@@ -403,6 +413,7 @@ fn t6_body_facts(w: &asset_t6::WeaponRef) -> WeaponBodyFacts {
     f.spread_before_fire_add = true;
     f.timed_detonation = w.def_u8(d::timedDetonation) != 0;
     f.proj_impact_explode = w.def_u8(d::bProjImpactExplode) != 0;
+    f.bullet_impact_explode = w.def_u8(d::bBulletImpactExplode) != 0;
     f.explosion_radius = w.def_i32(d::iExplosionRadius);
     f.explosion_radius_min = w.def_i32(d::iExplosionRadiusMin);
     f.explosion_inner_damage = w.def_i32(d::iExplosionInnerDamage);
@@ -580,7 +591,28 @@ impl WeaponCatalog {
         if w.name.is_empty() || w.name.starts_with(',') {
             return false;
         }
-        let left = left.filter(|_| w.def_u8(d::bDualWield) != 0);
+        // BO2's Turned zombie holds the left half of a pair
+        // (`zombiemelee_dw`: its own moves are the left claw's alone); the
+        // right claw moves with its partner's (`zombiemelee_zm`). Both arms
+        // show and move, as with a pair of pistols.
+        let has = |x: &[String], i: usize| x.get(i).is_some_and(|n| !n.is_empty());
+        let held_left_half =
+            left.filter(|p| !has(&w.xanims, 0x01) && has(&w.xanims, 0x51) && has(&p.xanims, 0x01));
+        let left = left.filter(|_| w.def_u8(d::bDualWield) != 0 && held_left_half.is_none());
+        // The right hand's moves: the partner's, else the weapon's own.
+        let right_t6: Vec<String> = match held_left_half {
+            Some(p) => (0..w.xanims.len().max(p.xanims.len()))
+                .map(|i| {
+                    p.xanims
+                        .get(i)
+                        .filter(|n| !n.is_empty())
+                        .or_else(|| w.xanims.get(i))
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .collect(),
+            None => w.xanims.clone(),
+        };
         let left_gun = left.and_then(|l| {
             camo_models
                 .get(&l.name)
@@ -662,16 +694,20 @@ impl WeaponCatalog {
             projectile_model: opt(w.def_model(d::projectileModel)),
             rocket_model: opt(w.def_model(d::rocketModel)),
             knife_xmodel: opt(w.def_model(d::additionalMeleeModel)),
-            sz_xanims: remap_t6_sz_xanims(&w.xanims),
-            sz_xanims_right: match left {
-                Some(_) => remap_t6_sz_xanims(&w.xanims),
-                None => [const { None }; WEAPON_ANIM_SLOTS],
+            sz_xanims: remap_t6_sz_xanims(&right_t6),
+            sz_xanims_right: match (left, held_left_half) {
+                (None, None) => [const { None }; WEAPON_ANIM_SLOTS],
+                _ => remap_t6_sz_xanims(&right_t6),
             },
-            sz_xanims_left: match left {
-                Some(l) => remap_t6_left_hand_xanims(&l.xanims),
-                None => [const { None }; WEAPON_ANIM_SLOTS],
+            sz_xanims_left: match (left, held_left_half) {
+                (Some(l), _) => remap_t6_left_hand_xanims(&l.xanims),
+                (None, Some(_)) => remap_t6_left_hand_xanims(&w.xanims),
+                (None, None) => [const { None }; WEAPON_ANIM_SLOTS],
             },
-            dual_wield_weapon: left.map(|l| l.name.clone()),
+            // The held left half names its partner, as BO2's own
+            // `szDualWieldWeaponName` does, so it is given as both hands.
+            dual_wield_weapon: left.or(held_left_half).map(|l| l.name.clone()),
+            spawned_grenade: opt(w.def_string(d::szSpawnedGrenadeWeaponName)),
             hide_tags: w.hide_tags.clone(),
             ads_view_attachments: Vec::new(),
             view_attachments: w
@@ -700,15 +736,35 @@ impl WeaponCatalog {
                     )
                 }))
                 .collect(),
+            world_attachments: w
+                .attach_world_models
+                .iter()
+                .map(|(_, model, tag, offset, rotation)| {
+                    (
+                        model.clone(),
+                        asset_model::FpvMountOffset {
+                            tag: tag.clone(),
+                            offset: *offset,
+                            rotation: *rotation,
+                            on_arms: false,
+                        },
+                    )
+                })
+                .collect(),
             sounds: t6_sounds(w),
             combat_fx,
             combat_slots: CombatFxSlots::default(),
-            facts: t6_body_facts(w),
+            facts: {
+                let mut f = t6_body_facts(w);
+                f.no_dual_wield &= held_left_half.is_none();
+                f
+            },
         });
         true
     }
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog_t6.rs
 /// bo2mp: Black Ops II's sight attachments, by attachment name: the ones a
 /// gun is given as its own catalog weapon (`mp7_mp+reflex`), so its sight
 /// model, hidden iron sights, ADS animations, zoom and scope overlay are the
@@ -963,6 +1019,8 @@ impl WeaponCatalog {
     }
 }
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog_t6.rs
 #[cfg(test)]
 mod tests {
     use super::*;

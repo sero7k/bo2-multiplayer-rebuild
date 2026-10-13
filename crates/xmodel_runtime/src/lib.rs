@@ -22,7 +22,8 @@ pub use retained::{
     collision_models, collision_models_with_controller, pose_dobj, pose_dobj_with_controller,
 };
 pub use semantic::{
-    DObjCompositionDescriptor, DObjModelDescriptor, DObjSemanticState, SemanticResolveError,
+    DObjCompositionDescriptor, DObjModelDescriptor, DObjRagdoll, DObjSemanticState,
+    SemanticResolveError, TagOffset,
     XAnimSemanticNode, XAnimSemanticNodeKind, XAnimTreeSnapshot,
 };
 pub use xanim_clip::{

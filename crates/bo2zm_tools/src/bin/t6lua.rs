@@ -191,6 +191,7 @@ fn nuketown_values(host: &mut hks_t6::host::Host) {
     v.bits.insert(hud_bit);
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6lua.rs
 /// bo2mp: a multiplayer dump (`...\patch_mp`, or T6LUA_MP=1) runs as the
 /// multiplayer front end: `patch_ui_mp` beside it, BO2's multiplayer
 /// answers (`hks_t6::mp`), his MP string tables and English text.
@@ -300,6 +301,14 @@ fn scripts_of(dir: &std::path::Path, files: &[PathBuf]) -> Vec<(String, Vec<u8>)
     let mut all: Vec<PathBuf> = files.to_vec();
     let sibling = if is_mp(dir) { "patch_ui_mp" } else { "patch_ui_zm" };
     if let Some(ui) = dir.parent().map(|p| p.join(sibling))
+=======
+/// The scripts in `dir` and, after it, its sibling `patch_ui_zm` (a later
+/// zone wins a name).
+fn scripts_of(dir: &std::path::Path, files: &[PathBuf]) -> Vec<(String, Vec<u8>)> {
+    let mut out = Vec::new();
+    let mut all: Vec<PathBuf> = files.to_vec();
+    if let Some(ui) = dir.parent().map(|p| p.join("patch_ui_zm"))
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6lua.rs
         && let Ok(rd) = std::fs::read_dir(&ui)
         && ui != dir
     {
@@ -320,9 +329,17 @@ fn scripts_of(dir: &std::path::Path, files: &[PathBuf]) -> Vec<(String, Vec<u8>)
 
 fn run_all(dir: &std::path::Path, files: &[PathBuf]) {
     use hks_t6::value::Value;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6lua.rs
     let zone_data = is_mp(dir).then(mp_zone_data);
     let mut host = new_host(dir, files, zone_data.as_ref());
+=======
+    // Text width: half the height per character (the harness has no fonts).
+    let measure = Box::new(|t: &str, _: &str, h: f32| t.chars().count() as f32 * h * 0.5);
+    let mut host = hks_t6::host::Host::new(scripts_of(dir, files), measure);
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6lua.rs
     host.step_budget = 50_000_000;
+    host.load_base();
+    nuketown_values(&mut host);
     let (mut ran, mut failed) = (0usize, 0usize);
     let mut errors: BTreeMap<String, usize> = BTreeMap::new();
     for path in files {
@@ -377,6 +394,7 @@ fn run_all(dir: &std::path::Path, files: &[PathBuf]) {
         // A fresh VM loaded as the engine loads a game: the base, then the
         // HUD's scripts (T6LUA_LOAD, default T6.HUD) - re-running every
         // top level above resets LUI's tables.
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6lua.rs
         // bo2mp: the front end loads T6.Main (its menus require the rest).
         let mut game = new_host(dir, files, zone_data.as_ref());
         let base = if zone_data.is_some() { "T6.Main" } else { "T6.HUD" };
@@ -386,6 +404,13 @@ fn run_all(dir: &std::path::Path, files: &[PathBuf]) {
         if zone_data.is_some() {
             game.root(16.0 / 9.0);
         }
+=======
+        let measure = Box::new(|t: &str, _: &str, h: f32| t.chars().count() as f32 * h * 0.5);
+        let mut game = hks_t6::host::Host::new(scripts_of(dir, files), measure);
+        game.load_base();
+        nuketown_values(&mut game);
+        let load = std::env::var("T6LUA_LOAD").unwrap_or_else(|_| "T6.HUD".to_owned());
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6lua.rs
         for m in load.split(',') {
             game.require(m);
         }

@@ -69,6 +69,7 @@ pub struct GlyphRef {
     pub st: [f32; 4],
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/m2.rs
 /// bo2mp: a weapon attachment (`WeaponAttachment`, 284 bytes): what it
 /// changes on any gun (zoom, ADS time scales, sway).
 #[derive(Clone, Debug, Default)]
@@ -126,6 +127,8 @@ impl AttachmentUniqueRef {
     }
 }
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/m2.rs
 /// bo2zm M3: a weapon camo (`WeaponCamo`): per camo index its images
 /// (`WeaponCamoSet`: solid, pattern, the pattern's offset and scale) and
 /// its material swaps (`WeaponCamoMaterialSet`: each base material, the
@@ -175,6 +178,9 @@ pub struct WeaponRef {
     /// The variant's `attachViewModel` slots that hold a model: (slot,
     /// model, `attachViewModelTag`, offset, rotation).
     pub attach_view_models: Vec<(usize, String, String, [f32; 3], [f32; 3])>,
+    /// The same for `attachWorldModel`: the magazine, scope or rocket Black
+    /// Ops II hangs on the gun everyone else sees (on a wall, in the box).
+    pub attach_world_models: Vec<(usize, String, String, [f32; 3], [f32; 3])>,
     /// `gunXModel[16]` and `worldModel[16]`.
     pub gun_models: Vec<String>,
     pub world_models: Vec<String>,
@@ -356,6 +362,42 @@ pub struct FxEffectRef {
     pub bounds_centre: [f32; 3],
 }
 
+/// One `DestructibleDef`: a prop that breaks in stages as it is hit (a
+/// mannequin's head, an outlet's sparks).
+#[derive(Clone, Debug, Default)]
+pub struct DestructibleRef {
+    pub name: String,
+    pub model: String,
+    pub pieces: Vec<DestructiblePieceRef>,
+    pub client_only: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DestructiblePieceRef {
+    pub stages: [DestructibleStageRef; 5],
+    pub parent_piece: u8,
+    pub parent_damage_percent: f32,
+    pub bullet_damage_scale: f32,
+    pub explosive_damage_scale: f32,
+    pub melee_damage_scale: f32,
+    pub health: i32,
+    pub hide_bones: [u32; 5],
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DestructibleStageRef {
+    pub show_bone: Option<String>,
+    pub break_health: f32,
+    pub max_time: f32,
+    pub flags: u32,
+    pub break_effect: Option<String>,
+    pub break_sound: Option<String>,
+    pub break_notify: Option<String>,
+    pub loop_sound: Option<String>,
+    pub has_phys_preset: bool,
+    pub spawn_models: [Option<String>; 3],
+}
+
 /// One `TracerDef`.
 #[derive(Clone, Debug, Default)]
 pub struct TracerRef {
@@ -510,6 +552,18 @@ pub struct SndAliasListRef {
 pub struct SndBankRef {
     pub name: String,
     pub aliases: Vec<SndAliasListRef>,
+    /// The bank's room echoes (`SndRadverb`), by name.
+    pub radverbs: Vec<SndRadverbRef>,
+}
+
+/// `SndRadverb`: one room echo preset, as the bank stores it.
+#[derive(Clone, Debug, Default)]
+pub struct SndRadverbRef {
+    pub name: String,
+    /// smoothing, earlyTime, lateTime, earlyGain, lateGain, returnGain,
+    /// earlyLpf, lateLpf, inputLpf, dampLpf, wallReflect, dryGain,
+    /// earlySize, lateSize, diffusion, returnHighpass (the struct's order).
+    pub values: [f32; 16],
 }
 
 /// `SndCurve`: a falloff curve, 8 points.
@@ -527,6 +581,22 @@ pub struct SndDriverGlobalsRef {
     pub curves: Vec<SndCurveRef>,
     /// (name, parent name, attenuation sp, attenuation mp).
     pub groups: Vec<(String, String, u16, u16)>,
+    pub masters: Vec<SndMasterRef>,
+}
+
+/// `SndMaster`: one mix preset (treyarch_mix, headphones, ...): its eq,
+/// compressor and limiter gains, and the bus gains with their enables.
+#[derive(Clone, Debug, Default)]
+pub struct SndMasterRef {
+    pub name: String,
+    pub eq_g: f32,
+    /// (enabled, post gain, makeup gain, threshold, ratio).
+    pub comp: (u32, f32, f32, f32, f32),
+    pub limit: (u32, f32, f32, f32, f32),
+    /// reverb, fx, voice, pfutz, hdrfx, ui, music, movie, vcs.
+    pub bus_g: [f32; 9],
+    /// reverb, fx, voice, pfutz, hdrfx, ui, music, movie.
+    pub bus_e: [u32; 8],
 }
 
 fn fixed_string(s: &ZoneStream<'_>, p: Ptr, off: usize, len: usize) -> Result<String> {
@@ -689,6 +759,7 @@ impl ZoneCapture {
         Ok(out)
     }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/m2.rs
     pub(crate) fn read_attachment(&mut self, s: &ZoneStream<'_>, a: Ptr) -> Result<AttachmentRef> {
         Ok(AttachmentRef {
             name: string_field(s, a, l::WeaponAttachment::szInternalName)?,
@@ -728,7 +799,38 @@ impl ZoneCapture {
                 if id != 0 {
                     out.hide_tags.push(self.script_string(id).to_owned());
                 }
+=======
+    /// A variant's 8 attach slots that hold a model: (slot, model, tag,
+    /// offset, rotation), from its model, tag, offset and rotation arrays.
+    fn read_weapon_attach(
+        &mut self,
+        s: &ZoneStream<'_>,
+        v: Ptr,
+        [models_at, tags_at, offsets_at, rotations_at]: [usize; 4],
+    ) -> Result<Vec<(usize, String, String, [f32; 3], [f32; 3])>> {
+        let mut out = Vec::new();
+        let Some(models) = deref(s, v, models_at)? else {
+            return Ok(out);
+        };
+        let tags = deref(s, v, tags_at)?;
+        for i in 0..8 {
+            let model = self.asset_name_at(s, models.at(i * 4), AssetType::XModel)?;
+            if model.is_empty() {
+                continue;
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/m2.rs
             }
+            let tag = match tags {
+                Some(t) => string_field(s, t, i * 4)?,
+                None => String::new(),
+            };
+            let f = |base: usize| -> Result<[f32; 3]> {
+                Ok([
+                    s.f32_at(v, base + i * 12)?,
+                    s.f32_at(v, base + i * 12 + 4)?,
+                    s.f32_at(v, base + i * 12 + 8)?,
+                ])
+            };
+            out.push((i, model, tag, f(offsets_at)?, f(rotations_at)?));
         }
         Ok(out)
     }
@@ -749,33 +851,26 @@ impl ZoneCapture {
                 w.xanims.push(string_field(s, arr, i * 4)?);
             }
         }
-        if let Some(models) = deref(s, v, l::WeaponVariantDef::attachViewModel)? {
-            let tags = deref(s, v, l::WeaponVariantDef::attachViewModelTag)?;
-            for i in 0..8 {
-                let model = self.asset_name_at(s, models.at(i * 4), AssetType::XModel)?;
-                if model.is_empty() {
-                    continue;
-                }
-                let tag = match tags {
-                    Some(t) => string_field(s, t, i * 4)?,
-                    None => String::new(),
-                };
-                let f = |base: usize| -> Result<[f32; 3]> {
-                    Ok([
-                        s.f32_at(v, base + i * 12)?,
-                        s.f32_at(v, base + i * 12 + 4)?,
-                        s.f32_at(v, base + i * 12 + 8)?,
-                    ])
-                };
-                w.attach_view_models.push((
-                    i,
-                    model,
-                    tag,
-                    f(l::WeaponVariantDef::attachViewModelOffsets)?,
-                    f(l::WeaponVariantDef::attachViewModelRotations)?,
-                ));
-            }
-        }
+        w.attach_view_models = self.read_weapon_attach(
+            s,
+            v,
+            [
+                l::WeaponVariantDef::attachViewModel,
+                l::WeaponVariantDef::attachViewModelTag,
+                l::WeaponVariantDef::attachViewModelOffsets,
+                l::WeaponVariantDef::attachViewModelRotations,
+            ],
+        )?;
+        w.attach_world_models = self.read_weapon_attach(
+            s,
+            v,
+            [
+                l::WeaponVariantDef::attachWorldModel,
+                l::WeaponVariantDef::attachWorldModelTag,
+                l::WeaponVariantDef::attachWorldModelOffsets,
+                l::WeaponVariantDef::attachWorldModelRotations,
+            ],
+        )?;
         if let Some(arr) = deref(s, v, l::WeaponVariantDef::hideTags)? {
             for i in 0..32 {
                 let id = s.u16_at(arr, i * 2)?;
@@ -1037,6 +1132,53 @@ impl ZoneCapture {
         })
     }
 
+    pub(crate) fn read_destructible(&mut self, s: &ZoneStream<'_>, d: Ptr) -> Result<DestructibleRef> {
+        let opt = |v: String| (!v.is_empty()).then_some(v);
+        let mut out = DestructibleRef {
+            name: string_field(s, d, l::DestructibleDef::name)?,
+            model: self.asset_name_at(s, d.at(l::DestructibleDef::model), AssetType::XModel)?,
+            pieces: Vec::new(),
+            client_only: s.i32_at(d, l::DestructibleDef::clientOnly)? != 0,
+        };
+        let count = usize::try_from(s.i32_at(d, l::DestructibleDef::numPieces)?).unwrap_or(0);
+        let Some(pieces) = deref(s, d, l::DestructibleDef::pieces)? else {
+            return Ok(out);
+        };
+        for i in 0..count.min(64) {
+            let p = pieces.at(i * l::DestructiblePiece::SIZE);
+            let mut piece = DestructiblePieceRef {
+                parent_piece: s.u8_at(p, l::DestructiblePiece::parentPiece)?,
+                parent_damage_percent: s.f32_at(p, l::DestructiblePiece::parentDamagePercent)?,
+                bullet_damage_scale: s.f32_at(p, l::DestructiblePiece::bulletDamageScale)?,
+                explosive_damage_scale: s.f32_at(p, l::DestructiblePiece::explosiveDamageScale)?,
+                melee_damage_scale: s.f32_at(p, l::DestructiblePiece::meleeDamageScale)?,
+                health: s.i32_at(p, l::DestructiblePiece::health)?,
+                ..Default::default()
+            };
+            for (j, word) in piece.hide_bones.iter_mut().enumerate() {
+                *word = s.u32_at(p, l::DestructiblePiece::hideBones + j * 4)?;
+            }
+            for (j, stage) in piece.stages.iter_mut().enumerate() {
+                let st = p.at(l::DestructiblePiece::stages + j * l::DestructibleStage::SIZE);
+                let bone = s.u16_at(st, l::DestructibleStage::showBone)?;
+                stage.show_bone = (bone != 0).then(|| self.script_string(bone).to_owned());
+                stage.break_health = s.f32_at(st, l::DestructibleStage::breakHealth)?;
+                stage.max_time = s.f32_at(st, l::DestructibleStage::maxTime)?;
+                stage.flags = s.u32_at(st, l::DestructibleStage::flags)?;
+                stage.break_effect = opt(self.asset_name_at(s, st.at(l::DestructibleStage::breakEffect), AssetType::Fx)?);
+                stage.break_sound = opt(string_field(s, st, l::DestructibleStage::breakSound)?);
+                stage.break_notify = opt(string_field(s, st, l::DestructibleStage::breakNotify)?);
+                stage.loop_sound = opt(string_field(s, st, l::DestructibleStage::loopSound)?);
+                stage.has_phys_preset = s.u32_at(st, l::DestructibleStage::physPreset)? != 0;
+                for (k, m) in stage.spawn_models.iter_mut().enumerate() {
+                    *m = opt(self.asset_name_at(s, st.at(l::DestructibleStage::spawnModel + k * 4), AssetType::XModel)?);
+                }
+            }
+            out.pieces.push(piece);
+        }
+        Ok(out)
+    }
+
     pub(crate) fn read_tracer(&mut self, s: &ZoneStream<'_>, t: Ptr) -> Result<TracerRef> {
         let mut colors = [[0.0f32; 4]; 5];
         for (i, c) in colors.iter_mut().enumerate() {
@@ -1176,9 +1318,25 @@ impl ZoneCapture {
                 });
             }
         }
+        let mut radverbs = Vec::new();
+        let rcount = s.u32_at(b, l::SndBank::radverbCount)? as usize;
+        if let Some(arr) = deref(s, b, l::SndBank::radverbs)? {
+            for i in 0..rcount {
+                let r = arr.at(i * l::SndRadverb::SIZE);
+                let mut values = [0.0f32; 16];
+                for (k, v) in values.iter_mut().enumerate() {
+                    *v = s.f32_at(r, l::SndRadverb::smoothing + k * 4)?;
+                }
+                radverbs.push(SndRadverbRef {
+                    name: fixed_string(s, r, l::SndRadverb::name, 32)?,
+                    values,
+                });
+            }
+        }
         Ok(SndBankRef {
             name: string_field(s, b, l::SndBank::name)?,
             aliases,
+            radverbs,
         })
     }
 
@@ -1213,6 +1371,41 @@ impl ZoneCapture {
                     s.u16_at(c, l::SndVolumeGroup::attenuationSp)?,
                     s.u16_at(c, l::SndVolumeGroup::attenuationMp)?,
                 ));
+            }
+        }
+        let master_count = s.u32_at(g, l::SndDriverGlobals::masterCount)? as usize;
+        if let Some(arr) = deref(s, g, l::SndDriverGlobals::masters)? {
+            use l::SndMaster as m;
+            for i in 0..master_count {
+                let c = arr.at(i * m::SIZE);
+                let mut bus_g = [0.0f32; 9];
+                for (k, v) in bus_g.iter_mut().enumerate() {
+                    *v = s.f32_at(c, m::busReverbG + k * 4)?;
+                }
+                let mut bus_e = [0u32; 8];
+                for (k, v) in bus_e.iter_mut().enumerate() {
+                    *v = s.u32_at(c, m::busReverbE + k * 4)?;
+                }
+                out.masters.push(SndMasterRef {
+                    name: fixed_string(s, c, m::name, 32)?,
+                    eq_g: s.f32_at(c, m::eqG)?,
+                    comp: (
+                        s.u32_at(c, m::compE)?,
+                        s.f32_at(c, m::compPG)?,
+                        s.f32_at(c, m::compMG)?,
+                        s.f32_at(c, m::compT)?,
+                        s.f32_at(c, m::compR)?,
+                    ),
+                    limit: (
+                        s.u32_at(c, m::limitE)?,
+                        s.f32_at(c, m::limitPG)?,
+                        s.f32_at(c, m::limitMG)?,
+                        s.f32_at(c, m::limitT)?,
+                        s.f32_at(c, m::limitR)?,
+                    ),
+                    bus_g,
+                    bus_e,
+                });
             }
         }
         Ok(out)

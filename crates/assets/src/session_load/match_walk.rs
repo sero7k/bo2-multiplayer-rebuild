@@ -234,6 +234,12 @@ pub(super) async fn walk_prepared_match(
         gaps,
     } = loaded;
     report.append(&mut common_report);
+    // bo2zm: a Black Ops II map brings its own penetration table (it has no
+    // IW4 common zone).
+    let (common_pen_table, common_pen_loaded) = match facts.t6_pen_table.take() {
+        Some(table) => (table, true),
+        None => (common_pen_table, common_pen_loaded),
+    };
 
     if facts.team_settings.allies.is_none() && facts.team_settings.axis.is_none() {
         if let Some(name) = facts.t5_teamset.as_ref() {
@@ -429,6 +435,7 @@ pub(super) async fn walk_prepared_match(
     let map_fpv_added = fpv_meshes.absorb(map_fpv);
     fpv_meshes.set_map_namespace(map_namespace);
     weapons.resolve_fpv_mesh_edges(&fpv_meshes);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/session_load/match_walk.rs
     let hands = weapons.resolve_fpv_hands(&fpv_meshes, &bodies);
     if hands.t6_linked + hands.t6_unresolved > 0 {
         let line = format!(
@@ -440,6 +447,9 @@ pub(super) async fn walk_prepared_match(
         diag::info!(Fpv, "{line}");
         report.push(line);
     }
+=======
+    report.push(weapons.resolve_fpv_hands(&fpv_meshes, &bodies));
+>>>>>>> /tmp/claude-0/zmhead/crates/assets/src/session_load/match_walk.rs
     let assembly_started = std::time::Instant::now();
     let assemblies = weapons.resolve_fpv_assemblies(&fpv_meshes, &xanims);
     report.push(format!(

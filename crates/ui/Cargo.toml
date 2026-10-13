@@ -15,13 +15,20 @@ asset_material.workspace = true
 asset_transport.workspace = true
 fastfile_iw6.workspace = true # bo2mp: Ghosts' Create-a-Class pictures
 assets.workspace = true
+bcdec_rs.workspace = true # bo2zm: popup blur of menu pictures
 frame.workspace = true
 net = { path = "../net" }
+playerstate_iw4.workspace = true
 session.workspace = true
 sim.workspace = true
 hks_t6.workspace = true # bo2zm M4
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/Cargo.toml
 bo2_profile.workspace = true # bo2mp stats saver
 asset_world.workspace = true # bo2mp vehicle screens (server vision)
+=======
+# bo2zm: the speakers' name (Settings' Sound Device row); bevy's audio already uses it.
+cpal = { version = "0.17", default-features = false }
+>>>>>>> /tmp/claude-0/zmhead/crates/ui/Cargo.toml
 
 [lints]
 workspace = true

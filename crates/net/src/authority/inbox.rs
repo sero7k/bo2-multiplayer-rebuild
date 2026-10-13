@@ -39,6 +39,18 @@ pub(crate) const COMMAND_TIME_STEP_MS: i32 = 200;
 
 pub const MAX_COMMAND_STALL_MS: i32 = 1000;
 
+/// How far ahead of the authority clock a command may be stamped and still wait
+/// for its tick: BO2's `ClientThink_real` clamps `serverTime` to `level.time + 200`.
+pub const MAX_COMMAND_AHEAD_MS: i32 = 200;
+
+/// A command due within BO2's window waits for its tick. One stamped further
+/// ahead (sent while the host stalled) runs now, like BO2's clamp, instead of
+/// blocking the queue until the no-progress kick.
+fn command_waits(server_time: i32, time_ms: i32) -> bool {
+    let ahead = server_time.saturating_sub(time_ms);
+    ahead > 0 && ahead <= MAX_COMMAND_AHEAD_MS
+}
+
 pub const MAX_COMMANDS_PER_PEER_PER_FRAME: usize = 32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -217,6 +229,21 @@ impl ClientCommandInbox {
         }
         let stalled_ms = time_ms.saturating_sub(blocked.1);
         if stalled_ms > MAX_COMMAND_STALL_MS {
+            let head_time = queue
+                .iter()
+                .find(|(seq, _, _)| *seq == Some(head))
+                .map(|(_, cmd, _)| cmd.server_time);
+            let expected = self
+                .last_acked_seq
+                .get(&id)
+                .map_or(1, |s| s.wrapping_add(1));
+            diag::warn!(
+                Net,
+                "input backlog: client {} head seq {} (expected {expected}), head time {head_time:?} \
+                 vs authority {time_ms}",
+                id.0,
+                head.0
+            );
             return Some(InputBacklogFault::NoProgress { stalled_ms });
         }
         None
@@ -269,7 +296,7 @@ impl ClientCommandInbox {
                         .iter()
                         .take_while(|(seq, cmd, _)| {
                             if let Some(seq) = seq {
-                                if seq.0 != expected || cmd.server_time > time_ms {
+                                if seq.0 != expected || command_waits(cmd.server_time, time_ms) {
                                     return false;
                                 }
                                 expected = expected.wrapping_add(1);
@@ -310,7 +337,8 @@ impl ClientCommandInbox {
             let mut ack = None;
             for (seq, mut cmd, sample) in drained {
                 cmd.server_time = if seq.is_some() {
-                    cmd.server_time
+                    // bo2zm: a command stamped past the window runs at the host's time.
+                    cmd.server_time.min(time_ms)
                 } else {
                     time_ms
                 };

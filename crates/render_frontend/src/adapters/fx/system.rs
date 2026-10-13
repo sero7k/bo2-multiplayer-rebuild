@@ -137,7 +137,16 @@ pub(crate) fn register_combat_fx_systems(app: &mut App) {
         )
         .add_systems(
             Update,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
             (drain_bullet_hit_fx, drain_pellet_fx, present_tracker_light)
+=======
+            (
+                drain_bullet_hit_fx,
+                drain_pellet_fx,
+                present_tracker_light,
+                present_ghost_hands_fx,
+            )
+>>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
                 .chain()
                 .after(render_anim::occupancy::fpv_present::publish_fpv_dobj_pose)
                 .after(frame::WorkerCmdSet::SkinModel)
@@ -227,6 +236,63 @@ fn present_tracker_light(
     {
         light.bolt = Some((target.dobj, target.bone));
     }
+}
+
+/// bo2zm: Mob's Afterlife ghost hands glow. BO2's client script
+/// (`zm_afterlife.csc`, which does not run here) plays
+/// `fx_alcatraz_ghost_vm_wrist` on the left wrist and `_r` on the right,
+/// then 0.1 seconds on the pixie dust on the gun tag, and again every 0.2
+/// seconds while the ghost hands are on.
+fn present_ghost_hands_fx(
+    hands: Option<Res<render_anim::FpvHandsOverride>>,
+    bolts: Res<render_anim::FpvBoltTargets>,
+    catalog: Option<Res<PreparedFxCatalog>>,
+    mut elem_infos: ResMut<PreparedFxElemInfos>,
+    mut host: ResMut<HostFxSystem>,
+    fx_world: FxSceneAccess,
+    time: Res<Time>,
+    mut next: Local<Option<(f64, bool)>>,
+    mut missing: Local<bool>,
+) {
+    const WRIST: [&str; 2] = [
+        "maps/zombie_alcatraz/fx_alcatraz_ghost_vm_wrist",
+        "maps/zombie_alcatraz/fx_alcatraz_ghost_vm_wrist_r",
+    ];
+    const PIXIES: &str = "maps/zombie_alcatraz/fx_alcatraz_afterlife_pixies";
+    let ghost = hands.as_ref().and_then(|h| h.0.as_deref()).is_some_and(|m| m.contains("ghost"));
+    let Some(catalog) = catalog.filter(|_| ghost) else {
+        *next = None;
+        return;
+    };
+    let now = time.elapsed_secs_f64();
+    let (at, pixies) = next.unwrap_or((now, false));
+    if now < at {
+        return;
+    }
+    let plays: Vec<(&str, Option<fx::FxBoltTarget>)> = if pixies {
+        vec![(PIXIES, bolts.weapon)]
+    } else {
+        vec![(WRIST[0], bolts.wrist[0]), (WRIST[1], bolts.wrist[1])]
+    };
+    if plays.iter().any(|(_, target)| target.is_none()) {
+        return;
+    }
+    elem_infos.0.sync(&catalog.0);
+    for (name, target) in plays {
+        let result = render_fx::present::play_named_bolted_in_world(
+            &mut host.0,
+            &catalog.0,
+            &elem_infos.0,
+            catalog.0.map_fx_name(name),
+            target.expect("checked above"),
+            fx_world.view().as_ref().map(|scene| scene as &dyn FxScene),
+        );
+        if result.and_then(PlayResult::handle).is_none() && !*missing {
+            *missing = true;
+            diag::warn!(World, "bo2zm ghost hands fx {name}: did not play ({result:?})");
+        }
+    }
+    *next = Some((at.max(now - 0.1) + 0.1, !pixies));
 }
 
 fn queue_tag_lasers(
@@ -665,6 +731,11 @@ pub struct T6FxMesh {
     pub clouds: Vec<T6CloudDraw>,
     /// The box's first index this frame, once a cloud has appended it.
     cloud_box: Option<u32>,
+    /// bo2zm M4 retest 5: per effect model surface (by its first index), its
+    /// box from the world (columns: the surface's bounds to -1..1) and its
+    /// origin. A projected decal (`mc_projecteddecal_*`, the blood a hit
+    /// paints on a zombie) draws its box and paints what lies inside it.
+    pub model_boxes: std::collections::HashMap<u32, ([f32; 16], [f32; 3])>,
 }
 
 /// bo2zm: one Black Ops II particle cloud. Its vertex shader
@@ -730,6 +801,7 @@ impl T6FxMesh {
         self.viewmodel_draws.clear();
         self.clouds.clear();
         self.cloud_box = None;
+        self.model_boxes.clear();
     }
 
     /// bo2zm: one effect model (shell casing, debris), rigid: its bind
@@ -775,6 +847,25 @@ impl T6FxMesh {
                 self.indices.push(base + i.saturating_sub(vbase as u32));
             }
             self.draws.push((start, icount as u32, mat));
+            let (lo, hi) = skel.positions[vbase..vbase + vn].iter().fold(
+                (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
+                |(lo, hi), p| {
+                    let p = Vec3::from_array(*p);
+                    (lo.min(p), hi.max(p))
+                },
+            );
+            let world_from_local = Mat4::from_cols(
+                (ax * s).extend(0.0),
+                (ay * s).extend(0.0),
+                (az * s).extend(0.0),
+                o.extend(1.0),
+            );
+            let half = ((hi - lo) * 0.5).max(Vec3::splat(0.001));
+            let box_from_world = Mat4::from_scale(half.recip())
+                * Mat4::from_translation(-(lo + hi) * 0.5)
+                * world_from_local.inverse();
+            self.model_boxes
+                .insert(start, (box_from_world.to_cols_array(), origin));
         }
     }
 
@@ -878,15 +969,17 @@ impl T6FxMesh {
 }
 
 /// bo2zm: the lights effects throw this frame (muzzle flashes, explosions,
-/// impact flashes), nearest the eye first, at most `T6_DYN_LIGHTS`: per
+/// impact flashes), most important first, at most `T6_DYN_LIGHTS`: per
 /// light its origin and radius, then its colour (linear, rgb).
 #[derive(Resource, Clone, Debug, Default)]
 pub struct T6DynLights {
     pub lights: Vec<[f32; 8]>,
 }
 
-/// The most effect lights the fallback pass reads.
-pub const T6_DYN_LIGHTS: usize = 16;
+/// The most effect lights the fallback pass reads. Black Ops II draws at
+/// most 4 dynamic lights in the whole frame (the perk machines' lights
+/// summed into a hot spot with more).
+pub const T6_DYN_LIGHTS: usize = 4;
 
 /// bo2zm: Black Ops II decal marks (bullet holes, blood): world-space
 /// triangles with the mark's own texcoords, per draw `(first index, index
@@ -911,8 +1004,14 @@ fn t6_fx_material(runtime: &MaterialGeneration, asset_id: usize) -> bool {
         .is_some_and(|m| m.t6_draw.is_some())
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
 /// bo2zm test aid: `IW4L_T6_FX_ONLY=a,b` draws only effect materials whose
 /// name contains one of them; `IW4L_T6_FX_SKIP=a,b` hides those.
+=======
+/// bo2zm: the effect materials not drawn (the superflares, below); test aid:
+/// `IW4L_T6_FX_ONLY=a,b` draws only effect materials whose name contains one
+/// of them; `IW4L_T6_FX_SKIP=a,b` hides those.
+>>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
 fn t6_fx_filtered_out(runtime: &MaterialGeneration, asset_id: usize) -> bool {
     static FILTER: std::sync::OnceLock<(Vec<String>, Vec<String>)> = std::sync::OnceLock::new();
     let (only, skip) = FILTER.get_or_init(|| {
@@ -928,15 +1027,23 @@ fn t6_fx_filtered_out(runtime: &MaterialGeneration, asset_id: usize) -> bool {
         };
         (list("IW4L_T6_FX_ONLY"), list("IW4L_T6_FX_SKIP"))
     });
-    if only.is_empty() && skip.is_empty() {
-        return false;
-    }
     let Some(m) = runtime
         .catalog
         .derived(assets::MaterialIndex::from_order(asset_id))
     else {
         return false;
     };
+    // The `superflare` materials (`sw4_3d_superflare_*` techniques: a
+    // light's lens flare, its ghosts placed on screen by the shader from an
+    // atlas of flare shapes, no depth test) are not drawn: as a sprite each
+    // one drew its whole atlas, a grid of coloured hexagons 70 units wide
+    // (Origins' lamps, `fx_tomb_light_expensive`).
+    if m.name.contains("superflare") {
+        return true;
+    }
+    if only.is_empty() && skip.is_empty() {
+        return false;
+    }
     (!only.is_empty() && !only.iter().any(|w| m.name.contains(w.as_str())))
         || skip.iter().any(|w| m.name.contains(w.as_str()))
 }
@@ -1013,6 +1120,24 @@ fn commit_fx_transaction(
         return;
     };
     let mut zero_half = 0u32;
+    // bo2zm test aid: IW4L_FX_HIDE=<effect name part>:<element>[,<element>...]
+    // leaves those elements of that effect undrawn (which part draws what).
+    let mut out = out;
+    {
+        static HIDE: std::sync::OnceLock<Option<(String, Vec<u8>)>> = std::sync::OnceLock::new();
+        let hide = HIDE.get_or_init(|| {
+            let v = std::env::var("IW4L_FX_HIDE").ok()?;
+            let (name, list) = v.split_once(':')?;
+            Some((name.to_owned(), list.split(',').filter_map(|s| s.trim().parse().ok()).collect()))
+        });
+        if let Some((want, elems)) = hide {
+            let hidden = |name: &str, i: u8| name.contains(want.as_str()) && elems.contains(&i);
+            out.sprites.retain(|s| !hidden(&s.def_name, s.def_index));
+            out.trail_meshes.retain(|t| !hidden(&t.def_name, t.def_index));
+            out.models.retain(|m| !hidden(&m.def_name, m.def_index));
+            out.clouds.retain(|c| !hidden(&c.def_name, c.def_index));
+        }
+    }
 
     take_t6_marks(&host.0, mark_mesh.as_ref(), &runtime, &mut t6_marks);
     fill_mark_mesh_plan(&mut host.0, mark_mesh, &mut mark_plan, &runtime);
@@ -1023,12 +1148,15 @@ fn commit_fx_transaction(
     let mut iw_models: Vec<fx::FxModelInstance> = Vec::with_capacity(out.models.len());
     for m in &out.models {
         let entry = fx_model_catalog.and_then(|catalog| catalog.get_at(m.model_index));
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
         // bo2mp: Black Ops II's `fx_decal_*` models are decal volumes (a
         // box BO2 projects blood onto the body inside it); drawn as a model
         // the box shows as a black block on the body. Not drawn.
         if entry.is_some_and(|e| e.skel.name.starts_with("fx_decal")) {
             continue;
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
         let t6 = entry.is_some_and(|e| {
             (0..e.skel.surface_materials.len()).any(|s| {
                 e.material_index(s)
@@ -1102,7 +1230,9 @@ fn commit_fx_transaction(
             Err(_) => {}
         }
     }
-    // bo2zm: the omni lights for the fallback pass, nearest the eye first.
+    // bo2zm: the omni lights for the fallback pass, most important first:
+    // as in Black Ops II, the smallest (eye distance / radius) squared, so a
+    // big light further off can beat a small one close by.
     t6_lights.lights.clear();
     {
         let mut near: Vec<(f32, [f32; 8])> = out
@@ -1113,7 +1243,7 @@ fn commit_fx_transaction(
                 let d = Vec3::from_array(l.origin).distance(cam_tf.translation);
                 let [b, g, r] = l.color_bgr;
                 (
-                    d - l.radius,
+                    (d * d) / (l.radius * l.radius),
                     [
                         l.origin[0],
                         l.origin[1],
@@ -1131,6 +1261,25 @@ fn commit_fx_transaction(
         t6_lights
             .lights
             .extend(near.into_iter().take(T6_DYN_LIGHTS).map(|(_, l)| l));
+        // bo2zm test aid: IW4L_FX_DLIGHT_LOG=1 logs the effect lights about
+        // once a second (place, radius, colour).
+        static LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        static FRAME: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        if *LOG.get_or_init(|| std::env::var_os("IW4L_FX_DLIGHT_LOG").is_some())
+            && FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 30 == 0
+        {
+            let rows: Vec<String> = t6_lights
+                .lights
+                .iter()
+                .map(|l| {
+                    format!(
+                        "({:.0} {:.0} {:.0}) r{:.0} rgb {:.2} {:.2} {:.2}",
+                        l[0], l[1], l[2], l[3], l[4], l[5], l[6]
+                    )
+                })
+                .collect();
+            diag::info!(World, "fx dlights {}: {}", rows.len(), rows.join(" | "));
+        }
     }
     let eye = cam_tf.translation.to_array();
     for light in &post_lights {
@@ -1240,6 +1389,22 @@ fn commit_fx_transaction(
                 .collect();
             if !rows.is_empty() {
                 diag::info!(World, "fx sprites {want}: {}", rows.join(" | "));
+            }
+            // Its trails (vertex count, first vertex) and models too.
+            let others: Vec<String> = out
+                .trail_meshes
+                .iter()
+                .filter(|t| t.def_name.contains(want.as_str()))
+                .map(|t| format!("trail e{} verts {} first {:?}", t.def_index, t.verts.len(), t.verts.first()))
+                .chain(
+                    out.models
+                        .iter()
+                        .filter(|m| m.def_name.contains(want.as_str()))
+                        .map(|m| format!("model e{} #{} scale {:.2} at {:?}", m.def_index, m.model_index, m.scale, m.origin)),
+                )
+                .collect();
+            if !others.is_empty() {
+                diag::info!(World, "fx others {want}: {}", others.join(" | "));
             }
             // IW4L_FX_SPRITE_LOG_STATE=1: every frame, the clock and each
             // matching effect's state and live parts (begin, life).
@@ -3007,12 +3172,21 @@ fn fire_weapon(
     combat.last_tracer_name = combat_fx.and_then(|fx| fx.tracer_hint.clone());
     combat.last_weapon_tracer_edge = combat_fx.map(|fx| fx.tracer.edge_kind().to_owned());
     combat.last_weapon_flash_edge =
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
         combat_fx.map(|fx| fx.flash_edge(own_gun).edge_kind().to_owned());
     let muzzle_name = combat_fx.and_then(|fx| fx.flash_present(own_gun));
     // bo2zm fix list 3: on the player's own gun, a far-view flash plays its
     // first-person copy (`asset_game::T6_FIRST_PERSON_FLASH_SCALE`).
     let first_person_name = muzzle_name
         .filter(|_| own_gun)
+=======
+        combat_fx.map(|fx| fx.flash_edge(player_view).edge_kind().to_owned());
+    let muzzle_name = combat_fx.and_then(|fx| fx.flash_present(player_view));
+    // bo2zm fix list 3: on the player's own gun, a far-view flash plays its
+    // first-person copy (`asset_game::T6_FIRST_PERSON_FLASH_SCALE`).
+    let first_person_name = muzzle_name
+        .filter(|_| player_view)
+>>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
         .map(|n| (n.namespace, asset_game::t6_first_person_flash_name(n.name)))
         .filter(|(ns, name)| {
             catalog
@@ -3046,6 +3220,7 @@ fn fire_weapon(
         let mut muzzle_played = cursor.muzzle_played;
         let mut muzzle_gap = cursor.muzzle_gap;
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
         // bo2mp: a gun on no player (a scorestreak's helicopter or turret)
         // has no flash bolt here: its flash plays where the server says its
         // muzzle is, turned along the shot.
@@ -3053,6 +3228,8 @@ fn fire_weapon(
             && identities
                 .get(fire.entity)
                 .is_ok_and(|identity| identity.client().is_none());
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
         if try_play_weapon_fx_bolted(
             &mut host.0,
             &catalog.0,
@@ -3063,6 +3240,7 @@ fn fire_weapon(
             fx_world.view().as_ref().map(|s| s as &dyn FxScene),
         ) {
             cursor.muzzle_bolted = cursor.muzzle_bolted.saturating_add(1);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
         } else if !(gun_on_no_player
             && try_play_weapon_fx_at_origin(
                 &mut host.0,
@@ -3075,6 +3253,9 @@ fn fire_weapon(
                 fx_world.view().as_ref().map(|s| s as &dyn FxScene),
             ))
         {
+=======
+        } else {
+>>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
             muzzle_gap = muzzle_gap.saturating_add(1);
         }
         if muzzle_played > cursor.muzzle_played {
@@ -3111,7 +3292,11 @@ fn fire_weapon(
         let weapon = fire.event.payload.weapon;
         audio::select_cg_fire_alias(
             last_shot,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
             own_gun,
+=======
+            player_view,
+>>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
             weapons
                 .0
                 .weapon_sound_alias(weapon, asset_game::WeaponSoundSlot::Fire, &bank.0),
@@ -3127,7 +3312,11 @@ fn fire_weapon(
                 &bank.0,
             ),
         )
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
         .map(|alias| (alias, own_gun))
+=======
+        .map(|alias| (alias, player_view))
+>>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
     });
     if let (Some((alias, player_view)), Some(sounds)) = (alias, sounds.as_deref_mut()) {
         combat.last_fire_alias = Some(alias.to_owned());
@@ -3655,6 +3844,8 @@ fn play_fx(
     mut host: ResMut<HostFxSystem>,
     mut presented: ResMut<PresentedVehicleFx>,
     fx_world: FxSceneAccess,
+    // bo2zm: the effects held in the world (def name, spot, handle).
+    mut held_world: Local<Vec<(String, [f32; 3], u16)>>,
 ) {
     let Some(catalog) = catalog else {
         return;
@@ -3704,11 +3895,30 @@ fn play_fx(
     // glow going out).
     if payload.simulation_flags & 0x80 != 0 {
         if let Some(def) = catalog.0.map_fx_name(&def_name).resolve(&catalog.0) {
-            host.0.stop_bolted(
-                &def.name,
-                payload.number as u32,
-                u16::from(payload.surf_type),
-            );
+            if payload.number as u32 == fx_iw4::FX_ENTITYNUM_WORLD {
+                // bo2zm: BO2's stopfx on a held world effect (Buried's "?"
+                // chalk when its wall buy is built).
+                let at = payload.origin;
+                held_world.retain(|(name, origin, handle)| {
+                    let here = *name == def.name
+                        && (0..3).all(|i| (origin[i] - at[i]).abs() < 1.0);
+                    if here
+                        && host
+                            .0
+                            .slot_for_handle(*handle)
+                            .is_some_and(|e| e.def_name == def.name)
+                    {
+                        host.0.stop_owned(*handle);
+                    }
+                    !here
+                });
+            } else {
+                host.0.stop_bolted(
+                    &def.name,
+                    payload.number as u32,
+                    u16::from(payload.surf_type),
+                );
+            }
         }
         return;
     }
@@ -3757,6 +3967,17 @@ fn play_fx(
             fx_world.view().as_ref().map(|s| s as &dyn FxScene),
         )
     };
+    if let Some(PlayResult::Held { handle }) = played
+        && payload.number as u32 == fx_iw4::FX_ENTITYNUM_WORLD
+        && let Some(def) = catalog.0.map_fx_name(&def_name).resolve(&catalog.0)
+    {
+        held_world.retain(|(name, _, h)| {
+            host.0
+                .slot_for_handle(*h)
+                .is_some_and(|e| e.def_name == *name)
+        });
+        held_world.push((def.name.clone(), payload.origin, handle));
+    }
     let spawn = match played {
         Some(PlayResult::PlayedReleased { .. } | PlayResult::Held { .. }) => "spawned",
         Some(PlayResult::Failed(_)) | None => "miss_def",
@@ -3957,11 +4178,24 @@ fn melee_blood(
             .and_then(|bolts| bolts.knife)
     };
     let mut played = 0u32;
+    // bo2zm: Black Ops II's own knife blood (its name differs from IW4's).
+    let knife_blood = if catalog.0.map_namespace() == asset_core::AssetNamespace::T6 {
+        asset_game::FxName::new(
+            asset_core::AssetNamespace::T6,
+            "impacts/fx_flesh_hit_knife_mp",
+        )
+    } else {
+        asset_game::FxName::engine("impacts/flesh_hit_knife")
+    };
     try_play_weapon_fx_bolted(
         &mut host.0,
         &catalog.0,
         &mut elem_infos.0,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
         Some(asset_game::FxName::engine("impacts/flesh_hit_knife")),
+=======
+        Some(knife_blood),
+>>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
         target,
         &mut played,
         fx_world.view().as_ref().map(|s| s as &dyn FxScene),

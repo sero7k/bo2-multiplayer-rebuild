@@ -15,6 +15,61 @@ fn main() {
                 m.num_root_bones,
                 m.lod0.len()
             );
+            println!(
+                "  mins {:?} maxs {:?} radius {}; collision lod {} with {} surfaces; bone boxes {:?}",
+                m.mins,
+                m.maxs,
+                m.radius,
+                m.coll_lod,
+                m.coll_surfs.len(),
+                m.bone_info
+            );
+            for (i, cs) in m.coll_surfs.iter().enumerate() {
+                println!(
+                    "  collision surface {i}: {} tris, mins {:?} maxs {:?}, bone {}, contents {:#x}, flags {:#x}",
+                    cs.tris.len(),
+                    cs.mins,
+                    cs.maxs,
+                    cs.bone_idx,
+                    cs.contents,
+                    cs.surf_flags
+                );
+                let far = cs
+                    .tris
+                    .iter()
+                    .filter(|t| t.iter().any(|r| r[0].abs() > 1000.0 || r[1].abs() > 1000.0 || r[2].abs() > 1000.0))
+                    .count();
+                println!("  collision surface {i}: {far} tris with a value beyond 1000");
+            }
+            for (i, s) in m.lod0.iter().enumerate() {
+                let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                for v in s.verts.chunks_exact(32) {
+                    for k in 0..3 {
+                        let x = f32::from_le_bytes(v[k * 4..k * 4 + 4].try_into().unwrap());
+                        lo[k] = lo[k].min(x);
+                        hi[k] = hi[k].max(x);
+                    }
+                }
+                println!("  surface {i} vertices span {lo:?} to {hi:?}");
+                let far: Vec<[f32; 3]> = s
+                    .verts
+                    .chunks_exact(32)
+                    .map(|v| std::array::from_fn(|k| f32::from_le_bytes(v[k * 4..k * 4 + 4].try_into().unwrap())))
+                    .filter(|p: &[f32; 3]| p[0].abs().max(p[1].abs()) > 1000.0)
+                    .collect();
+                println!("  surface {i}: {} vertices beyond 1000 out: {far:?}", far.len());
+                let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                for v in s.verts.chunks_exact(32) {
+                    let p: [f32; 3] = std::array::from_fn(|k| f32::from_le_bytes(v[k * 4..k * 4 + 4].try_into().unwrap()));
+                    if p[0].abs().max(p[1].abs()) <= 1000.0 {
+                        for k in 0..3 {
+                            lo[k] = lo[k].min(p[k]);
+                            hi[k] = hi[k].max(p[k]);
+                        }
+                    }
+                }
+                println!("  surface {i}: the rest spans {lo:?} to {hi:?}");
+            }
             for (i, b) in m.bone_names.iter().enumerate() {
                 let parent = if i < usize::from(m.num_root_bones) {
                     -1
@@ -296,9 +351,12 @@ fn main() {
                         for f in 0..a.numframes {
                             let t = f32::from(f) / a.framerate.max(1.0);
                             let s = clip.sample_track(track, t);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6bones.rs
                             if let Some(v) = s.and_then(|s| s.translation) {
                                 println!("  {bone} frame {f:2}: trans ({:.3} {:.3} {:.3})", v[0], v[1], v[2]);
                             }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6bones.rs
                             if let Some(q) = s.and_then(|s| s.rotation) {
                                 let [x, y, z, w] = [q[0], q[1], q[2], q[3]];
                                 // The bone's axes in its parent's space; each

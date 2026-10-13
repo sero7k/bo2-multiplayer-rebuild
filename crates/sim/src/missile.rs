@@ -115,6 +115,31 @@ pub(crate) fn magic_bullet(
     launched.ok_or_else(|| format!("weapon {weapon} launched no projectile"))
 }
 
+/// bo2zm: a script's `magicgrenadetype` (BO2's `ScrCmd_MagicGrenadeType`): a
+/// grenade from `origin` at the given velocity, going off after `fuse_ms`.
+pub(crate) fn magic_grenade(
+    world: &mut FrameWorld,
+    tick: crate::Tick,
+    owner: crate::ClientId,
+    weapon: u32,
+    origin: [f32; 3],
+    velocity: [f32; 3],
+    fuse_ms: i32,
+) -> Result<ProjectileState, String> {
+    let angles = math_iw4::vect_to_angles(velocity);
+    let kind = GrenadeLaunchKind::Magic { fuse_ms };
+    let now = crate::level_time_ms(tick);
+    spawn_grenade_projectile(world, owner, weapon, tick, origin, angles, velocity, kind)
+        .then(|| {
+            crate::frame::collect_projectiles(world.ecs())
+                .into_iter()
+                .filter(|p| p.owner == owner && p.weapon == weapon && p.spawn_time_ms == now)
+                .max_by_key(|p| p.id.0)
+        })
+        .flatten()
+        .ok_or_else(|| format!("weapon {weapon} launched no grenade"))
+}
+
 fn fire_missile(
     world: &mut FrameWorld,
     tick: crate::Tick,

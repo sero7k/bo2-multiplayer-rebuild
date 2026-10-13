@@ -212,9 +212,17 @@ pub fn update_sprint(
             cmd.buttons,
             context.sprint_forward_minimum,
         ) {
+            // bo2zm: aiming stops a sprint without needing sprint pressed
+            // again: let go of aim with sprint still held and it goes on.
+            let aiming = (cmd.buttons & crate::ads_intent::BUTTON_ADS) != 0
+                || (ps.pm_flags & pm_flags::ADS_INTENT) != 0;
             end_sprint(ps, cmd);
+            if aiming {
+                ps.sprint_button_up_required = 0;
+            }
             return SprintResult::Ended;
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/movement_iw4/src/sprint.rs
         if (old_buttons & BUTTON_SPRINT) != 0 || (cmd.buttons & BUTTON_SPRINT) == 0 {
             return SprintResult::Unchanged;
         }
@@ -222,6 +230,12 @@ pub fn update_sprint(
         end_sprint(ps, cmd);
         ps.sprint_button_up_required = 1;
         return SprintResult::Ended;
+=======
+        // bo2zm: sprint pressed again while sprinting keeps the sprint (IW4
+        // turned it off; Black Ops II does not).
+        let _ = old_buttons;
+        return SprintResult::Unchanged;
+>>>>>>> /tmp/claude-0/zmhead/crates/movement_iw4/src/sprint.rs
     }
 
     if ps.sprint_delay != 0 {

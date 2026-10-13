@@ -54,6 +54,9 @@ pub struct FpvBoltTags {
     /// set of arms (Black Ops II dual wield).
     pub flash_left: Option<u16>,
     pub brass_left: Option<u16>,
+    /// bo2zm: the wrists and gun tag (Mob's Afterlife ghost glow).
+    pub wrist: [Option<u16>; 2],
+    pub weapon: Option<u16>,
 }
 
 #[derive(Clone, Debug, Default)]

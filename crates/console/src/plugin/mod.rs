@@ -84,6 +84,7 @@ impl Plugin for ConsolePlugin {
             .init_resource::<ConsoleState>()
             .init_resource::<frame::HudInputView>()
             .init_resource::<ConsoleInputState>()
+            .init_resource::<crate::ScriptedKeys>()
             .init_resource::<KeyBinds>()
             .init_resource::<ConsoleCommandQueue>()
             .init_resource::<ConsoleDispatch>()
@@ -126,6 +127,7 @@ impl Plugin for ConsolePlugin {
                     handle_scrollback_pointer,
                     copy_console_selection_on_release,
                     isolate_gameplay_input,
+                    drive_scripted_keys,
                     expire_pressed_inputs,
                     publish_client_action_input,
                     sync_cursor_grab,
@@ -279,7 +281,11 @@ struct PhysicalInputState {
     look_ready: bool,
     mouse_activity: f32,
     mouse_activity_start: f32,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/console/src/plugin/mod.rs
     prompts: Option<(bool, frame::PromptStyle)>,
+=======
+    prompts: Option<(bool, frame::PromptStyle, bool)>,
+>>>>>>> /tmp/claude-0/zmhead/crates/console/src/plugin/mod.rs
 }
 
 fn publish_client_action_input(
@@ -291,6 +297,7 @@ fn publish_client_action_input(
     mut wheel_carry: Local<f32>,
     binds: Res<KeyBinds>,
     mut scripted: ResMut<ConsoleInputState>,
+    scripted_keys: Res<crate::ScriptedKeys>,
     console: Res<ConsoleState>,
     script_menus: Option<Res<hud::ScriptMenus>>,
     mut hud_input: ResMut<frame::HudInputView>,
@@ -320,7 +327,16 @@ fn publish_client_action_input(
         out.pad_autoaim = None;
         devices.aiming_with_pad = false;
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/console/src/plugin/mod.rs
     out.pad_aim_assist = 0;
+=======
+    // bo2zm: Black Ops II's aim assist on a pad (IW4 on PC has none).
+    out.pad_aim_assist = if devices.aiming_with_pad && pad.is_some() && frame::bo2_game() {
+        2
+    } else {
+        0
+    };
+>>>>>>> /tmp/claude-0/zmhead/crates/console/src/plugin/mod.rs
     out.pad_move = [0.0; 2];
     out.pad_look = [0.0; 2];
     out.pad_look_delta = [0.0; 2];
@@ -429,8 +445,16 @@ fn publish_client_action_input(
             if key_num >= input_iw4::KEY_COUNT || physical.blocked.contains(&button) {
                 continue;
             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/console/src/plugin/mod.rs
             // bo2zm: a scripted test run takes no physical keys or buttons.
             if inputs.just_pressed(button) && !crate::startup::scripted_run() {
+=======
+            // bo2zm: a scripted test run takes no physical keys or buttons
+            // (only the ones its own `key` command holds down).
+            let scripted_key = matches!(button, BindButton::Key(code)
+                if scripted_keys.0.iter().any(|(held, _, _)| *held == code));
+            if inputs.just_pressed(button) && (!crate::startup::scripted_run() || scripted_key) {
+>>>>>>> /tmp/claude-0/zmhead/crates/console/src/plugin/mod.rs
                 key_event(&mut out.client, key_num, true, now, frame);
             }
             if !inputs.pressed(button) && out.client.keys[key_num].down != 0 {
@@ -512,7 +536,11 @@ fn publish_client_action_input(
         devices.pad_prompts = false;
         physical.mouse_activity = 0.0;
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/console/src/plugin/mod.rs
     let prompts = (devices.pad_prompts, devices.style);
+=======
+    let prompts = (devices.pad_prompts, devices.style, frame::bo2_game());
+>>>>>>> /tmp/claude-0/zmhead/crates/console/src/plugin/mod.rs
     if physical.prompts == Some(prompts) && !binds.is_changed() {
         return;
     }
@@ -528,7 +556,16 @@ fn publish_client_action_input(
     hud_input.action_slot_keys = [None, None, None, None];
     for (button, id) in labels {
         let label = match button {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/console/src/plugin/mod.rs
             BindButton::Pad(button) => button.prompt(devices.style).to_owned(),
+=======
+            // bo2zm: in a Black Ops II game, BO2's button pictures.
+            BindButton::Pad(button) => frame::bo2_game()
+                .then(|| frame::bo2_pad_glyph(button.bo2_name(), devices.style))
+                .flatten()
+                .unwrap_or_else(|| button.prompt(devices.style))
+                .to_owned(),
+>>>>>>> /tmp/claude-0/zmhead/crates/console/src/plugin/mod.rs
             _ => crate::binds::display_button(button).to_uppercase(),
         };
         if let Some(command) = binds.binding_name(button) {
@@ -638,6 +675,12 @@ fn setup_console(
             crate::CommandSpec::new("press")
                 .usage("press <+input> [seconds] — hold an input, then release it")
                 .arg(crate::StaticCompleter::new(command_names())),
+        );
+    }
+    if registry.resolve("key").is_none() {
+        registry.register(
+            crate::CommandSpec::new("key")
+                .usage("key <key> [seconds] — hold a keyboard key (through the binds), then release it"),
         );
     }
     if registry.resolve("mousemove").is_none() {
@@ -892,6 +935,28 @@ fn is_console_input(word: &str) -> bool {
     is_bind_command(word)
 }
 
+/// bo2zm: `key` presses: down on the first frame, up when the time is out.
+fn drive_scripted_keys(
+    time: Res<Time>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut scripted: ResMut<crate::ScriptedKeys>,
+) {
+    let dt = time.delta_secs();
+    scripted.0.retain_mut(|(code, left, started)| {
+        if !*started {
+            keys.press(*code);
+            *started = true;
+            return true;
+        }
+        *left -= dt;
+        if *left <= 0.0 {
+            keys.release(*code);
+            return false;
+        }
+        true
+    });
+}
+
 fn expire_pressed_inputs(time: Res<Time>, mut inputs: ResMut<ConsoleInputState>) {
     inputs.tick(time.delta_secs());
 }
@@ -899,6 +964,7 @@ fn expire_pressed_inputs(time: Res<Time>, mut inputs: ResMut<ConsoleInputState>)
 fn handle_input_commands(
     mut events: MessageReader<ConsoleCommand>,
     mut inputs: ResMut<ConsoleInputState>,
+    mut scripted_keys: ResMut<crate::ScriptedKeys>,
     mut binds: ResMut<KeyBinds>,
     mut console: ResMut<ConsoleState>,
     settings: Res<ConsoleSettings>,
@@ -954,6 +1020,32 @@ fn handle_input_commands(
                     );
                 }
                 _ => console.echo("usage: press <+input> [seconds]", settings.log_capacity),
+            },
+            "key" => match command.args.as_slice() {
+                [name, rest @ ..] => {
+                    let code = crate::binds::parse_key_name(name).and_then(|buttons| {
+                        buttons.into_iter().find_map(|b| match b {
+                            BindButton::Key(code) => Some(code),
+                            _ => None,
+                        })
+                    });
+                    let seconds = rest
+                        .first()
+                        .and_then(|s| s.trim_end_matches(['s', 'S']).parse::<f32>().ok())
+                        .unwrap_or(crate::PRESS_SECONDS)
+                        .clamp(0.0, 60.0);
+                    match code {
+                        Some(code) => {
+                            scripted_keys.0.push((code, seconds, false));
+                            console.echo(
+                                format!("key: {name} ({seconds:.2}s)"),
+                                settings.log_capacity,
+                            );
+                        }
+                        None => console.echo(format!("key: no key `{name}`"), settings.log_capacity),
+                    }
+                }
+                _ => console.echo("usage: key <key> [seconds]", settings.log_capacity),
             },
             "mousemove" => match command.args.as_slice() {
                 [dx] => match dx.parse::<f32>() {

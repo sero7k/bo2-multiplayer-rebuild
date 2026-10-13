@@ -60,7 +60,10 @@ pub fn update_ads_intent(
     let mut ads_allowed = context.ads_allowed;
     let mut exit_ads_event = false;
 
+    // bo2zm: in Black Ops II aiming beats a held sprint button (aim from a
+    // sprint with shift still down); only sprint without aim drops ADS.
     if (cmd.buttons & BUTTON_SPRINT) != 0
+        && (cmd.buttons & BUTTON_ADS) == 0
         && (!context.weapon_def_scope || (cmd.buttons & BUTTON_SCOPE_HOLD) == 0)
         && (!context.sprint_hold_ads || ps.f_weapon_pos_frac == 0.0)
     {

@@ -378,6 +378,9 @@ pub struct RuntimeMaterial {
     pub falloff_begin_bits: [u32; 4],
     pub falloff_end_bits: [u32; 4],
     pub env_map_parms_bits: [u32; 4],
+    /// bo2zm 27c: a cloud sheet's constants: 1 / `FadeFactor`,
+    /// `ColorSpeed.xy`, `ColorScale.x` and `hdrAmount` squared.
+    pub sheet_bits: [u32; 5],
     pub textures: Vec<(u32, Option<RuntimeTextureBinding>)>,
     pub constants: Vec<(u32, [u32; 4])>,
 }
@@ -401,6 +404,10 @@ impl RuntimeMaterial {
 
     pub fn env_map_parms(&self) -> [f32; 4] {
         self.env_map_parms_bits.map(f32::from_bits)
+    }
+
+    pub fn sheet(&self) -> [f32; 5] {
+        self.sheet_bits.map(f32::from_bits)
     }
 
     pub fn texture_semantic(&self, semantic: u8) -> Option<RuntimeImageId> {

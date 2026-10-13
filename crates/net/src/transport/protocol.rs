@@ -79,6 +79,9 @@ impl MatchDescriptor {
 }
 
 pub const MAX_PACKET_BYTES: u32 = 256 * 1024;
+/// A compressed snapshot may unpack past one packet: a full Zombies map
+/// (Die Rise's first snapshot is over 256 KB, 12 KB packed).
+pub const MAX_SNAPSHOT_DECODED_BYTES: u32 = 16 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProtocolLimits {
@@ -622,7 +625,7 @@ impl ServerPacket {
                 let snapshot_seq = input.get_u32()?;
                 let decoded_len = if tag == TAG_SERVER_COMPRESSED_SNAPSHOT {
                     let len = input.get_u32()? as usize;
-                    if len > MAX_PACKET_BYTES as usize {
+                    if len > MAX_SNAPSHOT_DECODED_BYTES as usize {
                         return Err(WireError::Malformed("snapshot exceeds decoded size limit"));
                     }
                     Some(len)

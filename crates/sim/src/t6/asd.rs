@@ -51,7 +51,10 @@ impl AnimStateDef {
                 }
                 continue;
             }
-            if let Some((name, flags)) = line.split_once(':') {
+            // A state without flags has no colon (TranZit's Denizen:
+            // `zm_jump_loop` alone on its line, then its braces).
+            let header = line.split_once(':').or(cur.is_none().then_some((line, "")));
+            if let Some((name, flags)) = header {
                 if let Some(s) = cur.take() {
                     def.states.insert(s.name.clone(), s);
                 }

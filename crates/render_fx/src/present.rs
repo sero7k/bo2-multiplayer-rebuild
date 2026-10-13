@@ -1480,6 +1480,25 @@ pub fn build_fx_verts(
             ),
         })
     };
+    // bo2zm: Black Ops II's effect light colour (`R_AddOmniLightToScene`):
+    // the element's colour from sRGB to linear, times its alpha times 32, in
+    // the world's light units (its sun is about 15 before exposure).
+    fn t6_elem_light_color_bgr(color_rgba: [u8; 4]) -> [f32; 3] {
+        let lin = |c: u8| {
+            let c = c as f32 / 255.0;
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let s = color_rgba[3] as f32 / 255.0 * 32.0;
+        [
+            lin(color_rgba[2]) * s,
+            lin(color_rgba[1]) * s,
+            lin(color_rgba[0]) * s,
+        ]
+    }
     let mut on_light = |ctx: FxDrawElemContext<'_>| -> Option<FxElemLightInstance> {
         let effect = catalog_lookup_draw(
             catalog,
@@ -1506,13 +1525,6 @@ pub fn build_fx_verts(
             ctx.norm_time,
             rand_scale,
         )?;
-        // bo2zm: a Black Ops II light element leaves its scale at 0: its
-        // brightness is its colour (which fades to black over its life).
-        let scale = if scale <= 0.0 && effect.namespace == asset_core::AssetNamespace::T6 {
-            1.0
-        } else {
-            scale
-        };
         if cull_elem_light(
             cull.elem_draw,
             cull.planes,
@@ -1547,7 +1559,13 @@ pub fn build_fx_verts(
             is_spot: ctx.elem_type == FxElemType::SpotLight as u8,
             origin: ctx.origin,
             radius: size0,
-            color_bgr: elem_light_color_bgr(color, scale),
+            // bo2zm: a Black Ops II light element leaves its scale at 0:
+            // its brightness is its colour and alpha.
+            color_bgr: if effect.namespace == asset_core::AssetNamespace::T6 {
+                t6_elem_light_color_bgr(color)
+            } else {
+                elem_light_color_bgr(color, scale)
+            },
             axis,
         })
     };

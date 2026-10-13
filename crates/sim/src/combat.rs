@@ -312,7 +312,10 @@ pub(crate) fn advance_weapon_command(
         let locked_fire = world.missile_launch_facts(ps.weapon).is_none_or(|f| {
             !f.require_lock_to_fire || meta.weapon_lock.can_fire(ps.weapon, meta.life_sequence.0)
         });
-        let fire_buttons = if locked_fire {
+        // bo2zm: a Black Ops II Jet Gun's trigger spins it up (t6::jetgun);
+        // it fires no shots.
+        let script_trigger = crate::t6::jetgun::owns_trigger(world.weapon_script_name(ps.weapon));
+        let fire_buttons = if locked_fire && !script_trigger {
             cmd.buttons
         } else {
             cmd.buttons & !playerstate_iw4::buttons::ATTACK
@@ -526,9 +529,12 @@ pub(crate) fn advance_weapon_command(
                     0
                 };
             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/combat.rs
             if swap_log() {
                 swap_log_step(world_key, ps_mut.weaponstate_primary, hand0.weaponstate, hand0.weapon_time, msec);
             }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/combat.rs
             ps_mut.weaponstate_primary = hand0.weaponstate;
             ps_mut.weapon_time = hand0.weapon_time;
             ps_mut.weapon_delay = hand0.weapon_delay;
@@ -567,6 +573,7 @@ pub(crate) fn advance_weapon_command(
         if hand0.weapon != 0 {
             meta.mirror_held_ammo(hand0.weapon);
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/combat.rs
         if ammo_log() && (hand0.weapon != started_weapon || hand0.clip != clip0 || hand0.stock != stock) {
             diag::info!(
                 Sim,
@@ -576,6 +583,8 @@ pub(crate) fn advance_weapon_command(
                 hand0.stock
             );
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/combat.rs
         meta.weapon_shot_count = hand0.shot_count;
         meta.burst_latch = hand0.burst_latch;
         meta.rechamber_pending = hand0.rechamber_pending;
@@ -674,7 +683,11 @@ pub(crate) fn advance_weapon_command(
                         ps.origin[2] + ps.view_height_current,
                     ];
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/combat.rs
                     let last_shot = hand.clip == 0 && facts.fire_type != 5;
+=======
+                    let last_shot = hand.clip == 0 && facts.fire_type != 5 && !facts.unlimited_ammo;
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/combat.rs
                     world.push_entity_event(
                         tick,
                         EventAudience::All,
@@ -829,7 +842,9 @@ pub(crate) fn advance_weapon_command(
                             spend_ps_offhand_round(ps, weapon, facts);
                         }
                     }
-                    crate::equipment::explode_offhand_in_hand(world, *id, weapon, tick);
+                    if !crate::equipment::spawn_offhand_in_hand(world, *id, weapon, tick) {
+                        crate::equipment::explode_offhand_in_hand(world, *id, weapon, tick);
+                    }
                 }
                 WeaponTickEvent::ReloadStarted => {
                     apply_player_anim_event(world, *id, ANIM_ET_RELOAD);
@@ -964,6 +979,7 @@ pub fn spread_pellet_direction(
     spread_direction_on_plane(angles, spread_degrees, rng, 1.0)
 }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/combat.rs
 /// bo2mp: `IW4L_AMMO_LOG` set = log every clip/stock/weapon change of the
 /// player's held gun (test aid).  A swap logs `weapon a->b` with the clip and
 /// stock the new mode sees.
@@ -1018,6 +1034,8 @@ fn swap_log_step(world: usize, old: i32, new: i32, weapon_time: i32, msec: i32) 
     }
 }
 
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/combat.rs
 /// bo2zm: `IW4L_SHOT_LOG` set = log every shot's aim (test aid).
 pub(crate) fn shot_log() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -1059,8 +1077,13 @@ pub(crate) fn phase_emit(world: &FrameWorld, shots: &[AcceptedShot]) -> Vec<Emis
         };
 
         match fire_weapon_kind(facts.weap_type, facts.weap_class) {
+            // BO2 fires every bullet weapon, whatever its damage: a 0-damage
+            // one (the Paralyzer, whose script does its harm) still hits the
+            // models and triggers it crosses, which take at least 1 (the
+            // easter egg's amplifiers count Paralyzer hits). Players keep
+            // their own `scaled > 0` gate in phase_trace.
             Some(FireWeaponKind::Bullet) => {
-                if facts.damage <= 0 || facts.bullet_range() <= 0.0 {
+                if facts.bullet_range() <= 0.0 {
                     continue;
                 }
             }
@@ -1157,6 +1180,30 @@ pub(crate) fn phase_trace(
             Some(&on_glass_hit),
         );
         let entity_epoch = entity_collision_epoch(terminal, &query.entities.rows);
+        // BO2: a shot through a damage trigger fires it. Glass does not stop the bullet (the trace goes on
+        // through the pane), so it does not end this check either: Buried's easter egg targets stand behind windows.
+        if world.publishes_snapshot() {
+            let to = segments
+                .iter()
+                .find(|s| match s.collider {
+                    Some(ColliderId::World { contents, .. }) => {
+                        contents & weapon_iw4::CONTENTS_GLASS == 0
+                    }
+                    other => other.is_some(),
+                })
+                .map_or(end, |s| s.end);
+            let d = (0..3).map(|i| (to[i] - em.origin[i]).powi(2)).sum::<f32>().sqrt();
+            crate::t6::damage_triggers(
+                world.ecs(),
+                em.origin,
+                to,
+                0.0,
+                bullet_damage_at_distance(&facts, d).max(1),
+                em.attacker,
+                em.weapon,
+                crate::t6::DamageKind::Bullet,
+            );
+        }
         let startsolid = segments.first().is_some_and(|s| s.startsolid);
         let impact_n = segments
             .iter()
@@ -1374,11 +1421,16 @@ pub(crate) fn phase_trace(
                     | ColliderId::EntityLinkedBrush { owner, .. },
                 ) => {
                     if let Some(ColliderId::EntityDObjBone { bone, .. }) = segment.collider
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/combat.rs
                         && crate::t5_destructible::apply_hit(
+=======
+                        && let Some(notifies) = crate::t5_destructible::apply_hit(
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/combat.rs
                             world,
                             tick,
                             owner,
                             bone,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/combat.rs
                             scaled as u32,
                             [
                                 segment.end[0] - em.origin[0],
@@ -1387,8 +1439,26 @@ pub(crate) fn phase_trace(
                             ],
                             Some(em.attacker),
                             em.weapon,
+=======
+                            scaled.max(1) as u32,
+>>>>>>> /tmp/claude-0/zmhead/crates/sim/src/combat.rs
                         )
                     {
+                        if std::env::var_os("IW4L_T6_HITLOG").is_some() {
+                            diag::info!(Sim, "destructible hit surface {}", segment.surf_type);
+                        }
+                        // BO2: the map's scripts hear each break.
+                        if let Some(target) = owner.script_model() {
+                            for notify in notifies {
+                                crate::t6::destructible_broken(
+                                    world.ecs(),
+                                    target,
+                                    &notify,
+                                    Some(em.attacker),
+                                    em.weapon,
+                                );
+                            }
+                        }
                         continue;
                     }
                     if let Some(target) = owner.script_model() {
@@ -1444,9 +1514,65 @@ pub(crate) fn phase_trace(
                 None => {}
             }
         }
+        // bo2zm: a Black Ops II bullet weapon whose def sets
+        // bBulletImpactExplode explodes where its bullet first hits.
+        if let Some(eq) = world.equipment_row_raw(em.weapon)
+            && eq.bullet_impact_explode
+            && let Some(hit) = segments.iter().find(|s| {
+                s.collider.is_some() && s.surface_flags & fx_iw4::FX_IMPACT_EXIT_SURFACE_FLAG == 0
+            })
+        {
+            bullet_impact_blast(world, tick, em, eq, hit.end, hit.normal, hit.surf_type);
+        }
     }
     world.record_shot_collision_verdicts(&output.shot_verdicts);
     output
+}
+
+/// bo2zm: a bBulletImpactExplode bullet's explosion at `origin`: the
+/// weapon's explosion effect (its impact type, as a grenade's) and its
+/// explosion radius with inner / outer damage, as splash damage.
+fn bullet_impact_blast(
+    world: &mut FrameWorld,
+    tick: Tick,
+    em: &Emission,
+    eq: crate::EquipmentRuntimeFacts,
+    origin: [f32; 3],
+    normal: [f32; 3],
+    surf_type: u8,
+) {
+    world.push_entity_event(
+        tick,
+        EventAudience::All,
+        entity_iw4::EntityEventKind::GRENADE_EXPLODE,
+        crate::EntityEventPayload {
+            number: i32::from(trace_iw4::ENTITYNUM_WORLD),
+            attacker_entity_num: em.attacker.0 as i32,
+            weapon: em.weapon,
+            correlation: em.shot_id.0,
+            origin,
+            direction: normal,
+            surf_type: surf_type.into(),
+            ..Default::default()
+        },
+    );
+    let radius = eq.explosion_radius.max(eq.explosion_radius_min).max(0) as f32;
+    if radius <= 0.0 || (eq.explosion_inner_damage <= 0 && eq.explosion_outer_damage <= 0) {
+        return;
+    }
+    let blast = crate::damage::ExplosionBlast {
+        cone: None,
+        origin,
+        radius,
+        inner_damage: eq.explosion_inner_damage as f32,
+        outer_damage: eq.explosion_outer_damage.max(0) as f32,
+        weapon: em.weapon,
+        source: DamageSource::Projectile(crate::ProjectileId(0)),
+        attacker: em.attacker,
+        attacker_life: em.attacker_life,
+        killcam_entity_start_time: 0,
+    };
+    crate::damage::apply_explosion_blast(world, tick, &blast);
 }
 
 fn fire_weapon_melee(
@@ -1526,6 +1652,24 @@ fn fire_weapon_melee(
         }
         best_frac = frac;
         best_hit = Some(*segment);
+    }
+    // BO2: a knife through a damage trigger fires it (Nuketown's bunker
+    // hatch: Marlton).
+    if world.publishes_snapshot() {
+        let to = best_hit.map_or(
+            std::array::from_fn(|i| origin[i] + forward[i] * range),
+            |s| std::array::from_fn(|i| s.end[i] + forward[i] * 4.0),
+        );
+        crate::t6::damage_triggers(
+            world.ecs(),
+            origin,
+            to,
+            0.0,
+            facts.melee_damage,
+            attacker,
+            weapon,
+            crate::t6::DamageKind::Melee,
+        );
     }
     let Some(segment) = best_hit else {
         return;
@@ -1609,7 +1753,22 @@ fn fire_weapon_melee(
         }
         // bo2zm M3: the script entity (a zombie) takes the knife.
         Some(ColliderId::EntityDObjBone { owner, bone, .. }) => {
-            if let Some(target) = owner.script_model() {
+            // A breakable prop (a mannequin) takes the knife as a hit.
+            if let Some(notifies) =
+                crate::t5_destructible::apply_hit(world, tick, owner, bone, amount.max(0) as u32)
+            {
+                if let Some(target) = owner.script_model() {
+                    for notify in notifies {
+                        crate::t6::destructible_broken(
+                            world.ecs(),
+                            target,
+                            &notify,
+                            Some(attacker),
+                            weapon,
+                        );
+                    }
+                }
+            } else if let Some(target) = owner.script_model() {
                 crate::script::damage_entity(
                     world.ecs(),
                     &crate::script::EntityHit {

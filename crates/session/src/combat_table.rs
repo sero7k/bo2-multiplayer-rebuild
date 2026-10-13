@@ -75,6 +75,7 @@ pub(crate) fn validated_facts(
         reload_start_add_time_ms: f.reload_start_add_time_ms,
         reload_start_add: f.reload_start_add,
         no_partial_reload: f.no_partial_reload,
+        unlimited_ammo: f.unlimited_ammo,
         dual_mag: f.dual_mag,
         spread_before_fire_add: f.spread_before_fire_add,
         inherits_perks: f.inherits_perks,
@@ -183,6 +184,8 @@ pub fn from_registry(
             facts.dtp_cycle_scale = f.bob.dtp_cycle_scale;
             facts.alternate_weapon = weapons.alternate_of(i as u32);
             facts.dual_wield_weapon = weapons.dual_wield_weapon_of(i as u32);
+            facts.spawned_grenade = weapons.spawned_grenade_of(i as u32);
+            facts.retrievable = f.retrievable;
             facts.aim_assist = weapon_iw4::AimAssistRanges {
                 auto_aim: f.auto_aim_range,
                 hip: f.aim_assist_range,
@@ -203,17 +206,29 @@ pub fn from_registry(
 }
 
 const T5_WEAPTYPE_MELEE: i32 = 7;
+/// bo2zm: Black Ops II's `WEAPTYPE_MELEE` (its knives: `knife_zm`,
+/// `bowie_knife_zm`, `tazer_knuckles_zm`), kept raw since `weap_type` is
+/// remapped to IW4's gun types.
+const T6_WEAPTYPE_MELEE: i32 = 7;
 
 pub fn melee_only_from_registry(weapons: &WeaponRegistry) -> Vec<bool> {
     (0..=weapons.len())
         .map(|i| {
             weapons.facts_of(i as u32).is_some_and(|f| {
-                f.weap_type == T5_WEAPTYPE_MELEE
+                (f.weap_type == T5_WEAPTYPE_MELEE || f.t6_weap_type == T6_WEAPTYPE_MELEE)
                     && f.fire_time_ms <= 0
                     && f.raise_time_ms <= 0
                     && f.clip_size <= 0
             })
         })
+        .collect()
+}
+
+/// bo2zm: each weapon's own knife damage (BO2 hits with the melee weapon he
+/// holds: the Bowie Knife cuts harder than the knife).
+pub fn melee_damage_from_registry(weapons: &WeaponRegistry) -> Vec<i32> {
+    (0..=weapons.len())
+        .map(|i| weapons.facts_of(i as u32).map_or(0, |f| f.melee_damage))
         .collect()
 }
 
@@ -271,6 +286,7 @@ pub fn equipment_from_registry(weapons: &WeaponRegistry) -> Vec<sim::EquipmentRu
                 stickiness: f.stickiness,
                 timed_detonation: f.timed_detonation,
                 proj_impact_explode: f.proj_impact_explode,
+                bullet_impact_explode: f.bullet_impact_explode,
                 stick_to_players: f.stick_to_players,
                 ballistic_blade: weapons.namespace_of(index as u32)
                     == Some(asset_core::AssetNamespace::T5)

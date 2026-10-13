@@ -16,8 +16,13 @@ pub use anim::fpv_host::{
     PendingFpvSpawnRequest, generate_fpv_pose,
 };
 pub use anim::fpv_prepared::{
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/lib.rs
     FpvPreparationCensus, FpvRigSet, FpvWeaponSlot, FpvWeaponTable, FpvWeaponView, PreparedFpv,
     prepare_fpv_compositions,
+=======
+    FpvHandsOverride, FpvPreparationCensus, FpvRigSet, FpvWeaponSlot, FpvWeaponTable,
+    FpvWeaponView, PreparedFpv, prepare_fpv_compositions,
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/lib.rs
 };
 pub use anim::model_materials::{PreparedModelMaterials, prepare_model_materials};
 pub use anim::viewmodel_controller::{

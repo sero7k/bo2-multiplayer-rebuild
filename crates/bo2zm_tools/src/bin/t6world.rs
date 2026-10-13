@@ -49,6 +49,10 @@ fn main() -> ExitCode {
             c.static_model_count
         );
     }
+    // T6WORLD_ENTS=<file>: the entity strings, written out whole.
+    if let Some(out) = std::env::var_os("T6WORLD_ENTS") {
+        let _ = std::fs::write(out, capture.map_ents.concat());
+    }
     for (i, ents) in capture.map_ents.iter().enumerate() {
         println!("map ents {i}: {} chars", ents.len());
         let mut classes: BTreeMap<&str, usize> = BTreeMap::new();
@@ -60,6 +64,7 @@ fn main() -> ExitCode {
         for (k, n) in classes {
             println!("   {n:>5}  {k}");
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6world.rs
         // T6WORLD_ENTS=<text>: print every entity block that contains it.
         if let Ok(want) = std::env::var("T6WORLD_ENTS") {
             let mut block = String::new();
@@ -74,6 +79,8 @@ fn main() -> ExitCode {
                 }
             }
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6world.rs
     }
     ExitCode::SUCCESS
 }
@@ -111,6 +118,19 @@ fn report(capture: &asset_t6::ZoneCapture, w: &WorldRef) {
         capture.images.len(),
         capture.unresolved_refs
     );
+    // T6WORLD_SMODEL=<substring>: every drawn static model placement whose
+    // model name contains it (place, scale, flags, cull distance).
+    if let Ok(want) = std::env::var("T6WORLD_SMODEL") {
+        for (i, sm) in w.static_models.iter().enumerate() {
+            let name = sm.model.map_or("<none>", |k| capture.xmodels[k.index].name.as_str());
+            if name.contains(want.as_str()) {
+                println!(
+                    "smodel {i}: {name} at {:?} scale {} axis {:?} flags {:#x} cull {} light idx {} colors {}",
+                    sm.origin, sm.scale, sm.axis, sm.flags, sm.cull_dist, sm.primary_light_index, sm.colors_index
+                );
+            }
+        }
+    }
 
     // vd0: which stride and position offset put every surface's vertices
     // inside its bounds?
@@ -494,5 +514,80 @@ fn report(capture: &asset_t6::ZoneCapture, w: &WorldRef) {
     sorted.sort_by(|a, b| b.1.cmp(&a.1));
     for (name, n) in sorted.iter().take(25) {
         println!("   {n:>5}  {name}");
+    }
+    // T6WORLD_SURFS=a..b: list those surfaces (the ids the drawsurf
+    // diagnostic prints) with their material, technique set and bounds.
+    if let Some((a, b)) = std::env::var("T6WORLD_SURFS")
+        .ok()
+        .and_then(|r| {
+            r.split_once("..")
+                .map(|(a, b)| (a.parse::<usize>(), b.parse::<usize>()))
+        })
+        .and_then(|(a, b)| Some((a.ok()?, b.ok()?)))
+    {
+        for (i, surf) in s.iter().enumerate().take(b + 1).skip(a) {
+            let mat = surf.material.and_then(|k| capture.material(k));
+            let set = mat
+                .and_then(|m| m.technique_set)
+                .and_then(|k| capture.technique_sets.get(k.index))
+                .map_or("?", |t| t.name.as_str());
+            // Its first triangle corner's position.
+            let corner = w.indices.get(surf.base_index as usize).and_then(|&v| {
+                let at = surf.vertex_data_offset0 as usize + v as usize * 36;
+                Some([
+                    f32_at(&w.vd0, at)?,
+                    f32_at(&w.vd0, at + 4)?,
+                    f32_at(&w.vd0, at + 8)?,
+                ])
+            });
+            println!(
+                "surf {i}: {} [{set}] tris {} bounds {:?} .. {:?} corner {corner:?}",
+                mat.map_or("?", |m| m.name.as_str()),
+                surf.tri_count,
+                surf.mins,
+                surf.maxs
+            );
+            // T6WORLD_FACING=x,y,z: how many of its triangles have the
+            // point on the side of cross(b-a, c-a) (the same winding as a
+            // floor seen from above, when the floor counts "toward").
+            if let Some(p) = std::env::var("T6WORLD_FACING").ok().and_then(|v| {
+                let n: Vec<f32> = v.split(',').filter_map(|x| x.parse().ok()).collect();
+                (n.len() == 3).then(|| [n[0], n[1], n[2]])
+            }) {
+                let pos = |v: u16| {
+                    let at = surf.vertex_data_offset0 as usize + v as usize * 36;
+                    Some([
+                        f32_at(&w.vd0, at)?,
+                        f32_at(&w.vd0, at + 4)?,
+                        f32_at(&w.vd0, at + 8)?,
+                    ])
+                };
+                let (mut toward, mut away) = (0u32, 0u32);
+                for t in 0..surf.tri_count as usize {
+                    let at = surf.base_index as usize + t * 3;
+                    let (Some(a), Some(b), Some(c)) = (
+                        w.indices.get(at).and_then(|&v| pos(v)),
+                        w.indices.get(at + 1).and_then(|&v| pos(v)),
+                        w.indices.get(at + 2).and_then(|&v| pos(v)),
+                    ) else {
+                        continue;
+                    };
+                    let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                    let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                    let n = [
+                        u[1] * v[2] - u[2] * v[1],
+                        u[2] * v[0] - u[0] * v[2],
+                        u[0] * v[1] - u[1] * v[0],
+                    ];
+                    let d = n[0] * (p[0] - a[0]) + n[1] * (p[1] - a[1]) + n[2] * (p[2] - a[2]);
+                    if d > 0.0 {
+                        toward += 1;
+                    } else {
+                        away += 1;
+                    }
+                }
+                println!("   facing {p:?}: toward {toward} away {away}");
+            }
+        }
     }
 }

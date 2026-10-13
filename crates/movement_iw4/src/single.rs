@@ -117,6 +117,18 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     pml.right = right;
     pml.up = up;
 
+    // bo2zm: no clip (the cheat menu) flies along the view, nothing else.
+    if ps.pm_type == crate::noclip::PM_TYPE_NOCLIP {
+        crate::noclip::fly(ps, cmd, forward, right, pml.frametime);
+        return PmoveResult {
+            pml,
+            bounds: context.bounds,
+            stance_event: None,
+            reset_torso: false,
+            view_change: 0.0,
+        };
+    }
+
     mantle::clear_hint(ps);
 
     // bo2zm: Black Ops II's dive to prone starts from a sprint, so it is
@@ -137,7 +149,11 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         && crate::dive::wants(ps, cmd, context.old_buttons);
     let diving = dive_start || crate::dive::active(ps);
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/movement_iw4/src/single.rs
     // bo2zm: the gun can aim through a dive (by request).
+=======
+    // bo2zm: the gun can aim through a dive (a tester's ask, 10-09).
+>>>>>>> /tmp/claude-0/zmhead/crates/movement_iw4/src/single.rs
     let ads_cmd = crate::dive::ads_cmd(ps, cmd, diving);
     let _ads = update_ads_intent(ps, &ads_cmd, context.old_buttons, context.ads_intent);
     let mut sprint = context.sprint;
@@ -151,7 +167,7 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
                 end: ps.origin,
                 mins: context.bounds.mins,
                 maxs: context.bounds.maxs,
-                tracemask: context.bounds.tracemask & !0x0200_0000,
+                tracemask: context.bounds.tracemask & crate::stance::STANCE_ROOM_MASK,
             })
             .allsolid
             == 0;
@@ -233,7 +249,11 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     }
     if context.walk.feel.on {
         // bo2zm: a dive's push does not drop the aim on lying down (the gun
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/movement_iw4/src/single.rs
         // aims through a dive, by request).
+=======
+        // aims through a dive, a tester's ask 10-09).
+>>>>>>> /tmp/claude-0/zmhead/crates/movement_iw4/src/single.rs
         crate::stance::bo2_lie_down(
             ps,
             &ads_cmd,
@@ -268,6 +288,23 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         complete_ground_trace(ps, &mut pml, bounds, collision, context.walk.feel);
         let mut mantle_tracer = CollisionMantleTrace { collision, bounds };
         let started = (!diving).then(|| {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/movement_iw4/src/single.rs
+=======
+            // BO2 Zombies: a roof hatch over him comes before any ledge.
+            if context.walk.feel.zombies
+                && mantle::hatch_check(
+                    ps,
+                    cmd.buttons,
+                    pml.forward,
+                    pml.up,
+                    &mut mantle_tracer,
+                    lengths,
+                    root,
+                )
+            {
+                return (ps.pm_flags & pm_flags::MANTLE) != 0;
+            }
+>>>>>>> /tmp/claude-0/zmhead/crates/movement_iw4/src/single.rs
             mantle::check(
                 ps,
                 MantleCheckContext {

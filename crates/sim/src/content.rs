@@ -109,6 +109,7 @@ fn hash_combat(h: &mut Digest, combat: &[WeaponCombatFacts]) {
         h.i32(row.reload_start_add_time_ms);
         h.i32(row.reload_start_add);
         h.bool(row.no_partial_reload);
+        h.bool(row.unlimited_ammo);
         h.bool(row.dual_mag.is_some());
         if let Some(q) = row.dual_mag {
             h.i32(q.reload_ms);
@@ -231,6 +232,7 @@ fn hash_equipment(h: &mut Digest, rows: &[crate::EquipmentRuntimeFacts]) {
         h.i32(row.stickiness);
         h.bool(row.timed_detonation);
         h.bool(row.proj_impact_explode);
+        h.bool(row.bullet_impact_explode);
         h.bool(row.stick_to_players);
         h.i32(row.explosion_radius);
         h.i32(row.explosion_radius_min);

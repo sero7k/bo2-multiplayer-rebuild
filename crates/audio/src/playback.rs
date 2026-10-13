@@ -175,6 +175,8 @@ impl Plugin for PlayerSoundPlugin {
             .add_message::<ViewmodelNotetracks>()
             .init_resource::<crate::entity_events::NotetrackSoundTable>()
             .add_message::<LandSound>()
+            // bo2zm: the Sound sliders' gains, before anything plays.
+            .add_systems(Update, crate::bus_gain::sync.before(play_alias_messages))
             .add_systems(
                 Update,
                 (
@@ -207,8 +209,18 @@ impl Plugin for PlayerSoundPlugin {
                     play_land_sound_messages,
                     crate::destructible_loops::update
                         .before(crate::ambient::update_map_emitter_gain),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/playback.rs
                     crate::zm_music::update,
                     crate::ambient::update_map_emitter_gain,
+=======
+                    crate::zm_music::update.after(crate::bus_gain::sync),
+                    crate::dive_vox::update.before(play_alias_messages),
+                    crate::laststand::update
+                        .before(play_alias_messages)
+                        .after(crate::bus_gain::sync),
+                    crate::room_echo::update.before(play_alias_messages),
+                    crate::ambient::update_map_emitter_gain.after(crate::bus_gain::sync),
+>>>>>>> /tmp/claude-0/zmhead/crates/audio/src/playback.rs
                     update_all_channels,
                 )
                     .in_set(ClientSet::Effects),
@@ -223,6 +235,8 @@ impl Plugin for PlayerSoundPlugin {
                     crate::entity_events::bind_notetrack_sounds
                         .after(crate::ambient::install_sound_bank),
                     crate::ambient::stop_map_ambient_on_match_end.after(SessionSwapApplied),
+                    crate::ambient::boot_silent_map_effects
+                        .after(crate::ambient::stop_map_ambient_on_match_end),
                     reset_clip_prep_on_match_torn_down,
                 )
                     .in_set(ClientSet::Load),
@@ -1265,6 +1279,7 @@ fn play_alias_oneshot_at(
         loaded_name,
         loaded_ns,
     ) else {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/playback.rs
         // bo2mp: a Black Ops II alias with no sound of its own can be there
         // only for its secondary (a jump's launch exertion carries the gear
         // sound): that still plays.
@@ -1297,6 +1312,9 @@ fn play_alias_oneshot_at(
             );
         }
         return failed;
+=======
+        return OneshotStart::failed(StartFailure::NoPcm).with_variant(variant_index);
+>>>>>>> /tmp/claude-0/zmhead/crates/audio/src/playback.rs
     };
     let (volume, pitch, layer) = if let Some(picked) = &outcome.picked {
         (picked.volume, picked.pitch, picked.layer.clone())
@@ -1438,6 +1456,22 @@ fn take_or_pending_clip(
     }
 }
 
+/// bo2zm: the room echo a Black Ops II alias's play sends into (its
+/// `reverbSend`), when the player is in a room that has one.
+fn room_echo_for(
+    namespace: AssetNamespace,
+    row: Option<&asset_audio::CapturedAlias>,
+) -> Option<(std::sync::Arc<crate::room_echo::EchoParams>, f32)> {
+    if namespace != AssetNamespace::T6 {
+        return None;
+    }
+    let send = row?.reverb_send;
+    if send <= 0.0 {
+        return None;
+    }
+    Some((crate::room_echo::current()?, send))
+}
+
 fn submit_prepared_oneshot(
     commands: &mut Commands,
     pcm_assets: &mut Assets<PcmAudio>,
@@ -1469,6 +1503,13 @@ fn submit_prepared_oneshot(
         None => bank.sound_in(namespace, alias),
     };
     let row = sound.and_then(|s| s.aliases.get(variant_index));
+    // bo2zm: Black Ops II's Sound sliders (music, effects, voice) on its
+    // bus.
+    let volume = if namespace == AssetNamespace::T6 {
+        volume * crate::bus_gain::t6_alias(row.and_then(|r| r.flags))
+    } else {
+        volume
+    };
     let limit_name = sound.map_or(alias, |sound| sound.name.as_str());
     let channel = sound.and_then(|s| s.ent_channel(variant_index));
     let mut world_detail: Option<String> = None;
@@ -1533,6 +1574,7 @@ fn submit_prepared_oneshot(
                 return OneshotStart::failed(StartFailure::FalloffEval).with_variant(variant_index);
             }
             if atten == 0.0 {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/playback.rs
                 // bo2mp: out of this layer's reach, but its secondary is a
                 // sound of its own (a gun's npc shot chains to its LFE, then
                 // to the distant shot and its decay, each with a longer
@@ -1560,10 +1602,12 @@ fn submit_prepared_oneshot(
                         epoch,
                     )
                 };
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/audio/src/playback.rs
                 return OneshotStart {
                     outcome: StartOutcome::Suppressed(SuppressReason::Inaudible),
                     variant: Some(variant_index),
-                    secondary,
+                    secondary: None,
                     detail: Some(falloff_detail(dist, row.dist_min, row.dist_max, atten)),
                 };
             }
@@ -1591,7 +1635,14 @@ fn submit_prepared_oneshot(
             pick.last_variant
                 .insert((namespace, alias.to_owned()), variant_index);
             let _ = shared.dry_handle(pcm_assets, clip, pcm.clone(), clips.as_deref());
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/playback.rs
             let live = pcm.with_live_pan();
+=======
+            let live = match room_echo_for(namespace, Some(row)) {
+                Some((params, send)) => pcm.with_live_pan().with_echo(params, send),
+                None => pcm.with_live_pan(),
+            };
+>>>>>>> /tmp/claude-0/zmhead/crates/audio/src/playback.rs
             let live_pan = live.live_pan().expect("with_live_pan").clone();
             live_pan.set(pan_l, pan_r);
             let handle = pcm_assets.add(live);
@@ -1648,7 +1699,17 @@ fn submit_prepared_oneshot(
             }
             pick.last_variant
                 .insert((namespace, alias.to_owned()), variant_index);
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/playback.rs
             let handle = shared.dry_handle(pcm_assets, clip, pcm, clips.as_deref());
+=======
+            let handle = match room_echo_for(namespace, row) {
+                Some((params, send)) => {
+                    let _ = shared.dry_handle(pcm_assets, clip, pcm.clone(), clips.as_deref());
+                    pcm_assets.add(pcm.with_echo(params, send))
+                }
+                None => shared.dry_handle(pcm_assets, clip, pcm, clips.as_deref()),
+            };
+>>>>>>> /tmp/claude-0/zmhead/crates/audio/src/playback.rs
             let lease = voice_lease(bank, channel, snd_ent);
             let entity = crate::backend::spawn_oneshot(
                 commands,
@@ -1726,7 +1787,12 @@ fn play_secondary_layer(
     class: SoundClass,
     epoch: u64,
 ) -> Option<(String, StartOutcome)> {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/playback.rs
     let Some(sec) = layer.filter(|s| !s.is_empty()) else {
+=======
+    // bo2zm: BO2 writes "null" for no second layer.
+    let Some(sec) = layer.filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("null")) else {
+>>>>>>> /tmp/claude-0/zmhead/crates/audio/src/playback.rs
         return None;
     };
     if depth >= 10 {

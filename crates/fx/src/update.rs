@@ -407,6 +407,7 @@ fn pending_collide_for_elem(
         .map(|e| e.orient_spawn_params(elem_seed));
     let orient = crate::spark::spark_elem_orientation(flags, &now, &alt, spawn);
     let life_ms = life_msec as f32;
+    let prev_msec = prev_msec.max(msec_begin);
     Some(PendingCollide {
         handle,
         def_name,
@@ -655,6 +656,10 @@ fn update_element(
     }
 
     let life_ms = life_msec as f32;
+    // An element born inside this update only moves from its birth: without
+    // this, gravity ran over the whole gap since the effect last updated and
+    // a big smoke sheet fell through the camera at the start of Nuketown.
+    let prev_msec = prev_msec.max(msec_begin);
     let age0 = ((prev_msec.saturating_sub(msec_begin)).max(0) as f32) / life_ms;
     let age1 = ((msec_now.saturating_sub(msec_begin)).max(0) as f32) / life_ms;
     let dt_sec = (msec_now.saturating_sub(prev_msec)).max(0) as f32 * 0.001;

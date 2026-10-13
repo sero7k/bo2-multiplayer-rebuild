@@ -11,8 +11,12 @@ pub mod m2;
 pub use capture::{
     AabbTreeRef, AssetKey, ClipAabbRef, ClipBrushRef, ClipCmodelRef, ClipLeafBrushNodeRef, ClipLeafRef,
     ClipMaterialRef, ClipNodeRef, ClipRef, ClipStaticModelRef, DpvsRanges, DrawState, EmbeddedImage, ImageRef, LightGridRef, MaterialRef,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/lib.rs
     MaterialTexture, PassRef, PathNodeRef, PathTablesRef, PrimaryLightRef, ReflectionProbeRef, ShaderArgRef, SkyGridVolumeRef, StaticModel, StringTableRef, SunRef, TechniqueRef, TechniqueSetRef,
     DestructiblePieceRef, DestructibleRef, DestructibleStageRef, VehicleDrive, VehicleRef,
+=======
+    MaterialTexture, PassRef, PathNodeRef, PrimaryLightRef, ReflectionProbeRef, ShaderArgRef, SkyGridVolumeRef, StaticModel, StringTableRef, SunRef, ZBarrierDefRef, TechniqueRef, TechniqueSetRef,
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/lib.rs
     WorldFogRef, WorldRef, WorldSurface, XAnimRef, XModelCollSurfRef, XModelRef, XSurfaceRef, ZoneCapture, read_image,
 };
 pub use entities::{ArtFog, MapEntity, parse_art_fog, parse_entities};
@@ -21,7 +25,11 @@ pub use images::{ImageSource, Pack, PackSet};
 pub use m2::{
     AttachmentRef, AttachmentUniqueRef,
     FootstepFxTableRef, FootstepTableRef, FxEffectRef, FxElemRef, FxTrailRef, FxVisualRef, ImpactTableRef,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/lib.rs
     SndAliasListRef, SndAliasRef, SndBankRef, SndCurveRef, SndDriverGlobalsRef, TracerRef,
+=======
+    SndAliasListRef, SndAliasRef, SndBankRef, SndRadverbRef, SndCurveRef, SndDriverGlobalsRef, TracerRef,
+>>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/lib.rs
     FontRef, GlyphRef, WeaponCamoMaterialRef, WeaponCamoRef, WeaponCamoSetRef, WeaponRef,
 };
 

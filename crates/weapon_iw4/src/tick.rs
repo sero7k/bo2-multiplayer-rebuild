@@ -105,6 +105,8 @@ pub struct CapturedCombatInput {
 
     pub reload_start_add: i32,
     pub no_partial_reload: bool,
+
+    pub unlimited_ammo: bool,
     pub sprint_raise_time_ms: i32,
     pub sprint_drop_time_ms: i32,
     /// bo2mp: Black Ops II's damage over range, up to six (range, damage)
@@ -146,6 +148,7 @@ pub struct CapturedCombatInput {
 
     /// BO2: a reload lowers the sights (!bReloadWhileAds).
     pub reload_lowers_ads: bool,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/weapon_iw4/src/tick.rs
 
     /// BO2 iPositionReloadTransTime: the sights come back up when this
     /// much of the reload is left.
@@ -155,6 +158,14 @@ pub struct CapturedCombatInput {
 
     /// bo2mp: Hybrid Optic gun: its alternate weapon is the other sight.
     pub optic_switch: bool,
+=======
+
+    /// BO2 iPositionReloadTransTime: the sights come back up when this
+    /// much of the reload is left.
+    pub position_reload_trans_ms: i32,
+
+    pub ads_fire_only: bool,
+>>>>>>> /tmp/claude-0/zmhead/crates/weapon_iw4/src/tick.rs
 
     pub melee_damage: i32,
 
@@ -216,6 +227,7 @@ pub struct WeaponCombatFacts {
     pub sprint_cycle_scale: f32,
     pub ducked_sprint_cycle_scale: f32,
     pub dtp_cycle_scale: f32,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/weapon_iw4/src/tick.rs
     /// bo2mp: Black Ops II's other switch timers: the first raise of a
     /// life (`iFirstRaiseTime`), raising and dropping with an empty clip
     /// (`iEmptyRaiseTime`, `iEmptyDropTime`), and the time after the clip's
@@ -224,6 +236,8 @@ pub struct WeaponCombatFacts {
     pub empty_raise_time_ms: i32,
     pub empty_drop_time_ms: i32,
     pub last_fire_time_ms: i32,
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/weapon_iw4/src/tick.rs
     pub fire_time_ms: i32,
     /// bo2zm: the first `intro_fire_length` shots of a trigger pull come
     /// `intro_fire_time_ms` apart (Black Ops II's HAMR, AN-94, B23R).
@@ -284,6 +298,8 @@ pub struct WeaponCombatFacts {
 
     pub no_partial_reload: bool,
 
+    pub unlimited_ammo: bool,
+
     pub inherits_perks: bool,
 
     pub sprint_raise_time_ms: i32,
@@ -326,6 +342,7 @@ pub struct WeaponCombatFacts {
 
     /// BO2: a reload lowers the sights (!bReloadWhileAds).
     pub reload_lowers_ads: bool,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/weapon_iw4/src/tick.rs
 
     /// BO2 iPositionReloadTransTime: the sights come back up when this
     /// much of the reload is left.
@@ -334,6 +351,14 @@ pub struct WeaponCombatFacts {
     pub ads_fire_only: bool,
 
     pub optic_switch: bool,
+=======
+
+    /// BO2 iPositionReloadTransTime: the sights come back up when this
+    /// much of the reload is left.
+    pub position_reload_trans_ms: i32,
+
+    pub ads_fire_only: bool,
+>>>>>>> /tmp/claude-0/zmhead/crates/weapon_iw4/src/tick.rs
 
     pub melee_damage: i32,
 
@@ -372,6 +397,12 @@ pub struct WeaponCombatFacts {
     /// bo2zm: a Black Ops II dual-wield weapon's left-hand weapon (0: not
     /// dual wield): given, it holds two clips and fires from both hands.
     pub dual_wield_weapon: u32,
+    /// bo2zm: the grenade a Black Ops II gun's shot becomes for the
+    /// scripts (`szSpawnedGrenadeWeaponName`: the Sliquifier's slip bolt);
+    /// 0: none.
+    pub spawned_grenade: u32,
+    /// bo2zm: picked back up once placed (Black Ops II `bRetrievable`).
+    pub retrievable: bool,
 }
 
 impl Default for WeaponCombatFacts {
@@ -428,6 +459,7 @@ impl WeaponCombatFacts {
             reload_start_add_time_ms: 0,
             reload_start_add: 0,
             no_partial_reload: false,
+            unlimited_ammo: false,
             sprint_raise_time_ms: 0,
             sprint_drop_time_ms: 0,
             damage_points: [[0.0; 2]; 6],
@@ -476,6 +508,8 @@ impl WeaponCombatFacts {
             dual_mag: None,
             spread_before_fire_add: false,
             dual_wield_weapon: 0,
+            spawned_grenade: 0,
+            retrievable: false,
         }
     }
 
@@ -551,6 +585,7 @@ impl WeaponCombatFacts {
             reload_start_add_time_ms: input.reload_start_add_time_ms,
             reload_start_add: input.reload_start_add,
             no_partial_reload: input.no_partial_reload,
+            unlimited_ammo: input.unlimited_ammo,
             inherits_perks: input.inherits_perks,
             sprint_raise_time_ms: input.sprint_raise_time_ms,
             sprint_drop_time_ms: input.sprint_drop_time_ms,
@@ -599,6 +634,8 @@ impl WeaponCombatFacts {
             dual_mag: input.dual_mag,
             spread_before_fire_add: input.spread_before_fire_add,
             dual_wield_weapon: 0,
+            spawned_grenade: 0,
+            retrievable: false,
         })
     }
 
@@ -976,6 +1013,7 @@ pub fn weapon_ordinary(
         if let Some(prepare) = crate::offhand::weapon_check_for_offhand(hand, cmd) {
             return Some(prepare);
         }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/weapon_iw4/src/tick.rs
         // bo2mp: a weapon that never fires (Black Ops II's scorestreak
         // tablets: radar_mp, counteruav_mp, dogs_mp) still changes to the
         // one asked for once it is up.
@@ -1001,6 +1039,8 @@ pub fn weapon_ordinary(
             }
             return None;
         }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/weapon_iw4/src/tick.rs
         return crate::offhand::weapon_advance_offhand(hand, cmd, delayed_action);
     }
     let fire_ty = match facts.fire_type_enum() {
@@ -1058,7 +1098,11 @@ pub fn weapon_ordinary(
     }
 
     if time_before != 0 && hand.weapon_time < 1 {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/weapon_iw4/src/tick.rs
         weapon_decay_hold_interrupt(hand, fire_ty, cmd, attack);
+=======
+        weapon_decay_hold_interrupt(hand, fire_ty, cmd, attack, facts.unlimited_ammo);
+>>>>>>> /tmp/claude-0/zmhead/crates/weapon_iw4/src/tick.rs
     }
     if hand.weapon_delay > 0 {
         hand.weapon_delay = (hand.weapon_delay - decay_ms).max(0);
@@ -1264,7 +1308,11 @@ pub fn weapon_ordinary(
         };
 
         if trigger {
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/weapon_iw4/src/tick.rs
             if hand.clip <= 0 {
+=======
+            if hand.clip <= 0 && !facts.unlimited_ammo {
+>>>>>>> /tmp/claude-0/zmhead/crates/weapon_iw4/src/tick.rs
                 hand.shot_count = 0;
                 if hand.stock > 0 && !cmd.mantle_weapon_up && begin_weapon_reload(hand, facts) {
                     return Some(WeaponTickEvent::ReloadStarted);
@@ -1286,6 +1334,7 @@ pub fn weapon_ordinary(
 
             // bo2zm: Black Ops II's first shots of a pull come faster (the
             // HAMR's first 6, the AN-94's and B23R's first one) and play
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/weapon_iw4/src/tick.rs
             // the gun's first-shots fire animation. Worked out before the
             // fire-delay split so a held-back shot plays the same animation.
             let intro = facts.intro_fire_time_ms > 0
@@ -1294,6 +1343,15 @@ pub fn weapon_ordinary(
             // A shot held back by the weapon's fire delay goes now: its
             // firing began when the trigger was pulled (BO2's care package
             // marker waits 130 ms; re-arming here never let it go).
+=======
+            // the gun's first-shots fire animation.
+            let intro = facts.intro_fire_time_ms > 0
+                && i32::from(hand.shot_count) < facts.intro_fire_length;
+            // bo2zm: only the pull starts the firing state and the fire
+            // delay; the delay's end (delayed_fire) fires the shot. Setting
+            // them again then kept a weapon with a fire delay (the
+            // claymore, the Time Bomb) from ever firing.
+>>>>>>> /tmp/claude-0/zmhead/crates/weapon_iw4/src/tick.rs
             if !delayed_fire {
                 if ready_idle {
                     hand.weapon_restrict_kick_time = crate::start_firing_restrict_kick_time(
@@ -1305,6 +1363,7 @@ pub fn weapon_ordinary(
                     );
                 }
                 hand.weaponstate = WeaponState::Firing as i32;
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/weapon_iw4/src/tick.rs
                 // bo2mp: the clip's last shot takes the gun's own last-fire
                 // time when it has one (BO2's `iLastFireTime`).
                 let last_shot = facts.last_fire_time_ms > 0
@@ -1313,6 +1372,9 @@ pub fn weapon_ordinary(
                 hand.weapon_time = if last_shot {
                     facts.last_fire_time_ms
                 } else if intro {
+=======
+                hand.weapon_time = if intro {
+>>>>>>> /tmp/claude-0/zmhead/crates/weapon_iw4/src/tick.rs
                     facts.intro_fire_time_ms
                 } else {
                     facts.fire_time_ms
@@ -1340,7 +1402,15 @@ pub fn weapon_ordinary(
             if fire_weapon_kind(facts.weap_type, facts.weap_class).is_none() {
                 return Some(WeaponTickEvent::EmptyClick);
             }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/weapon_iw4/src/tick.rs
             let used = facts.ammo_per_shot().min(hand.clip);
+=======
+            let used = if facts.unlimited_ammo {
+                0
+            } else {
+                facts.ammo_per_shot().min(hand.clip)
+            };
+>>>>>>> /tmp/claude-0/zmhead/crates/weapon_iw4/src/tick.rs
             hand.clip -= used;
             if facts.bolt_action {
                 hand.rechamber_pending = true;
@@ -1348,7 +1418,11 @@ pub fn weapon_ordinary(
             crate::weap_anim::set_fps_fire_anim(
                 &mut hand.weap_anim,
                 cmd.f_weapon_pos_frac > 0.0,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/weapon_iw4/src/tick.rs
                 hand.clip <= 0,
+=======
+                hand.clip <= 0 && !facts.unlimited_ammo,
+>>>>>>> /tmp/claude-0/zmhead/crates/weapon_iw4/src/tick.rs
                 intro,
             );
             return Some(WeaponTickEvent::ShotAccepted { ammo_used: used });
@@ -1433,6 +1507,7 @@ fn weapon_decay_hold_interrupt(
     fire_ty: FireType,
     cmd: &WeaponCmd,
     attack: bool,
+    unlimited_ammo: bool,
 ) {
     let ws = hand.weaponstate;
     let rechamber = ws == WeaponState::Rechambering as i32;
@@ -1454,7 +1529,11 @@ fn weapon_decay_hold_interrupt(
         return;
     }
 
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/weapon_iw4/src/tick.rs
     if hand.clip <= 0 {
+=======
+    if hand.clip <= 0 && !unlimited_ammo {
+>>>>>>> /tmp/claude-0/zmhead/crates/weapon_iw4/src/tick.rs
         return;
     }
     hand.weapon_time = 1;
@@ -1747,6 +1826,7 @@ mod intro_fire_tests {
 }
 
 #[cfg(test)]
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/weapon_iw4/src/tick.rs
 mod fast_switch_tests {
     use super::*;
 
@@ -1851,5 +1931,75 @@ mod bo2_timer_tests {
         let mut loaded = WeaponHandState { weapon: 1, clip: 3, ..WeaponHandState::default() };
         crate::weapon_change::begin_weapon_change(&mut loaded, &facts, 2, false, 0);
         assert_eq!(loaded.weapon_time, 400);
+=======
+mod fire_delay_tests {
+    extern crate std;
+    use super::*;
+    use std::vec::Vec;
+
+    /// Taps the trigger on the first tick only, then runs for `ms` and
+    /// returns the times of each shot and the state at the end.
+    fn tap(hand: &mut WeaponHandState, facts: &WeaponCombatFacts, ms: i32) -> Vec<i32> {
+        let mut shots = Vec::new();
+        let mut t = 0;
+        while t < ms {
+            let mut cmd = WeaponCmd {
+                msec: 8,
+                buttons: if t == 0 { BUTTON_ATTACK } else { 0 },
+                ..WeaponCmd::default()
+            };
+            if let Some(WeaponTickEvent::ShotAccepted { .. }) =
+                weapon_ordinary(hand, facts, &mut cmd)
+            {
+                shots.push(t);
+            }
+            t += 8;
+        }
+        shots
+    }
+
+    /// Black Ops II's claymore (claymore_zm: fireTime 992, fireDelay 127):
+    /// a tap plants it once, when the delay runs out.
+    #[test]
+    fn a_tap_fires_a_weapon_with_a_fire_delay_once_after_the_delay() {
+        let facts = WeaponCombatFacts {
+            weap_type: crate::WEAPTYPE_GRENADE,
+            fire_time_ms: 992,
+            fire_delay_ms: 127,
+            clip_size: 1,
+            start_ammo: 2,
+            fire_type: FireType::SingleShot as i32,
+            ..WeaponCombatFacts::default()
+        };
+        let mut hand = WeaponHandState {
+            weapon: 1,
+            clip: 1,
+            ..WeaponHandState::default()
+        };
+        let shots = tap(&mut hand, &facts, 1500);
+        assert_eq!(shots.len(), 1, "{:?}", shots);
+        assert!((120..=136).contains(&shots[0]), "{:?}", shots);
+        assert_eq!(hand.clip, 0);
+        assert_ne!(hand.weaponstate, WeaponState::Firing as i32);
+    }
+
+    /// No delay: the pull fires at once, as before.
+    #[test]
+    fn a_tap_fires_a_weapon_without_a_delay_at_once() {
+        let facts = WeaponCombatFacts {
+            fire_time_ms: 200,
+            clip_size: 10,
+            start_ammo: 10,
+            fire_type: FireType::SingleShot as i32,
+            ..WeaponCombatFacts::default()
+        };
+        let mut hand = WeaponHandState {
+            weapon: 1,
+            clip: 10,
+            ..WeaponHandState::default()
+        };
+        assert_eq!(tap(&mut hand, &facts, 600), [0]);
+        assert_eq!(hand.clip, 9);
+>>>>>>> /tmp/claude-0/zmhead/crates/weapon_iw4/src/tick.rs
     }
 }

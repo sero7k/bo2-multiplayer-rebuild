@@ -41,6 +41,7 @@ pub struct T6MissileModel {
     /// bo2zm M3: skinned positions and normals in model space (an animated
     /// model); none = bind pose.
     pub posed: Option<std::sync::Arc<PosedVerts>>,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/missile.rs
     /// bo2mp: the parts hidden on its entity (a mannequin's shot-off head)
     /// and where this model's bones start among them; none = all drawn.
     pub hide: Option<([u32; 6], u32)>,
@@ -86,6 +87,10 @@ impl T6MissileModel {
                 .collect(),
         ))
     }
+=======
+    /// bo2zm round 1: a zombie's eye brightness (none = unscaled).
+    pub eye_luminance: Option<f32>,
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/missile.rs
 }
 
 /// bo2zm M3: one model's vertices after skinning.
@@ -296,6 +301,7 @@ fn collect_t6_script_models(
             .and_then(|o| presented_states.get(&o).copied())
             .unwrap_or(&owner.dobj_state);
         // The light is read at the middle of its first model (a zombie's
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/missile.rs
         // body): its bounds centre, placed.
         let light_at = state
             .composition
@@ -311,6 +317,27 @@ fn collect_t6_script_models(
                 );
                 world_from_local.transform_point3(mid).to_array()
             });
+=======
+        // body): its bounds centre, placed. A scene prop the map animates
+        // (an fxanim: cupboards, shutters, curtains) reads it at its own
+        // light point instead, the model's `lightingOriginOffset` from its
+        // origin ((0, 0, 0.5) on every Nuketown model measured). The
+        // west-house kitchen cupboards' bounds reach a helper box outside
+        // the house, so their middle sat behind the wall in the night air
+        // and their doors drew near black: his "the cupboards are the
+        // wrong color".
+        let first = state.composition.models.first();
+        let light_at = if first.is_some_and(|d| d.model.starts_with("fxanim_")) {
+            world_from_local.transform_point3(Vec3::new(0.0, 0.0, 0.5)).to_array()
+        } else {
+            first
+                .and_then(|d| fpv.0.get(asset_core::AssetNamespace::T6, &d.model))
+                .and_then(|e| e.skel.bounds)
+                .map_or(origin, |(mid, _half)| {
+                    world_from_local.transform_point3(Vec3::from_array(mid)).to_array()
+                })
+        };
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/missile.rs
         // IW4L_T6_POSE_LOG=<clip part>: the first model seen playing such a
         // clip, each frame: time past the snapshot, clip time sent, place.
         {
@@ -387,7 +414,11 @@ fn collect_t6_script_models(
                 origin,
                 light_at,
                 posed: posed.as_ref().and_then(|p| p.get(i).cloned().flatten()),
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/missile.rs
                 hide: hide.iter().any(|w| *w != 0).then_some((hide, base)),
+=======
+                eye_luminance: state.eye_luminance,
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/missile.rs
             });
         }
     }
@@ -442,7 +473,13 @@ fn collect_t6_script_models(
 
 /// bo2zm M3: pose a composition (a zombie's body and head) with its
 /// animation tree's leaves and skin every model; `None` when it has no
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/missile.rs
 /// animation (it draws in bind pose).
+=======
+/// animation and no hidden parts (it draws in bind pose). A hidden part (a
+/// mannequin's shot-off head) shrinks to its bone's origin, as BO2 does: its
+/// mesh shares surfaces with the rest of the body, so no surface can drop.
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/missile.rs
 fn pose_t6_composition(
     fpv: &asset_model::FpvMeshCatalog,
     xanims: &asset_anim::XAnimCatalog,
@@ -450,13 +487,24 @@ fn pose_t6_composition(
     since_snapshot: f32,
 ) -> Option<Vec<Option<std::sync::Arc<PosedVerts>>>> {
     use xmodel_runtime::{AnimInstance, Attach, DObj, XAnimSemanticNodeKind};
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/missile.rs
     let tree = state.tree.as_ref()?;
     let leaves: Vec<_> = tree
         .nodes
+=======
+    let hiding = state.hide_part_bits.words().iter().any(|w| *w != 0);
+    let leaves: Vec<_> = state
+        .tree
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/missile.rs
         .iter()
+        .flat_map(|tree| tree.nodes.iter())
         .filter(|n| n.kind == XAnimSemanticNodeKind::Leaf && n.clip.is_some())
         .collect();
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/missile.rs
     if leaves.is_empty() {
+=======
+    if leaves.is_empty() && !hiding {
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/missile.rs
         return None;
     }
     let entries: Vec<&asset_model::FpvMeshEntry> = state
@@ -521,7 +569,11 @@ fn pose_t6_composition(
             Some((clip, tracks, frac * duration, weight))
         })
         .collect();
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/missile.rs
     if clips.is_empty() {
+=======
+    if clips.is_empty() && !hiding {
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/missile.rs
         return None;
     }
     let instances: Vec<AnimInstance<'_>> = clips
@@ -534,8 +586,29 @@ fn pose_t6_composition(
             parts: None,
         })
         .collect();
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/missile.rs
     let world = dobj.pose(&instances, &dobj.all_parts(), Mat4::IDENTITY);
     let skin = dobj.skin_matrices(&world);
+=======
+    let world = if instances.is_empty() {
+        dobj.bones.iter().map(|b| b.bind_world).collect()
+    } else {
+        dobj.pose(&instances, &dobj.all_parts(), Mat4::IDENTITY)
+    };
+    let mut skin = dobj.skin_matrices(&world);
+    if hiding {
+        // Bones come parent first, so a hidden parent hides its children.
+        let mut hidden = vec![false; dobj.bones.len()];
+        for (g, bone) in dobj.bones.iter().enumerate() {
+            hidden[g] = state.hide_part_bits.get(g) || bone.parent.is_some_and(|p| hidden[p]);
+            if hidden[g]
+                && let (Some(m), Some(w)) = (skin.get_mut(g), world.get(g))
+            {
+                *m = Mat4::from_cols(Vec4::ZERO, Vec4::ZERO, Vec4::ZERO, w.w_axis);
+            }
+        }
+    }
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/missile.rs
     Some(
         entries
             .iter()
@@ -552,7 +625,11 @@ fn pose_t6_composition(
 
 /// CPU skinning: each vertex by its bones and weights (rigid models by
 /// their first bone).
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/missile.rs
 pub fn skin_verts(skel: &asset_model::ModelSkel, bone: impl Fn(usize) -> Mat4) -> PosedVerts {
+=======
+fn skin_verts(skel: &asset_model::ModelSkel, bone: impl Fn(usize) -> Mat4) -> PosedVerts {
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/missile.rs
     let n = skel.positions.len();
     let mut positions = Vec::with_capacity(n);
     let mut normals = Vec::with_capacity(n);
@@ -707,7 +784,11 @@ fn collect_t6_missiles(
             origin,
             light_at: origin,
             posed: None,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/missile.rs
             hide: None,
+=======
+            eye_luminance: None,
+>>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/missile.rs
         });
     }
 }

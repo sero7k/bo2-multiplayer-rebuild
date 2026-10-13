@@ -279,6 +279,9 @@ pub use crate::prepare::scene::world::{
 #[derive(Clone, Copy, Debug, Resource)]
 pub struct MapT5SunParseExposure {
     pub exposure: f32,
+    /// bo2zm: the vision's saturation the final image takes (Nuketown's
+    /// 0.853516 for a map without a vision).
+    pub saturation: f32,
 }
 
 #[derive(Clone, Copy, Debug, Resource)]
@@ -662,7 +665,7 @@ fn produce_t5_sky_constants(sources: &mut RuntimeCodeSources, authored: [f32; 4]
     );
 }
 
-fn t5_sky_intensity([angle0, angle1, factor0, factor1]: [f32; 4], forward_z: f32) -> f32 {
+pub(crate) fn t5_sky_intensity([angle0, angle1, factor0, factor1]: [f32; 4], forward_z: f32) -> f32 {
     let radians = f32::from_bits(0x3c8efa35);
     let cos0 = (((90.0 - angle0) * radians) as f64).cos() as f32;
     let cos1 = (((90.0 - angle1) * radians) as f64).cos() as f32;

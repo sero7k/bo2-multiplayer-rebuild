@@ -257,9 +257,17 @@ pub struct WeaponSelect {
 
     pub last_primary: u32,
     pub mapped_index: u32,
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/client/runtime.rs
     /// bo2mp: Black Ops II's switchingToInventory: the inventory weapon was
     /// asked for and the player does not hold it yet.
     pub switching_to_inventory: bool,
+=======
+
+    /// The last primary he held (BO2's `weaponLatestPrimary`).
+    pub latest_primary: u32,
+    /// The weapon he holds had nothing left in its clip or stock.
+    pub held_empty: bool,
+>>>>>>> /tmp/claude-0/zmhead/crates/net/src/client/runtime.rs
 }
 
 pub fn follow_held_weapon_select(
@@ -282,6 +290,66 @@ pub fn follow_held_weapon_select(
         select.time = cg_time;
     }
     select.held_index = ps_weapon;
+}
+
+/// BO2's client puts a gun back in his hands when the weapon he held is
+/// gone after he emptied it (`TakeClipOnlyWeaponIfEmpty`, then
+/// `CG_OutOfAmmoChange` once his weapon is none): the latest primary he
+/// held if he still has it, else the first primary on from there. TranZit
+/// leans on it: setting down the turbine, turret or trap fires the
+/// equipment's one round, and the script (`equipment_to_deployed`) takes it
+/// with no switch of its own. Offhands are left alone, as BO2 leaves its
+/// equipment and specific-use slots.
+pub fn out_of_ammo_change(
+    select: &mut WeaponSelect,
+    ps: &playerstate_iw4::PlayerState,
+    world: &sim::SimWorld,
+    cg_time: i32,
+) {
+    let inventory_type = |weapon: u32| {
+        world
+            .weapon_combat_row(weapon)
+            .map_or(-1, |facts| facts.inventory_type)
+    };
+    if ps.weapon != 0 {
+        match inventory_type(ps.weapon) {
+            0 => select.latest_primary = ps.weapon,
+            3 if ps.weapon_primary != 0 => select.latest_primary = ps.weapon_primary,
+            _ => {}
+        }
+        select.held_empty = world.weapon_combat_row(ps.weapon).is_some_and(|facts| {
+            let ammo_key = weapon_iw4::ammo_table_key(facts.ammo_index, ps.weapon);
+            let clip_key = weapon_iw4::clip_table_key(facts.clip_index, ps.weapon);
+            weapon_iw4::get_ammo_player_both_clips(ps, ps.weapon, ammo_key, clip_key) == 0
+        });
+        return;
+    }
+    let gone = select.held_index;
+    if gone == 0
+        || select.index != gone
+        || !select.held_empty
+        || ps.weapons.contains(&(gone as i32))
+        || inventory_type(gone) == 1
+        || ps.pm_type >= playerstate_iw4::PM_TYPE_DEAD
+    {
+        return;
+    }
+    let owned = |weapon: u32| weapon != 0 && ps.weapons.contains(&(weapon as i32));
+    let target = if owned(select.latest_primary) {
+        Some(select.latest_primary)
+    } else {
+        input_iw4::weapon_select::cycle_weapon(&ps.weapons, 0, 0, 0, true, inventory_type)
+    };
+    let Some(target) = target else {
+        return;
+    };
+    // Held as well as asked for, so a switch the server makes next is
+    // followed rather than fought.
+    select.index = target;
+    select.mapped_index = target;
+    select.held_index = target;
+    select.held_empty = false;
+    select.time = cg_time;
 }
 
 pub fn cycle_weapon_select(
@@ -820,6 +888,24 @@ pub fn sample_client_input(
                     velocity: other.velocity,
                 });
             }
+            // bo2zm: Black Ops II's zombies take the pad's aim assist too
+            // (a zombie stands about 70 tall; the assist leans to its chest).
+            if let Some(snapshot) = snapshot {
+                const ZOMBIE_TOP: f32 = 70.0;
+                for (n, o) in t6_zombies(snapshot, local.0) {
+                    let chest = [o[0], o[1], o[2] + 48.0];
+                    if !in_front(o, RADIUS) || !visible(chest) {
+                        continue;
+                    }
+                    targets.push(crate::client::pad_aim::AimTarget {
+                        key: 0x1_0000_0000 | u64::from(n),
+                        mins: [o[0] - RADIUS, o[1] - RADIUS, o[2]],
+                        maxs: [o[0] + RADIUS, o[1] + RADIUS, o[2] + ZOMBIE_TOP],
+                        aim: chest,
+                        velocity: [0.0; 3],
+                    });
+                }
+            }
         }
         let ranges = world
             .weapon_combat_row(playerstate_iw4::get_viewmodel_weapon_index(ps))
@@ -932,6 +1018,9 @@ pub fn sample_client_input(
     }
     follow_held_weapon_select(&mut select, ps_weapon, life_sequence, clock.time());
     if let Some(ps) = ps {
+        out_of_ammo_change(&mut select, ps, prediction.0.world(), clock.time());
+    }
+    if let Some(ps) = ps {
         if select.index == ps.weapon {
             select.mapped_index = if prediction
                 .0
@@ -1021,6 +1110,7 @@ pub fn sample_client_input(
             input_iw4::set_ads(&mut actions.client, false);
         }
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/client/runtime.rs
     // bo2mp: Hybrid Optic: Hold Breath while aiming switches to the gun's
     // other optic (its alternate weapon, which stays aimed).
     // One tap, one switch: the press flag outlives a frame, so the switch
@@ -1058,6 +1148,8 @@ pub fn sample_client_input(
             }
         }
     }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/net/src/client/runtime.rs
     let cycles = std::mem::take(&mut actions.client.weapon_cycles);
     // bo2mp: the switch-weapon key (`+weapnext_inventory`, wheel up) is also
     // BO2's change seat button, on the press.
@@ -1098,6 +1190,7 @@ pub fn sample_client_input(
             look.kick_pending[axis] -= step as f32 / input_iw4::ANGLE2SHORT;
         }
     }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/client/runtime.rs
     // bo2mp: melee on a Variable Zoom scope changes the zoom, no knife.
     if look.melee_is_zoom {
         let melee = &mut actions.client.kb.melee;
@@ -1108,6 +1201,8 @@ pub fn sample_client_input(
             *melee = input_iw4::Kbutton::default();
         }
     }
+=======
+>>>>>>> /tmp/claude-0/zmhead/crates/net/src/client/runtime.rs
     let mut cmd = build_usercmd(&mut actions, &look, 0);
     if cmd.buttons & playerstate_iw4::buttons::USE_RELOAD != 0
         && ps.is_some_and(|ps| ps.cursor_hint == 0)
@@ -1217,6 +1312,10 @@ pub fn sample_client_input(
     {
         cmd.melee_charge_yaw = yaw;
         cmd.melee_charge_dist = dist;
+        // Test aid: IW4L_MELEE_LOG=1 logs each lunge target the knife takes.
+        if std::env::var_os("IW4L_MELEE_LOG").is_some() {
+            diag::info!(Fpv, "melee lunge: yaw {yaw:.0} dist {dist}");
+        }
     }
     template.cmd = cmd;
     template.ready = true;
@@ -1225,6 +1324,26 @@ pub fn sample_client_input(
 const AIM_AUTOMELEE_RANGE: f32 = 128.0;
 const MELEE_REGION_TAN_X: f32 = 0.849 * 0.5;
 const MELEE_REGION_TAN_Y: f32 = 0.478 * 0.5;
+/// bo2zm: the living zombies the server lists near this client (entity
+/// number, feet), nearest first.
+fn t6_zombies(snapshot: &Snapshot, local: sim::ClientId) -> Vec<(u32, [f32; 3])> {
+    let Some(list) = snapshot.meta.script_dvars(local).string("bo2zm_zombies") else {
+        return Vec::new();
+    };
+    list.split(';')
+        .filter_map(|spot| {
+            let v: Vec<f32> = spot
+                .split_whitespace()
+                .filter_map(|x| x.parse().ok())
+                .collect();
+            match v[..] {
+                [n, x, y, z] => Some((n as u32, [x, y, z])),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 fn melee_charge_target(
     ps: &playerstate_iw4::PlayerState,
     local: sim::ClientId,
@@ -1243,6 +1362,55 @@ fn melee_charge_target(
     let (forward, right, up) = math_iw4::angle_vectors(ps.viewangles);
     let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     let mut best: Option<(f32, [f32; 3])> = None;
+    // A target standing at `origin` (feet): in reach, in the melee region
+    // round the crosshair, nothing solid between; the nearest the crosshair
+    // wins.
+    let mut consider = |origin: [f32; 3]| {
+        let delta = [
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/client/runtime.rs
+            other.origin[0] - ps.origin[0],
+            other.origin[1] - ps.origin[1],
+            other.origin[2] - ps.origin[2],
+=======
+            origin[0] - ps.origin[0],
+            origin[1] - ps.origin[1],
+            origin[2] - ps.origin[2],
+>>>>>>> /tmp/claude-0/zmhead/crates/net/src/client/runtime.rs
+        ];
+        if dot(delta, delta) > AIM_AUTOMELEE_RANGE * AIM_AUTOMELEE_RANGE {
+            return;
+        }
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/client/runtime.rs
+        let center = [other.origin[0], other.origin[1], other.origin[2] + 36.0];
+=======
+        let center = [origin[0], origin[1], origin[2] + 36.0];
+>>>>>>> /tmp/claude-0/zmhead/crates/net/src/client/runtime.rs
+        let to = [center[0] - eye[0], center[1] - eye[1], center[2] - eye[2]];
+        let depth = dot(to, forward);
+        if depth <= 1.0 {
+            return;
+        }
+        let x = dot(to, right) / depth;
+        let y = dot(to, up) / depth;
+        if x.abs() - 15.0 / depth > MELEE_REGION_TAN_X
+            || y.abs() - 36.0 / depth > MELEE_REGION_TAN_Y
+        {
+            return;
+        }
+        let crosshair = x * x + y * y;
+        if best.is_some_and(|(b, _)| b <= crosshair) {
+            return;
+        }
+        let hit = world.trace_static_world(eye, center, [0.0; 3], [0.0; 3], sim::MASK_SHOT);
+        if hit.fraction < 1.0 {
+            return;
+        }
+        best = Some((crosshair, delta));
+    };
+    // bo2zm: Black Ops II's zombies (the server lists those near him).
+    for (_, spot) in t6_zombies(snapshot, local) {
+        consider(spot);
+    }
     for (id, other) in &snapshot.players {
         if *id == local || other.pm_type > 1 {
             continue;
@@ -1256,43 +1424,25 @@ fn melee_charge_target(
         {
             continue;
         }
-        let delta = [
-            other.origin[0] - ps.origin[0],
-            other.origin[1] - ps.origin[1],
-            other.origin[2] - ps.origin[2],
-        ];
-        if dot(delta, delta) > AIM_AUTOMELEE_RANGE * AIM_AUTOMELEE_RANGE {
-            continue;
-        }
-        let center = [other.origin[0], other.origin[1], other.origin[2] + 36.0];
-        let to = [center[0] - eye[0], center[1] - eye[1], center[2] - eye[2]];
-        let depth = dot(to, forward);
-        if depth <= 1.0 {
-            continue;
-        }
-        let x = dot(to, right) / depth;
-        let y = dot(to, up) / depth;
-        if x.abs() - 15.0 / depth > MELEE_REGION_TAN_X
-            || y.abs() - 36.0 / depth > MELEE_REGION_TAN_Y
-        {
-            continue;
-        }
-        let crosshair = x * x + y * y;
-        if best.is_some_and(|(b, _)| b <= crosshair) {
-            continue;
-        }
-        let hit = world.trace_static_world(eye, center, [0.0; 3], [0.0; 3], sim::MASK_SHOT);
-        if hit.fraction < 1.0 {
-            continue;
-        }
-        best = Some((crosshair, delta));
+        consider(other.origin);
     }
     let (_, delta) = best?;
     let dist = dot(delta, delta).sqrt();
+<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/client/runtime.rs
     if dist <= movement_iw4::MELEE_CHARGE_PLAYER_MELEE_RANGE_DEFAULT {
         return None;
     }
     Some((math_iw4::vec_to_yaw(delta[0], delta[1]), dist as u8))
+=======
+    // bo2zm: a target in reach always gets the stab (BO2 slashes only at
+    // nothing); one already inside melee range is lunged at just past it,
+    // a step the zombie's own body stops.
+    let dist = dist.max(movement_iw4::MELEE_CHARGE_PLAYER_MELEE_RANGE_DEFAULT + 1.0);
+    Some((
+        math_iw4::vec_to_yaw(delta[0], delta[1]),
+        dist.min(255.0) as u8,
+    ))
+>>>>>>> /tmp/claude-0/zmhead/crates/net/src/client/runtime.rs
 }
 
 /// `yaw` is counterclockwise from map up.
