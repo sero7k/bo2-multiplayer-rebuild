@@ -986,6 +986,9 @@ pub(crate) struct BannerModel {
     pub emblem: Option<Handle<Image>>,
     /// A line over the card ("KILLED BY").
     pub title: Option<String>,
+    /// His kill streak this life, in a red box over the card ("2ND KILL",
+    /// as Modern Warfare's kill card).
+    pub streak: Option<String>,
     pub start: f64,
     /// How long it holds before it fades (s).
     pub hold: f32,
@@ -993,7 +996,7 @@ pub(crate) struct BannerModel {
 
 impl BannerModel {
     pub(crate) fn new(name: String, level: i32, start: f64) -> Self {
-        BannerModel { name, level, rank: None, card: None, emblem: None, title: None, start, hold: BANNER_HOLD }
+        BannerModel { name, level, rank: None, card: None, emblem: None, title: None, streak: None, start, hold: BANNER_HOLD }
     }
 }
 
@@ -1093,6 +1096,42 @@ pub(crate) fn spawn_banner(commands: &mut Commands, faces: &Faces, m: &BannerMod
                         Node { position_type: PositionType::Absolute, left: Val::Px(0.0), bottom: Val::Px(h + 3.0 * k), ..default() },
                         fade,
                     ));
+                }
+                // His kill streak over the card: white on red, boxed.
+                if let Some(streak) = &m.streak {
+                    let red = Color::srgba(0.62, 0.08, 0.08, 0.86);
+                    card.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            right: Val::Px(0.0),
+                            bottom: Val::Px(h + 4.0 * k),
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        },
+                    ))
+                    .with_children(|row| {
+                        row.spawn((
+                            Node {
+                                padding: UiRect::axes(Val::Px(8.0 * k), Val::Px(2.0 * k)),
+                                border: UiRect::all(Val::Px((1.0 * k).max(1.0))),
+                                ..default()
+                            },
+                            BackgroundColor(red),
+                            BorderColor::all(Color::srgba(0.95, 0.35, 0.30, 0.9)),
+                            fade.with(red.alpha()),
+                            FadeBack,
+                        ))
+                        .with_children(|b| {
+                            b.spawn((
+                                Text::new(streak.to_uppercase()),
+                                font(&faces.bold, 17.0 * k),
+                                TextColor(Color::WHITE),
+                                TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
+                                fade,
+                            ));
+                        });
+                    });
                 }
                 // His calling card, covering the card, clipped to it.
                 if let Some((image, pic)) = &m.card {
@@ -1251,6 +1290,8 @@ fn dress_card(
 #[derive(Default)]
 struct BannerState {
     last_kill: Option<u32>,
+    /// His kills since his last death (killstreak kills too).
+    life_kills: u32,
     /// A kill waiting for its card: the victim and when.
     pending: Option<(String, f64)>,
     shown: Option<(BannerModel, u32)>,
@@ -1325,7 +1366,11 @@ fn kill_banner(
     let now = now_secs(&time);
     let cat = catalog();
     for k in new_kills(&seen.kills, &mut st.last_kill) {
+        if !seen.me.is_empty() && k.victim == seen.me {
+            st.life_kills = 0;
+        }
         if seen.is_my_kill(k) {
+            st.life_kills += 1;
             st.pending = Some((k.victim.clone(), now));
         }
     }
@@ -1344,7 +1389,9 @@ fn kill_banner(
             if let Some(alias) = KILL_CARD_SOUND {
                 sounds.write(frame::UiPlaySound { alias: alias.to_owned() });
             }
-            st.shown = Some((BannerModel::new(victim, 1, now), u32::MAX));
+            let mut m = BannerModel::new(victim, 1, now);
+            m.streak = Some(ordinal_kill(st.life_kills));
+            st.shown = Some((m, u32::MAX));
         }
     }
     let life = (BANNER_IN + BANNER_HOLD + BANNER_OUT) as f64;
@@ -1372,6 +1419,18 @@ fn kill_banner(
     clear(&mut commands);
     spawn_banner(&mut commands, &faces, &model, size);
     st.shown = Some((model, key));
+}
+
+/// "1ST KILL", "2ND KILL", "11TH KILL", "23RD KILL".
+fn ordinal_kill(n: u32) -> String {
+    let suffix = match (n % 10, n % 100) {
+        (_, 11..=13) => "TH",
+        (1, _) => "ST",
+        (2, _) => "ND",
+        (3, _) => "RD",
+        _ => "TH",
+    };
+    format!("{n}{suffix} KILL")
 }
 
 /// How long the Killed By card holds (BO2's obituary callout goes after
