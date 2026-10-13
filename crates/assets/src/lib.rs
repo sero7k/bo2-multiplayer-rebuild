@@ -61,7 +61,7 @@ pub mod image_handles;
 /// rules on any map: a Modern Warfare 2, Modern Warfare 3 or Black Ops map
 /// brings its world (drawing, collision, entities, ambience) and Black Ops
 /// II brings the rest (guns, scripts, HUD, factions, sound).
-static T6_RULES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static T6_RULES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 pub fn set_t6_rules(on: bool) {
     T6_RULES.store(on, std::sync::atomic::Ordering::Relaxed);

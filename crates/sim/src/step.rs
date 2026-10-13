@@ -2210,9 +2210,7 @@ fn clip_move_to_players(
 /// the game ran BO2's, and a dive jumped back on every correction.
 static HOST_FEEL: std::sync::Mutex<Option<movement_iw4::Bo2Feel>> = std::sync::Mutex::new(None);
 
-/// bo2zm: the Black Ops II movement rules, on in a Black Ops II game.
-/// `BO2_FEEL=mw2` turns them off (the old MW2 movement) for side-by-side
-/// clips. Values the scripts set win over the defaults. `predicting` = this
+/// bo2zm: the Black Ops II movement rules, on in every game. Values the scripts set win over the defaults. `predicting` = this
 /// is the local player's guess, not the game itself; `sent` = the rules the
 /// game sent in its last snapshot.
 fn bo2_feel(
@@ -2221,19 +2219,22 @@ fn bo2_feel(
     sent: Option<movement_iw4::Bo2Feel>,
 ) -> movement_iw4::Bo2Feel {
     // The Black Ops II scripts' own dvars (setdvar); none = no T6 game.
+    // bo2mp: no Black Ops II scripts running: Black Ops II's own defaults
+    // all the same (MW2's rules never apply).
+    let defaults = || bo2_feel_with(&std::collections::HashMap::<String, String>::new(), omni_movement_setting());
     let Some(t6) = ecs.get_resource::<crate::t6::T6Runtime>() else {
         if predicting {
-            // The game's own rules first: a second PC has no scripts (it
-            // guessed with MW2's), and a game hosted here before may have
-            // left its rules behind.
+            // The game's own rules first: a second PC has no scripts, and
+            // a game hosted here before may have left its rules behind.
             return sent
                 .or_else(|| HOST_FEEL.lock().ok().and_then(|f| *f))
-                .unwrap_or(movement_iw4::Bo2Feel::IW4);
+                .unwrap_or_else(defaults);
         }
+        let feel = defaults();
         if let Ok(mut f) = HOST_FEEL.lock() {
-            *f = None;
+            *f = Some(feel);
         }
-        return movement_iw4::Bo2Feel::IW4;
+        return feel;
     };
     let feel = bo2_feel_from(t6);
     if !predicting && let Ok(mut f) = HOST_FEEL.lock() {
@@ -2242,10 +2243,10 @@ fn bo2_feel(
     feel
 }
 
-/// bo2zm: `BO2_FEEL=mw2`: the old MW2 rules in a Black Ops II game.
+/// bo2mp: the MW2 rule set is gone (`BO2_FEEL=mw2` no longer exists):
+/// every game plays by Black Ops II's.
 pub(crate) fn bo2_feel_mw2() -> bool {
-    static MW2: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *MW2.get_or_init(|| std::env::var("BO2_FEEL").is_ok_and(|v| v.eq_ignore_ascii_case("mw2")))
+    false
 }
 
 /// bo2zm: the Controls setting "Omni Movement" (off by
@@ -2275,19 +2276,23 @@ fn dvar_number<S: std::hash::BuildHasher>(
 }
 
 fn bo2_feel_from(t6: &crate::t6::T6Runtime) -> movement_iw4::Bo2Feel {
-    if bo2_feel_mw2() {
-        return movement_iw4::Bo2Feel::IW4;
-    }
+    bo2_feel_with(&t6.vm.dvars, t6.omni)
+}
+
+/// bo2mp: Black Ops II's rules from these dvars (none set: its defaults).
+/// Every game runs by them: there is no MW2 rule set.
+fn bo2_feel_with<S: std::hash::BuildHasher>(
+    dvars: &std::collections::HashMap<String, String, S>,
+    omni: bool,
+) -> movement_iw4::Bo2Feel {
     // Dvar names are case-blind: the VM keeps what the scripts set (and the
     // engine defaults it seeds) under lower case (`Vm::dvar_name`), so a
     // look-up by the engine's mixed-case name never found them and every
     // script-set value here (jump_slowdownEnable, bg_fallDamage*,
     // perk_*Multiplier, player_sprintStrafeSpeedScale) fell back to the
     // default.
-    let number = |name: &str, default: f32| dvar_number(&t6.vm.dvars, name).unwrap_or(default);
-    let zombies = t6
-        .vm
-        .dvars
+    let number = |name: &str, default: f32| dvar_number(dvars, name).unwrap_or(default);
+    let zombies = dvars
         .get("mapname")
         .is_some_and(|m| m.starts_with("zm_"));
     movement_iw4::Bo2Feel {
@@ -2324,7 +2329,7 @@ fn bo2_feel_from(t6: &crate::t6::T6Runtime) -> movement_iw4::Bo2Feel {
         // BO2 sprints forward only (forwardmove above
         // player_sprintForwardMinimum); off by default, the
         // Controls menu's "Omni Movement" turns it on (read at game start).
-        omni: t6.omni,
+        omni,
         // Low climbs keep the gun in hand (defaults until real BO2 is read).
         mantle_weapon_height: number("mantle_weapon_height", 39.0),
         mantle_weapon_anim_height: number("mantle_weapon_anim_height", 32.0),

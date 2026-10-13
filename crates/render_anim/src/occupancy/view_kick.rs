@@ -1052,7 +1052,7 @@ fn stamp_damage_feedback(
 pub(crate) fn bo2_camera(kick: &SessionViewKick) -> bool {
     static MW2: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let mw2 =
-        *MW2.get_or_init(|| std::env::var("BO2_FEEL").is_ok_and(|v| v.eq_ignore_ascii_case("mw2")));
+        *MW2.get_or_init(|| false);
     kick.aim_kick && !mw2
 }
 
