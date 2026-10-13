@@ -20,8 +20,11 @@
 //! - weapons through `WeaponCatalog::capture_legacy`, read by member name
 //!   through each reader's schema.
 //!
-//! Arms are Black Ops II's (the catalog's hands resolve to BO2's). The
-//! guns' sounds are not read yet (neither reader has sound aliases).
+//! Arms are Black Ops II's (the catalog's hands resolve to BO2's). World
+//! at War's guns' sounds are its own: the sound bank reads its common
+//! zone's aliases (`asset_audio::waw_weapon_sounds`, under the World at War
+//! namespace the guns carry), taken from this read when it comes first.
+//! CoD4's are not read yet (the `iw3` reader has no sound aliases).
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -409,6 +412,11 @@ fn read_t4(path: &Path) -> Result<LegacyRead, String> {
             parsed.of_type(t4::zone::AssetType::XAnimParts).map(|(_, a)| &a.root)
         )
     };
+    // The guns' sounds, from this read (the sound bank then needs no read
+    // of its own).
+    if crate::guest_guns() {
+        asset_audio::waw_sounds_from_zone(path, &parsed);
+    }
     let zone = t4::convert::to_iw3_map(&parsed).zone;
     Ok(LegacyRead { zone, weapons, anims, walked })
 }

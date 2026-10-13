@@ -151,6 +151,9 @@ pub struct NamespaceSoundIwd {
     t6: Option<crate::iwd::IwdSoundIndex>,
     // bo2mp: Ghosts keeps its sounds in paks (empty slot).
     iw6: Option<crate::iwd::IwdSoundIndex>,
+    // bo2mp: World at War's IWDs, for its guest guns' streamed sounds
+    // (`open_t4`; it has no tree).
+    t4: Option<crate::iwd::IwdSoundIndex>,
 }
 
 impl NamespaceSoundIwd {
@@ -191,7 +194,25 @@ impl NamespaceSoundIwd {
             AssetNamespace::T5 => self.t5.as_ref(),
             AssetNamespace::Iw5 => self.iw5.as_ref(),
             AssetNamespace::T6 => self.t6.as_ref(),
-            AssetNamespace::Iw6 | AssetNamespace::T4 | AssetNamespace::Iw3 => self.iw6.as_ref(),
+            AssetNamespace::T4 => self.t4.as_ref(),
+            AssetNamespace::Iw6 | AssetNamespace::Iw3 => self.iw6.as_ref(),
+        }
+    }
+
+    /// bo2mp: index World at War's IWDs (its `main`) for its guns' streamed
+    /// sounds; the line says what was opened.
+    pub fn open_t4(&mut self, main: &Path) -> String {
+        match crate::iwd::IwdSoundIndex::open(main) {
+            Ok(index) => {
+                let line = format!(
+                    "audio: IWD sounds t4 from {} — {} paths",
+                    index.indexed_dir().display(),
+                    index.sound_count()
+                );
+                self.t4 = Some(index);
+                line
+            }
+            Err(e) => format!("audio: IWD sounds t4 unavailable ({e})"),
         }
     }
 
@@ -213,7 +234,8 @@ impl NamespaceSoundIwd {
             AssetNamespace::T5 => &mut self.t5,
             AssetNamespace::Iw5 => &mut self.iw5,
             AssetNamespace::T6 => &mut self.t6,
-            AssetNamespace::Iw6 | AssetNamespace::T4 | AssetNamespace::Iw3 => &mut self.iw6,
+            AssetNamespace::T4 => &mut self.t4,
+            AssetNamespace::Iw6 | AssetNamespace::Iw3 => &mut self.iw6,
         }
     }
 }

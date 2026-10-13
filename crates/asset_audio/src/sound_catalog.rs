@@ -143,6 +143,12 @@ impl LoadedSoundPcm {
     pub fn is_t5_xwma(&self) -> bool {
         self.format == crate::sound_wma_t5::T5_WMA
     }
+
+    /// bo2mp: a World at War loaded sound (a whole WAVE file, decoded by
+    /// `decode_t4_wav`).
+    pub fn is_t4_wav(&self) -> bool {
+        self.format == crate::sound_load_t4::T4_WAV
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

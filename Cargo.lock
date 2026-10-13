@@ -315,6 +315,7 @@ dependencies = [
  "fastfile_iw6",
  "fastfile_t5",
  "sab_t6",
+ "t4",
 ]
 
 [[package]]

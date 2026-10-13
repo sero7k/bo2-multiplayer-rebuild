@@ -262,8 +262,24 @@ fn sound_sources(games: &GamesRoot, map: &Path) -> (Vec<SoundSource>, Vec<SoundS
     // (read by `fastfile_iw6`, kept under the Ghosts namespace).
     if std::env::var("BO2MP_GUEST_GUNS").map_or(true, |v| v.trim() != "0") {
         after_map.extend(ghosts_sound_sources(games));
+        // bo2mp: World at War's guns: their sounds, from its common zone
+        // (read by `t4`, kept under the World at War namespace). Nothing
+        // when World at War is not installed.
+        after_map.extend(waw_sound_source(games));
     }
     (before_map, after_map)
+}
+
+/// bo2mp: World at War's common zone, its guns' sounds, when it is
+/// installed.
+fn waw_sound_source(games: &GamesRoot) -> Option<SoundSource> {
+    Some(SoundSource {
+        namespace: AssetNamespace::T4,
+        name: "common_mp (World at War guns)",
+        found: Ok(crate::waw_common_mp(games)?),
+        merge: Merge::Missing,
+        absent: Absent::Skip,
+    })
 }
 
 /// bo2mp: the Ghosts zones its guns' sounds come from, when Ghosts is
@@ -382,11 +398,12 @@ impl SoundSources {
                 return None;
             }
         };
-        // bo2mp: Ghosts zones are read by `fastfile_iw6` (no `ZoneGame`).
-        let (catalog, origin) = if source.namespace == AssetNamespace::Iw6 {
-            (crate::ghosts_weapon_sounds(path), ZoneSoundOrigin::AudioOnly)
-        } else {
-            ensure_zone_sound(path)
+        // bo2mp: Ghosts zones are read by `fastfile_iw6`, World at War's by
+        // `t4` (neither has a `ZoneGame`).
+        let (catalog, origin) = match source.namespace {
+            AssetNamespace::Iw6 => (crate::ghosts_weapon_sounds(path), ZoneSoundOrigin::AudioOnly),
+            AssetNamespace::T4 => (crate::waw_weapon_sounds(path), ZoneSoundOrigin::AudioOnly),
+            _ => ensure_zone_sound(path),
         };
         match catalog {
             Ok(catalog) => {

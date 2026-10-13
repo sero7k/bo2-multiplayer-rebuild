@@ -43,11 +43,14 @@ pub enum ClipPath {
     Adpcm,
     /// T5 XWMA, decoded in-process or read from the artifact cache.
     Xwma,
+    /// bo2mp: a World at War WAVE file (Microsoft ADPCM, PCM or WMA2),
+    /// decoded in process.
+    T4Wav,
     /// A clip read out of an IWD rather than out of the zone.
     Streamed,
     /// No decoder claims the key: the bank holds nothing at that index, or it
-    /// holds a clip in a format none of the four above reads. Counted here so
-    /// it cannot hide inside another path's failures.
+    /// holds a clip in a format none of the above reads. Counted here so it
+    /// cannot hide inside another path's failures.
     Unresolved,
 }
 
@@ -58,6 +61,7 @@ impl ClipPath {
         Self::Pcm,
         Self::Adpcm,
         Self::Xwma,
+        Self::T4Wav,
         Self::Streamed,
         Self::Unresolved,
     ];
@@ -67,6 +71,7 @@ impl ClipPath {
             Self::Pcm => "pcm",
             Self::Adpcm => "t5 adpcm",
             Self::Xwma => "t5 xwma",
+            Self::T4Wav => "t4 wav",
             Self::Streamed => "streamed",
             Self::Unresolved => "unresolved",
         }
@@ -783,6 +788,8 @@ fn loaded_path(sound: &asset_audio::LoadedSoundPcm) -> Option<ClipPath> {
         Some(ClipPath::Adpcm)
     } else if sound.is_t5_xwma() {
         Some(ClipPath::Xwma)
+    } else if sound.is_t4_wav() {
+        Some(ClipPath::T4Wav)
     } else if sound.format() == asset_audio::MSS_PCM {
         Some(ClipPath::Pcm)
     } else {
@@ -804,6 +811,18 @@ fn prepare_loaded(sound: &asset_audio::LoadedSoundPcm) -> Result<PreparedPcm, Cl
             samples: Arc::clone(pcm.samples()),
             channels: pcm.channel_count(),
             sample_rate: pcm.rate(),
+        });
+    }
+    if sound.is_t4_wav() {
+        let pcm = asset_audio::decode_t4_wav(sound.encoded_bytes()).map_err(|error| {
+            diag::warn!(Audio, "audio: World at War clip `{}` does not decode: {error}", sound.name);
+            ClipError::Decode
+        })?;
+        let samples: Arc<[f32]> = pcm.samples.iter().map(|&s| f32::from(s) / 32768.0).collect();
+        return Ok(PreparedPcm {
+            samples,
+            channels: pcm.channels.max(1),
+            sample_rate: pcm.rate.max(1),
         });
     }
     let decoded: Vec<u8>;

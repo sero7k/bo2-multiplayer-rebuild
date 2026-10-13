@@ -272,7 +272,15 @@ pub(crate) fn start_sound_bank_compose(
                         trees.adopt_zone(&mw3.anchor);
                     }
                 }
-                NamespaceSoundIwd::open(&trees)
+                let (mut iwd, mut lines) = NamespaceSoundIwd::open(&trees);
+                // bo2mp: World at War's IWDs, for its guest guns' streamed
+                // sounds (nothing when it is not installed).
+                if assets::guest_guns()
+                    && let Some(main) = asset_audio::waw_main(&games)
+                {
+                    lines.push(iwd.open_t4(&main));
+                }
+                (iwd, lines)
             }))
         }
     };
