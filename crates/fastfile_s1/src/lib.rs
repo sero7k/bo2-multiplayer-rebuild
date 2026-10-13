@@ -10,9 +10,11 @@
 pub mod asset_type;
 pub mod container;
 pub mod cursor;
+pub mod image;
 pub mod layout;
 pub mod ptr;
 pub mod stream;
+pub mod walk;
 pub mod xfile;
 pub mod zone;
 
@@ -62,6 +64,55 @@ mod retail {
             );
             assert_eq!(unknown, 0, "{}", path.display());
             assert_eq!(zone.image.len() as u64, zone.assets.xfile.size + 0x48);
+        }
+    }
+}
+
+#[cfg(test)]
+mod retail_walk {
+    //! `S1_WALK=<zone.ff> cargo test -p fastfile_s1 --release walk_retail
+    //! -- --ignored --nocapture`: walks a zone and checks it ends exact.
+
+    use super::*;
+    use crate::stream::VIRTUAL;
+
+    #[test]
+    #[ignore]
+    fn walk_retail() {
+        let Some(path) = std::env::var_os("S1_WALK") else { return };
+        for path in std::env::split_paths(&path) {
+            let zone = Zone::open(&path).unwrap();
+            let mut w = walk::Walker::new(&zone.image, &zone.assets, &zone.header.stream_files);
+            let stop = w.walk().err();
+            let want = zone.assets.xfile.block_sizes[VIRTUAL as usize];
+            println!(
+                "{}: walked {}/{} pos {:#x}/{:#x} VIRTUAL {:#x} (block {:#x}) unresolved {} stop {:?}",
+                path.display(),
+                w.cap.walked,
+                zone.assets.assets.len(),
+                w.stream_pos(),
+                zone.image.len(),
+                w.virtual_offset(),
+                want,
+                w.unresolved.get(),
+                stop
+            );
+            if std::env::var_os("S1_LIST").is_some() {
+                for m in &w.cap.xmodels {
+                    println!("  model {} bones {} surfs {} lods {:?}", m.name, m.num_bones, m.numsurfs,
+                        m.lods.iter().map(|l| l.numsurfs).collect::<Vec<_>>());
+                }
+                for m in &w.cap.materials {
+                    println!("  material {} textures {}", m.name, m.textures.len());
+                }
+                for i in &w.cap.images {
+                    println!("  image {} {}x{} fmt {} streamed {} len1 {:#x} inline {:?} streams {:?}", i.name, i.width, i.height, i.format, i.streamed, i.data_len1, i.pixels.map(|p| p.len), i.streams);
+                }
+            }
+            if stop.is_none() {
+                assert_eq!(w.stream_pos(), zone.image.len(), "{}", path.display());
+                assert_eq!(w.virtual_offset(), want, "{}", path.display());
+            }
         }
     }
 }
