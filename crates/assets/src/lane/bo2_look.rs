@@ -31,36 +31,46 @@ pub(crate) struct Recipe {
 }
 
 /// Every World at War multiplayer map and the Black Ops II map of its
-/// setting: Berlin ruins as Aftermath; the German countryside and towns as
+/// setting and mood (Zombies maps too): the burning Berlin ruins (Dome,
+/// Downfall, Breach, Stalingrad, Nachtfeuer) as Nuketown Zombies' burnt
+/// haze; the grim and the underground (Asylum, Subway) as Mob of the
+/// Dead's. The rest: Berlin ruins as Aftermath; the German countryside and towns as
 /// Standoff; snow as Frostbite; rain as Hydro; the night raids as Plaza;
 /// the submarine pens as Cargo; the Pacific islands and jungles as
 /// Castaway; Japanese castles and shrines as Magma.
 pub(crate) const RECIPES: &[Recipe] = &[
+    // Dome: the Reichstag in ruins, burning, under smoke. Nuketown Zombies'
+    // light (its burnt orange grade, haze and dim sun) and its burnt
+    // and ashen materials where Dome has the same kind of surface.
     Recipe {
         map: "mp_dome",
-        model: "mp_la",
+        model: "zm_nuked",
         swaps: &[
-            ("berlin_wall_concrete_grungy_cracks_c", "mp_la:wpc/concrete_wall_rough_base01"),
+            ("berlin_wall_concrete_grungy_cracks_c", "zm_nuked:wpc/jun_art_concrete_base02_dark"),
             ("berlin_wall_concrete_holes_splats2_c", "mp_la:wpc/concrete_wall_broken"),
-            ("berlin_wall_concrete_reichstag_int_c", "mp_la:wpc/concrete_wall_pebbled01"),
-            ("berlin_facade_concrete_lower_c", "mp_la:wpc/concrete_wall_rough_base01"),
+            ("berlin_wall_concrete_reichstag_int_c", "zm_nuked:wpc/concrete_exposed"),
+            ("berlin_facade_concrete_lower_c", "zm_nuked:wpc/jun_art_concrete_base02_dark"),
             ("peleliu_wall_concrete_grimey_c", "mp_la:wpc/com_concrete_core_dusty"),
             ("berlin_floors_marble_tile_ornate_c", "mp_la:wpc/pb_marble_tile_floor"),
-            ("okinawa_walls_wood_trenchboard1_c", "mp_la:wpc/mp_b_art_floor_wood_dirty_dark"),
-            ("okinawa_floor_wood_faded_boards_c", "mp_la:wpc/wood_hardwoodfloor_01"),
+            ("okinawa_walls_wood_trenchboard1_c", "zm_nuked:wpc/zm_nuked_wood_planks_burnt"),
+            ("okinawa_floor_wood_faded_boards_c", "zm_nuked:wpc/wood_burned"),
+            ("berlin_floors_wood_plnks_dark1_c", "zm_nuked:wpc/zm_nuked_wood_planks_burnt_lambert"),
+            ("berlin_terrain_rubble_large_c", "zm_nuked:wpc/zm_nuked_rubble_ash_dark"),
+            ("berlin_terrain_rubble_small_c", "zm_nuked:wpc/rubble_ash"),
+            ("berlin_roofs_brick_slate2_c", "zm_nuked:wpc/zm_nuked_roof_brick_slate_02"),
         ],
     },
-    Recipe { map: "mp_downfall", model: "mp_la", swaps: &[] },
-    Recipe { map: "mp_bgate", model: "mp_la", swaps: &[] },
-    Recipe { map: "mp_stalingrad", model: "mp_la", swaps: &[] },
-    Recipe { map: "mp_subway", model: "mp_la", swaps: &[] },
+    Recipe { map: "mp_downfall", model: "zm_nuked", swaps: &[] },
+    Recipe { map: "mp_bgate", model: "zm_nuked", swaps: &[] },
+    Recipe { map: "mp_stalingrad", model: "zm_nuked", swaps: &[] },
+    Recipe { map: "mp_subway", model: "zm_prison", swaps: &[] },
     Recipe { map: "mp_seelow", model: "mp_village", swaps: &[] },
-    Recipe { map: "mp_asylum", model: "mp_village", swaps: &[] },
+    Recipe { map: "mp_asylum", model: "zm_prison", swaps: &[] },
     Recipe { map: "mp_vodka", model: "mp_village", swaps: &[] },
     Recipe { map: "mp_outskirts", model: "mp_frostbite", swaps: &[] },
     Recipe { map: "mp_roundhouse", model: "mp_frostbite", swaps: &[] },
     Recipe { map: "mp_suburban", model: "mp_hydro", swaps: &[] },
-    Recipe { map: "mp_nachtfeuer", model: "mp_nightclub", swaps: &[] },
+    Recipe { map: "mp_nachtfeuer", model: "zm_nuked", swaps: &[] },
     Recipe { map: "mp_makin", model: "mp_nightclub", swaps: &[] },
     Recipe { map: "mp_docks", model: "mp_dockside", swaps: &[] },
     Recipe { map: "mp_makin_day", model: "mp_castaway", swaps: &[] },
@@ -331,8 +341,9 @@ mod tests {
         let r = dome();
         assert_eq!(swap_for(r, "berlin_wall_brick_gritty_c"), Some(("mp_village", "wpc/brick_wall_redbrick")));
         assert_eq!(swap_for(r, "seelow_wall_brick_white01_c"), Some(("mp_village", "wpc/concrete_bricks_beige")));
-        assert_eq!(swap_for(r, "berlin_terrain_rubble_small_c"), Some(("mp_la", "wpc/rubble_concrete_dust01")));
-        assert_eq!(swap_for(r, "berlin_wall_concrete_reichstag_int_c"), Some(("mp_la", "wpc/concrete_wall_pebbled01")));
+        // Dome's own: Nuketown Zombies' ash and bare concrete.
+        assert_eq!(swap_for(r, "berlin_terrain_rubble_small_c"), Some(("zm_nuked", "wpc/rubble_ash")));
+        assert_eq!(swap_for(r, "berlin_wall_concrete_reichstag_int_c"), Some(("zm_nuked", "wpc/concrete_exposed")));
         assert_eq!(swap_for(r, "berlin_trim_concrete_ornate_group_c"), None);
         assert_eq!(swap_for(r, "berlin_window_warehouse_c"), None);
         assert_eq!(swap_for(r, "decal_cable_c"), None);

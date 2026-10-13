@@ -112,7 +112,7 @@ pub(crate) fn legacy_common_mp(game: Legacy) -> Result<PathBuf, String> {
 /// material pool): `build_legacy_guests` then links it into the match's.
 pub(crate) struct LegacyPrefetch {
     game: Legacy,
-    read: Result<(PathBuf, LegacyRead), String>,
+    read: Result<(PathBuf, Arc<LegacyRead>), String>,
 }
 
 /// bo2mp: read the game's guns for the match (`wanted`: Black Ops II rules
@@ -123,7 +123,7 @@ pub(crate) fn prefetch_legacy_guest_guns(game: Legacy, wanted: bool) -> LegacyPr
         return LegacyPrefetch { game, read: Err("off".into()) };
     }
     let read = legacy_common_mp(game).and_then(|path| {
-        let read = std::panic::catch_unwind(|| read_legacy(game, &path))
+        let read = std::panic::catch_unwind(|| read_legacy_shared(game, &path))
             .unwrap_or_else(|_| Err(format!("reading {} panicked", path.display())));
         read.map(|read| (path, read))
     });
@@ -413,6 +413,50 @@ fn read_t4(path: &Path) -> Result<LegacyRead, String> {
     Ok(LegacyRead { zone, weapons, anims, walked })
 }
 
+/// bo2mp: one read of a game's `common_mp` shared by whoever needs it at
+/// once (the guest guns, the map's props and their materials): the second
+/// to ask waits for the first's read. Kept only while someone holds it.
+fn read_legacy_shared(game: Legacy, path: &Path) -> Result<Arc<LegacyRead>, String> {
+    use std::sync::{Mutex, Weak};
+    static SHARED: Mutex<Vec<(Legacy, PathBuf, Weak<LegacyRead>)>> = Mutex::new(Vec::new());
+    static READING: Mutex<()> = Mutex::new(());
+    let _one_at_a_time = READING.lock().unwrap_or_else(|e| e.into_inner());
+    let find = || {
+        SHARED
+            .lock()
+            .ok()?
+            .iter()
+            .find(|(g, p, _)| *g == game && p == path)
+            .and_then(|(_, _, w)| w.upgrade())
+    };
+    if let Some(read) = find() {
+        return Ok(read);
+    }
+    let read = Arc::new(read_legacy(game, path)?);
+    if let Ok(mut s) = SHARED.lock() {
+        s.retain(|(_, _, w)| w.strong_count() > 0);
+        s.push((game, path.to_path_buf(), Arc::downgrade(&read)));
+    }
+    Ok(read)
+}
+
+/// bo2mp: a game's `common_mp` zone, for a map's references into it (the
+/// materials and models a map zone names but does not hold).
+pub(crate) fn legacy_common_zone(game: Legacy) -> Option<Arc<impl std::ops::Deref<Target = iw3::zone::Zone>>> {
+    let path = legacy_common_mp(game).ok()?;
+    read_legacy_shared(game, &path).ok().map(|r| Arc::new(CommonZone(r)))
+}
+
+/// The zone of a shared `common_mp` read.
+pub(crate) struct CommonZone(Arc<LegacyRead>);
+
+impl std::ops::Deref for CommonZone {
+    type Target = iw3::zone::Zone;
+    fn deref(&self) -> &iw3::zone::Zone {
+        &self.0.zone
+    }
+}
+
 fn read_legacy(game: Legacy, path: &Path) -> Result<LegacyRead, String> {
     let started = std::time::Instant::now();
     let mut read = match game {
@@ -428,12 +472,12 @@ fn read_legacy(game: Legacy, path: &Path) -> Result<LegacyRead, String> {
 /// `material_seed` (read and built in one go: `iw4l check-guns`).
 pub(crate) fn load_legacy_guests(game: Legacy, path: &Path, material_seed: MaterialCatalog) -> LegacyGuests {
     match read_legacy(game, path) {
-        Ok(read) => build_legacy_guests(game, path, read, material_seed),
+        Ok(read) => build_legacy_guests(game, path, Arc::new(read), material_seed),
         Err(e) => LegacyGuests::empty(material_seed, vec![format!("{} guest guns: {e}", game.tag())]),
     }
 }
 
-fn build_legacy_guests(game: Legacy, path: &Path, read: LegacyRead, material_seed: MaterialCatalog) -> LegacyGuests {
+fn build_legacy_guests(game: Legacy, path: &Path, read: Arc<LegacyRead>, material_seed: MaterialCatalog) -> LegacyGuests {
     let started = std::time::Instant::now();
     let tag = game.tag();
     let ns = game.namespace();
@@ -448,6 +492,8 @@ fn build_legacy_guests(game: Legacy, path: &Path, read: LegacyRead, material_see
     let main = asset_transport::game_root_for_zone(path).ok().map(|root| root.join("main"));
     let mut b = Builder {
         zone: &read.zone,
+        commons: Vec::new(),
+        common_names: None,
         tag,
         ns,
         main,
@@ -699,6 +745,10 @@ fn shrink(mut w: u32, mut h: u32, mut rgba: Vec<u8>, max: u32) -> (u32, u32, Vec
 
 struct Builder<'a> {
     zone: &'a iw3::zone::Zone,
+    /// bo2mp: the game's `common_mp`, for a material the zone only names
+    /// (a reference: no technique set of its own; its name by name there).
+    commons: Vec<&'a iw3::zone::Zone>,
+    common_names: Option<HashMap<String, (usize, usize)>>,
     tag: &'static str,
     ns: AssetNamespace,
     main: Option<PathBuf>,
@@ -712,7 +762,7 @@ struct Builder<'a> {
     missing: Vec<String>,
 }
 
-impl Builder<'_> {
+impl<'a> Builder<'a> {
     /// A colour map from the game's IWDs (flat grey where it is not found).
     fn image(&mut self, name: &str, max: u32) -> Option<usize> {
         let key = (name.to_owned(), max);
@@ -765,13 +815,31 @@ impl Builder<'_> {
         slot
     }
 
+    /// A zone material, or for a reference (no technique set: the zone
+    /// only names it) the game's `common_mp` material of that name.
+    fn resolve(&mut self, id: usize) -> Option<(&'a iw3::zone::Zone, &'a iw3::zone::Material)> {
+        let zone: &'a iw3::zone::Zone = self.zone;
+        let m = zone.material(id)?;
+        if m.technique_set.is_some() && !m.name.starts_with(',') {
+            return Some((zone, m));
+        }
+        if self.commons.is_empty() {
+            return Some((zone, m));
+        }
+        let commons = self.commons.clone();
+        let names = self.common_names.get_or_insert_with(|| common_material_names(&commons));
+        match names.get(m.name.trim_start_matches(',')).and_then(|&(z, i)| Some((commons[z], commons[z].material(i)?))) {
+            Some(found) => Some(found),
+            None => Some((zone, m)),
+        }
+    }
+
     /// One model material into the catalog, with its colour map.
     fn material(&mut self, id: usize, max: u32) -> Option<usize> {
         if let Some(&i) = self.materials.get(&id) {
             return Some(i);
         }
-        let zone = self.zone;
-        let m = zone.material(id)?;
+        let (zone, m) = self.resolve(id)?;
         let technique_set = m.technique_set.and_then(|t| zone.technique_set(t)).map_or("", |t| t.name.as_str());
         let state = TECHNIQUES.iter().find_map(|&t| m.state_bits_for(t));
         let draw = legacy_model_draw(technique_set, m.sort_key, state);
@@ -839,4 +907,171 @@ mod tests {
         assert_eq!((w, h, px.len()), (2, 2, 16));
         assert!(px.iter().all(|&v| v == 200));
     }
+}
+
+
+/// bo2mp: a CoD4 or World at War map's placed models (the GfxWorld's static
+/// models: statues, debris, furniture, flags), their materials linked into
+/// `catalog` (a reference resolved from `common`), each lit by the map's
+/// light grid at its middle.
+pub(crate) struct LegacyProps {
+    pub catalog: MaterialCatalog,
+    pub meshes: Vec<asset_world::ModelMesh>,
+    pub placements: Vec<Option<asset_world::StaticModelPlacement>>,
+    pub report: String,
+}
+
+/// The biggest side of a prop's picture.
+const PROP_MAX: u32 = 1024;
+
+pub(crate) fn legacy_static_models(
+    tag: &'static str,
+    ns: AssetNamespace,
+    path: &Path,
+    zone: &iw3::zone::Zone,
+    commons: &[&iw3::zone::Zone],
+    world: &iw3::zone::GfxWorld,
+    catalog: MaterialCatalog,
+) -> LegacyProps {
+    use bevy::prelude::{Mat3, Quat, Transform, Vec3};
+    let main = asset_transport::game_root_for_zone(path).ok().map(|root| root.join("main"));
+    let mut b = Builder {
+        zone,
+        commons: commons.to_vec(),
+        common_names: None,
+        tag,
+        ns,
+        main,
+        catalog,
+        owner: ZoneOwner::from_zone_path(path),
+        materials: HashMap::new(),
+        images: HashMap::new(),
+        decoded: 0,
+        missing: Vec::new(),
+    };
+    // The light grid: each stored point's mean colour (gamma), by point.
+    let grid = &world.light_grid;
+    let mut light: HashMap<[u32; 3], [f32; 3]> = HashMap::new();
+    for (p, entry) in grid.points() {
+        let Some(colours) = grid.colors.get(usize::from(entry.colors_index)) else { continue };
+        let mut sum = [0.0f32; 3];
+        for c in &colours.0 {
+            for k in 0..3 {
+                sum[k] += f32::from(c[k]) / 255.0;
+            }
+        }
+        light.insert(p, sum.map(|v| v / colours.0.len() as f32));
+    }
+    let light_at = |at: [f32; 3]| -> Option<[f32; 3]> {
+        let g: [i64; 3] = std::array::from_fn(|i| ((at[i] + 131_072.0) / iw3::zone::LightGrid::SPACING[i]).round() as i64);
+        // The nearest stored point within two steps.
+        let mut best: Option<(i64, [f32; 3])> = None;
+        for dz in -2i64..=2 {
+            for dy in -2i64..=2 {
+                for dx in -2i64..=2 {
+                    let p = [g[0] + dx, g[1] + dy, g[2] + dz];
+                    if p.iter().any(|&v| v < 0) {
+                        continue;
+                    }
+                    if let Some(c) = light.get(&[p[0] as u32, p[1] as u32, p[2] as u32]) {
+                        let d = dx * dx + dy * dy + dz * dz;
+                        if best.is_none_or(|(bd, _)| d < bd) {
+                            best = Some((d, *c));
+                        }
+                    }
+                }
+            }
+        }
+        best.map(|(_, c)| c)
+    };
+    let mut meshes = Vec::new();
+    let mut shared: HashMap<usize, Option<(usize, [f32; 3])>> = HashMap::new();
+    let mut placements = vec![None; world.static_models.len()];
+    let (mut lit, mut dark, mut unreadable) = (0usize, 0usize, Vec::new());
+    for (i, sm) in world.static_models.iter().enumerate() {
+        let Some(id) = sm.model else { continue };
+        let entry = *shared.entry(id).or_insert_with(|| {
+            let model = zone.xmodel(id)?;
+            let Some(xref) = model_ref(model) else {
+                if unreadable.len() < 8 {
+                    unreadable.push(model.name.clone());
+                }
+                return None;
+            };
+            let linked: HashMap<usize, usize> = model
+                .materials
+                .iter()
+                .flatten()
+                .filter_map(|&mid| Some((mid, b.material(mid, PROP_MAX)?)))
+                .collect();
+            let mesh = asset_world::build_t6_model_mesh(&xref, |k| linked.get(&k.index).copied())?;
+            meshes.push(mesh);
+            let mid: [f32; 3] = std::array::from_fn(|k| (xref.mins[k] + xref.maxs[k]) * 0.5);
+            Some((meshes.len() - 1, mid))
+        });
+        let Some((mesh, mid)) = entry else { continue };
+        let at: [f32; 3] = std::array::from_fn(|k| {
+            sm.origin[k] + (mid[0] * sm.axis[0][k] + mid[1] * sm.axis[1][k] + mid[2] * sm.axis[2][k]) * sm.scale
+        });
+        // As the map's lightmaps light in gamma space: the grid's colour is
+        // the light the model takes (light = colour^2, packed sqrt(light/32)).
+        let packed_lighting = match light_at(at) {
+            Some(c) => {
+                lit += 1;
+                Some([c[0], c[1], c[2]].map(|v| (v / 32f32.sqrt() * 255.0).round().clamp(0.0, 255.0) as u8).into_iter().chain([0]).collect::<Vec<u8>>().try_into().unwrap_or([0; 4]))
+            }
+            None => {
+                dark += 1;
+                None
+            }
+        };
+        let basis = Mat3::from_cols(Vec3::from_array(sm.axis[0]), Vec3::from_array(sm.axis[1]), Vec3::from_array(sm.axis[2]));
+        placements[i] = Some(asset_world::StaticModelPlacement {
+            mesh,
+            transform: Transform {
+                translation: Vec3::from_array(sm.origin),
+                rotation: Quat::from_mat3(&basis),
+                scale: Vec3::splat(sm.scale),
+            },
+            origin: sm.origin,
+            axis: sm.axis,
+            scale: sm.scale,
+            cull_dist: sm.cull_dist.clamp(0.0, f32::from(u16::MAX)) as u16,
+            reflection_probe_index: 0,
+            primary_light_index: 0,
+            flags: sm.flags,
+            packed_lighting,
+            t6_primary: [0, 0],
+        });
+    }
+    let report = format!(
+        "{tag} props: {} placed of {}, {} models; {lit} lit by the light grid, {dark} with no grid point near; {} pictures decoded, {} not found{}; unreadable {:?}",
+        placements.iter().filter(|p| p.is_some()).count(),
+        world.static_models.len(),
+        meshes.len(),
+        b.decoded,
+        b.missing.len(),
+        if b.missing.is_empty() { String::new() } else { format!(" (first: {})", b.missing.iter().take(4).cloned().collect::<Vec<_>>().join(", ")) },
+        unreadable
+    );
+    let Builder { catalog, .. } = b;
+    LegacyProps { catalog, meshes, placements, report }
+}
+
+/// bo2mp: the full materials of the zones a map leans on (the game's
+/// localized_common_mp first: the flags; then common_mp), by name: (zone,
+/// material id). The first zone to define a name keeps it.
+pub(crate) fn common_material_names(commons: &[&iw3::zone::Zone]) -> HashMap<String, (usize, usize)> {
+    let mut out = HashMap::new();
+    for (z, c) in commons.iter().enumerate() {
+        for (i, a) in c.assets.iter().enumerate() {
+            if let iw3::zone::Asset::Material(m) = a
+                && m.technique_set.is_some()
+                && !m.name.starts_with(',')
+            {
+                out.entry(m.name.trim_start_matches(',').to_owned()).or_insert((z, i));
+            }
+        }
+    }
+    out
 }

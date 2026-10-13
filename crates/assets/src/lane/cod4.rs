@@ -120,7 +120,12 @@ fn link_world_materials(
     owner: &str,
     report: &mut Vec<String>,
     look: Option<&super::bo2_look::Look>,
+    commons: &[&iw3::zone::Zone],
 ) -> Vec<Option<usize>> {
+    // bo2mp: a material the map only names (a reference, no technique set:
+    // the flags' decals, shared trims) is the game's `common_mp` one.
+    let common_names = super::legacy_guns::common_material_names(commons);
+    let mut from_common = 0usize;
     let owner = ZoneOwner::intern(owner);
     // bo2mp: Black Ops II pictures linked for swapped surfaces (colour,
     // normal, specular slots), by World at War colour image.
@@ -145,9 +150,20 @@ fn link_world_materials(
             out.push(None);
             continue;
         };
+        let (mzone, material) = match (material.name.starts_with(',') || material.technique_set.is_none())
+            .then(|| common_names.get(material.name.trim_start_matches(',')))
+            .flatten()
+            .and_then(|&(z, i)| Some((commons[z], commons[z].material(i)?)))
+        {
+            Some(found) => {
+                from_common += 1;
+                found
+            }
+            None => (zone, material),
+        };
         let technique_set = material
             .technique_set
-            .and_then(|t| zone.technique_set(t))
+            .and_then(|t| mzone.technique_set(t))
             .map_or("", |t| t.name.as_str());
         let state = TECHNIQUES.iter().find_map(|&t| material.state_bits_for(t));
         let mut draw = T6Draw::from_technique_set(technique_set, material.sort_key, state);
@@ -159,7 +175,7 @@ fn link_world_materials(
             .find(|t| t.semantic == iw3::zone::TextureSemantic::Color && t.image.is_some());
         let swap = colour
             .and_then(|t| t.image)
-            .and_then(|i| zone.image(i))
+            .and_then(|i| mzone.image(i))
             .and_then(|image| look.and_then(|l| l.swaps.get_key_value(image.name.as_str())));
         if let Some((key, swap)) = swap
             && let Some(texture) = colour
@@ -207,7 +223,7 @@ fn link_world_materials(
                 }
             }
         } else if let Some(texture) = colour
-            && let Some(image) = texture.image.and_then(|i| zone.image(i))
+            && let Some(image) = texture.image.and_then(|i| mzone.image(i))
         {
             let sky_cube = (draw.blend == asset_core::T6Blend::Sky)
                 .then(|| main.map(|main| asset_material::decode_sky_cube_from_main(main, &image.name)))
@@ -335,6 +351,10 @@ fn link_world_materials(
             String::new()
         } else {
             format!(" (first: {})", missing.iter().take(5).cloned().collect::<Vec<_>>().join(", "))
+        } + &if from_common > 0 {
+            format!("; {from_common} from the game's common_mp")
+        } else {
+            String::new()
         } + &if swap_count > 0 {
             format!("; {swap_count} drawn with Black Ops II materials")
         } else {
@@ -630,8 +650,54 @@ pub(crate) fn build_legacy_world(
             images.dedup();
             super::bo2_look::load(recipe, &images, &mut report)
         });
-    let surface_materials =
-        link_world_materials(tag, zone, world, main.as_deref(), &mut materials, &map, &mut report, look.as_ref());
+    // bo2mp: the game's common_mp (shared with the guest guns' read), for
+    // what the map only names.
+    let legacy = if tag == "t4" { super::legacy_guns::Legacy::T4 } else { super::legacy_guns::Legacy::Iw3 };
+    let common = super::legacy_guns::legacy_common_zone(legacy);
+    // (And localized_common_mp beside the map: its region's shared models
+    // and materials, World at War's flags among them.)
+    let localized = path.parent().map(|d| d.join("localized_common_mp.ff")).filter(|p| p.is_file()).and_then(|p| {
+        let r = if tag == "t4" {
+            t4::load_map(&p).map(|m| m.zone).map_err(|e| e.to_string())
+        } else {
+            iw3::fastfile::load(&p)
+                .map_err(|e| e.to_string())
+                .and_then(|d| iw3::zone::Zone::parse(&d, iw3::zone::ParseOptions::default()).map_err(|e| e.to_string()))
+        };
+        r.map_err(|e| report.push(format!("{tag} localized_common_mp: {e}"))).ok()
+    });
+    let mut commons: Vec<&iw3::zone::Zone> = Vec::new();
+    commons.extend(localized.as_ref());
+    commons.extend(common.as_deref().map(|c| &**c));
+    report.push(format!(
+        "{tag} shared zones: localized_common_mp {}, common_mp {}",
+        if localized.is_some() { "read" } else { "not found" },
+        if common.is_some() { "read" } else { "not found" }
+    ));
+    let surface_materials = link_world_materials(
+        tag,
+        zone,
+        world,
+        main.as_deref(),
+        &mut materials,
+        &map,
+        &mut report,
+        look.as_ref(),
+        &commons,
+    );
+    // bo2mp: the placed models (statues, debris, furniture, flags).
+    let props = super::legacy_guns::legacy_static_models(
+        tag,
+        if tag == "t4" { AssetNamespace::T4 } else { AssetNamespace::Iw3 },
+        path,
+        zone,
+        &commons,
+        world,
+        std::mem::take(&mut materials),
+    );
+    materials = props.catalog;
+    report.push(props.report);
+    let (prop_meshes, prop_placements) = (props.meshes, props.placements);
     stage.done();
 
     // The map's film vision (`vision/<map>.vision` in the game's IWDs): its
@@ -670,20 +736,11 @@ pub(crate) fn build_legacy_world(
         sun.sun_color[2] * sun.sun_light,
         1.0,
     ];
-    // bo2mp: in a Black Ops II map's look, its sun's hue at this sun's
-    // strength (the baked light stays this map's).
-    if let Some(model_sun) = look.as_ref().and_then(|l| l.capture.world.as_ref()).and_then(|w| w.sun) {
-        let strength = (colour[0] + colour[1] + colour[2]) / 3.0;
-        // (Its linear colour's ratios, square-rooted: this map lights in
-        // gamma space.)
-        let hue = model_sun.color.map(|c| c.max(0.0).sqrt());
-        let mean = (hue[0] + hue[1] + hue[2]) / 3.0;
-        if mean > 1e-4 {
-            for k in 0..3 {
-                colour[k] = strength * hue[k] / mean;
-            }
-            report.push(format!("bo2 look: sun hue {:?} from the model map", hue));
-        }
+    // bo2mp: in a Black Ops II map's look the sun stays this map's own (its
+    // colour is the original's mood: Dome's smoky haze, Asylum's grey rain);
+    // the model map gives the grade, fog and reflections.
+    if look.is_some() {
+        report.push("bo2 look: the sun is the map's own".to_owned());
     }
     let lighting = asset_world::T6WorldLighting {
         sun: asset_world::WorldSunLight { direction: dir, diffuse: colour, specular: colour },
@@ -806,6 +863,8 @@ pub(crate) fn build_legacy_world(
                     max,
                     film_vision,
                     policy: WorldDrawPolicy::t5(),
+                    static_model_meshes: prop_meshes,
+                    static_model_instances: prop_placements,
                     ..Default::default()
                 },
                 materials,
