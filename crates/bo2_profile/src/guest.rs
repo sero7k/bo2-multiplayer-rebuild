@@ -613,22 +613,32 @@ impl GuestGun {
     /// Create-a-Class pictures to try: the game's own menu picture, then
     /// its kill icon (`t5:menu_mp_weapons_ak74u|hud_icon_ak74u`).
     fn picture(&self) -> String {
+        let gun = self.gun;
         match self.game {
-            // (MW2's Create-a-Class pictures are `weapon_<gun>`.)
-            "iw4" => format!("iw4:weapon_{0}|hud_icon_{0}", self.gun),
+            // (MW2's Create-a-Class pictures are `weapon_<model>`, named for
+            // the model, not the weapon: `weapon_m4carbine` for the M4A1.)
+            "iw4" => match mw2_picture(gun) {
+                Some(p) => format!("iw4:weapon_{p}|weapon_{gun}|hud_icon_{gun}"),
+                None => format!("iw4:weapon_{gun}|hud_icon_{gun}"),
+            },
             // (MW3's are its statstable's, `weapon_acr`.)
             "iw5" => format!("iw5:{}", self.icon),
-            // (World at War's are Treyarch's `menu_mp_weapons_<gun>`,
-            // CoD4's `weapon_<gun>`; else the kill icon.)
-            "t4" => format!("t4:menu_mp_weapons_{}|{}", self.gun, self.icon),
-            "iw3" => format!("iw3:weapon_{}|{}", self.gun, self.icon),
+            // (World at War's are its 256x128 menu pictures, named for the
+            // gun (`m1garand`, `kar98`), then its kill icon; CoD4's
+            // `weapon_<gun>`.)
+            "t4" => format!(
+                "t4:{}|menu_mp_weapons_{gun}|{}|hud_{gun}",
+                waw_picture(gun).unwrap_or(gun),
+                self.icon
+            ),
+            "iw3" => format!("iw3:weapon_{}|{}", gun, self.icon),
             // (Ghosts' are its ui_mp's `weapon_<gun>_360`, then the HUD icon.)
-            "iw6" if self.icon.is_empty() => format!("iw6:weapon_{0}_360|hud_icon_{0}", self.gun),
-            "iw6" => format!("iw6:{}", self.icon),
-            // (AW's pictures are not read yet: its kill icon name.)
-            "s1" => format!("s1:hud_icon_{}", self.gun),
+            "iw6" if self.icon.is_empty() => format!("iw6:weapon_{gun}_360|hud_icon_{gun}"),
+            "iw6" => format!("iw6:{}|weapon_{gun}_360|hud_icon_{gun}", self.icon),
+            // (AW's are common_mp's `weapon_<gun>` (streamed), then the kill icon.)
+            "s1" => format!("s1:weapon_{gun}|hud_icon_{gun}"),
             _ => {
-                let mut p = format!("{}:menu_mp_weapons_{}", self.game, self.gun);
+                let mut p = format!("{}:menu_mp_weapons_{gun}", self.game);
                 if !self.icon.is_empty() {
                     p.push('|');
                     p.push_str(self.icon);
@@ -880,7 +890,7 @@ mod tests {
         assert_eq!(rows.iter().find(|r| r[4] == "waw_thompson").map(|r| r[0].as_str()), Some("605"));
         assert_eq!(rows.iter().find(|r| r[4] == "cod4_g3").map(|r| r[0].as_str()), Some("703"));
         assert_eq!(rows.iter().find(|r| r[4] == "gh_ak12").map(|r| r[0].as_str()), Some("800"));
-        assert!(rows.iter().find(|r| r[4] == "gh_k7").is_some_and(|r| r[6] == "iw6:weapon_k7_ui_360|hud_icon_k7_ui"));
+        assert!(rows.iter().find(|r| r[4] == "gh_k7").is_some_and(|r| r[6].starts_with("iw6:weapon_k7_ui_360|hud_icon_k7_ui")));
         let mut indices: Vec<&String> = rows.iter().map(|r| &r[0]).collect();
         indices.sort();
         indices.dedup();
@@ -938,4 +948,43 @@ mod tests {
         assert_eq!(family_of_reference("mw3_m4"), family_of_reference("mw2_m4"));
         assert_eq!(family_of_reference("sa58"), "fal");
     }
+}
+
+/// MW2's Create-a-Class picture (`weapon_<this>`) where it is not named for
+/// the gun (its IWDs name the pictures for the models).
+fn mw2_picture(gun: &str) -> Option<&'static str> {
+    Some(match gun {
+        "m4" => "m4carbine",
+        "m16" => "m16a4",
+        "aug" => "steyr",
+        "barrett" => "barrett50cal",
+        "m21" => "m14ebr",
+        "beretta" => "m9beretta",
+        "deserteagle" => "desert_eagle",
+        "coltanaconda" => "colt_anaconda",
+        "usp" => "usp_45",
+        "tmp" => "mp9_v2",
+        "ranger" => "sawed_off",
+        "wa2000" => "wa2000",
+        _ => return None,
+    })
+}
+
+/// World at War's Create-a-Class picture where it is not named for the gun.
+fn waw_picture(gun: &str) -> Option<&'static str> {
+    Some(match gun {
+        "gewehr43" => "g43",
+        "doublebarreledshotgun" => "double_barreled_shotgun",
+        "shotgun" => "trenchgun",
+        "type99lmg" => "type99_lmg",
+        "mg42" => "weapon_mg42",
+        "type99rifle" => "type99_arisaka",
+        "ptrs41" => "weapon_ptrs41",
+        "kar98k" => "kar98",
+        "mosinrifle" => "mosinnagant",
+        "springfield" => "springfield_scoped",
+        "type100smg" => "type100",
+        "stg44" => "mp44",
+        _ => return None,
+    })
 }

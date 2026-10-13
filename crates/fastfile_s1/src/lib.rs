@@ -12,6 +12,7 @@ pub mod container;
 pub mod cursor;
 pub mod image;
 pub mod install;
+pub mod ui_image;
 pub mod layout;
 pub mod ptr;
 pub mod stream;

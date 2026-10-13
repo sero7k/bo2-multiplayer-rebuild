@@ -716,6 +716,13 @@ pub(crate) fn read_game_image(prefix: &str, names: &[String]) -> Option<(u32, u3
         let install = ghosts_install(asset_transport::games_root_from_env().ok().as_ref())?;
         return fastfile_iw6::ui_image::read_ui_image(&install, names);
     }
+    // bo2mp: Advanced Warfare's are in its common_mp (and its image paks).
+    if prefix == "s1" {
+        let root = asset_transport::games_root_from_env().ok();
+        let extra: Vec<std::path::PathBuf> = asset_transport::game_paths::get("aw").into_iter().collect();
+        let install = fastfile_s1::install::find_install(root.as_ref().map(|r| r.0.as_path()), &extra)?;
+        return fastfile_s1::ui_image::read_ui_image(&install, names);
+    }
     let root = asset_transport::games_root_from_env().ok()?;
     let main = match asset_transport::legacy_version(prefix) {
         // Call of Duty 4 / World at War: the `main` beside their zones.
