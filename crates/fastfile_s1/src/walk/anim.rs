@@ -147,6 +147,27 @@ pub(super) fn xanim(w: &mut Walker, h: usize) -> Result<AssetId> {
     rec.random_data_int = span(w.blob(h + X::randomDataInt, n, 3)?, n);
     let n = rec.index_count as usize * if big { 2 } else { 1 };
     rec.indices = span(w.blob(h + X::indices, n, if big { 1 } else { 0 })?, n);
+    // AW's additions: the secondary animation's name, blend shapes and
+    // scripted viewmodel data.
+    w.xstr(h + X::secondaryName)?;
+    let shapes = u16_at(w, X::blendShapeCount)? as usize;
+    w.blob(h + X::blendShapeWeightNames, 4 * shapes, 3)?;
+    w.blob(h + X::blendShapeCoefficientMagnitudes, 3 * shapes, 0)?;
+    let mut keys = 0usize;
+    if let Some(at) = w.blob(h + X::numberOfBlendShapeKeys, 2 * shapes, 1)? {
+        for i in 0..shapes {
+            keys += w.s.u16_at(at + 2 * i)? as usize;
+        }
+    }
+    w.blob(h + X::blendShapeKeys, 2 * keys, 1)?;
+    w.blob(h + X::compressedBlendShapeCoefficients, 2 * (keys + 2 * shapes), 1)?;
+    w.blob(
+        h + X::blendShapeWeights,
+        4 * shapes * (rec.numframes as usize + 1),
+        3,
+    )?;
+    w.asset(AssetType::XAnimParts, h + X::alternativeAnim)?;
+    w.blob(h + X::svAmimData, L::XAnimScriptedViewmodelAnimData::SIZE, 3)?;
     w.s.pop();
     w.cap.xanims.push(rec);
     Ok(AssetId {

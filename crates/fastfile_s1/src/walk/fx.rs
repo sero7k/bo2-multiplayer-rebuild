@@ -14,9 +14,11 @@ const FX_SOUND: u8 = 14;
 const FX_DECAL: u8 = 15;
 const FX_RUNNER: u8 = 16;
 const FX_VECTORFIELD: u8 = 17;
-const FX_PARTICLE_SIM: u8 = 5;
-const FX_TRAIL: u8 = 3;
-const FX_FLARE: u8 = 4;
+// (AW's numbering: Ghosts has no rotated sprites or lines, so its trails,
+// flares and particle sims are two lower.)
+const FX_PARTICLE_SIM: u8 = 7;
+const FX_TRAIL: u8 = 5;
+const FX_FLARE: u8 = 6;
 const FX_SPARK_FOUNTAIN: u8 = 10;
 
 /// One visual (`FxElemVisuals`, a pointer-sized union) at `field`.
@@ -79,7 +81,7 @@ fn elem(w: &mut Walker, e: usize) -> Result<FxElemRec> {
         let mv = L::FxElemMarkVisuals::SIZE;
         if let Some(marks) = w.inline_array(e + E::visuals, mv * count, 3)? {
             for i in 0..count {
-                for k in 0..3 {
+                for k in 0..mv / 8 {
                     if let Some(id) = w.asset(AssetType::Material, marks + mv * i + 8 * k)? {
                         rec.materials.push(id);
                     }
@@ -117,6 +119,9 @@ fn elem(w: &mut Walker, e: usize) -> Result<FxElemRec> {
             }
             FX_SPOT_LIGHT => {
                 w.blob(ext, L::FxSpotLightDef::SIZE, 3)?;
+            }
+            FX_OMNI_LIGHT => {
+                w.blob(ext, L::FxOmniLightDef::SIZE, 3)?;
             }
             FX_FLARE => {
                 use L::FxFlareDef as F;

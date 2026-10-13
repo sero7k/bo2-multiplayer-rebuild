@@ -98,6 +98,40 @@ mod retail_walk {
                 stop
             );
             println!("  first unresolved (asset, pos, virt): {:x?}", w.first_unresolved.get());
+            if let Ok(v) = std::env::var("S1_PROBE_V") {
+                let v = u64::from_str_radix(v.trim_start_matches("0x"), 16).unwrap();
+                println!("  probe {v:#x}: file {:x?}", w.virtual_map().file_pos(v));
+                let mut near: Vec<_> = w.slot_list().into_iter().filter(|(k, _)| k.abs_diff(v) < 0x100).collect();
+                near.sort_by_key(|(k, _)| *k);
+                for (k, id) in near {
+                    println!("    slot {k:#x} {:?} {}", id.ty, w.cap.name_of(id));
+                }
+            }
+            if let Ok(r) = std::env::var("S1_STARTS") {
+                let (a, b) = r.split_once("..").unwrap();
+                let (a, b): (usize, usize) = (a.parse().unwrap(), b.parse().unwrap());
+                for i in a..b.min(w.cap.starts.len()) {
+                    let p = w.cap.starts[i];
+                    let t = zone.assets.assets[i].asset_type().map(|t| t.name()).unwrap_or("?");
+                    let head: String = zone.image[p..p + 24].iter().map(|b| format!("{b:02x}")).collect();
+                    println!("  start {i} {t} {p:#x} {head}");
+                }
+            }
+            if std::env::var_os("S1_FIRST_BAD").is_some() {
+                let mut shown = 0;
+                for (i, &p) in w.cap.starts.iter().enumerate() {
+                    if !zone.assets.assets[i].header.is_inline() {
+                        continue;
+                    }
+                    let ok = zone.image[p + 5..p + 8] == [0xfd, 0xfd, 0xfd];
+                    if !ok {
+                        let t = zone.assets.assets[i].asset_type().map(|t| t.name()).unwrap_or("?");
+                        println!("  bad start {i} {t} {p:#x} (prev {:?})", zone.assets.assets[i - 1].asset_type());
+                        shown += 1;
+                        if shown > 3 { break; }
+                    }
+                }
+            }
             if std::env::var_os("S1_LIST").is_some() {
                 for m in &w.cap.xmodels {
                     println!("  model {} bones {} surfs {} lods {:?}", m.name, m.num_bones, m.numsurfs,

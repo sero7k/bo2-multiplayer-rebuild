@@ -24,6 +24,11 @@ pub(super) fn shader(
     w.s.push(VIRTUAL);
     let name = w.xstr(h + S::name)?.unwrap_or_default();
     let size = w.s.u32_at(h + S::prog__loadDef__programSize)? as usize;
+    #[cfg(test)]
+    let temp_program = match std::env::var("S1_SHADER_VIRT") {
+        Ok(v) => !v.split(',').any(|n| n == ty.name()),
+        Err(_) => temp_program,
+    };
     if temp_program {
         w.s.push(TEMP);
     }

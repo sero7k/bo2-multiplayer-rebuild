@@ -277,7 +277,7 @@ pub(super) fn table_size(ty: AssetType, default: usize) -> usize {
 
 /// `SurfaceFxTable` { name; SurfaceFxEntry* table }: 6 entries of 31
 /// effects (186 pointers in retail common_mp).
-pub(super) const SURFACE_FX_EFFECTS: usize = 6 * 31;
+pub(super) const SURFACE_FX_EFFECTS: usize = 6 * 53;
 
 /// An effect table (`ImpactFx`, `SurfaceFx`): name, then a pointer to
 /// `effects` effect pointers.
@@ -285,7 +285,7 @@ pub(super) fn fx_table(w: &mut Walker, ty: AssetType, h: usize, effects: usize) 
     let effects = table_size(ty, effects);
     w.s.push(VIRTUAL);
     let name = w.xstr(h)?.unwrap_or_default();
-    if let Some(table) = w.inline_array(h + 8, 8 * effects, 7)? {
+    if let Some(table) = w.inline_array(h + 8, 8 * effects, 3)? {
         for i in 0..effects {
             #[cfg(test)]
             if matches!(w.s.ptr_at(table + 8 * i)?, crate::Ptr::Other(_)) {
@@ -308,25 +308,21 @@ pub(super) fn fx_table(w: &mut Walker, ty: AssetType, h: usize, effects: usize) 
 /// its shape: a name pointer that follows, its name string after the
 /// header).
 pub(super) fn equipment_snd_table(w: &mut Walker, h: usize) -> Result<AssetId> {
+    // AW's table (88-byte header, name only filled in) is not IW6's: after
+    // the name its data is taken as one run up to the next asset, found by
+    // that asset's shape.
     w.s.push(VIRTUAL);
     let name = w.xstr(h)?.unwrap_or_default();
-    let names = w.s.u32_at(h + 8)? as usize;
-    let rattles = w.s.u32_at(h + 12)? as usize;
-    if let Some(list) = w.inline_array(h + 24, 8 * names, 7)? {
-        for i in 0..names {
-            w.xstr(list + 8 * i)?;
-        }
-    }
-    if let Some(list) = w.inline_array(h + 32, 16 * rattles, 7)? {
-        for i in 0..rattles {
-            w.xstr(list + 16 * i)?;
-        }
-    }
     let start = w.s.pos();
-    let end =
-        find_next_asset(w, start).ok_or(ReadError::Invalid("equipment sound table end", start))?;
-    w.s.align(7);
-    w.take(end - start)?;
+    let end = find_next_asset(w, start)
+        .or_else(|| find_next_techset(w, start))
+        .ok_or(ReadError::Invalid("equipment sound table end", start))?;
+    // (On retail common_mp the next asset follows the name directly, with
+    // no VIRTUAL alignment between them.)
+    if end > start {
+        w.s.align(7);
+        w.take(end - start)?;
+    }
     w.s.pop();
     Ok(w.name_only(AssetType::EquipmentSndTable, name))
 }
@@ -414,4 +410,61 @@ pub(super) fn skeleton_script(w: &mut Walker, h: usize) -> Result<AssetId> {
     w.blob(h + S::code, 4 * code, 3)?;
     w.s.pop();
     Ok(w.name_only(AssetType::SkeletonScript, name))
+}
+
+pub(super) fn laser(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::LaserDef as D;
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + D::name)?.unwrap_or_default();
+    w.asset(AssetType::Material, h + D::laserMaterial)?;
+    w.asset(AssetType::Material, h + D::laserLightMaterial)?;
+    w.asset(AssetType::Fx, h + D::laserEndEffect)?;
+    w.asset(AssetType::Laser, h + D::friendlyTeamLaser)?;
+    w.s.pop();
+    Ok(w.name_only(AssetType::Laser, name))
+}
+
+/// `VectorField` (H1's layout, read on retail common_mp): a 48-byte header
+/// { name; fields; bounds; i32 count; }, then `count` 80-byte sub-fields
+/// (aligned 16) each with its `vec4` grid (x*y*z entries, aligned 4).
+pub(super) fn vector_field(w: &mut Walker, h: usize) -> Result<AssetId> {
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h)?.unwrap_or_default();
+    let n = w.s.i32_at(h + 40)?.max(0) as usize;
+    if let Some(at) = w.inline_array(h + 8, 80 * n, 15)? {
+        for i in 0..n {
+            let f = at + 80 * i;
+            let cells = (0..3).try_fold(1usize, |acc, k| {
+                w.s.u32_at(f + 44 + 4 * k).map(|v| acc * v as usize)
+            })?;
+            w.blob(f, 16 * cells, 3)?;
+        }
+    }
+    w.s.pop();
+    Ok(w.name_only(AssetType::VectorField, name))
+}
+
+/// Where the next asset starts when it is a technique set: a 0x5B0-byte
+/// header whose name pointer and 180 technique pointers are all pointers.
+fn find_next_techset(w: &Walker, from: usize) -> Option<usize> {
+    let next = w.cap.walked + 1;
+    if w.list.assets.get(next)?.asset_type() != Some(AssetType::TechniqueSet) {
+        return None;
+    }
+    let data = w.s.data();
+    let ptr_ok = |q: usize| -> Option<bool> {
+        let b = data.get(q..q + 8)?;
+        Some(
+            b == [0; 8]
+                || (b[5..8] == [0xfd, 0xfd, 0xfd] && (b[4] == 0xfd || b[4] & 0xf0 == 0xf0))
+        )
+    };
+    let limit = data.len().min(from + (1 << 22));
+    (from..limit).find(|&p| {
+        let name = data.get(p..p + 8);
+        name == Some(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xfd, 0xfd, 0xfd][..])
+            && data.get(p + 12..p + 16) == Some(&[0; 4][..])
+            && (0..180).all(|i| ptr_ok(p + 16 + 8 * i) == Some(true))
+            && (0..180).any(|i| data.get(p + 16 + 8 * i..p + 24 + 8 * i) != Some(&[0; 8][..]))
+    })
 }

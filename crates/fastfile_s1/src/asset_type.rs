@@ -58,7 +58,7 @@ asset_types! {
     TechniqueSet = 0x0f, "techset", 1456;
     Image = 0x10, "image", 104;
     Sound = 0x11, "sound", 32;
-    SoundSubmix = 0x12, "soundsubmix", 0;
+    SoundSubmix = 0x12, "soundsubmix", 24;
     SoundCurve = 0x13, "sndcurve", 152;
     LpfCurve = 0x14, "lpfcurve", 152;
     ReverbCurve = 0x15, "reverbcurve", 152;
@@ -101,8 +101,8 @@ asset_types! {
     ReverbPreset = 0x3a, "reverbpreset", 0;
     LuaFile = 0x3b, "luafile", 24;
     Scriptable = 0x3c, "scriptable", 64;
-    EquipmentSndTable = 0x3d, "equipsndtable", 0;
-    VectorField = 0x3e, "vectorfield", 0;
+    EquipmentSndTable = 0x3d, "equipsndtable", 88;
+    VectorField = 0x3e, "vectorfield", 48;
     DopplerPreset = 0x3f, "dopplerpreset", 32;
     ParticleSimAnimation = 0x40, "particlesimanimation", 96;
     Laser = 0x41, "laser", 152;
