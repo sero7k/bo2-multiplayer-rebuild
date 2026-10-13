@@ -144,25 +144,15 @@ fn reset_roster_on_match_torn_down(
         return;
     }
     *roster = BotRoster::default();
+    sim::lobby_bots::next_lobby();
     *nav = BotNav::default();
     ready.0 = false;
 }
 
-/// bo2mp: the next lobby gamertag. Walks all 1000 in a shuffled order from a
-/// random start, so no name comes back until every other one has been used.
+/// bo2mp: the next lobby gamertag: the pregame lobby's names in its order
+/// (`sim::lobby_bots`), so the bots play under the names the lobby showed.
 fn next_bot_name() -> String {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::OnceLock;
-    static NAMES: OnceLock<Vec<&'static str>> = OnceLock::new();
-    static START: OnceLock<usize> = OnceLock::new();
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    let names = NAMES.get_or_init(|| include_str!("bot_names.txt").lines().filter(|l| !l.is_empty()).collect());
-    let start = *START.get_or_init(|| {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos() as usize ^ d.as_secs() as usize)
-    });
-    let i = NEXT.fetch_add(1, Ordering::Relaxed);
-    // 7919 is prime, so stepping by it visits every index once.
-    names[(start + i * 7919) % names.len()].to_owned()
+    sim::lobby_bots::next_name()
 }
 
 /// bo2mp: Black Ops II's bot scripts asked for bots (`addtestclient`):

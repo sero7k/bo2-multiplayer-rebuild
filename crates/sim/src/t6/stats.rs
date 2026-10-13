@@ -119,6 +119,21 @@ pub(crate) fn player(world: &mut World, client: u32) -> &mut PlayerStats {
         let (items, atts) = (table_rows(world, "mp/statstable.csv"), table_rows(world, "mp/attachmenttable.csv"));
         let mut profile = Profile::from_tables(&items, &atts, &|_| None, stats);
         profile.match_set = class_set(world);
+        // bo2mp: a bot plays at the level the lobby showed for its name.
+        if world.resource::<Zm>().bots.contains_key(&client) {
+            let name = super::frame(world)
+                .client_meta(crate::world::ClientId(client))
+                .map(|m| String::from_utf8_lossy(&m.name).trim_end_matches('\0').to_owned())
+                .unwrap_or_default();
+            let rank = crate::lobby_bots::level_for(&name) - 1;
+            let min_xp = table_rows(world, "mp/ranktable.csv")
+                .iter()
+                .find(|r| r.first().and_then(|c| c.trim().parse::<i32>().ok()) == Some(rank))
+                .and_then(|r| r.get(2).and_then(|c| c.trim().parse::<f32>().ok()))
+                .unwrap_or(0.0);
+            profile.set_stat(bo2_profile::RANK.to_owned(), StatValue::Num(rank as f32));
+            profile.set_stat("playerstatslist.rankxp.statvalue".to_owned(), StatValue::Num(min_xp));
+        }
         if let Some(f) = &file {
             diag::info!(
                 Sim,

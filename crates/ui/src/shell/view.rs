@@ -556,9 +556,13 @@ fn lobby(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row])
         let icon = cx.pic(&[me.rank_picture.clone()]);
         let diff = DIFFICULTY[shell.difficulty.min(3) as usize];
         // (level, name, team, his, calling card, emblem: a bot's by its name.)
+        // bo2mp: each bot by the name and level it plays the match under.
+        let _ = diff;
         let bot = |n: u32, team: Color| {
             let key = format!("Bot {n}");
-            (String::new(), format!("{key} ({})", title_case(diff)), team, false, cards::for_name(Kind::Card, &key), cards::for_name(Kind::Emblem, &key))
+            let name = sim::lobby_bots::lobby_bot_name(n);
+            let level = sim::lobby_bots::level_for(&name);
+            (level.to_string(), name, team, false, cards::for_name(Kind::Card, &key), cards::for_name(Kind::Emblem, &key))
         };
         let mut people: Vec<(String, String, Color, bool, String, String)> =
             vec![(me.level.to_string(), me.name.clone(), cx.pal.accent, true, cards::mine(Kind::Card, &me.card), cards::mine(Kind::Emblem, &me.emblem))];

@@ -27,6 +27,7 @@ mod weapon_lock;
 pub use weapon_lock::WeaponLock;
 pub mod player_anim_script;
 pub mod rules;
+pub mod lobby_bots;
 mod score;
 pub mod script_gaps;
 mod script_player;
