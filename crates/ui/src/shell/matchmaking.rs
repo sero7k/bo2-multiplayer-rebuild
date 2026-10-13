@@ -17,8 +17,11 @@ use super::theme::*;
 use super::view::{Ctx, Kids, abs, header, menu_rows, tabs};
 use super::{Act, Hit, Row, Shell};
 
-/// The filter's tabs.
-pub(crate) const TABS: [&str; 2] = ["CORE", "PARTY GAMES"];
+/// The filter's tabs: the two playlists, then the server's lobbies.
+pub(crate) const TABS: [&str; 3] = ["CORE", "PARTY GAMES", "ACTIVE LOBBIES"];
+
+/// The tab listing the server's lobbies (FIND A LOBBY, as it was).
+pub(crate) const ACTIVE_LOBBIES: usize = 2;
 
 /// Black Ops II's party games (its PARTY GAMES playlist).
 const PARTY: [&str; 4] = ["gun", "oic", "shrp", "sas"];
@@ -76,6 +79,9 @@ fn ticked_titles(shell: &Shell, c: &Catalog) -> Vec<String> {
 }
 
 pub(crate) fn rows(shell: &Shell, c: &Catalog) -> Vec<Row> {
+    if shell.page == ACTIVE_LOBBIES {
+        return super::lobbies::rows(shell, c);
+    }
     let mut out: Vec<Row> = Vec::new();
     if shell.page == 0 {
         out.push(Row {
@@ -156,8 +162,14 @@ fn count(v: f32) -> String {
 }
 
 pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row]) {
-    header(c, cx, &["FIND A MATCH", "PLAYLIST FILTER"]);
     let labels: Vec<String> = TABS.iter().map(|t| (*t).to_owned()).collect();
+    if shell.page == ACTIVE_LOBBIES {
+        header(c, cx, &["FIND A MATCH", "ACTIVE LOBBIES"]);
+        tabs(c, cx, &labels, ACTIVE_LOBBIES, Hit::Page);
+        super::lobbies::body(c, cx, shell, rows, 222.0);
+        return;
+    }
+    header(c, cx, &["FIND A MATCH", "PLAYLIST FILTER"]);
     tabs(c, cx, &labels, shell.page.min(TABS.len() - 1), Hit::Page);
     // (How many are ticked, under the tabs: Black Ops II's "Selected filter".)
     let picked = shell.filter.len();
@@ -318,14 +330,75 @@ pub(crate) fn candidates(shell: &Shell) -> Vec<net::MasterAdvert> {
     list
 }
 
-/// The search's step this frame: join the next game when it is time.
+/// How long the search looks for a game before it starts its own on the
+/// voted map (with the server: a room others searching can join; without
+/// one: a match with bots here).
+pub(crate) const OWN_MATCH_S: f64 = 25.0;
+
+/// The map the lobby plays: his vote, else the first of the two.
+pub(crate) fn voted_map(shell: &Shell) -> Option<String> {
+    shell.vote.and_then(|k| shell.vote_maps.get(k)).or(shell.vote_maps.first()).cloned()
+}
+
+/// Two maps to vote between: different, from the installed games' maps
+/// (Shipment, twice over, for BRAINROT 24/7).
+pub(crate) fn vote_maps(shell: &Shell, c: &Catalog, now: f64) -> Vec<String> {
+    if shell.brainrot {
+        return shipment(c).map(|m| vec![m.ui_name.clone()]).unwrap_or_default();
+    }
+    let pool: Vec<&super::bridge::MapEntry> = c.maps.iter().filter(|m| m.group != "CUSTOM MAPS").collect();
+    if pool.is_empty() {
+        return Vec::new();
+    }
+    // (A small mix of the clock: no random-number crate here.)
+    let mut seed = (now * 1000.0) as u64 ^ 0x9E37_79B9_7F4A_7C15;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed as usize
+    };
+    let a = next() % pool.len();
+    let mut b = next() % pool.len();
+    if pool.len() > 1 && b == a {
+        b = (a + 1) % pool.len();
+    }
+    let mut out = vec![pool[a].ui_name.clone()];
+    if b != a {
+        out.push(pool[b].ui_name.clone());
+    }
+    out
+}
+
+/// The search's step this frame: join the next game when it is time; none
+/// found by `OWN_MATCH_S`: start its own on the voted map.
 pub(crate) fn tick(shell: &mut Shell, now: f64) {
     if shell.screen != super::Screen::Lobbies || !shell.searching || crate::online_match::room().is_some() {
         return;
     }
     let found = candidates(shell);
     let since = now - shell.search_started;
-    if found.is_empty() || since < LOOK_S + FOUND_S {
+    if found.is_empty() {
+        if since >= OWN_MATCH_S
+            && super::bridge::starting_in().is_none()
+            && let Some(map) = voted_map(shell)
+        {
+            diag::info!(Ui, "bo2mp shell: no game found in {OWN_MATCH_S:.0}s; starting our own on `{map}`");
+            shell.map = map;
+            shell.mode = host_mode(shell);
+            shell.searching = false;
+            shell.played = true;
+            super::bridge::request(super::bridge::Request::Start(super::bridge::StartSpec {
+                map: shell.map.clone(),
+                gametype: shell.mode.clone(),
+                bot_friends: shell.friends,
+                bot_enemies: shell.enemies,
+                bot_difficulty: shell.difficulty,
+            }));
+        }
+        return;
+    }
+    if since < LOOK_S + FOUND_S {
         return;
     }
     let due = shell.join_at.is_none_or(|(_, at)| now - at > JOIN_WAIT_S);
@@ -343,11 +416,12 @@ pub(crate) fn search_status(shell: &Shell, now: f64) -> (String, String) {
     let found = candidates(shell);
     let since = now - shell.search_started;
     let dots = ".".repeat(1 + ((now * 2.0) as usize % 3));
+    let left = (OWN_MATCH_S - since).ceil().max(0.0);
     if !crate::online_match::online_available() && !super::lobbies::previewing() {
-        return ("OFFLINE".to_owned(), "No server set: fill in online.cfg next to run-bo2.cmd (docs\\ONLINE.md).".to_owned());
+        return (format!("OFFLINE  ·  MATCH WITH BOTS IN {left:.0}"), "No server set: fill in online.cfg next to run-bo2.cmd (docs\\ONLINE.md).".to_owned());
     }
     if found.is_empty() || since < LOOK_S {
-        let sub = if since < LOOK_S { String::new() } else { "No open games in this playlist yet. Host one and players searching find it.".to_owned() };
+        let sub = if since < LOOK_S { String::new() } else { format!("No open games in this playlist yet: your own starts in {left:.0} on the voted map.") };
         return (format!("SEARCHING FOR GAMES{dots}"), sub);
     }
     if since < LOOK_S + FOUND_S {
@@ -369,24 +443,23 @@ pub(crate) fn playlist_title(shell: &Shell, c: &Catalog) -> String {
     }
 }
 
-/// The left column's rows in the matchmaking lobby: the menus he can open
-/// while he waits, and (searching) HOST A MATCH.
-pub(crate) fn lobby_rows(searching: bool) -> Vec<Row> {
+/// The left column's rows in the matchmaking lobby (Ghosts' lobby menu):
+/// the menus he can open while he waits, the lobby's leaderboard, then
+/// (searching) the two maps to vote between.
+pub(crate) fn lobby_rows(shell: &Shell, c: &Catalog, searching: bool) -> Vec<Row> {
     let mut out = Vec::new();
-    if searching {
-        out.push(Row {
-            label: "HOST A MATCH".to_owned(),
-            sub: "Open your own lobby in this playlist: players searching find it.".to_owned(),
-            value: None,
-            act: Act::HostMatch,
-        });
-    }
     for (label, sub, act) in [
         ("CREATE A CLASS", "Build your loadouts while you wait.", Act::Classes),
         ("BARRACKS", "Your combat record, calling card, emblem and prestige.", Act::Barracks),
-        ("OPTIONS", "Graphics, sound and controls.", Act::Options),
+        ("LOBBY LEADERBOARD", "The players in this lobby, by rank.", Act::Leaderboard),
     ] {
         out.push(Row { label: label.to_owned(), sub: sub.to_owned(), value: None, act });
+    }
+    if searching {
+        for (k, map) in shell.vote_maps.iter().enumerate() {
+            let title = c.maps.iter().find(|m| m.ui_name == *map).map_or_else(|| map.to_uppercase(), |m| m.title.clone());
+            out.push(Row { label: title, sub: "Vote for this map.".to_owned(), value: None, act: Act::Vote(k) });
+        }
     }
     out
 }
@@ -414,13 +487,50 @@ pub(crate) fn lobby_view(
     max: usize,
 ) {
     header(c, cx, &[title]);
-    // The left: the menus, then the playlist or map card.
+    // The left: the menus, then the two maps to vote between (or the
+    // playlist / map card).
+    let menu: Vec<Row> = rows.iter().filter(|r| !matches!(r.act, Act::Vote(_))).map(|r| Row { sub: String::new(), ..r.clone() }).collect();
+    let votes: Vec<(usize, &Row)> = rows.iter().enumerate().filter(|(_, r)| matches!(r.act, Act::Vote(_))).collect();
     c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(6.0), ..abs(Some(72.0), Some(176.0), None, None, cx) })
         .with_children(|col| {
-            let shown: Vec<Row> = rows.iter().map(|r| Row { sub: String::new(), ..r.clone() }).collect();
-            menu_rows(col, cx, &shown, shell.focus, 560.0, false);
+            menu_rows(col, cx, &menu, if shell.focus < menu.len() { shell.focus } else { usize::MAX }, 560.0, false);
             if let Some(r) = rows.get(shell.focus).filter(|r| !r.sub.is_empty()) {
                 col.spawn((Text::new(r.sub.clone()), cx.regular(19.0), TextColor(DIM), Node { margin: UiRect::new(cx.px(4.0), Val::ZERO, cx.px(4.0), cx.px(14.0)), ..default() }));
+            }
+            if !votes.is_empty() {
+                for (k, (i, r)) in votes.iter().enumerate() {
+                    let on = shell.focus == *i;
+                    let mine = shell.vote == Some(k);
+                    let pics: Vec<String> = cat_pictures(shell, k);
+                    col.spawn((
+                        Hit::Row(*i),
+                        Button,
+                        Node { width: cx.px(560.0), height: cx.px(150.0), border: UiRect::all(cx.px(if on { 3.0 } else { 1.0 })), margin: UiRect::bottom(cx.px(6.0)), ..default() },
+                        BorderColor::all(if on { cx.pal.accent } else { cx.pal.line }),
+                    ))
+                    .with_children(|tile| {
+                        super::view::picture_box(tile, cx, &pics, 554.0, 144.0, ());
+                        tile.spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(0.0),
+                                right: Val::Px(0.0),
+                                bottom: Val::Px(0.0),
+                                padding: UiRect::axes(cx.px(14.0), cx.px(6.0)),
+                                justify_content: JustifyContent::SpaceBetween,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(cx.pal.strip),
+                        ))
+                        .with_children(|bar| {
+                            bar.spawn((Text::new(r.label.clone()), cx.bold(24.0), TextColor(if on { WHITE } else { TEXT })));
+                            let n = usize::from(mine);
+                            bar.spawn((Text::new(format!("{n} VOTE{}", if n == 1 { "" } else { "S" })), cx.bold(18.0), TextColor(if mine { GOLD } else { DIM })));
+                        });
+                    });
+                }
+                return;
             }
             col.spawn((
                 Node { width: cx.px(560.0), flex_direction: FlexDirection::Column, border: UiRect::left(cx.px(4.0)), ..default() },
@@ -436,16 +546,24 @@ pub(crate) fn lobby_view(
                     });
             });
         });
-    // The right: what it is doing, then the places.
+    // The right: what it is doing, then the places (by rank on the
+    // leaderboard).
+    let mut sorted: Vec<&Place> = places.iter().collect();
+    if shell.leaderboard {
+        sorted.sort_by_key(|p| std::cmp::Reverse(p.level.unwrap_or(0)));
+    }
     c.spawn(Node { width: cx.px(780.0), flex_direction: FlexDirection::Column, row_gap: cx.px(4.0), ..abs(None, Some(176.0), Some(64.0), None, cx) })
         .with_children(|list| {
+            if shell.leaderboard {
+                list.spawn((Text::new("LOBBY LEADERBOARD"), cx.bold(22.0), TextColor(FAINT)));
+            }
             list.spawn((Text::new(status.0.to_owned()), cx.bold(30.0), TextColor(GOLD)));
             if !status.1.is_empty() {
                 list.spawn((Text::new(status.1.to_owned()), cx.regular(19.0), TextColor(DIM)));
             }
             list.spawn(Node { height: cx.px(10.0), ..default() });
             for i in 0..max {
-                let place = places.get(i);
+                let place = sorted.get(i).copied();
                 list.spawn((
                     Node {
                         width: Val::Percent(100.0),
@@ -488,6 +606,12 @@ pub(crate) fn lobby_view(
                 Node { margin: UiRect::top(cx.px(10.0)), align_self: AlignSelf::FlexEnd, ..default() },
             ));
         });
+}
+
+/// The picture names of vote map `k` (from the catalog).
+fn cat_pictures(shell: &Shell, k: usize) -> Vec<String> {
+    let Some(map) = shell.vote_maps.get(k) else { return Vec::new() };
+    super::bridge::catalog().and_then(|c| c.maps.iter().find(|m| m.ui_name == *map).map(|m| m.pictures.clone())).unwrap_or_default()
 }
 
 /// FIND A MATCH while it searches (the Lobbies screen in a search).

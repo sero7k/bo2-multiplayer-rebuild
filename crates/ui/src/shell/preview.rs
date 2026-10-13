@@ -350,7 +350,8 @@ fn step(
                 a(3, "Jimbo's lobby", "t6:mp_raid", "sd", 10, true, 0),
                 a(4, "kane's lobby", "t4:mp_castle", "tdm", 4, false, net::CONTENT_T4),
             ]);
-            s.screen = Screen::Lobbies;
+            s.screen = Screen::MatchFilter;
+            s.page = super::matchmaking::ACTIVE_LOBBIES;
             s.focus = 0;
         }),
         ("12k_match_filter", |s, _| {
@@ -411,7 +412,10 @@ fn step(
             s.screen = Screen::Lobbies;
             s.searching = true;
             s.filter = vec!["oic".to_owned()];
-            s.focus = 1;
+            s.search_started = 1.0e9;
+            s.vote_maps = vec!["mp_la".to_owned(), "mp_nuketown_2020".to_owned()];
+            s.vote = Some(1);
+            s.focus = 4;
         }),
         ("12j_room", |s, _| {
             super::lobbies::preview(Vec::new());

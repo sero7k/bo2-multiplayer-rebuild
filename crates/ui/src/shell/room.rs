@@ -12,8 +12,8 @@ fn map_title(map: &str) -> String {
     map.split(':').next_back().unwrap_or(map).trim_start_matches("mp_").replace('_', " ").to_uppercase()
 }
 
-pub(crate) fn rows(_shell: &Shell) -> Vec<Row> {
-    super::matchmaking::lobby_rows(false)
+pub(crate) fn rows(shell: &Shell, c: &Catalog) -> Vec<Row> {
+    super::matchmaking::lobby_rows(shell, c, false)
 }
 
 /// The waiting room, as FIND A MATCH's matchmaking lobby: the mode, how many

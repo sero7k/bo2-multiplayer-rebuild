@@ -172,6 +172,10 @@ pub(crate) enum Act {
     Brainrot,
     SearchMatches,
     HostMatch,
+    /// The matchmaking lobby: vote for one of its two maps; the lobby's
+    /// players by rank.
+    Vote(usize),
+    Leaderboard,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -249,6 +253,11 @@ pub(crate) struct Shell {
     /// FIND A MATCH: when the search began, and its last join (attempt, when).
     pub search_started: f64,
     pub join_at: Option<(usize, f64)>,
+    /// The matchmaking lobby's two maps to vote between (catalog
+    /// `ui_name`s), his vote, and whether its leaderboard is showing.
+    pub vote_maps: Vec<String>,
+    pub vote: Option<usize>,
+    pub leaderboard: bool,
 }
 
 impl Default for Shell {
@@ -280,6 +289,9 @@ impl Default for Shell {
             brainrot: false,
             search_started: 0.0,
             join_at: None,
+            vote_maps: Vec::new(),
+            vote: None,
+            leaderboard: false,
         }
     }
 }
@@ -306,19 +318,18 @@ fn rows_len(s: &Shell, c: &Catalog) -> usize {
 pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
     match s.screen {
         Screen::Main => vec![
-            Row::new("MULTIPLAYER", "Custom games with bots on every map.", Act::Multiplayer),
-            Row::new("FIND A MATCH", "Public matches on the online server, by playlist.", Act::FindMatch),
+            Row::new("MULTIPLAYER", "Find a match, or a custom game with bots on every map.", Act::Multiplayer),
             Row::new("ZOMBIES", "Survive the undead.", Act::Zombies),
             Row::new("OPTIONS", "Graphics, sound and controls.", Act::Options),
             Row::new("FRIENDS", "Add friends by their code and see where they are.", Act::Friends),
             Row::new("QUIT", "Back to the desktop.", Act::Quit),
         ],
         Screen::Multiplayer => vec![
+            Row::new("FIND A MATCH", "Public matches by playlist, and the server's active lobbies.", Act::FindMatch),
             Row::new("CUSTOM GAME", "Pick the map, the mode and the bots, then play.", Act::CustomGame),
             Row::new("CREATE A CLASS", "Build your loadouts.", Act::Classes),
             Row::new("BARRACKS", "Your combat record, calling card, emblem and prestige.", Act::Barracks),
             Row::new("OPTIONS", "Graphics, sound and controls.", Act::Options),
-            Row::new("FIND A LOBBY", "Join a lobby on the online server.", Act::Lobbies),
         ],
         Screen::Lobby => match s.tab {
             Tab::Lobby => vec![
@@ -364,9 +375,9 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
             .collect(),
         Screen::Classes | Screen::ClassEdit | Screen::ItemPick => classes::book().map(|b| cac::rows(s, &b)).unwrap_or_default(),
         Screen::Friends => friends::rows(s),
-        Screen::Lobbies => lobbies::rows(s),
+        Screen::Lobbies => lobbies::rows(s, c),
         Screen::MatchFilter => matchmaking::rows(s, c),
-        Screen::Room => room::rows(s),
+        Screen::Room => room::rows(s, c),
         Screen::Options => {
             let mut r = options::rows(s.page, &options::snapshot());
             if let Some(t) = &s.typing
@@ -437,9 +448,9 @@ impl Shell {
                 self.go(from);
                 self.page = 0;
                 self.focus = match (from, was) {
-                    (Screen::Main, _) => 3,
-                    (Screen::Multiplayer, Screen::Barracks) => 2,
-                    (Screen::Multiplayer, _) => 3,
+                    (Screen::Main, _) => 2,
+                    (Screen::Multiplayer, Screen::Barracks) => 3,
+                    (Screen::Multiplayer, _) => 4,
                     (Screen::Lobby, _) => 1,
                     _ => 0,
                 };
@@ -447,7 +458,7 @@ impl Shell {
             Screen::Classes => {
                 let from = self.cac_from;
                 self.go(from);
-                self.focus = if from == Screen::Multiplayer { 1 } else { 0 };
+                self.focus = if from == Screen::Multiplayer { 2 } else { 0 };
             }
             Screen::ClassEdit => {
                 let n = self.class.max(0) as usize;
@@ -475,7 +486,7 @@ impl Shell {
             Screen::Main => {}
             Screen::Friends => {
                 self.go(Screen::Main);
-                self.focus = 4;
+                self.focus = 3;
             }
             Screen::Lobbies if self.searching => {
                 self.searching = false;
@@ -483,20 +494,20 @@ impl Shell {
                 self.focus = rows_len(self, &bridge::catalog().unwrap_or_default()).saturating_sub(1);
             }
             Screen::Lobbies => {
-                self.go(Screen::Multiplayer);
-                self.focus = 4;
+                self.go(Screen::MatchFilter);
+                self.page = matchmaking::ACTIVE_LOBBIES;
             }
             Screen::MatchFilter => {
-                self.go(Screen::Main);
+                self.go(Screen::Multiplayer);
                 self.page = 0;
-                self.focus = 1;
+                self.focus = 0;
             }
             // (The shell leaves the room screen once he is out of it.)
             Screen::Room => crate::online_match::queue_leave(),
             Screen::Multiplayer => self.go(Screen::Main),
             Screen::Zombies => {
                 self.go(Screen::Main);
-                self.focus = 2;
+                self.focus = 1;
             }
             Screen::ZmMapPick | Screen::ZmStartPick => {
                 let from = self.screen;
@@ -509,7 +520,7 @@ impl Shell {
                     bridge::request(Request::CancelStart);
                 } else {
                     self.go(Screen::Multiplayer);
-                    self.focus = 0;
+                    self.focus = 1;
                 }
             }
             Screen::MapPick | Screen::ModePick => {
@@ -589,6 +600,9 @@ impl Shell {
                 self.searching = true;
                 self.search_started = now;
                 self.join_at = None;
+                self.vote_maps = matchmaking::vote_maps(self, c, now);
+                self.vote = None;
+                self.leaderboard = false;
                 self.go(Screen::Lobbies);
                 if !crate::online_match::online_available() {
                     self.note("No server set: fill in online.cfg next to run-bo2.cmd (see docs\\ONLINE.md).", now);
@@ -609,6 +623,12 @@ impl Shell {
                 self.note("Hosting: press START MATCH to open your lobby to players searching.", now);
             }
             Act::Lobby(id) => self.note(&lobbies::lobby_note(id), now),
+            Act::Vote(k) => {
+                if k < self.vote_maps.len() {
+                    self.vote = Some(k);
+                }
+            }
+            Act::Leaderboard => self.leaderboard = !self.leaderboard,
             Act::Barracks if self.screen != Screen::Barracks => {
                 self.cac_from = self.screen;
                 self.go(Screen::Barracks);
@@ -799,8 +819,9 @@ fn shell_input(
             shell.join_at = None;
         }
         (false, true) => {
-            shell.go(Screen::Multiplayer);
-            shell.focus = 4;
+            shell.go(Screen::MatchFilter);
+            shell.page = matchmaking::ACTIVE_LOBBIES;
+            shell.focus = 0;
         }
         _ => {}
     }

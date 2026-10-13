@@ -90,9 +90,9 @@ fn shown(shell: &Shell) -> Vec<MasterAdvert> {
     list.into_iter().filter(|a| joinable(a) && super::matchmaking::passes(shell, &a.map, &a.mode)).collect()
 }
 
-pub(crate) fn rows(shell: &Shell) -> Vec<Row> {
+pub(crate) fn rows(shell: &Shell, c: &super::bridge::Catalog) -> Vec<Row> {
     if shell.searching {
-        return super::matchmaking::lobby_rows(true);
+        return super::matchmaking::lobby_rows(shell, c, true);
     }
     let list = shown(shell);
     if list.is_empty() && shell.searching {
@@ -159,9 +159,15 @@ pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row]) {
     if shell.searching {
         header(c, cx, &["FIND A MATCH", "SEARCH RESULTS"]);
     } else {
-        header(c, cx, &["MULTIPLAYER", "FIND A LOBBY"]);
+        header(c, cx, &["FIND A MATCH", "ACTIVE LOBBIES"]);
     }
-    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(8.0), ..abs(Some(72.0), Some(176.0), None, None, cx) })
+    body(c, cx, shell, rows, 176.0);
+}
+
+/// The lobby list and the panel beside it, from `top` down (FIND A
+/// MATCH's ACTIVE LOBBIES tab draws it under its tabs).
+pub(crate) fn body(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row], top: f32) {
+    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(8.0), ..abs(Some(72.0), Some(top), None, None, cx) })
         .with_children(|col| menu_rows(col, cx, rows, shell.focus, 720.0, false));
     let list = shown(shell);
     let open = list.iter().filter(|a| joinable(a)).count();
@@ -173,7 +179,7 @@ pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row]) {
             row_gap: cx.px(14.0),
             padding: UiRect::all(cx.px(28.0)),
             border: UiRect::top(cx.px(3.0)),
-            ..abs(Some(880.0), Some(176.0), None, None, cx)
+            ..abs(Some(880.0), Some(top), None, None, cx)
         },
         BackgroundColor(cx.pal.panel),
         BorderColor::all(cx.pal.accent),
