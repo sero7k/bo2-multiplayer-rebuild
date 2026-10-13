@@ -41,6 +41,10 @@ pub(crate) struct ModeEntry {
     /// (mp/gamesettings_default.cfg, then mp/gamesettings_<type>.cfg):
     /// time limit (minutes, 0 none), score limit, round limit, lives.
     pub rules: ModeRules,
+    /// gametypestable's own: a party game (its playlist group `party`), and
+    /// its playlist picture (`playlist_tdm`).
+    pub party: bool,
+    pub picture: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -317,6 +321,8 @@ fn build_catalog(host: &Host, mp: Option<&Mp>) -> Catalog {
             title: title.to_uppercase(),
             desc,
             rules: mode_rules(&v.configs, key),
+            party: cell(row, 9).eq_ignore_ascii_case("party"),
+            picture: cell(row, 4).to_owned(),
         });
     }
     // His card.

@@ -60,6 +60,8 @@ fn stand_in_catalog() -> Catalog {
                 title: (*t).to_owned(),
                 desc: (*d).to_owned(),
                 rules: super::bridge::ModeRules { time_limit: Some(10.0), score_limit: Some(75.0), round_limit: Some(1.0), lives: Some(0.0) },
+                party: matches!(*k, "gun" | "oic" | "shrp" | "sas"),
+                picture: String::new(),
             })
             .collect(),
         player: PlayerCard {
@@ -370,7 +372,41 @@ fn step(
             s.filter = vec!["gun".to_owned()];
             s.focus = 0;
         }),
+        ("12o_match_found", |s, _| {
+            let a = |n: u8, name: &str, map: &str, mode: &str, players: u8| net::MasterAdvert {
+                id: net::master_protocol::AdvertId([n; 16]),
+                name: name.to_owned(),
+                map: map.to_owned(),
+                mode: mode.to_owned(),
+                players,
+                max_players: 12,
+                locked: false,
+                in_match: false,
+                requires: Default::default(),
+                missing: net::master_protocol::ContentFlags(0),
+            };
+            super::lobbies::preview(vec![a(1, "egs's lobby", "t6:mp_nuketown_2020", "tdm", 5), a(2, "reaaL's lobby", "mp_rust", "tdm", 2)]);
+            s.screen = Screen::Lobbies;
+            s.searching = true;
+            s.filter = vec!["tdm".to_owned()];
+            s.brainrot = false;
+            s.search_started = -100.0;
+            s.focus = 0;
+        }),
+        ("12p_match_room", |s, _| {
+            super::lobbies::preview(Vec::new());
+            crate::online_match::preview_room(Some(crate::online_match::RoomView {
+                name: "egs's lobby".to_owned(),
+                map: "t6:mp_nuketown_2020".to_owned(),
+                mode: "tdm".to_owned(),
+                players: vec!["egs".to_owned(), "juansevastianvilla".to_owned(), "Maro".to_owned(), "BoomBoom".to_owned(), "simon".to_owned()],
+                max_players: 12,
+            }));
+            s.screen = Screen::Room;
+            s.focus = 0;
+        }),
         ("12m_match_none", |s, _| {
+            crate::online_match::preview_room(None);
             super::lobbies::preview(Vec::new());
             s.screen = Screen::Lobbies;
             s.searching = true;

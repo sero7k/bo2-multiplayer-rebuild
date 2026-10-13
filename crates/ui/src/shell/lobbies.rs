@@ -23,6 +23,16 @@ pub(crate) fn preview(list: Vec<MasterAdvert>) {
     }
 }
 
+/// Every lobby on the server (or the preview's), unsorted by any search.
+pub(crate) fn all() -> Vec<MasterAdvert> {
+    list()
+}
+
+/// The shell preview is showing a stand-in list.
+pub(crate) fn previewing() -> bool {
+    PREVIEW.lock().is_ok_and(|p| p.is_some())
+}
+
 fn list() -> Vec<MasterAdvert> {
     let mut list = PREVIEW.lock().ok().and_then(|p| p.clone()).unwrap_or_else(super::online::adverts);
     list.sort_by_key(|a| (!joinable(a), a.missing.0 != 0, std::cmp::Reverse(a.players), a.name.to_lowercase()));
@@ -30,7 +40,7 @@ fn list() -> Vec<MasterAdvert> {
 }
 
 /// He can join it now.
-fn joinable(a: &MasterAdvert) -> bool {
+pub(crate) fn joinable(a: &MasterAdvert) -> bool {
     !a.in_match && !a.locked && a.players < a.max_players && a.missing.0 == 0
 }
 
@@ -81,6 +91,9 @@ fn shown(shell: &Shell) -> Vec<MasterAdvert> {
 }
 
 pub(crate) fn rows(shell: &Shell) -> Vec<Row> {
+    if shell.searching {
+        return super::matchmaking::lobby_rows(true);
+    }
     let list = shown(shell);
     if list.is_empty() && shell.searching {
         let online = crate::online_match::online_available() || PREVIEW.lock().is_ok_and(|p| p.is_some());

@@ -1131,9 +1131,10 @@ pub(crate) fn shell_view(
                 Screen::Options => options_view(c, &mut cx, &shell, &rows),
                 Screen::Barracks => barracks_view(c, &mut cx, &shell, &cat, &rows),
                 Screen::Friends => super::friends::view(c, &mut cx, &shell, &rows),
+                Screen::Lobbies if shell.searching => super::matchmaking::search_view(c, &mut cx, &shell, &cat, &rows),
                 Screen::Lobbies => super::lobbies::view(c, &mut cx, &shell, &rows),
                 Screen::MatchFilter => super::matchmaking::view(c, &mut cx, &shell, &cat, &rows),
-                Screen::Room => super::room::view(c, &mut cx, &shell, &rows),
+                Screen::Room => super::room::view(c, &mut cx, &shell, &cat, &rows),
                 Screen::CardPick | Screen::EmblemPick => super::looks::view(c, &mut cx, &shell, &cat, &rows),
                 Screen::Classes | Screen::ClassEdit | Screen::ItemPick => {
                     if let Some(book) = super::classes::book() {

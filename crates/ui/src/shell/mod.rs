@@ -245,6 +245,9 @@ pub(crate) struct Shell {
     pub searching: bool,
     /// FIND A MATCH: BRAINROT 24/7 (Shipment, nothing else) is on.
     pub brainrot: bool,
+    /// FIND A MATCH: when the search began, and its last join (attempt, when).
+    pub search_started: f64,
+    pub join_at: Option<(usize, f64)>,
 }
 
 impl Default for Shell {
@@ -274,6 +277,8 @@ impl Default for Shell {
             filter: Vec::new(),
             searching: false,
             brainrot: false,
+            search_started: 0.0,
+            join_at: None,
         }
     }
 }
@@ -581,6 +586,8 @@ impl Shell {
             Act::Brainrot => self.brainrot = !self.brainrot,
             Act::SearchMatches => {
                 self.searching = true;
+                self.search_started = now;
+                self.join_at = None;
                 self.go(Screen::Lobbies);
                 if !crate::online_match::online_available() {
                     self.note("No server set: fill in online.cfg next to run-bo2.cmd (see docs\\ONLINE.md).", now);
@@ -765,15 +772,30 @@ fn shell_input(
         return;
     }
     let now_s = time.elapsed_secs_f64();
-    // Online: the room he joined shows until its host starts the match.
+    // Online: the room he joined shows until its host starts the match (its
+    // menus open over it: Create a Class, Barracks, Options).
+    let over_room = matches!(
+        shell.screen,
+        Screen::Room | Screen::Classes | Screen::ClassEdit | Screen::ItemPick | Screen::Barracks | Screen::Options | Screen::CardPick | Screen::EmblemPick
+    );
     match (crate::online_match::room().is_some(), shell.screen == Screen::Room) {
-        (true, false) => shell.go(Screen::Room),
+        (true, false) if !over_room => {
+            shell.go(Screen::Room);
+            shell.focus = 0;
+        }
+        (false, true) if shell.searching => {
+            // (Out of the room: back to the search, which looks again.)
+            shell.go(Screen::Lobbies);
+            shell.search_started = now_s;
+            shell.join_at = None;
+        }
         (false, true) => {
             shell.go(Screen::Multiplayer);
             shell.focus = 4;
         }
         _ => {}
     }
+    matchmaking::tick(&mut shell, now_s);
     // FRIENDS > ADD FRIEND: digits (8 at most); Enter adds the friend,
     // Esc leaves the list as it was.
     if let Some(mut t) = shell.code_entry.clone() {

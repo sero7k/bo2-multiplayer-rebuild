@@ -2,11 +2,9 @@
 //! (FRIENDS or FIND A LOBBY) the shell shows its map, mode and players until
 //! its host starts the match; Esc leaves it.
 
-use bevy::prelude::*;
-
-use super::theme::*;
-use super::view::{Ctx, Kids, abs, header, menu_rows};
-use super::{Act, Row, Shell};
+use super::bridge::Catalog;
+use super::view::{Ctx, Kids};
+use super::{Row, Shell};
 use crate::online_match::RoomView;
 
 /// A map's name from its zone name (`t6:mp_nuketown_2020` -> `NUKETOWN 2020`).
@@ -15,45 +13,38 @@ fn map_title(map: &str) -> String {
 }
 
 pub(crate) fn rows(_shell: &Shell) -> Vec<Row> {
-    let Some(room) = crate::online_match::room() else { return Vec::new() };
-    room.players
-        .iter()
-        .enumerate()
-        .map(|(i, p)| Row {
-            label: p.clone(),
-            sub: String::new(),
-            value: (i == 0).then(|| "HOST".to_owned()),
-            act: Act::Info,
-        })
-        .collect()
+    super::matchmaking::lobby_rows(false)
 }
 
-pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row]) {
+/// The waiting room, as FIND A MATCH's matchmaking lobby: the mode, how many
+/// places are left until the host starts, the players, the map.
+pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row]) {
     let room = crate::online_match::room().unwrap_or_else(RoomView::default);
-    header(c, cx, &["ONLINE", "LOBBY"]);
-    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(8.0), ..abs(Some(72.0), Some(176.0), None, None, cx) })
-        .with_children(|col| menu_rows(col, cx, rows, shell.focus, 720.0, false));
-    c.spawn((
-        Node {
-            width: cx.px(860.0),
-            flex_direction: FlexDirection::Column,
-            row_gap: cx.px(14.0),
-            padding: UiRect::all(cx.px(28.0)),
-            border: UiRect::top(cx.px(3.0)),
-            ..abs(Some(880.0), Some(176.0), None, None, cx)
-        },
-        BackgroundColor(cx.pal.panel),
-        BorderColor::all(cx.pal.accent),
-    ))
-    .with_children(|p| {
-        p.spawn((Text::new(room.name.to_uppercase()), cx.bold(22.0), TextColor(FAINT)));
-        p.spawn((Text::new(map_title(&room.map)), cx.bold(72.0), TextColor(WHITE)));
-        p.spawn((Text::new(room.mode.to_uppercase()), cx.bold(30.0), TextColor(cx.pal.accent)));
-        p.spawn((Node { height: Val::Px(1.0), width: Val::Percent(100.0), margin: UiRect::vertical(cx.px(8.0)), ..default() }, BackgroundColor(cx.pal.line)));
-        p.spawn((Text::new(format!("{}/{} PLAYERS", room.players.len(), room.max_players)), cx.bold(24.0), TextColor(WHITE)));
-        p.spawn((Text::new("WAITING FOR THE HOST TO START THE MATCH"), cx.bold(24.0), TextColor(DIM)));
-        p.spawn((Text::new("Esc leaves the lobby."), cx.regular(20.0), TextColor(DIM)));
-    });
+    let mode = cat.mode(&room.mode).map_or_else(|| room.mode.to_uppercase(), |m| m.title.clone());
+    let stem = room.map.split(':').next_back().unwrap_or(&room.map);
+    let map = cat.map(stem).or_else(|| cat.maps.iter().find(|m| m.ui_name.starts_with(stem)));
+    let pictures = map.map(|m| m.pictures.clone()).unwrap_or_default();
+    let map_name = map.map_or_else(|| map_title(&room.map), |m| m.title.to_uppercase());
+    let max = usize::from(room.max_players).max(room.players.len()).clamp(2, 18);
+    let left = max.saturating_sub(room.players.len());
+    let status = if left == 0 {
+        "LOBBY FULL: WAITING FOR THE HOST".to_owned()
+    } else {
+        format!("WAITING FOR {left} MORE PLAYER{}", if left == 1 { "" } else { "S" })
+    };
+    let places: Vec<super::matchmaking::Place> = room
+        .players
+        .iter()
+        .enumerate()
+        .map(|(i, p)| super::matchmaking::Place {
+            level: p.eq_ignore_ascii_case(&cat.player.name).then_some(cat.player.level),
+            name: p.clone(),
+            me: p.eq_ignore_ascii_case(&cat.player.name),
+            host: i == 0,
+        })
+        .collect();
+    let sub = format!("{} · the host starts the match. Esc leaves.", room.name);
+    super::matchmaking::lobby_view(c, cx, shell, rows, &mode, (&status, &sub), (&pictures, &map_name, &mode), &places, max);
 }
 
 #[cfg(test)]
