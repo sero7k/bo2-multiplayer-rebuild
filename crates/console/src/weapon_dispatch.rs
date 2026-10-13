@@ -60,7 +60,7 @@ pub(crate) fn register_weapon_commands(
     if registry.resolve("give").is_none() {
         registry.register(
             crate::CommandSpec::new("give")
-                .usage("give <game:weapon> [attachment...] | give killstreak <name> — equip a weapon on the active slot (e.g. give iw5:acr acog), or grant a killstreak (e.g. give killstreak airdrop)")
+                .usage("give <game:weapon> [attachment...] | give killstreak <name> — equip a weapon on the active slot (e.g. give iw5:acr acog), or grant a killstreak (e.g. give killstreak airdrop; give killstreak nuke for the Tactical Nuke)")
                 .arg(LiveListCompleter(Arc::clone(&completions.give))),
         );
     }
@@ -269,7 +269,7 @@ fn give_killstreak(
     mut echo: impl FnMut(String),
 ) {
     let Some(name) = name else {
-        echo("usage: give killstreak <name> (e.g. airdrop, uav, predator_missile)".into());
+        echo("usage: give killstreak <name> (e.g. airdrop, uav, predator_missile, nuke)".into());
         return;
     };
     if !alive(presented, local.0) {

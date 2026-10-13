@@ -1884,6 +1884,21 @@ pub(crate) fn give_killstreak(world: &mut World, client: u32, menu_name: &str) -
     if !world.get_resource::<Zm>().is_some_and(|z| z.mp) {
         return false;
     }
+    // bo2mp: the Tactical Nuke (`give killstreak nuke`): ready to call in,
+    // as if earned (the `bo2mp/moab` script announces it).
+    if matches!(menu_name.to_ascii_lowercase().as_str(), "nuke" | "kem" | "tactical_nuke" | "moab" | "kem_strike") {
+        let given = with_vm(world, |vm, world| {
+            let obj = world.resource::<Zm>().players.get(&client)?.obj;
+            let (ready, earned) = (vm.intern("moab_ready"), vm.intern("moab_earned"));
+            vm.set_raw_field(obj, ready, gsc_t6::Value::Int(1));
+            vm.set_raw_field(obj, earned, gsc_t6::Value::Int(1));
+            Some(())
+        })
+        .flatten()
+        .is_some();
+        diag::info!(Sim, "bo2mp: give killstreak nuke to client {client}: {}", if given { "ready" } else { "no player" });
+        return true;
+    }
     killstreaks::give(world, client, menu_name);
     true
 }

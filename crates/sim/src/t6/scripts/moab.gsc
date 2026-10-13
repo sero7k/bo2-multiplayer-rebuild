@@ -107,6 +107,12 @@ moab_watchstreak()
         {
             self.moab_earned = 1;
             self.moab_ready = 1;
+        }
+
+        // (Earned, or given: `give killstreak nuke` in the console.)
+        if ( self.moab_ready && !isdefined( self.moab_announced ) )
+        {
+            self.moab_announced = 1;
             self iprintlnbold( "TACTICAL NUKE READY: HOLD [USE] TO CALL IT IN" );
             self moab_voice( "achieve_kem" );
         }
@@ -124,6 +130,7 @@ moab_watchstreak()
             if ( held >= 1.0 && !isdefined( level.moab_incoming ) )
             {
                 self.moab_ready = 0;
+                self.moab_announced = undefined;
                 level thread moab_launch( self );
             }
         }
