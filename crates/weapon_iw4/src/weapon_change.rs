@@ -140,6 +140,9 @@ pub fn begin_weapon_change(
     };
     hand.weapon_time = if quick {
         facts.quick_drop_time_ms
+    } else if hand.clip <= 0 && facts.clip_size > 0 && facts.empty_drop_time_ms > 0 {
+        // bo2mp: an empty gun drops on its own timer (`iEmptyDropTime`).
+        facts.empty_drop_time_ms
     } else {
         facts.drop_time_ms.max(1)
     };

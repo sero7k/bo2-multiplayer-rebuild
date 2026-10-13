@@ -983,6 +983,15 @@ fn preflight_match_install(
     };
     // A match the front end started runs BO2's own scripts (no switch).
     let mp_scripts = mp_scripts || setup.is_some();
+    // bo2mp: a multiplayer map without BO2's scripts plays MW2's movement
+    // and weapon rules; say so (a test started outside the lobby looked
+    // like Black Ops II's rules were broken).
+    if mp && !mp_scripts && sources.0.t6.is_some() {
+        diag::warn!(
+            Sim,
+            "bo2mp: `{zone}` started outside the lobby without BO2MP_SCRIPTS=1: Black Ops II's scripts, movement and weapon rules are off for this match"
+        );
+    }
     let t6_scripts = sources.0.t6.as_ref().filter(|_| !mp || mp_scripts).map(|set| sim::T6Install {
         map: zone.to_owned(),
         gametype: mp_gametype.clone(),

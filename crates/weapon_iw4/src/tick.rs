@@ -48,6 +48,14 @@ pub enum MissingCombatFacts {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CapturedCombatInput {
+    /// bo2mp: Black Ops II's other switch timers: the first raise of a
+    /// life (`iFirstRaiseTime`), raising and dropping with an empty clip
+    /// (`iEmptyRaiseTime`, `iEmptyDropTime`), and the time after the clip's
+    /// last shot (`iLastFireTime`); 0: the usual timer.
+    pub first_raise_time_ms: i32,
+    pub empty_raise_time_ms: i32,
+    pub empty_drop_time_ms: i32,
+    pub last_fire_time_ms: i32,
     pub fire_time_ms: i32,
     /// bo2zm: Black Ops II's faster first shots of a trigger pull
     /// (`iIntroFireTime`, `iIntroFireLength`): the HAMR, AN-94 and B23R.
@@ -208,6 +216,14 @@ pub struct WeaponCombatFacts {
     pub sprint_cycle_scale: f32,
     pub ducked_sprint_cycle_scale: f32,
     pub dtp_cycle_scale: f32,
+    /// bo2mp: Black Ops II's other switch timers: the first raise of a
+    /// life (`iFirstRaiseTime`), raising and dropping with an empty clip
+    /// (`iEmptyRaiseTime`, `iEmptyDropTime`), and the time after the clip's
+    /// last shot (`iLastFireTime`); 0: the usual timer.
+    pub first_raise_time_ms: i32,
+    pub empty_raise_time_ms: i32,
+    pub empty_drop_time_ms: i32,
+    pub last_fire_time_ms: i32,
     pub fire_time_ms: i32,
     /// bo2zm: the first `intro_fire_length` shots of a trigger pull come
     /// `intro_fire_time_ms` apart (Black Ops II's HAMR, AN-94, B23R).
@@ -368,6 +384,10 @@ impl WeaponCombatFacts {
     pub const fn none() -> Self {
         Self {
             aim_assist: AimAssistRanges::NONE,
+            first_raise_time_ms: 0,
+            empty_raise_time_ms: 0,
+            empty_drop_time_ms: 0,
+            last_fire_time_ms: 0,
             fire_time_ms: 0,
             intro_fire_time_ms: 0,
             intro_fire_length: 0,
@@ -487,6 +507,10 @@ impl WeaponCombatFacts {
         }
         Ok(Self {
             aim_assist: AimAssistRanges::NONE,
+            first_raise_time_ms: input.first_raise_time_ms,
+            empty_raise_time_ms: input.empty_raise_time_ms,
+            empty_drop_time_ms: input.empty_drop_time_ms,
+            last_fire_time_ms: input.last_fire_time_ms,
             fire_time_ms: input.fire_time_ms,
             intro_fire_time_ms: input.intro_fire_time_ms,
             intro_fire_length: input.intro_fire_length,
@@ -1281,7 +1305,14 @@ pub fn weapon_ordinary(
                     );
                 }
                 hand.weaponstate = WeaponState::Firing as i32;
-                hand.weapon_time = if intro {
+                // bo2mp: the clip's last shot takes the gun's own last-fire
+                // time when it has one (BO2's `iLastFireTime`).
+                let last_shot = facts.last_fire_time_ms > 0
+                    && facts.clip_size > 0
+                    && hand.clip <= facts.ammo_per_shot().max(1);
+                hand.weapon_time = if last_shot {
+                    facts.last_fire_time_ms
+                } else if intro {
                     facts.intro_fire_time_ms
                 } else {
                     facts.fire_time_ms
@@ -1595,7 +1626,11 @@ pub fn spawn_weapon_hand(weapon: u32, facts: &WeaponCombatFacts) -> WeaponHandSt
         0
     };
     let stock = (total - clip).max(0);
-    let raise = if facts.raise_time_ms > 0 {
+    // bo2mp: a weapon given at spawn makes its first raise of the life
+    // (BO2's `iFirstRaiseTime`, the first-raise animation the view plays).
+    let raise = if facts.first_raise_time_ms > 0 {
+        facts.first_raise_time_ms
+    } else if facts.raise_time_ms > 0 {
         facts.raise_time_ms
     } else {
         0
@@ -1748,5 +1783,73 @@ mod fast_switch_tests {
         for other in [PERK_FASTRELOAD, crate::PERK_SPRINTRECOVERY, crate::PERK_BULLETACCURACY] {
             assert_eq!(PERK_FASTWEAPONSWITCH & other, 0);
         }
+    }
+}
+
+#[cfg(test)]
+mod bo2_timer_tests {
+    extern crate std;
+    use super::*;
+
+    fn gun() -> WeaponCombatFacts {
+        WeaponCombatFacts {
+            fire_time_ms: 100,
+            raise_time_ms: 500,
+            drop_time_ms: 400,
+            clip_size: 3,
+            start_ammo: 30,
+            fire_type: FireType::SingleShot as i32,
+            ..WeaponCombatFacts::default()
+        }
+    }
+
+    /// Fires one shot from a ready hand; the weapon time it is left with.
+    fn one_shot(hand: &mut WeaponHandState, facts: &WeaponCombatFacts) -> i32 {
+        let mut cmd = WeaponCmd { msec: 1, buttons: BUTTON_ATTACK, old_buttons: 0, ..WeaponCmd::default() };
+        weapon_ordinary(hand, facts, &mut cmd);
+        hand.weapon_time
+    }
+
+    /// BO2's KSG: the clip's last shot waits `iLastFireTime` (512), the
+    /// others `iFireTime`.
+    #[test]
+    fn the_last_shot_of_a_clip_takes_the_last_fire_time() {
+        let facts = WeaponCombatFacts { last_fire_time_ms: 512, ..gun() };
+        let mut hand = WeaponHandState { weapon: 1, clip: 2, ..WeaponHandState::default() };
+        assert!((99..=100).contains(&one_shot(&mut hand, &facts)), "an ordinary shot");
+        hand.weapon_time = 0;
+        hand.weaponstate = WeaponState::Ready as i32;
+        assert!((511..=512).contains(&one_shot(&mut hand, &facts)), "the last shot");
+        assert_eq!(hand.clip, 0);
+    }
+
+    /// A gun with no last-fire time fires its last shot like any other.
+    #[test]
+    fn without_a_last_fire_time_the_last_shot_is_ordinary() {
+        let facts = gun();
+        let mut hand = WeaponHandState { weapon: 1, clip: 1, ..WeaponHandState::default() };
+        assert!((99..=100).contains(&one_shot(&mut hand, &facts)));
+    }
+
+    /// The weapon given at spawn makes its first raise (`iFirstRaiseTime`).
+    #[test]
+    fn a_spawned_weapon_makes_its_first_raise() {
+        let facts = WeaponCombatFacts { first_raise_time_ms: 1600, ..gun() };
+        let hand = spawn_weapon_hand(1, &facts);
+        assert_eq!(hand.weaponstate, WeaponState::Raising as i32);
+        assert_eq!(hand.weapon_time, 1600);
+        assert_eq!(spawn_weapon_hand(1, &gun()).weapon_time, 500);
+    }
+
+    /// An empty gun drops on `iEmptyDropTime`; a loaded one on its drop time.
+    #[test]
+    fn an_empty_gun_drops_on_its_empty_drop_time() {
+        let facts = WeaponCombatFacts { empty_drop_time_ms: 750, ..gun() };
+        let mut empty = WeaponHandState { weapon: 1, clip: 0, ..WeaponHandState::default() };
+        crate::weapon_change::begin_weapon_change(&mut empty, &facts, 2, false, 0);
+        assert_eq!(empty.weapon_time, 750);
+        let mut loaded = WeaponHandState { weapon: 1, clip: 3, ..WeaponHandState::default() };
+        crate::weapon_change::begin_weapon_change(&mut loaded, &facts, 2, false, 0);
+        assert_eq!(loaded.weapon_time, 400);
     }
 }

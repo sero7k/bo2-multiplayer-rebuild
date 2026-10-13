@@ -948,7 +948,7 @@ fn scripts_see_the_dive_from_take_off_to_the_slides_end() {
 }
 
 #[test]
-fn getting_up_from_a_dive_is_twice_as_quick() {
+fn getting_up_from_a_dive_takes_the_usual_time() {
     let mut dived = Run::new(DIVE);
     dive(&mut dived, 127, 0, 0);
     while flag(&dived, movement_iw4::PMF_DIVE_SLIDE) || dived.ps.view_height_lerp_time != 0 {
@@ -962,10 +962,11 @@ fn getting_up_from_a_dive_is_twice_as_quick() {
     assert_eq!(prone.ps.view_height_current, 11.0);
     let from_prone = ms_to_stand(&mut prone, 0);
     eprintln!("prone to standing: after a dive {from_dive} ms, ordinary {from_prone} ms");
-    // Both steps (lying to crouched, crouched to standing) take half as
-    // long: 300 ms of view change, not 600. Each step also waits a 50 ms
-    // test frame to start, and the dive's count holds the jump press.
-    assert_eq!((from_dive - 50 - 100) * 2, from_prone - 100);
+    // Both steps (lying to crouched, crouched to standing) take their usual
+    // time, as from any prone (BO2 has no faster dive get-up: the earlier
+    // double speed was dropped after testing, `stance::lerp_duration`). The
+    // dive's count also holds the jump press (50 ms).
+    assert_eq!(from_dive - 50, from_prone);
     dived.hold(50, 0, 0, 0);
     assert!(!flag(&dived, movement_iw4::PMF_DIVE_GETUP), "get-up over");
 }

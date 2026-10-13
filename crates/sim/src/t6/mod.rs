@@ -2236,7 +2236,26 @@ pub(crate) fn resolve_weapon(world: &mut World, name: &str) -> Result<(u32, Opti
         }
         return Err(format!("unknown weapon '{name}' (no variant of `{base}` can be given)"));
     }
-    for att in atts.split('+').filter(|a| !a.is_empty()) {
+    // bo2mp: Select Fire with a sight (`an94_mp+sf+reflex`, any order):
+    // the catalog names it `<gun>+<sight>+sf` (or `<gun>+sf`).
+    let parts: Vec<&str> = atts.split('+').filter(|a| !a.is_empty()).collect();
+    if parts.contains(&"sf") {
+        let mut tries: Vec<String> = parts
+            .iter()
+            .filter(|a| **a != "sf")
+            .map(|a| format!("{base}+{a}+sf"))
+            .collect();
+        tries.push(format!("{base}+sf"));
+        for t in tries {
+            if let Ok(w) = crate::script_player::weapon_named(&f, &t)
+                && usable(w)
+            {
+                let note = (t != name).then(|| format!("`{name}`: {why}; its Select Fire variant `{t}`"));
+                return Ok((w, note));
+            }
+        }
+    }
+    for att in parts {
         let sight = format!("{base}+{att}");
         if let Ok(w) = crate::script_player::weapon_named(&f, &sight)
             && usable(w)

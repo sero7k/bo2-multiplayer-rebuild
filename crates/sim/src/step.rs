@@ -536,6 +536,12 @@ fn run_players_system(ecs: &mut World) {
             world.set_pmove_view_change(*id, view_change); // bo2zm
             world.link_player_area(*id, linked_bounds);
 
+            // bo2mp: Black Ops II's switch rules (the instaswap) follow the
+            // match's rules each step, on the host and in a joiner's
+            // prediction alike (the rules come with every snapshot); a flag
+            // set once by the host's script install left a joiner predicting
+            // MW2's switches, and stayed on into later non-BO2 matches.
+            weapon_iw4::set_bo2_switch_rules(feel.on);
             let shots = advance_weapon_command(&mut world, tick, *id, cmd, delta.min(200));
             for shot in shots {
                 crate::missile::fire_accepted_shot(&mut world, tick, &shot);

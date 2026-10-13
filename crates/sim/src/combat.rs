@@ -414,9 +414,18 @@ pub(crate) fn advance_weapon_command(
                 } else {
                     ps.weapon
                 };
+                // bo2mp: an empty gun raises on its own timer
+                // (`iEmptyRaiseTime`).
                 world
                     .combat_facts_for(w)
-                    .map(|f| f.raise_time_ms)
+                    .map(|f| {
+                        let clip = get_clip_for_hand(&ps.ammoclip, weapon_iw4::clip_table_key(f.clip_index, w), 0);
+                        if f.empty_raise_time_ms > 0 && f.clip_size > 0 && clip <= 0 {
+                            f.empty_raise_time_ms
+                        } else {
+                            f.raise_time_ms
+                        }
+                    })
                     .unwrap_or(0)
             },
             switch_quick_raise_time_ms: {

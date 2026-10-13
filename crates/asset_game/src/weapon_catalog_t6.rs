@@ -238,6 +238,10 @@ fn t6_body_facts(w: &asset_t6::WeaponRef) -> WeaponBodyFacts {
     f.intro_fire_length = w.def_i32(d::iIntroFireLength);
     f.impact_type = w.def_i32(d::impactType);
     f.raise_time_ms = w.def_i32(d::iRaiseTime);
+    f.first_raise_time_ms = w.def_i32(d::iFirstRaiseTime);
+    f.empty_raise_time_ms = w.def_i32(d::iEmptyRaiseTime);
+    f.empty_drop_time_ms = w.def_i32(d::iEmptyDropTime);
+    f.last_fire_time_ms = w.def_i32(d::iLastFireTime);
     f.drop_time_ms = w.def_i32(d::iDropTime);
     f.alternate_drop_time_ms = w.def_i32(d::iAltDropTime);
     f.fire_delay_ms = w.def_i32(d::iFireDelay);
@@ -915,6 +919,47 @@ impl WeaponCatalog {
         }
         self.entries.push(e);
         true
+    }
+}
+
+impl WeaponCatalog {
+    /// bo2mp: Black Ops II's Select Fire (`sf`): the gun (or its sight
+    /// variant `from`) as `<from>+sf`, whose alternate is the attachment
+    /// unique's `szAltWeaponName` (`sf_an94_mp`) in the same dress:
+    /// `<sf weapon><from's attachments>+sf`. Toggling it is the alternate
+    /// weapon switch, as in the original (the attachment makes the gun two
+    /// weapons; the switch runs the alternate's raise and drop timers); the
+    /// two share their clip and stock (the alternate keeps the gun's ammo
+    /// rows). The alternate fires as its own weapon says (burst, auto or
+    /// single, its fire and burst times). Returns the pair's names.
+    pub fn capture_t6_select_fire(
+        &mut self,
+        from: &str,
+        sf: &asset_t6::WeaponRef,
+    ) -> Option<(String, String)> {
+        let ns = self.capture_ns;
+        let primary = self.entries.iter().rev().find(|e| e.name == from && e.namespace == ns)?.clone();
+        let sf_facts = t6_body_facts(sf);
+        let suffix = from.split_once('+').map_or(String::new(), |(_, rest)| format!("+{rest}"));
+        let main_name = format!("{from}+sf");
+        let alt_name = format!("{}{suffix}+sf", sf.name);
+        let mut main = primary.clone();
+        main.name = main_name.clone();
+        main.alternate_weapon = Some(alt_name.clone());
+        main.facts.alternate_raise_time_ms = sf_facts.alternate_raise_time_ms.max(main.facts.alternate_raise_time_ms);
+        let mut alt = primary;
+        alt.name = alt_name.clone();
+        alt.alternate_weapon = Some(main_name.clone());
+        alt.facts.fire_type = sf_facts.fire_type;
+        alt.facts.burst_delay_ms = sf_facts.burst_delay_ms;
+        alt.facts.fire_time_ms = sf_facts.fire_time_ms;
+        alt.facts.fire_delay_ms = sf_facts.fire_delay_ms;
+        alt.facts.alternate_raise_time_ms = sf_facts.alternate_raise_time_ms;
+        alt.facts.alternate_drop_time_ms = sf_facts.alternate_drop_time_ms;
+        alt.display_name_key = opt(&sf.display_name).or(alt.display_name_key);
+        self.entries.push(main);
+        self.entries.push(alt);
+        Some((main_name, alt_name))
     }
 }
 

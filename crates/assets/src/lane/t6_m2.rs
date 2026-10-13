@@ -1963,6 +1963,20 @@ pub(crate) fn load_t6_combat(
             }
         }
     }
+    // bo2mp: Select Fire (`sf`): each gun with an `au_<gun>_sf` unique
+    // naming its alternate (`sf_an94_mp`), plain and with each sight.
+    let mut sf_n = 0usize;
+    for name in &weapon_order {
+        let Some(base) = name.strip_suffix("_mp") else { continue };
+        let Some(u) = uniques.get(format!("au_{base}_sf").as_str()) else { continue };
+        let Some(sf) = weapon_refs.get(u.alt_weapon_name.as_str()) else { continue };
+        let mut froms = vec![name.clone()];
+        froms.extend(sights.iter().filter(|(n, a, _)| n == name && a.name != "dualoptic").map(|(n, a, _)| format!("{n}+{}", a.name)));
+        for from in froms {
+            sf_n += usize::from(catalog.capture_t6_select_fire(&from, sf).is_some());
+        }
+    }
+    report.push(format!("t6 select fire: {sf_n} guns and sight variants with Select Fire"));
     report.push(format!(
         "t6 sight reticles: {} sight models with a reticle ({:?})",
         reticle_pictures.len(),

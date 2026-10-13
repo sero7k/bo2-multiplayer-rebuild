@@ -47,6 +47,14 @@ pub struct WeaponBodyFacts {
     pub raise_time_ms: i32,
 
     pub drop_time_ms: i32,
+    /// bo2mp: Black Ops II's other switch timers: the first raise of a
+    /// life (`iFirstRaiseTime`), raising and dropping with an empty clip
+    /// (`iEmptyRaiseTime`, `iEmptyDropTime`), and the time after the clip's
+    /// last shot (`iLastFireTime`); 0: the usual timer.
+    pub first_raise_time_ms: i32,
+    pub empty_raise_time_ms: i32,
+    pub empty_drop_time_ms: i32,
+    pub last_fire_time_ms: i32,
     pub alternate_raise_time_ms: i32,
     pub alternate_drop_time_ms: i32,
 
@@ -1702,6 +1710,10 @@ impl WeaponCatalog {
                 impact_type: geometry.impact_type,
                 raise_time_ms: geometry.raise_time_ms,
                 drop_time_ms: geometry.drop_time_ms,
+                first_raise_time_ms: 0,
+                empty_raise_time_ms: 0,
+                empty_drop_time_ms: 0,
+                last_fire_time_ms: 0,
                 alternate_raise_time_ms: geometry.alternate_raise_time_ms,
                 alternate_drop_time_ms: geometry.alternate_drop_time_ms,
                 fire_delay_ms: geometry.fire_delay_ms,
