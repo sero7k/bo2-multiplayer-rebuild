@@ -1,11 +1,5 @@
 //! Script vehicles on paths: `attachpath(node)` then `startpath()` moves a
 //! vehicle entity along its chain of `info_vehicle_node`s (each node's
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/vehicles.rs
-//! `target` names the next) at each node's `speed` (miles per hour, 17.6
-//! units a second each), turned along the way; `reached_end_node` at the
-//! last node. Nuketown's perk machines ride `perk_arrival_vehicle` down
-//! from the sky this way (linked to it).
-=======
 //! `target` names the next; a chain may loop back on itself) straight from
 //! node to node (BO2's curve through them takes each node's `tension`, and
 //! with none set, as on every Tranzit node, it is 0: straight lines), facing
@@ -24,30 +18,18 @@
 //! miles per hour per second) or `setspeedimmediate`; `resumespeed` hands
 //! it back to the nodes. Tranzit's bus is driven this way (its stop
 //! schedule waits on `reached_node` and polls `getspeed`).
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/vehicles.rs
 
 use std::collections::BTreeMap;
 
 use bevy_ecs::prelude::World;
 use gsc_t6::{Value, Vm};
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/vehicles.rs
-use super::{Zm, arg, entnum, with_vm};
-=======
 use super::{Zm, arg, entnum, num, vec3, with_vm};
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/vehicles.rs
 
 const MPH: f32 = 17.6;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct VPath {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/vehicles.rs
-    /// (point, speed units/s from it).
-    pub points: Vec<([f32; 3], f32)>,
-    /// bo2mp: each point's node entity (`reached_node` names it).
-    pub nodes: Vec<u32>,
-    pub seg: usize,
-=======
     /// The node it left last.
     pub from: u32,
     /// The node it drives to.
@@ -80,7 +62,6 @@ pub(crate) struct VSpeed {
     pub decel: f32,
     /// `setvehmaxspeed`.
     pub max: Option<f32>,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/vehicles.rs
 }
 
 #[derive(Clone, Debug, Default)]
@@ -97,9 +78,6 @@ pub(crate) struct Vehicles {
     pub plants: BTreeMap<u32, Plant>,
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/vehicles.rs
-fn node_chain(vm: &mut Vm<World>, world: &World, start: u32) -> Vec<([f32; 3], f32, u32)> {
-=======
 /// The vehicle types that stand on their wheels (BO2 plants its ground
 /// vehicles; Tranzit's bus is the one driven on a path here).
 const PLANTED: [&str; 1] = ["zombie_bus"];
@@ -138,18 +116,13 @@ pub(crate) struct Plant {
 }
 
 fn build_nodes(vm: &mut Vm<World>, world: &World) -> BTreeMap<u32, VNode> {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/vehicles.rs
     let zm = world.resource::<Zm>();
     let (tn, tg, sp) = (
         vm.intern("targetname"),
         vm.intern("target"),
         vm.intern("speed"),
     );
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/vehicles.rs
-    let nodes: Vec<(u32, [f32; 3], String, String, f32)> = zm
-=======
     let raw: Vec<(u32, [f32; 3], String, String, f32, Option<[f32; 3]>)> = zm
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/vehicles.rs
         .ents
         .iter()
         .filter(|(_, e)| e.classname.starts_with("info_vehicle_node"))
@@ -157,24 +130,6 @@ fn build_nodes(vm: &mut Vm<World>, world: &World) -> BTreeMap<u32, VNode> {
             let o = e.obj?;
             let name = vm.to_text(&vm.raw_field(o, tn));
             let target = vm.to_text(&vm.raw_field(o, tg));
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/vehicles.rs
-            let speed = vm.raw_field(o, sp).as_float().unwrap_or(30.0);
-            Some((*n, e.origin, name, target, speed))
-        })
-        .collect();
-    let mut out = Vec::new();
-    let mut at = nodes.iter().find(|n| n.0 == start);
-    let mut seen = 0;
-    while let Some(n) = at {
-        out.push((n.1, n.4.max(1.0) * MPH, n.0));
-        seen += 1;
-        if n.3.is_empty() || seen > 256 {
-            break;
-        }
-        at = nodes.iter().find(|m| m.2 == n.3);
-    }
-    out
-=======
             let v = vm.raw_field(o, sp);
             let speed = v
                 .as_float()
@@ -205,7 +160,6 @@ fn build_nodes(vm: &mut Vm<World>, world: &World) -> BTreeMap<u32, VNode> {
             )
         })
         .collect()
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/vehicles.rs
 }
 
 /// Each tick: vehicles along their paths.
@@ -219,12 +173,6 @@ pub(crate) fn advance(world: &mut World, dt: f32) {
         .keys()
         .copied()
         .collect();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/vehicles.rs
-    let mut arrived = Vec::new();
-    // bo2mp: each node passed, as BO2's engine tells the vehicle (the
-    // Warthog starts and stops its strafing runs by them).
-    let mut passed: Vec<(u32, u32)> = Vec::new();
-=======
     if ids.is_empty() {
         return;
     }
@@ -233,7 +181,6 @@ pub(crate) fn advance(world: &mut World, dt: f32) {
     };
     // (vehicle, node reached, end of the path)
     let mut reached: Vec<(u32, u32, bool)> = Vec::new();
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/vehicles.rs
     for v in ids {
         let Some(mut path) = world.resource::<Zm>().vehicles.moving.get(&v).cloned() else {
             continue;
@@ -242,29 +189,6 @@ pub(crate) fn advance(world: &mut World, dt: f32) {
             world.resource_mut::<Zm>().vehicles.moving.remove(&v);
             continue;
         };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/vehicles.rs
-        let mut step = path.points.get(path.seg).map_or(0.0, |p| p.1) * dt;
-        let mut yaw = None;
-        while step > 0.0 {
-            let Some(&(to, _)) = path.points.get(path.seg + 1) else {
-                break;
-            };
-            let d = [to[0] - pos[0], to[1] - pos[1], to[2] - pos[2]];
-            let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-            if len > 1e-3 && (d[0].abs() + d[1].abs()) > 1e-3 {
-                yaw = Some(d[1].atan2(d[0]).to_degrees());
-            }
-            if len <= step {
-                pos = to;
-                step -= len;
-                path.seg += 1;
-                if let Some(&node) = path.nodes.get(path.seg) {
-                    passed.push((v, node));
-                }
-            } else {
-                pos = std::array::from_fn(|i| pos[i] + d[i] / len * step);
-                step = 0.0;
-=======
         let mut sp = world
             .resource::<Zm>()
             .vehicles
@@ -360,10 +284,8 @@ pub(crate) fn advance(world: &mut World, dt: f32) {
                 pos[2] = z;
                 angles[0] = pitch;
                 angles[2] = roll;
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/vehicles.rs
             }
         }
-        let done = path.seg + 1 >= path.points.len();
         let mut zm = world.resource_mut::<Zm>();
         if let Some(e) = zm.ents.get_mut(&v) {
             let moved = gsc_t6::math::sub(pos, e.origin);
@@ -377,31 +299,11 @@ pub(crate) fn advance(world: &mut World, dt: f32) {
         if done {
             sp.now = 0.0;
             zm.vehicles.moving.remove(&v);
-            arrived.push(v);
         } else {
             zm.vehicles.moving.insert(v, path);
         }
         zm.vehicles.speed.insert(v, sp);
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/vehicles.rs
-    if arrived.is_empty() && passed.is_empty() {
-        return;
-    }
-    with_vm(world, |vm, world| {
-        for (v, node) in passed {
-            let zm = world.resource::<Zm>();
-            let (Some(o), Some(n)) = (
-                zm.ents.get(&v).and_then(|e| e.obj),
-                zm.ents.get(&node).and_then(|e| e.obj),
-            ) else {
-                continue;
-            };
-            vm.notify_str(world, o, "reached_node", &[Value::Object(n)]);
-        }
-        for v in arrived {
-            if let Some(o) = world.resource::<Zm>().ents.get(&v).and_then(|e| e.obj) {
-                vm.notify_str(world, o, "reached_end_node", &[]);
-=======
     world.resource_mut::<Zm>().vehicles.nodes = Some(nodes);
     if reached.is_empty() {
         return;
@@ -429,7 +331,6 @@ pub(crate) fn advance(world: &mut World, dt: f32) {
             vm.notify_str(world, vo, "reached_node", &[arg]);
             if end {
                 vm.notify_str(world, vo, "reached_end_node", &[]);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/vehicles.rs
             }
         }
     });
@@ -747,24 +648,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let Some(start) = world.resource::<Zm>().vehicles.attached.get(&v).copied() else {
             return Ok(Value::Undefined);
         };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/vehicles.rs
-        let chain = node_chain(vm, world, start);
-        let points: Vec<([f32; 3], f32)> = chain.iter().map(|(p, s, _)| (*p, *s)).collect();
-        let nodes: Vec<u32> = chain.iter().map(|(_, _, n)| *n).collect();
-        if let Some(&(first, _)) = points.first() {
-            let mut zm = world.resource_mut::<Zm>();
-            if let Some(e) = zm.ents.get_mut(&v) {
-                e.origin = first;
-            }
-            zm.vehicles.moving.insert(
-                v,
-                VPath {
-                    points,
-                    nodes,
-                    seg: 0,
-                },
-            );
-=======
         if world.resource::<Zm>().vehicles.nodes.is_none() {
             let nodes = build_nodes(vm, world);
             world.resource_mut::<Zm>().vehicles.nodes = Some(nodes);
@@ -779,7 +662,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let mut zm = world.resource_mut::<Zm>();
         if planted {
             zm.vehicles.plants.entry(v).or_default();
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/vehicles.rs
         }
         let Some(first) = zm
             .vehicles
@@ -806,17 +688,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         zm.vehicles.moving.insert(v, path);
         Ok(Value::Undefined)
     });
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/vehicles.rs
-    for name in [
-        "setspeed",
-        "setspeedimmediate",
-        "resumespeed",
-        "setvehgoalpos",
-        "vehicle_detachfrompath",
-    ] {
-        vm.bind(name, true, |_, _, _, _| Ok(Value::Undefined));
-    }
-=======
     // setspeed(mph, accel, decel) / setspeedimmediate(mph): the script
     // drives the vehicle from here on.
     vm.bind("setspeed", true, |vm, world, s, a| {
@@ -913,5 +784,4 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     });
     vm.bind("vehicle_detachfrompath", true, |_, _, _, _| Ok(Value::Undefined));
     super::flight::bind(vm);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/vehicles.rs
 }

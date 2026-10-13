@@ -902,10 +902,6 @@ impl<'a> Walk<'a> {
                 | op::GET_FUNCTION
                 | op::GET_HASH
                 | op::EMPTY_ARRAY
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/gsc.rs
-                | op::GET_TIME
-                | op::VECTOR_CONSTANT => self.push(GscValue::Other),
-=======
                 | op::GET_TIME => self.push(GscValue::Other),
                 // bo2zm: a vector of -1/0/1 parts, two bits each (x high),
                 // as the script VM reads it: createfx angles are written
@@ -927,7 +923,6 @@ impl<'a> Walk<'a> {
                         _ => self.push(GscValue::Other),
                     }
                 }
->>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/gsc.rs
                 op::GET_LEVEL_OBJECT => self.field_object = GscValue::Level,
                 op::GET_SELF_OBJECT | op::GET_ANIM_OBJECT => self.field_object = GscValue::Other,
                 op::GET_GAME_REF => {
@@ -1063,7 +1058,6 @@ impl<'a> Walk<'a> {
                 | op::MULTIPLY
                 | op::DIVIDE
                 | op::MODULUS
-                | op::VECTOR_SCALE
                 | op::NEXT_ARRAY_KEY => {
                     self.pop();
                     self.pop();

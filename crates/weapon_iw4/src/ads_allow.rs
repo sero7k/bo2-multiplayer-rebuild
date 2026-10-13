@@ -8,12 +8,9 @@ pub struct AdsAllowWeaponFacts {
     pub no_ads_when_mag_empty: bool,
 
     pub clip_index: i32,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/weapon_iw4/src/ads_allow.rs
 
     /// bo2mp: Hybrid Optic: the sight swap keeps the player aimed.
     pub optic_switch: bool,
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/weapon_iw4/src/ads_allow.rs
 }
 
 pub const OTHER_FLAG_PLAYER: u32 = playerstate_iw4::other_flags::PLAYER;

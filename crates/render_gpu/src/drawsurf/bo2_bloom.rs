@@ -1,4 +1,3 @@
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.rs
 //! bo2zm: Black Ops II's bloom and final colour, after the fallback pass on
 //! a Black Ops II map. BO2 (`hdr_bloom_downsample`, `hdr_bloom_combine_hilo`,
 //! `hdr_bloom_apply`, `hdr_apply_lut2d`, fxc disassembly) takes the scene's
@@ -10,15 +9,6 @@
 //! vision rows' w, low to high (the code's mapping is not in the shaders).
 //! The fallback pass already rolls highlights off (8-bit frame); this pass
 //! undoes it before adding bloom.
-=======
-//! bo2zm: Black Ops II's bloom, after the fallback pass on a Black Ops II
-//! map. BO2 (`hdr_bloom_remap`, `hdr_bloom_apply`, fxc disassembly) takes
-//! the scene's bright parts by a smooth threshold on luminance, blurs them
-//! at a quarter of the frame and puts them back as sqrt(scene^2 + 4 bloom^2)
-//! before its tone curve. The fallback pass writes display values, so the
-//! threshold is on those, set by eye (the map's vision file names its
-//! ranges, but not which of them the bloom reads).
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.rs
 //!
 //! bo2zm M4: the same pass blurs the whole world while BO2's menus ask for
 //! it (`Engine.BlurWorld`, `frame::WorldBlur`): the frame at a quarter size,
@@ -28,27 +18,16 @@ use bevy::core_pipeline::{Core3d, Core3dSystems};
 use bevy::prelude::*;
 use bevy::render::RenderStartup;
 use bevy::render::render_resource::binding_types::{
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.rs
     sampler, texture_2d, texture_3d, uniform_buffer_sized,
-=======
-    sampler, texture_2d, uniform_buffer_sized,
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.rs
 };
 use bevy::render::render_resource::{
     BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, Buffer, BufferDescriptor,
     BufferUsages, CachedRenderPipelineId, ColorTargetState, ColorWrites, Extent3d, FilterMode,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.rs
     FragmentState, LoadOp, Operations, Origin3d, PipelineCache, RenderPassColorAttachment,
     RenderPassDescriptor, RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor,
     ShaderStages, StoreOp, TexelCopyBufferLayout, TexelCopyTextureInfo, Texture, TextureAspect,
     TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
     TextureView, TextureViewDescriptor, VertexState,
-=======
-    FragmentState, LoadOp, Operations, PipelineCache, RenderPassColorAttachment,
-    RenderPassDescriptor, RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor,
-    ShaderStages, StoreOp, Texture, TextureDescriptor, TextureDimension, TextureFormat,
-    TextureSampleType, TextureUsages, TextureView, TextureViewDescriptor, VertexState,
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.rs
 };
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery};
 use bevy::render::view::ViewTarget;
@@ -57,7 +36,6 @@ use std::collections::HashMap;
 use std::num::NonZeroU64;
 
 const SHADER_PATH: &str = "embedded://render_gpu/drawsurf/bo2_bloom.wgsl";
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.rs
 const PARAMS_BYTES: u64 = 112;
 const QUARTER_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 const LUT_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
@@ -65,14 +43,6 @@ const LUT_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
 const LOW_STEP: f32 = 3.0;
 
 static NO_BLOOM: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-=======
-const PARAMS_BYTES: u64 = 32;
-const QUARTER_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
-/// Display luminance where the bright pass starts, where it is full, and
-/// the strength bloom goes back in with (BO2's apply uses 4 on its HDR
-/// bloom; display values are smaller, so the same 4).
-const THRESHOLD: [f32; 4] = [0.62, 0.95, 4.0, 0.0];
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.rs
 
 /// BO2 maps only (set by the fallback pass's geometry: the map has T6
 /// lighting).
@@ -86,21 +56,13 @@ pub(super) struct Bo2BloomSet;
 
 /// How much BO2's menus blur the world this frame (0 = none; 2 = full).
 #[derive(Resource, Default)]
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.rs
 pub(super) struct Bo2MenuBlur(f32, f32, f32, f32);
-
-fn extract_menu_blur(
-    blur: bevy::render::Extract<Option<Res<frame::WorldBlur>>>,
-    screen: bevy::render::Extract<Option<Res<frame::AppScreen>>>,
-    dim: bevy::render::Extract<Option<Res<frame::WorldDim>>>,
-=======
-struct Bo2MenuBlur(f32);
 
 /// bo2zm: BO2's brightness, its `r_gamma` (0.5 to 1.5, 1 = as made): the
 /// finished picture raised to 1/gamma. His saved brightness (-0.2 to 0.2)
 /// is that slider.
 #[derive(Resource)]
-struct Bo2Gamma(f32);
+pub(super) struct Bo2Gamma(f32);
 
 impl Default for Bo2Gamma {
     fn default() -> Self {
@@ -111,19 +73,21 @@ impl Default for Bo2Gamma {
 /// bo2zm: his FXAA row (or the anti-aliasing row set above off): the
 /// finished picture's edges smoothed as it goes back into the frame.
 #[derive(Resource, Default)]
-struct Bo2Fxaa(bool);
+pub(super) struct Bo2Fxaa(bool);
 
 fn extract_menu_blur(
-    (blur, settings): (
+    (blur, screen, dim, settings): (
         bevy::render::Extract<Option<Res<frame::WorldBlur>>>,
+        bevy::render::Extract<Option<Res<frame::AppScreen>>>,
+        bevy::render::Extract<Option<Res<frame::WorldDim>>>,
         bevy::render::Extract<Option<Res<frame::GameSettings>>>,
     ),
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.rs
     mut out: ResMut<Bo2MenuBlur>,
     (mut gamma, mut fxaa): (ResMut<Bo2Gamma>, ResMut<Bo2Fxaa>),
 ) {
     out.0 = blur.as_ref().map_or(0.0, |b| b.0);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.rs
+    gamma.0 = settings.as_ref().map_or(1.0, |s| (1.0 + s.brightness * 2.5).clamp(0.5, 1.5));
+    fxaa.0 = settings.as_ref().is_some_and(|s| s.fxaa || s.aa_samples > 1);
     // bo2mp: the class select before the first spawn (and the front end) shows the
     // world grey and dim (real 28); the pause menu in a live match keeps its colour (real 58).
     // bo2mp: the black dims the in-match menus stack over the world.
@@ -133,10 +97,6 @@ fn extract_menu_blur(
     // dim (pebbles and the parking sign's digits resolve); the blur belongs to the pause menu
     // and the front end. (out.3: 1 = no blur, the grey and dim stay.)
     out.3 = if screen.as_ref().is_some_and(|s| **s == frame::AppScreen::ClassSelect) { 1.0 } else { 0.0 };
-=======
-    gamma.0 = settings.as_ref().map_or(1.0, |s| (1.0 + s.brightness * 2.5).clamp(0.5, 1.5));
-    fxaa.0 = settings.as_ref().is_some_and(|s| s.fxaa || s.aa_samples > 1);
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.rs
 }
 
 #[derive(Resource)]
@@ -145,7 +105,6 @@ pub(super) struct Bo2Bloom {
     composite_layout: BindGroupLayoutDescriptor,
     shader: Handle<Shader>,
     sampler: Option<Sampler>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.rs
     /// Quarter-size targets (two ping-pong, one for the low bloom level),
     /// for the frame size they were made at.
     quarter: Option<(UVec2, [(Texture, TextureView); 3])>,
@@ -155,13 +114,6 @@ pub(super) struct Bo2Bloom {
     /// bo2mp: the map's colour table (3D, 32^3) and the grade generation it
     /// was made from.
     lut: Option<(u64, Texture, TextureView)>,
-=======
-    /// Quarter-size ping-pong targets, for the frame size they were made at.
-    quarter: Option<(UVec2, [(Texture, TextureView); 2])>,
-    /// extract, blur, composite: one parameter buffer each (blur twice);
-    /// then the menu blur's: shrink, blur four times, put back.
-    params: Option<[Buffer; 10]>,
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.rs
     extract: Option<CachedRenderPipelineId>,
     bright: Option<CachedRenderPipelineId>,
     blur: Option<CachedRenderPipelineId>,
@@ -250,8 +202,7 @@ pub(super) fn draw_bo2_bloom(
     view: ViewQuery<&ViewTarget>,
     enabled: Res<Bo2BloomEnabled>,
     menu_blur: Res<Bo2MenuBlur>,
-    gamma: Res<Bo2Gamma>,
-    fxaa: Res<Bo2Fxaa>,
+    (gamma, fxaa): (Res<Bo2Gamma>, Res<Bo2Fxaa>),
     bloom: Option<ResMut<Bo2Bloom>>,
     cache: Res<PipelineCache>,
     device: Res<RenderDevice>,
@@ -283,11 +234,7 @@ pub(super) fn draw_bo2_bloom(
         let id = cache.queue_render_pipeline(d);
         bloom.blurred.insert(format, id);
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.rs
     let (Some(extract), Some(bright), Some(blur), Some(composite)) = (
-=======
-    let (Some(extract), Some(blur), Some(composite)) = (
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.rs
         bloom.extract.and_then(|id| cache.get_render_pipeline(id)),
         bloom.bright.and_then(|id| cache.get_render_pipeline(id)),
         bloom.blur.and_then(|id| cache.get_render_pipeline(id)),
@@ -317,7 +264,6 @@ pub(super) fn draw_bo2_bloom(
             let view = texture.create_view(&TextureViewDescriptor::default());
             (texture, view)
         };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.rs
         bloom.quarter = Some((
             full,
             [
@@ -400,10 +346,6 @@ pub(super) fn draw_bo2_bloom(
         }
     };
     let bloom_rows = [ramp, tint(rgb_h), tint(rgb_l), tint(y_h), tint(y_l)];
-=======
-        bloom.quarter = Some((full, [make("bo2zm_bloom_a"), make("bo2zm_bloom_b")]));
-    }
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.rs
     let sampler = bloom
         .sampler
         .get_or_insert_with(|| {
@@ -429,7 +371,6 @@ pub(super) fn draw_bo2_bloom(
         })
         .clone();
     let write_with = |buffer: &Buffer, texel: Vec2, dir: Vec2, threshold: [f32; 4]| {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.rs
         let mut data = [0.0f32; 28];
         data[..8].copy_from_slice(&[
             texel.x, texel.y, dir.x, dir.y, threshold[0], threshold[1], threshold[2], threshold[3],
@@ -440,36 +381,23 @@ pub(super) fn draw_bo2_bloom(
         queue.write_buffer(buffer, 0, bytemuck::cast_slice(&data));
     };
     let write = |buffer: &Buffer, texel: Vec2, dir: Vec2| write_with(buffer, texel, dir, [0.0; 4]);
-=======
-        let data: [f32; 8] = [
-            texel.x, texel.y, dir.x, dir.y, threshold[0], threshold[1], threshold[2], threshold[3],
-        ];
-        queue.write_buffer(buffer, 0, bytemuck::cast_slice(&data));
-    };
-    let write = |buffer: &Buffer, texel: Vec2, dir: Vec2| write_with(buffer, texel, dir, THRESHOLD);
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.rs
     let full_texel = Vec2::new(1.0 / full.x as f32, 1.0 / full.y as f32);
     let quarter_texel = Vec2::new(1.0 / quarter.x as f32, 1.0 / quarter.y as f32);
     write(&params[0], full_texel, Vec2::ZERO);
     write(&params[1], quarter_texel, Vec2::new(1.0, 0.0));
     write(&params[2], quarter_texel, Vec2::new(0.0, 1.0));
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.rs
     write(&params[3], quarter_texel, Vec2::new(LOW_STEP, 0.0));
     write(&params[4], quarter_texel, Vec2::new(0.0, LOW_STEP));
-    write(&params[5], full_texel, Vec2::ZERO);
+    // bo2zm: the composite's w: BO2's gamma (its brightness slider); z: FXAA on.
+    write_with(
+        &params[5],
+        full_texel,
+        Vec2::new(if fxaa.0 { 1.0 } else { 0.0 }, 0.0),
+        [0.0, 0.0, 0.0, gamma.0],
+    );
     let (Some((_, [(_, a), (_, b), (_, low)])), Some((_, _, lut))) =
         (bloom.quarter.as_ref(), bloom.lut.as_ref())
     else {
-=======
-    // The composite's w: BO2's gamma (its brightness slider); z: FXAA on.
-    write_with(
-        &params[3],
-        full_texel,
-        Vec2::new(if fxaa.0 { 1.0 } else { 0.0 }, 0.0),
-        [THRESHOLD[0], THRESHOLD[1], THRESHOLD[2], gamma.0],
-    );
-    let Some((_, [(_, a), (_, b)])) = bloom.quarter.as_ref() else {
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.rs
         return;
     };
     let layout = cache.get_bind_group_layout(&bloom.layout);
@@ -507,13 +435,9 @@ pub(super) fn draw_bo2_bloom(
             &BindGroupEntries::with_indices(((0, source), (1, &sampler), (2, buffer.as_entire_binding()))),
         )
     };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.rs
     // The high level (quarter size, blurred), then the low (the high blurred
     // again, wider).
     run("bo2zm_bloom_bright", bright, &bind(post.source, &params[0]), a);
-=======
-    run("bo2zm_bloom_extract", extract, &bind(post.source, &params[0]), a);
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.rs
     run("bo2zm_bloom_blur_h", blur, &bind(a, &params[1]), b);
     run("bo2zm_bloom_blur_v", blur, &bind(b, &params[2]), a);
     run("bo2mp_bloom_low_h", blur, &bind(a, &params[3]), b);
@@ -524,11 +448,7 @@ pub(super) fn draw_bo2_bloom(
         &BindGroupEntries::with_indices((
             (0, post.source),
             (1, &sampler),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.rs
             (2, params[5].as_entire_binding()),
-=======
-            (2, params[3].as_entire_binding()),
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.rs
             (3, a),
             (4, low),
             (5, lut),
@@ -542,7 +462,6 @@ pub(super) fn draw_bo2_bloom(
     else {
         return;
     };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.rs
     // (bo2mp: with two or more dims over the match world the pass still runs, with no blur, to lift the dark world.)
     if amount <= 0.0 && !(menu_blur.1 < 0.5 && menu_blur.2 >= 1.5) {
         return;
@@ -562,35 +481,13 @@ pub(super) fn draw_bo2_bloom(
     run("bo2zm_menu_blur_v1", blur, &bind(b, &params[8]), a);
     run("bo2zm_menu_blur_h2", blur, &bind(a, &params[9]), b);
     run("bo2zm_menu_blur_v2", blur, &bind(b, &params[10]), a);
-=======
-    if amount <= 0.0 {
-        return;
-    }
-    let all = [-1.0, 0.0, 0.0, amount];
-    write_with(&params[4], full_texel, Vec2::ZERO, all);
-    write_with(&params[5], quarter_texel, Vec2::new(1.0, 0.0), all);
-    write_with(&params[6], quarter_texel, Vec2::new(0.0, 1.0), all);
-    write_with(&params[7], quarter_texel, Vec2::new(2.0, 0.0), all);
-    write_with(&params[8], quarter_texel, Vec2::new(0.0, 2.0), all);
-    write_with(&params[9], full_texel, Vec2::ZERO, all);
-    let post = target.post_process_write();
-    run("bo2zm_menu_blur_shrink", extract, &bind(post.source, &params[4]), a);
-    run("bo2zm_menu_blur_h1", blur, &bind(a, &params[5]), b);
-    run("bo2zm_menu_blur_v1", blur, &bind(b, &params[6]), a);
-    run("bo2zm_menu_blur_h2", blur, &bind(a, &params[7]), b);
-    run("bo2zm_menu_blur_v2", blur, &bind(b, &params[8]), a);
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.rs
     let blurred_bind = device.create_bind_group(
         "bo2zm_menu_blur",
         &composite_layout,
         &BindGroupEntries::with_indices((
             (0, post.source),
             (1, &sampler),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.rs
             (2, params[11].as_entire_binding()),
-=======
-            (2, params[9].as_entire_binding()),
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.rs
             (3, a),
             (4, low),
             (5, lut),

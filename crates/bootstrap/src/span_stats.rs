@@ -76,11 +76,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bootstrap/src/span_stats.rs
 /// One leaked copy per distinct name (systems and schedules are a fixed set).
-=======
-/// One never-freed copy per distinct name (systems and schedules are a fixed set).
->>>>>>> /tmp/claude-0/zmhead/crates/bootstrap/src/span_stats.rs
 fn intern(name: String) -> &'static str {
     let mut names = lock(&NAMES);
     let names = names.get_or_insert_with(HashSet::new);

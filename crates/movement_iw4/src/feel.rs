@@ -74,13 +74,8 @@ pub struct Bo2Feel {
     pub dtp_cycle_scale: f32,
 
     /// Sprint in any direction at full speed. Not BO2 (it sprints forward
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/movement_iw4/src/feel.rs
     /// only), so off unless the Controls menu's "Omni Movement" is on
     /// (off by default, an option for whoever wants it).
-=======
-    /// only), so off unless his Controls menu's "Omni Movement" is on
-    /// (a tester 10-10: off by default, an option for whoever wants it).
->>>>>>> /tmp/claude-0/zmhead/crates/movement_iw4/src/feel.rs
     pub omni: bool,
 
     /// mantle_weapon_height: a climb this low (by its climb table height)
@@ -843,13 +838,9 @@ mod tests {
 
     #[test]
     fn a_second_sprint_press_mid_sprint_keeps_sprinting() {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/movement_iw4/src/feel.rs
-        for (feel, still_sprinting) in [(BO2, true), (Bo2Feel::IW4, false)] {
-=======
         // bo2zm: zombies' sprint keeps going on a second press with the feel
         // off too (sprint.rs, M4 retest 2), so both keep sprinting here.
         for (feel, still_sprinting) in [(BO2, true), (Bo2Feel::IW4, true)] {
->>>>>>> /tmp/claude-0/zmhead/crates/movement_iw4/src/feel.rs
             let mut ps = PlayerState::ZERO;
             ps.pm_flags = playerstate_iw4::pm_flags::SPRINTING;
             ps.last_sprint_start = 1000;

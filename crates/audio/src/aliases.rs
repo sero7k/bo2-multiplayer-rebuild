@@ -322,14 +322,11 @@ fn t6_movement_owned(alias: &str) -> Option<String> {
         });
     }
     let rest = alias.strip_prefix("gear_rattle_")?;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/aliases.rs
     // bo2mp: another player's mantle is BO2's prone-and-mantle gear (it has
     // no fly_gear_mantle_npc).
     if rest == "mantle" {
         return Some("fly_prone_n_mantle_npc".to_owned());
     }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/audio/src/aliases.rs
     Some(match rest.strip_prefix("plr_") {
         Some(gait) => format!("fly_gear_{gait}_plr"),
         None => format!("fly_gear_{rest}_npc"),

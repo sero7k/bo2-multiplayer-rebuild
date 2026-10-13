@@ -1,11 +1,7 @@
 //! bo2zm: Black Ops II's player collision (its "GJK" character controller),
 //! the plain-math parts: the player's shape, the plane solver that bends a
 //! move along what it touches, and the "can I stand on this" rule. Facts and
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/movement_iw4/src/gjk.rs
 //! numbers from Black Ops II's server.
-=======
-//! numbers from Black Ops II's server; the spec is D:/bo2feel/audit/C-gjk-spec.md.
->>>>>>> /tmp/claude-0/zmhead/crates/movement_iw4/src/gjk.rs
 //! Nothing calls this yet: the traces and the slide move come next.
 #![allow(dead_code)]
 

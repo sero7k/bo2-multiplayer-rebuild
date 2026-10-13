@@ -1,10 +1,6 @@
 //! Triggers: touch triggers (`trigger_multiple`, `trigger_radius`) notify
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/triggers.rs
-//! `trigger` with the player every frame he is inside; use triggers
-=======
 //! `trigger` with the player every frame he is inside (and with zombies when
 //! the spawnflags take AI); use triggers
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/triggers.rs
 //! (`trigger_use`, `trigger_use_touch`, `trigger_radius_use`) when he
 //! presses use inside the one he faces best. A trigger hidden from a player
 //! (`setinvisibletoplayer`) ignores him.
@@ -84,27 +80,6 @@ pub(super) fn touches(world: &mut World, e: &Ent, mins: [f32; 3], maxs: [f32; 3]
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/triggers.rs
-/// A look-at use trigger's test: how far along the player's view (from
-/// his eye, within the use radius) it meets the trigger's turned box, with
-/// nothing solid in front of it (the chalk board the weapon sits on is
-/// allowed: a few units). BO2 builds each wall buy's box from the
-/// weapon model on the wall, nudged out of the wall so the view meets it
-/// before the wall, and asks the engine for a look (`require_look_at`).
-fn look_hit(world: &mut World, e: &Ent, eye: [f32; 3], dir: [f32; 3], reach: f32) -> Option<f32> {
-    let [w, l, h] = e.box_dims?;
-    let (f, r, u) = gsc_t6::math::angle_vectors(e.angles);
-    let rel = gsc_t6::math::sub(eye, e.origin);
-    let (mut near, mut far) = (0.0f32, reach);
-    for (axis, half) in [(f, w * 0.5), (r, l * 0.5), (u, h * 0.5)] {
-        let o = gsc_t6::math::dot(rel, axis);
-        let d = gsc_t6::math::dot(dir, axis);
-        if d.abs() < 1e-6 {
-            if o.abs() > half {
-                return None;
-            }
-            continue;
-=======
 /// Does a trigger faced at `score` (low priority or not) win over the best
 /// so far (its score and priority)? A normal priority trigger beats a low
 /// one whatever their scores; among equals the better faced wins.
@@ -147,7 +122,6 @@ fn box_use_reach(e: &Ent, mins: [f32; 3], maxs: [f32; 3], eye: [f32; 3], fwd: [f
     for i in 0..3 {
         if m[i].abs() > half[i] + d[i].abs() {
             return false;
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/triggers.rs
         }
     }
     for (a, b) in [(1, 2), (2, 0), (0, 1)] {
@@ -309,12 +283,17 @@ pub(super) fn dispatch(world: &mut World) {
             let fwd = gsc_t6::math::angle_vectors(ps.map_or([0.0; 3], |p| p.viewangles)).0;
             (eye, fwd)
         };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/triggers.rs
         // In a vehicle he has no use hint and uses nothing (BO2's
         // Player_UpdateCursorHints and the use scan both stop while
         // eFlags 0x4000 is set).
         let in_vehicle = super::killstreaks::riding(world, client);
-        let mut best: Option<(f32, ObjRef, Option<String>)> = None;
+        // The faced trigger: (score, trigger, hint, low priority). BO2 offers a
+        // low priority one (`sethintlowpriority`: every buyable door) only
+        // when no other is there to use; among equals, the best faced.
+        let mut best: Option<(f32, ObjRef, Option<String>, bool)> = None;
+        let beats = |score: f32, low: bool, best: &Option<(f32, ObjRef, Option<String>, bool)>| {
+            hint_beats(score, low, best.as_ref().map(|b| (b.0, b.3)))
+        };
         let my_team = teams
             .iter()
             .find(|(c, _)| *c == client)
@@ -323,23 +302,13 @@ pub(super) fn dispatch(world: &mut World) {
             if in_vehicle && *k == Kind::Use {
                 continue;
             }
-            // (A claim by someone no longer playing holds nothing.)
+            // bo2mp: (A claim by someone no longer playing holds nothing.)
             if let Some((_, claimant, team)) = claims.iter().find(|(t, _, _)| t == n)
                 && (claimant.is_some_and(|c| c != client && playing.contains(&c))
                     || team.as_deref().is_some_and(|t| Some(t) != my_team))
             {
                 continue;
             }
-=======
-        // The faced trigger: (score, trigger, hint, low priority). BO2 offers a
-        // low priority one (`sethintlowpriority`: every buyable door) only
-        // when no other is there to use; among equals, the best faced.
-        let mut best: Option<(f32, ObjRef, Option<String>, bool)> = None;
-        let beats = |score: f32, low: bool, best: &Option<(f32, ObjRef, Option<String>, bool)>| {
-            hint_beats(score, low, best.as_ref().map(|b| (b.0, b.3)))
-        };
-        for (_, e, k) in &triggers {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/triggers.rs
             if e.invisible_to.contains(&client) || e.invisible_to_all {
                 continue;
             }
@@ -421,7 +390,6 @@ pub(super) fn dispatch(world: &mut World) {
                 }
             }
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/triggers.rs
         // bo2mp: else a usable model's (a care package's capture prompt).
         if !in_vehicle
             && best.as_ref().is_none_or(|b| b.2.is_none())
@@ -430,10 +398,7 @@ pub(super) fn dispatch(world: &mut World) {
         {
             world.resource_mut::<Zm>().hints.insert(client, h);
         }
-        if pressed && let Some((_, obj, _)) = best {
-=======
         if pressed && let Some((_, obj, _, _)) = best {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/triggers.rs
             if std::env::var("IW4L_T6_TRIGLOG").is_ok() {
                 diag::info!(Sim, "bo2zm t6 use by {client} on {obj:?}");
             }
@@ -456,8 +421,6 @@ pub(super) fn dispatch(world: &mut World) {
     });
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/triggers.rs
-=======
 /// IW4L_T6_FIRELOG=<targetname>[,...]: each trigger with that name that
 /// fires, which entity it is, its volume and who set it off (at most once a
 /// second per pair; Die Rise's squash triggers refuse Who's Who's body).
@@ -887,9 +850,6 @@ fn damageable_model(e: &Ent) -> bool {
         && !e.classname.starts_with("trigger")
 }
 
-#[allow(dead_code)]
-fn _volume_type(_: Volume<'_>) {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -943,4 +903,3 @@ mod tests {
         assert!(hint_beats(0.1, true, None));
     }
 }
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/triggers.rs

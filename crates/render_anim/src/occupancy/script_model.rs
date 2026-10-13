@@ -525,7 +525,6 @@ fn apply_presented_script_model_dobjs(
         return;
     };
     let by_owner = presented_dobj_states(presented);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/script_model.rs
     // bo2mp: a vehicle he sees from its own tag is not drawn for him (his
     // view sits inside it: the Dragonfire, the VTOL Warship's gun).
     let ridden = local
@@ -538,9 +537,6 @@ fn apply_presented_script_model_dobjs(
             *visibility = Visibility::Hidden;
             continue;
         }
-=======
-    for (mut owner, mut visibility) in &mut owners {
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/script_model.rs
         let Some(authority_owner) = owner.authority_owner else {
             *visibility = Visibility::Hidden;
             continue;
@@ -1750,11 +1746,6 @@ pub fn pose_script_dobj_with_materials(
     lod_view: Option<DObjLodView>,
     skin_entries: &[dpvs_iw4::SceneEntSkinEntry],
 ) -> Option<(Vec<PosedModelSurface>, Vec<Option<assets::MaterialIndex>>)> {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/script_model.rs
-    let world = xmodel_runtime::pose_dobj(dobj, request, Mat4::IDENTITY).ok()?;
-    let skin = dobj.skin_matrices(&world);
-    let hide = request.hide_part_bits.words();
-=======
     pose_script_dobj_with_controller(
         catalog,
         skels,
@@ -1803,7 +1794,7 @@ pub(crate) fn skin_script_dobj_with_materials(
     skin_entries: &[dpvs_iw4::SceneEntSkinEntry],
 ) -> Option<(Vec<PosedModelSurface>, Vec<Option<assets::MaterialIndex>>)> {
     let skin = dobj.skin_matrices(world);
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/script_model.rs
+    let hide = hide_part_bits.words();
     let mut surfaces = Vec::new();
     let mut materials = Vec::new();
     for (model, skel) in skels.iter().enumerate() {
@@ -1824,12 +1815,8 @@ pub(crate) fn skin_script_dobj_with_materials(
             |surface_index| {
                 !anim_iw4::surface_hidden_whole(
                     &skel.surface_part_bits[surface_index],
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/script_model.rs
                     hide,
                     base as u32,
-=======
-                    hide_part_bits,
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/script_model.rs
                 ) && dpvs_iw4::SceneEntSkinEntry::stream_draws(
                         skin_entries,
                         model as u16,

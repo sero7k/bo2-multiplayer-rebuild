@@ -490,14 +490,11 @@ fn run_session_swap(
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/session/src/lifecycle.rs
 /// BO2's intermission hold: `_globallogic::endgame` ends with `wait 5.0;
 /// exitlevel( 0 )` after `spawnintermission` (the end scoreboard), so the
 /// board is on screen for 5.0 s before the match goes back to the front end.
 const END_BOARD_HOLD: std::time::Duration = std::time::Duration::from_millis(5000);
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/session/src/lifecycle.rs
 fn run_exit_level(
     mut called: MessageReader<frame::ExitLevelCalled>,
     mut transition: ResMut<SessionSwapRequest>,
@@ -506,7 +503,6 @@ fn run_exit_level(
     mut board: Option<ResMut<frame::EndBoardShown>>,
     mut waiting: Local<bool>,
 ) {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/session/src/lifecycle.rs
     if called.read().next().is_some() {
         *waiting = true;
     }
@@ -535,19 +531,6 @@ fn run_exit_level(
         return;
     }
     *waiting = false;
-    // bo2zm: a Black Ops II game has no menu to go back to yet (M4): the
-    // end of a game starts a new one on the same map.
-    if let Some(zone) = identity
-        .as_ref()
-        .map(|i| i.zone.clone())
-        .filter(|z| z.starts_with("t6:") || z.starts_with("zm_"))
-    {
-        match transition.request_zone(zone.clone()) {
-            Ok(id) => diag::info!(Sim, "session: exitLevel -> a new game on `{zone}` (swap #{id})"),
-=======
-    if called.read().next().is_none() {
-        return;
-    }
     // bo2zm: a Black Ops II game started straight into the map (no menu
     // to go back to) starts a new one on the same map; one started from
     // BO2's own front end goes back to it (the menu screen).
@@ -562,7 +545,6 @@ fn run_exit_level(
                 Sim,
                 "session: exitLevel -> a new game on `{zone}` (swap #{id})"
             ),
->>>>>>> /tmp/claude-0/zmhead/crates/session/src/lifecycle.rs
             Err(err) => diag::info!(Sim, "session: exitLevel refused - {err}"),
         }
         return;
@@ -809,15 +791,6 @@ fn follow_master_match(
     if has_world.0 || loading || swap.pending.is_some() {
         return;
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/session/src/lifecycle.rs
-    // bo2mp: under Black Ops II's rules the offer's mode is BO2's game type
-    // (conf, gun, oic, ...), which Infinity Ward's mode table does not know:
-    // the match takes its game type from `Bo2mpMatchSetup`, and the mode
-    // here is only the session's stand-in.
-    let mode = sim::HostGameModeSelection::from_token(&offer.mode)
-        .or_else(|| assets::t6_rules().then(|| sim::HostGameModeSelection::from_token("tdm")).flatten());
-    let Some(mode) = mode else {
-=======
     // bo2zm H28: a Black Ops II Zombies lobby's mode is `gametype:location`
     // (`zclassic:transit`); everyone in it starts there (free-for-all
     // underneath, as every Zombies map loads). A party's own lobby (Custom
@@ -830,8 +803,13 @@ fn follow_master_match(
         }
         _ => offer.mode.as_str(),
     };
-    let Some(mode) = sim::HostGameModeSelection::from_token(token) else {
->>>>>>> /tmp/claude-0/zmhead/crates/session/src/lifecycle.rs
+    // bo2mp: under Black Ops II's rules the offer's mode is BO2's game type
+    // (conf, gun, oic, ...), which Infinity Ward's mode table does not know:
+    // the match takes its game type from `Bo2mpMatchSetup`, and the mode
+    // here is only the session's stand-in.
+    let mode = sim::HostGameModeSelection::from_token(token)
+        .or_else(|| assets::t6_rules().then(|| sim::HostGameModeSelection::from_token("tdm")).flatten());
+    let Some(mode) = mode else {
         diag::warn!(Net, "master match mode refused: {}", offer.mode);
         *pending = None;
         return;

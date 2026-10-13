@@ -86,7 +86,6 @@ pub fn content_names(flags: ContentFlags) -> String {
     if flags.0 & CONTENT_T6 != 0 {
         names.push("t6");
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/transport/master.rs
     if flags.0 & CONTENT_IW3 != 0 {
         names.push("iw3");
     }
@@ -94,9 +93,6 @@ pub fn content_names(flags: ContentFlags) -> String {
         names.push("t4");
     }
     if flags.0 & !CONTENT_KNOWN != 0 {
-=======
-    if flags.0 & !(CONTENT_IW4 | CONTENT_IW5 | CONTENT_T5 | CONTENT_T6) != 0 {
->>>>>>> /tmp/claude-0/zmhead/crates/net/src/transport/master.rs
         names.push("unknown");
     }
     names.join(",")
@@ -923,11 +919,7 @@ pub fn arm_master_bridge(
             if *role != frame::RuntimeRole::Listen || udp_hub.is_some() {
                 return;
             }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/transport/master.rs
-            let relay = spawn_host(config.clone(), settings.player_name.clone());
-=======
             let relay = spawn_host(config.clone(), settings.shown_name());
->>>>>>> /tmp/claude-0/zmhead/crates/net/src/transport/master.rs
             diag::info!(
                 Net,
                 "master public lobby arming for {}",
@@ -939,11 +931,7 @@ pub fn arm_master_bridge(
             if *role != frame::RuntimeRole::Client || udp_link.is_some() {
                 return;
             }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/transport/master.rs
-            let relay = spawn_join(config.clone(), settings.player_name.clone());
-=======
             let relay = spawn_join(config.clone(), settings.shown_name());
->>>>>>> /tmp/claude-0/zmhead/crates/net/src/transport/master.rs
             diag::info!(
                 Net,
                 "master joining lobby advert {} through {} ({}/{})",

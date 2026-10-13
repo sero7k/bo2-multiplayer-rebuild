@@ -1,24 +1,13 @@
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.wgsl
 // bo2zm: Black Ops II's bloom and final colour (see bo2_bloom.rs): the
 // frame's bright parts at quarter size, blurred into a high and a low level,
 // put back as BO2's hdr_bloom_apply does (sqrt(scene^2 + bloom), the
 // highlight roll-off), then looked up in the map's colour table.
-=======
-// bo2zm: Black Ops II's bloom (see bo2_bloom.rs): the frame's bright parts
-// at quarter size, blurred, put back as BO2's hdr_bloom_apply does:
-// sqrt(scene^2 + strength * bloom^2).
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.wgsl
 
 struct BloomParams {
     // xy: one source texel in uv; zw: the blur direction (in texels).
     texel_dir: vec4<f32>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.wgsl
     // The menu blur's: x, y the luminance where its shrink starts and is
     // full (-1, 0: everything); w: how much of the blur goes back in.
-=======
-    // x, y: the luminance where the bright pass starts and is full;
-    // z: the strength bloom goes back in with.
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.wgsl
     threshold: vec4<f32>,
     // bo2mp: the bright pass's ramps on linear luminance: x, z where the
     // colour bloom starts and is full; y, w the luminance bloom's.
@@ -52,7 +41,6 @@ fn vertex(@builtin(vertex_index) index: u32) -> FullscreenOut {
     return out;
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.wgsl
 // BO2's highlight roll-off (hdr_bloom_apply): above 0.75,
 // 0.75 + 0.25 * (1 - 2^(-5.77078 * (x - 0.75))).
 fn roll_off(x: vec3<f32>) -> vec3<f32> {
@@ -75,10 +63,6 @@ fn ramp(x: f32, start: f32, end: f32) -> f32 {
 
 // The menu blur's shrink: a 4x4 block of the full frame per quarter texel
 // (four bilinear taps), weighted by a smooth threshold on its luminance.
-=======
-// The bright pass, a 4x4 block of the full frame per quarter texel (four
-// bilinear taps), weighted by a smooth threshold on its luminance.
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.wgsl
 @fragment
 fn extract(in: FullscreenOut) -> @location(0) vec4<f32> {
     let t = params.texel_dir.xy;
@@ -93,7 +77,6 @@ fn extract(in: FullscreenOut) -> @location(0) vec4<f32> {
     return vec4(c * w, 1.0);
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.wgsl
 // bo2mp: BO2's bloom downsample (hdr_bloom_downsample): the same 4x4 block
 // averaged in gamma, squared to linear; its luminance through two smooth
 // ramps, one for the colour (rgb) and one for the luminance (alpha).
@@ -112,14 +95,11 @@ fn bright(in: FullscreenOut) -> @location(0) vec4<f32> {
     return vec4(lin * ramp(luma, r.x, r.z), luma * ramp(luma, r.y, r.w));
 }
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.wgsl
 // A 9-tap gaussian along one direction.
 @fragment
 fn blur(in: FullscreenOut) -> @location(0) vec4<f32> {
     let step = params.texel_dir.xy * params.texel_dir.zw;
     let w = array<f32, 5>(0.2270270, 0.1945946, 0.1216216, 0.0540541, 0.0162162);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.wgsl
     var c = textureSample(source, source_sampler, in.uv) * w[0];
     for (var i = 1; i < 5; i++) {
         let o = step * f32(i);
@@ -129,20 +109,62 @@ fn blur(in: FullscreenOut) -> @location(0) vec4<f32> {
     return c;
 }
 
+fn fxaa_luma(c: vec3<f32>) -> f32 {
+    return dot(c, vec3(0.299, 0.587, 0.114));
+}
+
+// bo2zm: his FXAA row: the classic fast approximate anti-aliasing (four
+// diagonal taps find the edge, two to four taps along it blend it).
+fn fxaa(uv: vec2<f32>, t: vec2<f32>) -> vec3<f32> {
+    let m = textureSample(source, source_sampler, uv).rgb;
+    let nw = textureSample(source, source_sampler, uv + vec2(-1.0, -1.0) * t).rgb;
+    let ne = textureSample(source, source_sampler, uv + vec2(1.0, -1.0) * t).rgb;
+    let sw = textureSample(source, source_sampler, uv + vec2(-1.0, 1.0) * t).rgb;
+    let se = textureSample(source, source_sampler, uv + vec2(1.0, 1.0) * t).rgb;
+    let l_m = fxaa_luma(m);
+    let l_nw = fxaa_luma(nw);
+    let l_ne = fxaa_luma(ne);
+    let l_sw = fxaa_luma(sw);
+    let l_se = fxaa_luma(se);
+    let l_min = min(l_m, min(min(l_nw, l_ne), min(l_sw, l_se)));
+    let l_max = max(l_m, max(max(l_nw, l_ne), max(l_sw, l_se)));
+    var dir = vec2(-((l_nw + l_ne) - (l_sw + l_se)), (l_nw + l_sw) - (l_ne + l_se));
+    let reduce = max((l_nw + l_ne + l_sw + l_se) * (0.25 / 8.0), 1.0 / 128.0);
+    let rcp_min = 1.0 / (min(abs(dir.x), abs(dir.y)) + reduce);
+    dir = clamp(dir * rcp_min, vec2(-8.0), vec2(8.0)) * t;
+    let a = 0.5 * (textureSample(source, source_sampler, uv + dir * (1.0 / 3.0 - 0.5)).rgb
+        + textureSample(source, source_sampler, uv + dir * (2.0 / 3.0 - 0.5)).rgb);
+    let b = a * 0.5 + 0.25 * (textureSample(source, source_sampler, uv - dir * 0.5).rgb
+        + textureSample(source, source_sampler, uv + dir * 0.5).rgb);
+    let l_b = fxaa_luma(b);
+    if (l_b < l_min || l_b > l_max) {
+        return a;
+    }
+    return b;
+}
+
 // BO2's final image (hdr_bloom_combine_hilo, hdr_bloom_apply): the two
 // bloom levels tinted by the vision, added to the frame in linear, the
 // highlight roll-off, then the map's colour table (32^3, trilinear like the
-// game's 2D lookup).
+// game's 2D lookup). bo2zm: texel_dir.z: FXAA on the frame first;
+// threshold.w: BO2's brightness, the picture raised to 1 / r_gamma (1 = as
+// made).
 @fragment
 fn composite(in: FullscreenOut) -> @location(0) vec4<f32> {
-    let s = unroll(textureSample(source, source_sampler, in.uv).rgb);
+    var frame_rgb = textureSample(source, source_sampler, in.uv).rgb;
+    if (params.texel_dir.z > 0.5) {
+        frame_rgb = fxaa(in.uv, params.texel_dir.xy);
+    }
+    let s = unroll(frame_rgb);
     let hi = textureSample(bloom, source_sampler, in.uv);
     let lo = textureSample(bloom_lo, source_sampler, in.uv);
     let add = hi.rgb * params.rgb_hi.rgb + lo.rgb * params.rgb_lo.rgb
         + hi.a * params.y_hi.rgb + lo.a * params.y_lo.rgb;
     let g = roll_off(sqrt(s * s + max(add, vec3(0.0))));
     let at = saturate(g) * (31.0 / 32.0) + vec3(0.5 / 32.0);
-    return vec4(textureSampleLevel(grade_lut, source_sampler, at, 0.0).rgb, 1.0);
+    let graded = textureSampleLevel(grade_lut, source_sampler, at, 0.0).rgb;
+    let gamma = select(params.threshold.w, 1.0, params.threshold.w <= 0.0);
+    return vec4(pow(graded, vec3(1.0 / max(gamma, 0.1))), 1.0);
 }
 
 // bo2zm M4: the menus' world blur put back in the frame's place
@@ -174,71 +196,12 @@ fn dim_lift(c: vec3<f32>, dims: f32, z: f32) -> vec3<f32> {
     let k1 = 0.02899;
     let after_pause = srgb_enc(srgb_dec(c) * k1);
     return after_pause * pow(0.2, dims - 1.0);
-=======
-    var c = textureSample(source, source_sampler, in.uv).rgb * w[0];
-    for (var i = 1; i < 5; i++) {
-        let o = step * f32(i);
-        c += textureSample(source, source_sampler, in.uv + o).rgb * w[i];
-        c += textureSample(source, source_sampler, in.uv - o).rgb * w[i];
-    }
-    return vec4(c, 1.0);
 }
 
-fn luma(c: vec3<f32>) -> f32 {
-    return dot(c, vec3(0.299, 0.587, 0.114));
-}
-
-// bo2zm: his FXAA row: the classic fast approximate anti-aliasing (four
-// diagonal taps find the edge, two to four taps along it blend it).
-fn fxaa(uv: vec2<f32>, t: vec2<f32>) -> vec3<f32> {
-    let m = textureSample(source, source_sampler, uv).rgb;
-    let nw = textureSample(source, source_sampler, uv + vec2(-1.0, -1.0) * t).rgb;
-    let ne = textureSample(source, source_sampler, uv + vec2(1.0, -1.0) * t).rgb;
-    let sw = textureSample(source, source_sampler, uv + vec2(-1.0, 1.0) * t).rgb;
-    let se = textureSample(source, source_sampler, uv + vec2(1.0, 1.0) * t).rgb;
-    let l_m = luma(m);
-    let l_nw = luma(nw);
-    let l_ne = luma(ne);
-    let l_sw = luma(sw);
-    let l_se = luma(se);
-    let l_min = min(l_m, min(min(l_nw, l_ne), min(l_sw, l_se)));
-    let l_max = max(l_m, max(max(l_nw, l_ne), max(l_sw, l_se)));
-    var dir = vec2(-((l_nw + l_ne) - (l_sw + l_se)), (l_nw + l_sw) - (l_ne + l_se));
-    let reduce = max((l_nw + l_ne + l_sw + l_se) * (0.25 / 8.0), 1.0 / 128.0);
-    let rcp_min = 1.0 / (min(abs(dir.x), abs(dir.y)) + reduce);
-    dir = clamp(dir * rcp_min, vec2(-8.0), vec2(8.0)) * t;
-    let a = 0.5 * (textureSample(source, source_sampler, uv + dir * (1.0 / 3.0 - 0.5)).rgb
-        + textureSample(source, source_sampler, uv + dir * (2.0 / 3.0 - 0.5)).rgb);
-    let b = a * 0.5 + 0.25 * (textureSample(source, source_sampler, uv - dir * 0.5).rgb
-        + textureSample(source, source_sampler, uv + dir * 0.5).rgb);
-    let l_b = luma(b);
-    if (l_b < l_min || l_b > l_max) {
-        return a;
-    }
-    return b;
-}
-
-// Back into the frame as BO2 does, then BO2's brightness: the picture
-// raised to 1 / r_gamma (threshold.w; 1 = as made). texel_dir.z: FXAA.
-@fragment
-fn composite(in: FullscreenOut) -> @location(0) vec4<f32> {
-    var s = textureSample(source, source_sampler, in.uv).rgb;
-    if (params.texel_dir.z > 0.5) {
-        s = fxaa(in.uv, params.texel_dir.xy);
-    }
-    let b = textureSample(bloom, source_sampler, in.uv).rgb;
-    let c = sqrt(s * s + params.threshold.z * b * b);
-    return vec4(pow(c, vec3(1.0 / max(params.threshold.w, 0.1))), 1.0);
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.wgsl
-}
-
-// bo2zm M4: the menus' world blur put back in the frame's place
-// (threshold.w: how much).
 @fragment
 fn blurred(in: FullscreenOut) -> @location(0) vec4<f32> {
     let s = textureSample(source, source_sampler, in.uv).rgb;
     let b = textureSample(bloom, source_sampler, in.uv).rgb;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/bo2_bloom.wgsl
     // bo2mp: BO2's class select before the first spawn (threshold.z = 1) shows the
     // world blurred and grey and dim: the colour and the light go out as the blur
     // comes in. The pause menu in a live match (z = 0) only blurs it; the menu's
@@ -257,7 +220,4 @@ fn blurred(in: FullscreenOut) -> @location(0) vec4<f32> {
     // 11.3 here with the x0.5, 22.3 without.)
     let level = mix(1.0, 0.5, k);
     return vec4(dim_lift(mix(m, grey, k) * level, params.threshold.y, params.threshold.z), 1.0);
-=======
-    return vec4(mix(s, b, params.threshold.w), 1.0);
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/bo2_bloom.wgsl
 }

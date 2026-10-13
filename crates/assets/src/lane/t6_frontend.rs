@@ -128,6 +128,7 @@ pub fn load_t6_frontend(zone_all: &Path) -> T6Frontend {
     ));
     T6Frontend {
         ui: crate::T6Ui {
+            game_settings: Default::default(),
             scripts,
             strings: std::sync::Arc::new(strings),
             tables: std::sync::Arc::new(tables),

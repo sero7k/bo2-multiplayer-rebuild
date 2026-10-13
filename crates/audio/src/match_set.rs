@@ -32,7 +32,6 @@ impl AudioSilent {
     pub fn no_device() -> bool {
         frame::Headless::requested()
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/match_set.rs
 
     /// Silent runs that log sound (IW4L_SOUND_LOG) still compose the map's
     /// sound bank and prepare its clips, so the real alias lookups, starts,
@@ -42,8 +41,6 @@ impl AudioSilent {
     pub fn composes() -> bool {
         Self::active() && std::env::var_os("IW4L_SOUND_LOG").is_some()
     }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/audio/src/match_set.rs
 }
 
 const MATCH_HUD_PULSE: &[&str] = &["ui_pulse_text_type", "ui_pulse_text_delete"];

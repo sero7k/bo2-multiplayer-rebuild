@@ -617,15 +617,11 @@ pub(crate) fn apply_damage_attempt(
         return DamageOutcome::Refused(DamageRefusal::StaleLife);
     }
     let mut amount = intent.amount;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/damage.rs
     // A hit the riot shield stopped carries the bullet's whole damage to
     // the scripts (BO2's callback counts what the shield blocked).
     if !matches!(intent.source, crate::DamageSource::Melee)
         && intent.hitloc != crate::bullet_collision::HITLOC_SHIELD
     {
-=======
-    if !matches!(intent.source, crate::DamageSource::Melee) {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/damage.rs
         let scale = world
             .combat_facts_for(intent.weapon)
             .map(|facts| facts.location_scale(intent.hitloc))

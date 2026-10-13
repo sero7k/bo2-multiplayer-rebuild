@@ -1,4 +1,3 @@
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/ragdoll.rs
 //! bo2mp: a dead player's body going limp, as BO2's own ragdoll does it.
 //! Once the server says the body is a ragdoll (its corpse's trajectory
 //! turns to one: the script's `startragdoll` and `launchragdoll`), the body
@@ -763,7 +762,146 @@ fn fit_axis(lo: f32, hi: f32, start: f32) -> (f32, f32, f32) {
     let v = sign * start;
     let margin = START_MARGIN_DEG.to_radians();
     (sign, lo.min(v - margin), hi.max(v + margin))
-=======
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sim::t6_ragdoll::parse;
+
+    /// A made-up body plan in the file's format (not the game's numbers).
+    const DEF: &str = "\
+        ragdoll_bone 0 j_mainroot j_neck 5 0.5 3 0.3 -1 0\n\
+        ragdoll_bone 0 j_neck j_head 3 0.5 0.5 0.3 0 0\n\
+        ragdoll_bone 0 j_shoulder_le j_elbow_le 2 0.5 0.5 0.3 0 0\n\
+        ragdoll_bone 0 j_elbow_le j_wrist_le 2 0.5 0.5 0.3 2 0\n\
+        ragdoll_bone 0 j_shoulder_ri j_elbow_ri 2 0.5 0.5 0.3 0 1\n\
+        ragdoll_bone 0 j_elbow_ri j_wrist_ri 2 0.5 0.5 0.3 4 1\n\
+        ragdoll_bone 0 j_hip_le j_knee_le 3 0.5 1 0.3 0 0\n\
+        ragdoll_bone 0 j_knee_le j_ankle_le 3 0.5 1 0.3 6 0\n\
+        ragdoll_bone 0 j_hip_ri j_knee_ri 3 0.5 1 0.3 0 1\n\
+        ragdoll_bone 0 j_knee_ri j_ankle_ri 3 0.5 1 0.3 8 1\n\
+        ragdoll_selfpair 0 3 5\n\
+        ragdoll_selfpair 0 7 9\n\
+        ragdoll_joint 0 1 swivel\n\
+        ragdoll_joint 0 3 hinge\n\
+        ragdoll_joint 0 7 hinge\n\
+        ragdoll_limit 0 0 y 0 -40 40\n\
+        ragdoll_limit 0 0 z 0 -40 40\n\
+        ragdoll_limit 0 1 z 0 -150 0\n\
+        ragdoll_limit 0 2 z 0 -150 0\n";
+
+    /// A standing stick figure: every bone's x along it, pointing down.
+    fn figure() -> (xmodel_runtime::DObj, Vec<Mat4>) {
+        let rows: [(&str, Option<usize>, [f32; 3]); 18] = [
+            ("tag_origin", None, [0.0, 0.0, 0.0]),
+            ("j_mainroot", Some(0), [0.0, 0.0, 40.0]),
+            ("j_spine4", Some(1), [0.0, 0.0, 55.0]),
+            ("j_neck", Some(2), [0.0, 0.0, 60.0]),
+            ("j_head", Some(3), [0.0, 0.0, 66.0]),
+            ("j_clavicle_le", Some(2), [0.0, 3.0, 58.0]),
+            ("j_shoulder_le", Some(5), [0.0, 8.0, 58.0]),
+            ("j_elbow_le", Some(6), [0.0, 8.0, 46.0]),
+            ("j_wrist_le", Some(7), [0.0, 8.0, 34.0]),
+            ("j_clavicle_ri", Some(2), [0.0, -3.0, 58.0]),
+            ("j_shoulder_ri", Some(9), [0.0, -8.0, 58.0]),
+            ("j_elbow_ri", Some(10), [0.0, -8.0, 46.0]),
+            ("j_wrist_ri", Some(11), [0.0, -8.0, 34.0]),
+            ("j_hip_le", Some(1), [0.0, 4.0, 38.0]),
+            ("j_knee_le", Some(13), [0.0, 4.0, 20.0]),
+            ("j_ankle_le", Some(14), [0.0, 4.0, 2.0]),
+            ("j_hip_ri", Some(1), [0.0, -4.0, 38.0]),
+            ("j_knee_ri", Some(16), [0.0, -4.0, 20.0]),
+        ];
+        let turn = Quat::from_mat3(&Mat3::from_cols(Vec3::NEG_Z, Vec3::NEG_X, Vec3::Y));
+        let mut world: Vec<Mat4> = rows
+            .iter()
+            .map(|(_, _, at)| Mat4::from_rotation_translation(turn, Vec3::from_array(*at)))
+            .collect();
+        world.push(Mat4::from_rotation_translation(turn, Vec3::new(0.0, -4.0, 2.0)));
+        let mut bones: Vec<xmodel_runtime::Bone> = rows
+            .iter()
+            .enumerate()
+            .map(|(i, (name, parent, _))| bone(name, *parent, &world, i))
+            .collect();
+        bones.push(bone("j_ankle_ri", Some(17), &world, 18));
+        let dobj = xmodel_runtime::DObj {
+            models: vec![xmodel_runtime::ModelSlot {
+                name: "figure".into(),
+                base: 0,
+                bone_count: bones.len(),
+                scale: 1.0,
+            }],
+            bones,
+            duplicates: Vec::new(),
+        };
+        (dobj, world)
+    }
+
+    fn bone(name: &str, parent: Option<usize>, world: &[Mat4], i: usize) -> xmodel_runtime::Bone {
+        let local = parent.map_or(world[i], |p| world[p].inverse() * world[i]);
+        let (_, rotation, translation) = local.to_scale_rotation_translation();
+        xmodel_runtime::Bone {
+            name: name.into(),
+            model: 0,
+            parent,
+            bind_rotation: rotation,
+            bind_translation: translation,
+            bind_world: world[i],
+            no_scale: false,
+        }
+    }
+
+    #[test]
+    fn swing_is_axis_times_angle() {
+        let s = swing(Vec3::X, Vec3::Y);
+        assert!((s - Vec3::Z * std::f32::consts::FRAC_PI_2).length() < 1e-5, "{s}");
+        let s = swing(Vec3::NEG_X, Vec3::NEG_Y);
+        assert!((s - Vec3::Z * std::f32::consts::FRAC_PI_2).length() < 1e-5, "{s}");
+        assert_eq!(swing(Vec3::Z, Vec3::Z), Vec3::ZERO);
+    }
+
+    #[test]
+    fn finds_a_turn_from_its_matrix() {
+        let want = Quat::from_axis_angle(Vec3::new(1.0, 2.0, 3.0).normalize(), 1.2);
+        let got = extract_rotation(Mat3::from_quat(want) * 7.0, Quat::IDENTITY);
+        assert!(got.dot(want).abs() > 0.9999, "{got} vs {want}");
+    }
+
+    #[test]
+    fn a_pushed_body_falls_and_lies_still_on_the_floor() {
+        let defs = parse(DEF);
+        let (dobj, world) = figure();
+        let mut doll = Ragdoll::start(&defs[0], &dobj, &world, Mat4::IDENTITY, None, Vec3::new(60.0, 0.0, 0.0), None)
+            .expect("the figure has every joint");
+        assert_eq!(doll.rig.limits.len(), 3, "{}", doll.note());
+        for _ in 0..(8 * 60) {
+            doll.step(1.0 / 60.0, None);
+        }
+        assert!(doll.asleep(), "still moving: {:?}", doll.v);
+        for (i, p) in doll.x.iter().enumerate() {
+            assert!(p.is_finite() && p.z >= doll.floor - 0.5, "joint {i} at {p}");
+        }
+        for b in doll.rig.bodies.iter().filter(|b| !b.rigid()) {
+            let len = (doll.x[b.p1] - doll.x[b.p0]).length();
+            assert!((len - b.len).abs() < b.len * 0.05, "stick {} {} grew to {len}", b.p0, b.p1);
+        }
+        let mut bones = world.clone();
+        let placed = doll.pose(&mut bones);
+        let head = (placed * bones[dobj.find("j_head").unwrap()]).w_axis.truncate();
+        assert!(head.z < 25.0, "the head stayed up at {head}");
+        // Lying still keeps the same pose.
+        let again = doll.pose(&mut bones);
+        assert_eq!(placed, again);
+    }
+}
+
+/// bo2zm: the Zombies fork's limp bodies (a zombie's script model: Die
+/// Rise, the Trample Steam's throws), kept whole beside the multiplayer
+/// corpse ragdoll above (`Ragdoll`, players' bodies by `t6_body`). The two
+/// grew apart in the two forks; both are BO2's ragdoll, for different
+/// callers.
+mod zm {
 //! bo2zm (Die Rise chat): a limp body, Black Ops II's ragdoll. The server
 //! marks a body limp (`startragdoll`) and may throw it (`launchragdoll`, the
 //! Trample Steam's kills); each client then drops it from the pose it had,
@@ -1417,96 +1555,11 @@ fn torso_frame(p: &[Vec3; POINTS]) -> Option<Quat> {
 
 fn show(p: Vec3) -> String {
     format!("({:.0} {:.0} {:.0})", p.x, p.y, p.z)
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/ragdoll.rs
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/ragdoll.rs
-    use sim::t6_ragdoll::parse;
-
-    /// A made-up body plan in the file's format (not the game's numbers).
-    const DEF: &str = "\
-        ragdoll_bone 0 j_mainroot j_neck 5 0.5 3 0.3 -1 0\n\
-        ragdoll_bone 0 j_neck j_head 3 0.5 0.5 0.3 0 0\n\
-        ragdoll_bone 0 j_shoulder_le j_elbow_le 2 0.5 0.5 0.3 0 0\n\
-        ragdoll_bone 0 j_elbow_le j_wrist_le 2 0.5 0.5 0.3 2 0\n\
-        ragdoll_bone 0 j_shoulder_ri j_elbow_ri 2 0.5 0.5 0.3 0 1\n\
-        ragdoll_bone 0 j_elbow_ri j_wrist_ri 2 0.5 0.5 0.3 4 1\n\
-        ragdoll_bone 0 j_hip_le j_knee_le 3 0.5 1 0.3 0 0\n\
-        ragdoll_bone 0 j_knee_le j_ankle_le 3 0.5 1 0.3 6 0\n\
-        ragdoll_bone 0 j_hip_ri j_knee_ri 3 0.5 1 0.3 0 1\n\
-        ragdoll_bone 0 j_knee_ri j_ankle_ri 3 0.5 1 0.3 8 1\n\
-        ragdoll_selfpair 0 3 5\n\
-        ragdoll_selfpair 0 7 9\n\
-        ragdoll_joint 0 1 swivel\n\
-        ragdoll_joint 0 3 hinge\n\
-        ragdoll_joint 0 7 hinge\n\
-        ragdoll_limit 0 0 y 0 -40 40\n\
-        ragdoll_limit 0 0 z 0 -40 40\n\
-        ragdoll_limit 0 1 z 0 -150 0\n\
-        ragdoll_limit 0 2 z 0 -150 0\n";
-
-    /// A standing stick figure: every bone's x along it, pointing down.
-    fn figure() -> (xmodel_runtime::DObj, Vec<Mat4>) {
-        let rows: [(&str, Option<usize>, [f32; 3]); 18] = [
-            ("tag_origin", None, [0.0, 0.0, 0.0]),
-            ("j_mainroot", Some(0), [0.0, 0.0, 40.0]),
-            ("j_spine4", Some(1), [0.0, 0.0, 55.0]),
-            ("j_neck", Some(2), [0.0, 0.0, 60.0]),
-            ("j_head", Some(3), [0.0, 0.0, 66.0]),
-            ("j_clavicle_le", Some(2), [0.0, 3.0, 58.0]),
-            ("j_shoulder_le", Some(5), [0.0, 8.0, 58.0]),
-            ("j_elbow_le", Some(6), [0.0, 8.0, 46.0]),
-            ("j_wrist_le", Some(7), [0.0, 8.0, 34.0]),
-            ("j_clavicle_ri", Some(2), [0.0, -3.0, 58.0]),
-            ("j_shoulder_ri", Some(9), [0.0, -8.0, 58.0]),
-            ("j_elbow_ri", Some(10), [0.0, -8.0, 46.0]),
-            ("j_wrist_ri", Some(11), [0.0, -8.0, 34.0]),
-            ("j_hip_le", Some(1), [0.0, 4.0, 38.0]),
-            ("j_knee_le", Some(13), [0.0, 4.0, 20.0]),
-            ("j_ankle_le", Some(14), [0.0, 4.0, 2.0]),
-            ("j_hip_ri", Some(1), [0.0, -4.0, 38.0]),
-            ("j_knee_ri", Some(16), [0.0, -4.0, 20.0]),
-        ];
-        let turn = Quat::from_mat3(&Mat3::from_cols(Vec3::NEG_Z, Vec3::NEG_X, Vec3::Y));
-        let mut world: Vec<Mat4> = rows
-            .iter()
-            .map(|(_, _, at)| Mat4::from_rotation_translation(turn, Vec3::from_array(*at)))
-            .collect();
-        world.push(Mat4::from_rotation_translation(turn, Vec3::new(0.0, -4.0, 2.0)));
-        let mut bones: Vec<xmodel_runtime::Bone> = rows
-            .iter()
-            .enumerate()
-            .map(|(i, (name, parent, _))| bone(name, *parent, &world, i))
-            .collect();
-        bones.push(bone("j_ankle_ri", Some(17), &world, 18));
-        let dobj = xmodel_runtime::DObj {
-            models: vec![xmodel_runtime::ModelSlot {
-                name: "figure".into(),
-                base: 0,
-                bone_count: bones.len(),
-                scale: 1.0,
-            }],
-            bones,
-            duplicates: Vec::new(),
-        };
-        (dobj, world)
-    }
-
-    fn bone(name: &str, parent: Option<usize>, world: &[Mat4], i: usize) -> xmodel_runtime::Bone {
-        let local = parent.map_or(world[i], |p| world[p].inverse() * world[i]);
-        let (_, rotation, translation) = local.to_scale_rotation_translation();
-        xmodel_runtime::Bone {
-            name: name.into(),
-            model: 0,
-            parent,
-            bind_rotation: rotation,
-            bind_translation: translation,
-            bind_world: world[i],
-            no_scale: false,
-=======
 
     /// A standing body's points, facing +X, 1 unit = 1 inch.
     fn standing() -> [Vec3; POINTS] {
@@ -1563,53 +1616,10 @@ mod tests {
             steps: 0,
             lying: None,
             seed: 7,
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/ragdoll.rs
         }
     }
 
     #[test]
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/ragdoll.rs
-    fn swing_is_axis_times_angle() {
-        let s = swing(Vec3::X, Vec3::Y);
-        assert!((s - Vec3::Z * std::f32::consts::FRAC_PI_2).length() < 1e-5, "{s}");
-        let s = swing(Vec3::NEG_X, Vec3::NEG_Y);
-        assert!((s - Vec3::Z * std::f32::consts::FRAC_PI_2).length() < 1e-5, "{s}");
-        assert_eq!(swing(Vec3::Z, Vec3::Z), Vec3::ZERO);
-    }
-
-    #[test]
-    fn finds_a_turn_from_its_matrix() {
-        let want = Quat::from_axis_angle(Vec3::new(1.0, 2.0, 3.0).normalize(), 1.2);
-        let got = extract_rotation(Mat3::from_quat(want) * 7.0, Quat::IDENTITY);
-        assert!(got.dot(want).abs() > 0.9999, "{got} vs {want}");
-    }
-
-    #[test]
-    fn a_pushed_body_falls_and_lies_still_on_the_floor() {
-        let defs = parse(DEF);
-        let (dobj, world) = figure();
-        let mut doll = Ragdoll::start(&defs[0], &dobj, &world, Mat4::IDENTITY, None, Vec3::new(60.0, 0.0, 0.0), None)
-            .expect("the figure has every joint");
-        assert_eq!(doll.rig.limits.len(), 3, "{}", doll.note());
-        for _ in 0..(8 * 60) {
-            doll.step(1.0 / 60.0, None);
-        }
-        assert!(doll.asleep(), "still moving: {:?}", doll.v);
-        for (i, p) in doll.x.iter().enumerate() {
-            assert!(p.is_finite() && p.z >= doll.floor - 0.5, "joint {i} at {p}");
-        }
-        for b in doll.rig.bodies.iter().filter(|b| !b.rigid()) {
-            let len = (doll.x[b.p1] - doll.x[b.p0]).length();
-            assert!((len - b.len).abs() < b.len * 0.05, "stick {} {} grew to {len}", b.p0, b.p1);
-        }
-        let mut bones = world.clone();
-        let placed = doll.pose(&mut bones);
-        let head = (placed * bones[dobj.find("j_head").unwrap()]).w_axis.truncate();
-        assert!(head.z < 25.0, "the head stayed up at {head}");
-        // Lying still keeps the same pose.
-        let again = doll.pose(&mut bones);
-        assert_eq!(placed, again);
-=======
     fn a_throw_moves_the_body_at_four_times_the_vector() {
         let mut b = body(standing());
         b.throw(&DObjRagdoll {
@@ -1670,6 +1680,7 @@ mod tests {
     fn bones_map_to_their_parts() {
         assert_eq!(part_of_bone("j_knee_ri"), Some(9));
         assert_eq!(part_of_bone("j_spine4"), None);
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/ragdoll.rs
     }
 }
+}
+pub(crate) use zm::{AHEAD_S, Ragdolls};

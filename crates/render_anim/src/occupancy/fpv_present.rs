@@ -88,14 +88,11 @@ fn same_compositions(a: &asset_game::FpvSideAssemblies, b: &asset_game::FpvSideA
             (None, None) => true,
             _ => false,
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/fpv_present.rs
         && match (&a.ads, &b.ads) {
             (Some(a), Some(b)) => Arc::ptr_eq(a, b),
             (None, None) => true,
             _ => false,
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/fpv_present.rs
         && match (&a.rocket, &b.rocket) {
             (Some(a), Some(b)) => Arc::ptr_eq(a, b),
             (None, None) => true,
@@ -307,11 +304,7 @@ pub fn spawn_pending_fpv(
     let left = view.left.clone().map(ViewmodelController::new);
     diag::info!(
         Fpv,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/fpv_present.rs
-        "fpv: viewmodel controller `{}` — {} clips{}, fireTime={}ms raiseTime={}ms (action from weapAnim)",
-=======
         "fpv: viewmodel controller `{}` — {} clips{}, fireTime={}ms holdFireTime={}ms raiseTime={}ms (action from weapAnim); pull-back clip {:?}s",
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/fpv_present.rs
         view.right.name,
         view.right.resolved_count(),
         view.left
@@ -749,14 +742,11 @@ pub fn tick_fpv_viewmodel(
                 Ok(weapon_iw4::WeaponState::MeleeInit | weapon_iw4::WeaponState::MeleeFire)
             )
         }),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/fpv_present.rs
         // bo2mp: a sight with a stripped aimed model shows it from the
         // fraction the reticle fades in at.
         ads: presented
             .viewweapon_player(local.0)
             .is_some_and(|ps| ps.f_weapon_pos_frac >= 0.75),
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/fpv_present.rs
         sample,
         predicted_fire,
         dual,

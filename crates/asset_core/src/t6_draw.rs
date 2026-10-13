@@ -43,18 +43,12 @@ pub enum T6Blend {
     Blend,
     Add,
     Multiply,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_core/src/t6_draw.rs
-    /// Never drawn in colour: casts shadow only, or a screen distortion
-    /// (`distortion_*`, an effect's heat haze), which refracts the frame in
-    /// a pass this renderer does not have.
-=======
     /// Never drawn in colour: casts shadow only, a screen distortion
     /// (`distortion_*`, an effect's heat haze), which refracts the frame in
     /// a pass this renderer does not have, or a light sphere
     /// (`*_sw4_3d_light_sphere_*`, a glow the shader works out from the
     /// sphere's depth; as a plain model it drew a pale hard-edged disc, Mob
     /// of the Dead's fires).
->>>>>>> /tmp/claude-0/zmhead/crates/asset_core/src/t6_draw.rs
     ShadowOnly,
     /// The sky (`*_skycubemaphdr_*`): drawn behind everything from its cube
     /// colour map, never as a surface.
@@ -79,18 +73,11 @@ pub enum T6Cull {
 pub struct T6Layers {
     /// Per extra layer 1..3: 0 none, 1 blend (`bK`: mixed in by the layer
     /// colour's alpha times the vertex colour's green, blue, alpha), 2
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_core/src/t6_draw.rs
     /// multiply (`mK`: colour times 1 + weight * (layer - 1)), 3 add (`aK`,
     /// bo2mp: colour plus layer * layer alpha * weight, before squaring;
     /// `lit_sm_*_a1c1` pixel shader, fxc disassembly), 4 test (`tK`:
     /// the layer replaces the colour where layer alpha * weight >= 0.5;
     /// `lit_sm_*_t1c1n1`).
-=======
-    /// multiply (`mK`: colour times 1 + weight * (layer - 1)), 3 tested
-    /// (`tK`: the layer replaces the colour where its alpha times the
-    /// weight reaches 0.5), 4 add (`aK`: colour plus layer * alpha *
-    /// weight); as `pimp_shader_layer_lmap` does.
->>>>>>> /tmp/claude-0/zmhead/crates/asset_core/src/t6_draw.rs
     pub kinds: [u8; 3],
     /// Per extra layer, its texcoord's byte offset in a vertex record.
     pub uv_offsets: [u8; 3],
@@ -109,11 +96,7 @@ impl T6Layers {
         for t in tokens {
             let b = t.as_bytes();
             if b.len() < 4
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_core/src/t6_draw.rs
                 || !matches!(b[0], b'b' | b'm' | b'a' | b't')
-=======
-                || !matches!(b[0], b'b' | b'm' | b't' | b'a')
->>>>>>> /tmp/claude-0/zmhead/crates/asset_core/src/t6_draw.rs
                 || !(b'1'..=b'3').contains(&b[1])
             {
                 continue;
@@ -126,11 +109,7 @@ impl T6Layers {
             layers.kinds[k] = match b[0] {
                 b'b' => 1,
                 b'm' => 2,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_core/src/t6_draw.rs
                 b'a' => 3,
-=======
-                b't' => 3,
->>>>>>> /tmp/claude-0/zmhead/crates/asset_core/src/t6_draw.rs
                 _ => 4,
             };
             layers.uv_offsets[k] = layers.stride;
@@ -177,7 +156,6 @@ pub struct T6Draw {
     /// marks): a colour pulsing between the material's colorObjMin and
     /// colorObjMax, added on.
     pub objective: bool,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_core/src/t6_draw.rs
     /// bo2mp: a `treecanopy` technique (ferns, leaves): its vertex colour
     /// picks the wind variant (rgb) and scales the grid light (alpha); it
     /// is no tint (`mc_treecanopy` vertex shader, fxc disassembly).
@@ -203,6 +181,22 @@ pub struct T6Draw {
     /// cliffs, rocks, vista mountains): two tiled colour maps mixed by a
     /// macro mask, with macro AO. Bits 12 and 14 of a lit code together.
     pub tile_blend: bool,
+    /// bo2zm M4 retest 5: an `mc_projecteddecal_*` technique (the blood a
+    /// hit paints on a zombie): its model is a box; the pixel shader (fxc
+    /// disassembly) reads the scene depth and paints the texture on what lies
+    /// inside the box, projected along its x axis.
+    pub projected_decal: bool,
+    /// bo2zm: a ghost technique (`sw4_3d_char_ghost*`, Mob's Afterlife
+    /// ghost hands): a bright cyan glow, its alpha from how the surface
+    /// faces the eye times two drifting edge noises.
+    pub ghost: bool,
+    /// bo2zm 27c: a scrolling cloud sheet (`mc_*_scrolling_zfeather`, Die
+    /// Rise's cloud floor), drawn unlit: its texture drifts with the game
+    /// time and it fades where the scene behind it is near.
+    pub sheet: bool,
+    /// bo2zm round 1: a zombie's eyes (`unlit_cheap_zombie_eyes`): the
+    /// texture is scaled by the eye brightness its client script set.
+    pub eyes: bool,
 }
 
 /// A tile blend technique set (`*_cod7_tile_blend*`).
@@ -246,23 +240,6 @@ pub fn t6_water_kind(name: &str) -> Option<u8> {
             "cod7watershore" => Some(1),
             _ => None,
         })
-=======
-    /// bo2zm M4 retest 5: an `mc_projecteddecal_*` technique (the blood a
-    /// hit paints on a zombie): its model is a box; the pixel shader (fxc
-    /// disassembly) reads the scene depth and paints the texture on what lies
-    /// inside the box, projected along its x axis.
-    pub projected_decal: bool,
-    /// bo2zm: a ghost technique (`sw4_3d_char_ghost*`, Mob's Afterlife
-    /// ghost hands): a bright cyan glow, its alpha from how the surface
-    /// faces the eye times two drifting edge noises.
-    pub ghost: bool,
-    /// bo2zm 27c: a scrolling cloud sheet (`mc_*_scrolling_zfeather`, Die
-    /// Rise's cloud floor), drawn unlit: its texture drifts with the game
-    /// time and it fades where the scene behind it is near.
-    pub sheet: bool,
-    /// bo2zm round 1: a zombie's eyes (`unlit_cheap_zombie_eyes`): the
-    /// texture is scaled by the eye brightness its client script set.
-    pub eyes: bool,
 }
 
 /// A projected decal technique set (`mc_projecteddecal_*`).
@@ -270,7 +247,6 @@ fn projected_decal_technique(name: &str) -> bool {
     name.trim_start_matches(',')
         .split('_')
         .any(|t| t == "projecteddecal")
->>>>>>> /tmp/claude-0/zmhead/crates/asset_core/src/t6_draw.rs
 }
 
 /// An objective technique set (`mc_objective_*`).
@@ -356,12 +332,7 @@ impl T6Draw {
         let layered = name.split('_').any(|t| t.starts_with("b1"))
             || T6Layers::from_technique_set(name).any();
         let sky = name.split('_').any(|t| t.starts_with("sky"));
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_core/src/t6_draw.rs
-        let shadow_only =
-            has("shadowcaster") || name.trim_start_matches(',').starts_with("distortion");
-=======
         let shadow_only = never_coloured(name);
->>>>>>> /tmp/claude-0/zmhead/crates/asset_core/src/t6_draw.rs
         let Some(bits) = state else {
             return Self::from_name(name, sort_key);
         };
@@ -371,11 +342,8 @@ impl T6Draw {
             T6Blend::Sky
         } else if shadow_only || !st.color_write_rgb {
             T6Blend::ShadowOnly
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_core/src/t6_draw.rs
         } else if water {
             T6Blend::Blend
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/asset_core/src/t6_draw.rs
         } else if st.blend_op == 0 {
             T6Blend::Opaque
         } else if st.dst_blend == GFXS_BLEND_ONE {
@@ -413,19 +381,16 @@ impl T6Draw {
             effect,
             cloud,
             objective,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_core/src/t6_draw.rs
             foliage: foliage_technique(name),
             water,
             flow: flow_technique(name),
             tile: tile_technique(name),
             flag: flag_technique(name),
             tile_blend: tile_blend_technique(name),
-=======
             projected_decal: projected_decal_technique(name),
             ghost: ghost_technique(name),
             sheet: false,
             eyes: false,
->>>>>>> /tmp/claude-0/zmhead/crates/asset_core/src/t6_draw.rs
         }
     }
 
@@ -447,11 +412,7 @@ impl T6Draw {
             base_kind == Some(b't') || name.split('_').any(|t| t.starts_with("treecanopy"));
         let blend = if name.split('_').any(|t| t.starts_with("sky")) {
             T6Blend::Sky
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_core/src/t6_draw.rs
-        } else if has("shadowcaster") || name.trim_start_matches(',').starts_with("distortion") {
-=======
         } else if never_coloured(name) {
->>>>>>> /tmp/claude-0/zmhead/crates/asset_core/src/t6_draw.rs
             T6Blend::ShadowOnly
         } else if has("multiply") {
             T6Blend::Multiply
@@ -480,39 +441,32 @@ impl T6Draw {
             effect: effect_technique(name),
             cloud: name.trim_start_matches(',').starts_with("particlecloud"),
             objective: objective_technique(name),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_core/src/t6_draw.rs
             foliage: foliage_technique(name),
             water: t6_water_kind(name).is_some(),
             flow: flow_technique(name),
             tile: tile_technique(name),
             flag: flag_technique(name),
             tile_blend: tile_blend_technique(name),
-=======
             projected_decal: projected_decal_technique(name),
             ghost: ghost_technique(name),
             sheet: false,
             eyes: false,
->>>>>>> /tmp/claude-0/zmhead/crates/asset_core/src/t6_draw.rs
         }
     }
 
     /// One word for per-surface tables: blend in bits 0..3, unlit in bit 4,
     /// layered in bit 6, alpha tested in bit 7, cull in bits 8..9 (0 none,
     /// 1 back, 2 front), polygon offset in bits 10..11, the unlit colour
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_core/src/t6_draw.rs
-    /// scale's log2 in bits 12..14, a particle cloud in bit 15, the sort
+    /// scale's log2 in bits 12..14, a particle cloud in bit 15 (an effect;
+    /// without the effect bit 5, a cloud sheet), the sort
     /// key in bits 16..23, extra layers 1 and 2 in bits 24..25 and 26..27, an
     /// objective in bit 28, foliage in bit 29, water in bit 30, emissive flow in bit 31;
     /// a lit emissive tile in bit 12, a lit layer 1 test layer in bit 13 (its kind
-    /// bits say blend; a layer 2 test layer is drawn as blend). `NONE_CODE` marks a surface with no BO2 draw (no real code
-=======
-    /// scale's log2 in bits 12..14, a particle cloud in bit 15 (an effect;
-    /// without the effect bit 5, a cloud sheet), the sort
-    /// key in bits 16..23, extra layers 1 and 2's kinds in bits 24..25 and
-    /// 26..27 (their high bits in 30 and 31), an objective in bit 28, a
-    /// projected decal in bit 29, a ghost in both (28 and 29; no technique
-    /// is both an objective and a decal). `NONE_CODE` marks a surface with no BO2 draw (no real code
->>>>>>> /tmp/claude-0/zmhead/crates/asset_core/src/t6_draw.rs
+    /// bits say blend; a layer 2 test layer is drawn as blend).
+    /// bo2zm merge: a ghost sets bits 28 and 29 (objective + foliage), a
+    /// projected decal bits 29 and 30 (foliage + water); no technique is
+    /// either pair, so decoders test the pairs before the single bits.
+    /// `NONE_CODE` marks a surface with no BO2 draw (no real code
     /// has a low nibble of 0xf).
     pub fn code(self) -> u32 {
         let blend: u32 = match self.blend {
@@ -536,19 +490,11 @@ impl T6Draw {
             | u32::from(self.polygon_offset & 3) << 10
             | u32::from(self.unlit_scale_exp & 7) << 12
             | u32::from(self.sort_key) << 16
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_core/src/t6_draw.rs
             | layer_code(self.layers[0]) << 24
             | layer_code(self.layers[1]) << 26
-=======
-            | u32::from(self.layers[0] & 3) << 24
-            | u32::from(self.layers[1] & 3) << 26
-            | u32::from(self.layers[0] >> 2 & 1) << 30
-            | u32::from(self.layers[1] >> 2 & 1) << 31
->>>>>>> /tmp/claude-0/zmhead/crates/asset_core/src/t6_draw.rs
             | if self.effect { 0x20 } else { 0 }
             | if self.cloud || self.sheet { 0x8000 } else { 0 }
             | if self.objective { 0x1000_0000 } else { 0 }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_core/src/t6_draw.rs
             | if self.foliage { 0x2000_0000 } else { 0 }
             | if self.water { 0x4000_0000 } else { 0 }
             | if self.flow { 0x8000_0000 } else { 0 }
@@ -564,10 +510,8 @@ impl T6Draw {
             } else {
                 0
             }
-=======
-            | if self.projected_decal { 0x2000_0000 } else { 0 }
+            | if self.projected_decal { 0x6000_0000 } else { 0 }
             | if self.ghost { 0x3000_0000 } else { 0 }
->>>>>>> /tmp/claude-0/zmhead/crates/asset_core/src/t6_draw.rs
     }
 
     pub const NONE_CODE: u32 = 0xffff_ffff;
@@ -676,11 +620,11 @@ mod tests {
         assert_eq!(l("lit_sm_r0c0n0x0_b1c1v1").stride, 4);
         // Die Rise's paper decals: a tested layer, then a blend layer.
         let t = l("lit_sm_r0c0n0x0_t1c1n1_b2c2n2s2v2");
-        assert_eq!(t.kinds, [3, 1, 0]);
+        assert_eq!(t.kinds, [4, 1, 0]);
         assert_eq!(t.stride, 16);
         // Origins: an add layer, then a multiply layer.
         let a = l("lit_sm_r0c0n0x0_a1c1_m2c2");
-        assert_eq!(a.kinds, [4, 2, 0]);
+        assert_eq!(a.kinds, [3, 2, 0]);
         assert_eq!(a.uv_offsets[1], 4);
         assert!(!l("wpc_lit_sm_r0c0n0x0_f488034e").any());
         assert!(!l("wpc_lit_sm_b0c0n0_19f3588f").any());

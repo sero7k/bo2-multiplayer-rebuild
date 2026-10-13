@@ -69,7 +69,6 @@ pub struct GlyphRef {
     pub st: [f32; 4],
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/m2.rs
 /// bo2mp: a weapon attachment (`WeaponAttachment`, 284 bytes): what it
 /// changes on any gun (zoom, ADS time scales, sway).
 #[derive(Clone, Debug, Default)]
@@ -127,8 +126,6 @@ impl AttachmentUniqueRef {
     }
 }
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/m2.rs
 /// bo2zm M3: a weapon camo (`WeaponCamo`): per camo index its images
 /// (`WeaponCamoSet`: solid, pattern, the pattern's offset and scale) and
 /// its material swaps (`WeaponCamoMaterialSet`: each base material, the
@@ -759,7 +756,6 @@ impl ZoneCapture {
         Ok(out)
     }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/m2.rs
     pub(crate) fn read_attachment(&mut self, s: &ZoneStream<'_>, a: Ptr) -> Result<AttachmentRef> {
         Ok(AttachmentRef {
             name: string_field(s, a, l::WeaponAttachment::szInternalName)?,
@@ -799,7 +795,11 @@ impl ZoneCapture {
                 if id != 0 {
                     out.hide_tags.push(self.script_string(id).to_owned());
                 }
-=======
+            }
+        }
+        Ok(out)
+    }
+
     /// A variant's 8 attach slots that hold a model: (slot, model, tag,
     /// offset, rotation), from its model, tag, offset and rotation arrays.
     fn read_weapon_attach(
@@ -817,7 +817,6 @@ impl ZoneCapture {
             let model = self.asset_name_at(s, models.at(i * 4), AssetType::XModel)?;
             if model.is_empty() {
                 continue;
->>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/m2.rs
             }
             let tag = match tags {
                 Some(t) => string_field(s, t, i * 4)?,
@@ -1132,6 +1131,10 @@ impl ZoneCapture {
         })
     }
 
+    // bo2mp: the merged build reads `DestructibleDef` with capture.rs's own
+    // reader (`DestructibleRef` there, with the pristine model and physics
+    // constraint); this Zombies-fork reading is kept for reference.
+    #[allow(dead_code)]
     pub(crate) fn read_destructible(&mut self, s: &ZoneStream<'_>, d: Ptr) -> Result<DestructibleRef> {
         let opt = |v: String| (!v.is_empty()).then_some(v);
         let mut out = DestructibleRef {

@@ -180,11 +180,7 @@ impl PcmDecoder {
             let extra = usize::from(self.pending_right.is_some());
             let ch = self.src_channels.max(1) as usize;
             let frames_left = self.samples.len().saturating_sub(self.pos) / ch;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/pcm.rs
-            extra + frames_left * 2
-=======
             extra + (frames_left + self.tail_left) * 2
->>>>>>> /tmp/claude-0/zmhead/crates/audio/src/pcm.rs
         } else {
             self.samples.len().saturating_sub(self.pos)
         }
@@ -285,12 +281,8 @@ impl Source for PcmDecoder {
         if self.looping {
             return None;
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/pcm.rs
-        let frames = self.samples.len() as u64 / self.src_channels.max(1) as u64;
-=======
         let frames = self.samples.len() as u64 / self.src_channels.max(1) as u64
             + self.echo.as_ref().map_or(0, |e| e.tail_frames() as u64);
->>>>>>> /tmp/claude-0/zmhead/crates/audio/src/pcm.rs
         Some(Duration::from_secs_f64(
             frames as f64 / self.sample_rate.max(1) as f64,
         ))

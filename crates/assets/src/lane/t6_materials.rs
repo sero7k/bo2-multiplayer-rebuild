@@ -22,11 +22,7 @@ use bevy::render::render_resource::{
     Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
 };
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
 /// `R_HashString("colorMap")`, the colour map's slot in a texture table.
-=======
-/// The string hash of "colorMap", the colour map's slot in a texture table.
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
 const COLOR_MAP_HASH: u32 = 0xa0ab_1041;
 /// bo2mp: `DiffuseAndGloss`, the sw4 shaders' colour map.
 const DIFFUSE_AND_GLOSS_HASH: u32 = 0xd50e_4161;
@@ -35,7 +31,6 @@ const DIFFUSE_AND_GLOSS_HASH: u32 = 0xd50e_4161;
 /// the scan's noise and wireframe).
 const LASER_SCAN_IMAGE_HASH: u32 = 0x079c_6367;
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
 /// bo2mp: the 3-D tile-blend shaders (`sw4_3d_cod7_tile_blend*`, rocks and
 /// cliffs on most multiplayer maps) have no `colorMap`: they mix two tiling
 /// colour maps (`Micro_1_ColorMap`, `Micro_2_ColorMap`) by a macro map in
@@ -47,10 +42,6 @@ const TILE_BLEND_MICRO2_HASH: u32 = name_hash("Micro_2_ColorMap");
 
 /// `R_HashString`: case-folded, xor with 33 times the running hash.
 pub(crate) const fn name_hash(name: &str) -> u32 {
-=======
-/// The string hash: case-folded, xor with 33 times the running hash.
-const fn name_hash(name: &str) -> u32 {
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
     let b = name.as_bytes();
     let mut h = 0u32;
     let mut i = 0;
@@ -80,11 +71,7 @@ pub(crate) struct T6Materials {
 /// A GPU image over an IWI's own blocks: every mip level, largest first.
 /// A cube map (the sky's) is six faces, each with its mips, read linear:
 /// the sky shader decodes it as rgb / a in linear space.
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
 pub(crate) fn gpu_image(iwi: &ipak_t6::IwiImage<'_>) -> Result<Image, String> {
-=======
-fn gpu_image(iwi: &ipak_t6::IwiImage<'_>) -> Result<Image, String> {
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
     use ipak_t6::IwiFormat as F;
     let cube = iwi.is_cube();
     let format = match (iwi.format, cube) {
@@ -313,11 +300,7 @@ pub(crate) fn decode(packs: &PackSet, image: &ImageRef) -> Result<Image, String>
             let iwi = ipak_t6::parse_iwi(&bytes).map_err(|e| e.to_string())?;
             gpu_image(&iwi)
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
-        Some(ImageSource::Embedded) => Err("in-zone colour maps are not drawn yet".to_owned()),
-=======
         Some(ImageSource::Embedded) => embedded_image(image),
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
         Some(ImageSource::Empty) => Err("no pixels".to_owned()),
         None => Err("in no pack".to_owned()),
     }
@@ -409,7 +392,6 @@ fn embedded_image(image: &ImageRef) -> Result<Image, String> {
 /// first tile; never by its macro map.
 pub(crate) fn colour_texture<'a>(
     material: &'a asset_t6::MaterialRef,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
     capture: &'a ZoneCapture,
 ) -> Option<&'a asset_t6::MaterialTexture> {
     if material
@@ -437,10 +419,6 @@ pub(crate) fn colour_texture<'a>(
             return Some(t);
         }
     }
-=======
-    capture: &ZoneCapture,
-) -> Option<&'a asset_t6::MaterialTexture> {
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
     // A colour map is named `_c` / `_col`; the burning-ember materials also
     // carry an animated glow noise named `_c` (`glowcycle_random_01_c`),
     // which sorts first in their table, so it never counts as colour.
@@ -472,7 +450,6 @@ pub(crate) fn colour_texture<'a>(
         .textures
         .iter()
         .find(|t| t.name_hash == COLOR_MAP_HASH && t.image.is_some())
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
         .or_else(|| {
             material
                 .textures
@@ -494,10 +471,6 @@ pub(crate) fn colour_texture<'a>(
             let first = t.next();
             first.filter(|_| t.next().is_none())
         })
-=======
-        .or_else(|| semantic().filter(colour_named).max_by_key(area))
-        .or_else(|| semantic().next())
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
 }
 
 /// A 1x1 stand-in for a colour map with no pixels here, by its name: white,
@@ -525,7 +498,6 @@ fn flat_image(name: &str) -> Image {
     image
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
 /// bo2mp: an f32 as an IEEE half float (round to nearest; tiny values to
 /// zero, huge ones to infinity).
 fn half_bits(v: f32) -> u16 {
@@ -788,8 +760,6 @@ fn water_image(rows: &[[f32; 4]]) -> Image {
     image
 }
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
 /// An objective material's two colours as a 2x1 sRGB picture (linear
 /// colours in, so a sampled texel gives them back).
 fn objective_image(lo: [f32; 4], hi: [f32; 4]) -> Image {
@@ -841,7 +811,8 @@ const WATER_DEEP_DELTA_HASH: u32 = name_hash("waterColorDeepDelta");
 /// linear colour. Black Ops 1's water has a shallow colour and a deep one
 /// (shallow plus the delta, by the depth behind it): drawn at half depth
 /// (Shi No Numa's swamp: a muddy brown, clear at the banks, solid deep).
-fn water_image(material: &asset_t6::MaterialRef) -> Image {
+/// (bo2zm; named apart from bo2mp's `water_image` constant table.)
+fn water_colour_image(material: &asset_t6::MaterialRef) -> Image {
     let colour = |hash: u32| material.constants.iter().find(|c| c.0 == hash).map(|c| c.2);
     let mix: [f32; 4] = match (colour(WATER_COLOR_NEAR_HASH), colour(WATER_SHALLOW_HASH)) {
         (None, Some(shallow)) => {
@@ -918,7 +889,6 @@ pub(crate) fn link_materials_with(
             material.state_bits.get(usize::from(entry)).copied()
         });
         let mut draw = T6Draw::from_technique_set(technique_set, material.sort_key, state);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
         // bo2mp test aid: `IW4L_T6_HIDE_MAT=a,b` leaves out every material
         // whose name contains one of them (bisecting a stray surface).
         if let Ok(hide) = std::env::var("IW4L_T6_HIDE_MAT")
@@ -934,7 +904,7 @@ pub(crate) fn link_materials_with(
         // never draws in colour.
         if material.surface_flags & 0x8_0000 != 0 {
             draw.blend = asset_core::T6Blend::ShadowOnly;
-=======
+        }
         // bo2zm 27c: a material that draws in the emissive technique and in
         // none of the lit ones (TECHNIQUE_LIT_BEGIN 4 to TECHNIQUE_LIT_END 26),
         // like Die Rise's cloud sheets, takes no light: BO2 draws it unlit.
@@ -955,7 +925,6 @@ pub(crate) fn link_materials_with(
                     .collect();
                 emissive_names.push(format!("{} [{technique_set}] {constants:?}", material.name));
             }
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
         }
         // Unlit shaders scale their colour by the material's `scaleRGB`
         // (the light dome's is 32); powers of two up to 128 are kept.
@@ -963,7 +932,6 @@ pub(crate) fn link_materials_with(
         // the texel by `hdrAmount` before squaring it into linear (fxc
         // disassembly: (rgb * a * hdrAmount)^2), so by its square.
         if draw.unlit {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
             let sw4 = technique_set.split('_').any(|t| t == "sw4")
                 && technique_set.split('_').any(|t| t == "unlit");
             let hdr_amount = material
@@ -972,19 +940,13 @@ pub(crate) fn link_materials_with(
                 .find(|c| c.1 == "hdrAmount")
                 .map(|c| c.2[0] * c.2[0])
                 .filter(|_| sw4);
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
             let scale = material
                 .constants
                 .iter()
                 .find(|c| c.1.starts_with("scaleRGB"))
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
                 .map(|c| c.2[0])
                 .or(hdr_amount)
                 .unwrap_or(1.0);
-=======
-                .map_or(1.0, |c| c.2[0]);
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
             draw.unlit_scale_exp = scale.max(1.0).log2().round().clamp(0.0, 7.0) as u8;
             // bo2zm 27c: Die Rise's cloud sheets (`scrolling_zfeather`) drift
             // and fade where the scene behind them is near; their colour
@@ -1051,49 +1013,25 @@ pub(crate) fn link_materials_with(
                 }))
             })
         };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
         // bo2mp: a water material draws from its constants (a picture of
         // them in the colour map's place) and its two normal maps (in the
         // normal and specular maps' places).
         let water = asset_core::t6_water_kind(technique_set).filter(|_| draw.water);
         if let Some(kind) = water {
-=======
-        // bo2zm M3: an objective material (the box's question marks) draws
-        // its two pulse colours, not its (black) colour map: they go in a
-        // 2x1 picture its shader reads (texel 0 colorObjMin, 1 colorObjMax).
-        if draw.objective {
-            let colour = |name: &str| {
-                material
-                    .constants
-                    .iter()
-                    .find(|c| c.1 == name)
-                    .map_or([0.0; 4], |c| c.2)
-            };
-            let image = objective_image(colour("colorObjMin"), colour("colorObjMax"));
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
             let slot = catalog.link_image(AuthoredImage {
                 namespace: AssetNamespace::T6,
-                name: AssetRef::Real(format!("{}#objective", material.name)),
+                name: AssetRef::Real(format!("{}#water", material.name)),
                 map_type: 0,
                 semantic: TS_COLOR_MAP,
                 category: 0,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
                 use_srgb_reads: false,
                 width: 11,
-=======
-                use_srgb_reads: true,
-                width: 2,
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
                 height: 1,
                 depth: 1,
                 level_count: 1,
                 format: 0,
                 payload: Arc::new(Vec::new()),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
                 decoded: Some(Arc::new(water_image(&water_table(material, kind)))),
-=======
-                decoded: Some(Arc::new(image)),
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
                 common_owned: false,
                 decoded_variant: None,
                 decoded_by: None,
@@ -1107,7 +1045,6 @@ pub(crate) fn link_materials_with(
                 semantic: TS_COLOR_MAP,
                 image: Some(slot),
             });
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
             // Pool: normalMap00, normalMap01; sea: normalMapLo, normalMapHi.
             let maps = if kind == 0 {
                 [0x1aca_8a8f, 0x1aca_8a8e]
@@ -1142,7 +1079,33 @@ pub(crate) fn link_materials_with(
                     .map_or([0.0; 4], |c| c.2)
             };
             let image = objective_image(colour("colorObjMin"), colour("colorObjMax"));
-=======
+            let slot = catalog.link_image(AuthoredImage {
+                namespace: AssetNamespace::T6,
+                name: AssetRef::Real(format!("{}#objective", material.name)),
+                map_type: 0,
+                semantic: TS_COLOR_MAP,
+                category: 0,
+                use_srgb_reads: true,
+                width: 2,
+                height: 1,
+                depth: 1,
+                level_count: 1,
+                format: 0,
+                payload: Arc::new(Vec::new()),
+                decoded: Some(Arc::new(image)),
+                common_owned: false,
+                decoded_variant: None,
+                decoded_by: None,
+                pending_decode: None,
+            });
+            textures.push(MaterialTextureBinding {
+                name_hash: 0xa0ab_1041,
+                name_start: 0,
+                name_end: 0,
+                sampler_state: 0x14,
+                semantic: TS_COLOR_MAP,
+                image: Some(slot),
+            });
         } else if technique_set.contains("cod7water")
             && colour_texture(material, capture).is_none_or(|t| {
                 // Black Ops 1's water keeps its sky reflection (a cube map)
@@ -1153,17 +1116,17 @@ pub(crate) fn link_materials_with(
                     .is_some_and(|img| img.map_type == 5)
             })
         {
-            // bo2zm visuals: water (`cod7water`) without a colour map. Its pixel
-            // shader (fxc disassembly) mixes the scene behind towards
+            // bo2zm visuals: water (`cod7water`) the bo2mp water draw above
+            // did not take, without a colour map. Its pixel shader (fxc
+            // disassembly) mixes the scene behind towards
             // waterColorNear..waterColorS (by the view angle) times the
             // lightmap, by their alpha, under a fresnel reflection; drawn
             // here as that colour at a middle view angle, blended by its
             // alpha (it drew as the untextured blue diagnostic).
             draw.blend = asset_core::T6Blend::Blend;
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
             let slot = catalog.link_image(AuthoredImage {
                 namespace: AssetNamespace::T6,
-                name: AssetRef::Real(format!("{}#water", material.name)),
+                name: AssetRef::Real(format!("{}#water_colour", material.name)),
                 map_type: 0,
                 semantic: TS_COLOR_MAP,
                 category: 0,
@@ -1174,7 +1137,7 @@ pub(crate) fn link_materials_with(
                 level_count: 1,
                 format: 0,
                 payload: Arc::new(Vec::new()),
-                decoded: Some(Arc::new(water_image(material))),
+                decoded: Some(Arc::new(water_colour_image(material))),
                 common_owned: false,
                 decoded_variant: None,
                 decoded_by: None,
@@ -1255,15 +1218,11 @@ pub(crate) fn link_materials_with(
         // The normal and specular maps BO2's lit shaders read (the shine);
         // the fast quality setting draws without them.
         // (`IW4L_T6_NO_SHINE` leaves them out: a test aid for comparing.)
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
         if !asset_core::t6_fast()
             && !draw.unlit
             && water.is_none()
             && std::env::var_os("IW4L_T6_NO_SHINE").is_none()
         {
-=======
-        if !asset_core::t6_fast() && !draw.unlit && std::env::var_os("IW4L_T6_NO_SHINE").is_none() {
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
             for (hash, semantic) in SHINE_MAPS {
                 if let Some(texture) = material.textures.iter().find(|t| t.name_hash == hash)
                     && let Some(key) = texture.image
@@ -1280,7 +1239,6 @@ pub(crate) fn link_materials_with(
                 }
             }
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
         // bo2mp: an emissive flow material's masks (in the specular map's
         // place) and colour remap with constants (in layer 1's).
         // (`IW4L_T6_NO_FLOW` leaves them out: a test aid for comparing.)
@@ -1529,8 +1487,6 @@ pub(crate) fn link_materials_with(
         } else {
             draw.flow = false;
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
         if textures.is_empty() {
             uncoloured += 1;
         } else {
@@ -1595,7 +1551,6 @@ pub(crate) fn link_materials_with(
 /// (blend ONE/ONE, or SRC_ALPHA/ONE) - BO2's menu brackets and glows,
 /// black where nothing shows.
 pub(crate) fn is_additive(material: &asset_t6::MaterialRef) -> bool {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
     (0..36).filter_map(|t| material.draw_state(t)).any(|d| d.dst_blend == 2 && matches!(d.src_blend, 2 | 5))
 }
 
@@ -1635,22 +1590,13 @@ pub(crate) fn pack_color_add(color: &Image, added: &Image) -> Option<(Image, Ima
     let packed = rgba8_image(color, w, h, rgba);
     let flat = additive_to_alpha(&rgba8_image(color, w, h, flat))?;
     Some((packed, flat))
-=======
-    (0..36)
-        .filter_map(|t| material.draw_state(t))
-        .any(|d| d.dst_blend == 2 && matches!(d.src_blend, 2 | 5))
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
 }
 
 /// bo2zm M4: an additive picture for a 2D layer that only alpha-blends: its
 /// top level as RGBA with the brightness as alpha (black = see-through),
 /// colour divided back out.
 pub(crate) fn additive_to_alpha(image: &Image) -> Option<Image> {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
     let (w, h, mut rgba) = top_level_rgba8(image)?;
-=======
-    let (w, h, mut rgba) = top_level_rgba(image)?;
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
     for px in rgba.chunks_exact_mut(4) {
         let a = u32::from(px[0].max(px[1]).max(px[2]));
         let alpha = a * u32::from(px[3]) / 255;
@@ -1661,7 +1607,19 @@ pub(crate) fn additive_to_alpha(image: &Image) -> Option<Image> {
         }
         px[3] = alpha as u8;
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lane/t6_materials.rs
+    Some(rgba8_image(image, w, h, rgba))
+}
+
+/// bo2zm M4: the left `keep` of a picture's columns, the rest see-through
+/// (the lobby's quiet speaker: `voice_on` without its sound waves).
+pub(crate) fn left_part(image: &Image, keep: f32) -> Option<Image> {
+    let (w, h, mut rgba) = top_level_rgba8(image)?;
+    let cut = (w as f32 * keep).round() as usize;
+    for (i, px) in rgba.chunks_exact_mut(4).enumerate() {
+        if i % w >= cut {
+            px[3] = 0;
+        }
+    }
     Some(rgba8_image(image, w, h, rgba))
 }
 
@@ -1701,38 +1659,6 @@ fn top_level_rgba8(image: &Image) -> Option<(usize, usize, Vec<u8>)> {
         TextureFormat::Rgba8UnormSrgb => (0, |_, _, _| {}),
         _ => return None,
     };
-=======
-    Some(rgba_image(image, w, h, rgba))
-}
-
-/// bo2zm M4: the left `keep` of a picture's columns, the rest see-through
-/// (the lobby's quiet speaker: `voice_on` without its sound waves).
-pub(crate) fn left_part(image: &Image, keep: f32) -> Option<Image> {
-    let (w, h, mut rgba) = top_level_rgba(image)?;
-    let cut = (w as f32 * keep).round() as usize;
-    for (i, px) in rgba.chunks_exact_mut(4).enumerate() {
-        if i % w >= cut {
-            px[3] = 0;
-        }
-    }
-    Some(rgba_image(image, w, h, rgba))
-}
-
-/// A picture's top level as plain RGBA bytes (block-compressed ones
-/// decoded), with its size.
-fn top_level_rgba(image: &Image) -> Option<(usize, usize, Vec<u8>)> {
-    let w = image.texture_descriptor.size.width as usize;
-    let h = image.texture_descriptor.size.height as usize;
-    let data = image.data.as_ref()?;
-    let (block, decode): (usize, fn(&[u8], &mut [u8], usize)) =
-        match image.texture_descriptor.format {
-            TextureFormat::Bc1RgbaUnormSrgb | TextureFormat::Bc1RgbaUnorm => (8, bcdec_rs::bc1),
-            TextureFormat::Bc2RgbaUnormSrgb | TextureFormat::Bc2RgbaUnorm => (16, bcdec_rs::bc2),
-            TextureFormat::Bc3RgbaUnormSrgb | TextureFormat::Bc3RgbaUnorm => (16, bcdec_rs::bc3),
-            TextureFormat::Rgba8UnormSrgb => (0, |_, _, _| {}),
-            _ => return None,
-        };
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lane/t6_materials.rs
     let mut rgba = vec![0u8; w * h * 4];
     if block == 0 {
         rgba.copy_from_slice(data.get(..w * h * 4)?);
@@ -1757,20 +1683,4 @@ fn top_level_rgba(image: &Image) -> Option<(usize, usize, Vec<u8>)> {
         }
     }
     Some((w, h, rgba))
-}
-
-fn rgba_image(like: &Image, w: usize, h: usize, rgba: Vec<u8>) -> Image {
-    let mut out = Image::new(
-        Extent3d {
-            width: w as u32,
-            height: h as u32,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        rgba,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-    out.sampler = like.sampler.clone();
-    out
 }

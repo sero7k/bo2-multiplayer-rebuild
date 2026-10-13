@@ -9,20 +9,19 @@ mod launch_report;
 mod layers;
 mod load_table;
 mod loading;
-mod lui_hud; // bo2zm M4
+mod lui_hud; // bo2zm M4; bo2mp: the multiplayer front end and match HUD
+mod lui_hud_zm; // bo2 merge: Zombies' own LUI front end and HUD (see lui_hud::zombies_turn)
 mod menu;
 mod menu_load;
 mod options;
 mod plugin;
 mod screen;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/lib.rs
-mod bo2_font;
 mod scope_hint; // bo2mp scope lane
 mod overhead_names; // bo2mp: names over heads in BO2's font
-mod zm_hud;
+mod zm_hud; // bo2zm M4: the Zombies globe
 mod foreign_maps; // bo2mp: other games' maps in the map list
 mod game_folders; // bo2mp: the Game Folders panel
-pub mod hud_modern;
+pub mod hud_modern; // bo2mp: the modern in-game HUD
 pub mod hud_match; // bo2mp: our kill feed, hit marker, kill banner, scoreboard
 pub mod hud_medals; // bo2mp: Black Ops' medal notification
 pub(crate) mod hud_cards; // bo2mp: MW2/MW3 calling cards and emblems in the HUD
@@ -32,18 +31,13 @@ pub(crate) mod online_match; // bo2mp: the front end's matches through the maste
 pub mod shell; // bo2mp: the client's own front end and loading screen
 mod music_screen; // bo2mp: front-end music context for the audio director
 mod load_info; // bo2mp: the loading screen's info bar
-mod pad_glyphs; // bo2mp: Xbox button icons on a controller // bo2mp: the modern in-game HUD
-mod lui_hud; // bo2zm M4
+mod pad_glyphs; // bo2mp: Xbox button icons on a controller
 mod lui_additive; // bo2mp scope: true additive HUD pictures
 mod lui_frontend; // bo2mp lane C
 mod lui_scene; // bo2mp menus: the front end's 3D backdrop
 mod bo2mp_damage; // bo2mp lane C
 pub use lui_frontend::{Bo2mpFrontend, Bo2mpFrontendAssets};
-pub mod lui_omni_row; // bo2zm: Controls > Move "Omni Movement"
-=======
-mod zm_hud; // bo2zm M4: the Zombies globe
 pub mod lui_omni_row; // bo2zm: Controls > Move "Omni Movement" (a tester 10-10)
->>>>>>> /tmp/claude-0/zmhead/crates/ui/src/lib.rs
 
 pub use classes::equip_txn::{
     EquipTxnWatch, apply_pending_class_equip, resolve_class_equip_transaction,

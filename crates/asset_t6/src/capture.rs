@@ -412,11 +412,9 @@ pub struct WorldRef {
     /// `GfxWorld::exposureVolumes`: (exposure, increase scale, decrease
     /// scale, feather range) per volume.
     pub exposure_volumes: Vec<[f32; 4]>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
     /// bo2mp: `GfxWorld::sunParse.initWorldSun.exposure`, the map's own
     /// exposure where no exposure volume holds the eye.
     pub init_sun_exposure: f32,
-=======
     /// Per exposure volume its `control` word (which planes bound it).
     pub exposure_volume_controls: Vec<u32>,
     /// `GfxWorld::exposureVolumePlanes`: the volumes' bounding planes.
@@ -429,19 +427,10 @@ pub struct WorldRef {
     pub lut_volume_planes: Vec<[f32; 4]>,
     /// `GfxWorld::skyDynIntensity`: angle0, angle1, factor0, factor1.
     pub sky_dyn_intensity: [f32; 4],
->>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
     /// `GfxWorld::lightGrid`, the static-model lighting source.
     pub light_grid: Option<LightGridRef>,
     /// `GfxWorld::lutMaterial`: the map's colour grading material.
     pub lut_material: Option<AssetKey>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
-    /// `GfxWorld::lutVolumes`: per volume its box, control word, transition
-    /// time and the band of the LUT image it picks.
-    pub lut_volumes: Vec<([f32; 3], [f32; 3], u32, u32, u32)>,
-    /// `GfxWorld::skyDynIntensity`: angle0, angle1, factor0, factor1.
-    pub sky_dyn_intensity: [f32; 4],
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
     /// The static visibility lists.
     pub dpvs: DpvsRanges,
     /// `sortedSurfIndex`: draw order -> surface.
@@ -768,7 +757,6 @@ pub struct StringTableRef {
     pub cells: Vec<String>,
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
 /// bo2mp: a vehicle's own weapons (`VehicleDef::turretWeapon`,
 /// `gunnerWeapon[4]`): what a scorestreak's helicopter fires.
 #[derive(Clone, Debug, Default)]
@@ -920,7 +908,8 @@ fn vehicle_button_command(name: &str) -> &'static str {
         "BUTTON_RTRIG" => "+attack",
         _ => "",
     }
-=======
+}
+
 /// bo2zm: a window/box barrier type (`ZBarrierDef`, named by a map
 /// entity's `type` key): the zombie animation states it asks for.
 #[derive(Clone, Debug, Default)]
@@ -936,7 +925,6 @@ pub struct ZBarrierDefRef {
     pub attack_spot_horz_offset: f32,
     /// Per board: (tear anim state, tear anim substate).
     pub boards: Vec<(String, String)>,
->>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
 }
 
 /// Everything one walk captured.
@@ -979,6 +967,10 @@ pub struct ZoneCapture {
     /// bo2mp: vehicles and their weapons.
     pub vehicles: Vec<VehicleRef>,
     /// bo2mp: destructible definitions (a map's cars, barrels, ...).
+    /// bo2zm: also the props that break in stages (Nuketown's mannequins);
+    /// the Zombies fork's own `m2::DestructibleRef` reading of the same
+    /// asset is superseded by this one (it adds the pristine model and the
+    /// physics constraint a break launches with).
     pub destructibles: Vec<DestructibleRef>,
     /// bo2mp: physics presets and constraint sets (what a broken-off piece
     /// flies with).
@@ -990,8 +982,6 @@ pub struct ZoneCapture {
     pub fonts: Vec<crate::m2::FontRef>,
     pub fx: Vec<crate::m2::FxEffectRef>,
     pub tracers: Vec<crate::m2::TracerRef>,
-    /// Props that break in stages (Nuketown's mannequins).
-    pub destructibles: Vec<crate::m2::DestructibleRef>,
     pub impact_tables: Vec<crate::m2::ImpactTableRef>,
     pub footstep_tables: Vec<crate::m2::FootstepTableRef>,
     pub footstep_fx_tables: Vec<crate::m2::FootstepFxTableRef>,
@@ -1948,35 +1938,6 @@ impl ZoneCapture {
             reflection_probes,
             sky_box_model: string_field(s, w, l::GfxWorld::skyBoxModel)?,
             lut_material: self.asset_at(s, w.at(l::GfxWorld::lutMaterial))?,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
-            lut_volumes: {
-                let n = s.u32_at(w, l::GfxWorld::lutVolumeCount)? as usize;
-                let mut v = Vec::with_capacity(n);
-                if let Some(arr) = deref(s, w, l::GfxWorld::lutVolumes)? {
-                    for i in 0..n {
-                        let e = arr.at(i * l::GfxLutVolume::SIZE);
-                        v.push((
-                            vec3(s, e, l::GfxLutVolume::mins)?,
-                            vec3(s, e, l::GfxLutVolume::maxs)?,
-                            s.u32_at(e, l::GfxLutVolume::control)?,
-                            s.u32_at(e, l::GfxLutVolume::lutTransitionTime)?,
-                            s.u32_at(e, l::GfxLutVolume::lutIndex)?,
-                        ));
-                    }
-                }
-                v
-            },
-            sky_dyn_intensity: {
-                let d = w.at(l::GfxWorld::skyDynIntensity);
-                [
-                    s.f32_at(d, l::GfxSkyDynamicIntensity::angle0)?,
-                    s.f32_at(d, l::GfxSkyDynamicIntensity::angle1)?,
-                    s.f32_at(d, l::GfxSkyDynamicIntensity::factor0)?,
-                    s.f32_at(d, l::GfxSkyDynamicIntensity::factor1)?,
-                ]
-            },
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
             light_grid: {
                 let g = w.at(l::GfxWorld::lightGrid);
                 let u16x3 = |off: usize| -> Result<[u16; 3]> {
@@ -2050,15 +2011,12 @@ impl ZoneCapture {
                 };
                 Some(grid)
             },
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
             init_sun_exposure: s.f32_at(
                 w,
                 l::GfxWorld::sunParse
                     + l::SunLightParseParams::initWorldSun
                     + l::GfxWorldSun::exposure,
             )?,
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
             exposure_volumes: {
                 let n = s.u32_at(w, l::GfxWorld::exposureVolumeCount)? as usize;
                 let mut v = Vec::with_capacity(n);
@@ -2434,7 +2392,6 @@ impl WalkSink for ZoneCapture {
                 }
                 None
             }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
             AssetType::FontIcon => {
                 // bo2mp: BO2's button pictures (`^BBUTTON_MOUSE_LEFT^`): each icon's
                 // name, picture and its size scales, and the aliases that name
@@ -2473,8 +2430,6 @@ impl WalkSink for ZoneCapture {
                 self.string_tables.push(StringTableRef { name: "bo2mp/fonticonalias.csv".to_owned(), columns: 2, rows: cells.len() / 2, cells });
                 None
             }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
             AssetType::StringTable => {
                 let name = string_field(s, body, l::StringTable::name)?;
                 let columns = s.u32_at(body, l::StringTable::columnCount)? as usize;
@@ -2570,7 +2525,6 @@ impl WalkSink for ZoneCapture {
                 self.weapons.push(weapon);
                 None
             }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
             AssetType::Attachment => {
                 let a = self.read_attachment(s, body)?;
                 self.attachments.push(a);
@@ -2581,8 +2535,6 @@ impl WalkSink for ZoneCapture {
                 self.attachment_uniques.push(a);
                 None
             }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
             AssetType::WeaponCamo => {
                 let camo = self.read_weapon_camo(s, body)?;
                 self.weapon_camos.push(camo);
@@ -2597,11 +2549,6 @@ impl WalkSink for ZoneCapture {
                 let fx = self.read_fx(s, body)?;
                 self.fx.push(fx);
                 Some(self.fx.len() - 1)
-            }
-            AssetType::DestructibleDef => {
-                let def = self.read_destructible(s, body)?;
-                self.destructibles.push(def);
-                None
             }
             AssetType::Tracer => {
                 let tracer = self.read_tracer(s, body)?;
@@ -2632,7 +2579,6 @@ impl WalkSink for ZoneCapture {
                 self.snd_globals = Some(self.read_snd_driver_globals(s, body)?);
                 None
             }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_t6/src/capture.rs
             AssetType::VehicleDef => {
                 // Its guns are named, not pointed at (`turretWeapon`,
                 // `gunnerWeapon[4]` are strings in BO2's vehicle def).
@@ -2800,8 +2746,6 @@ impl WalkSink for ZoneCapture {
                 });
                 None
             }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/asset_t6/src/capture.rs
             AssetType::MapEnts => {
                 let len = s.u32_at(body, l::MapEnts::numEntityChars)? as usize;
                 let text = bytes_field(s, body, l::MapEnts::entityString, len)?;

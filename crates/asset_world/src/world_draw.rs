@@ -451,12 +451,6 @@ pub struct WorldDraw {
     /// elsewhere.
     pub t6_lights: Vec<[f32; 16]>,
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_world/src/world_draw.rs
-    /// bo2zm: a Black Ops II world's fog banks (its fog volumes' banks, the
-    /// client scripts' `setworldfogactivebank`): per bank the two fog rows
-    /// of `t6_lights` (slots 30 and 31) that bank draws with.
-    pub t6_fog_banks: Vec<(u32, [[f32; 16]; 2])>,
-=======
     /// bo2zm: a Black Ops II world's fog volumes (the client scripts'
     /// `setworldfogactivebank` picks which banks are on); empty elsewhere.
     pub t6_fog_banks: Vec<T6FogVolume>,
@@ -482,7 +476,6 @@ pub struct WorldDraw {
     /// targetname is one of the engine's built-in mixer behaviours,
     /// `fire_flicker` / `electrical_flicker`); empty elsewhere.
     pub t6_flicker: Vec<T6Flicker>,
->>>>>>> /tmp/claude-0/zmhead/crates/asset_world/src/world_draw.rs
 
     /// bo2zm: per reflection probe, its `lightingSH` (three vec4) for the
     /// fallback draw's reflections; empty elsewhere.

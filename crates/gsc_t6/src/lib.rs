@@ -14,12 +14,8 @@ pub mod program;
 pub mod value;
 pub mod vm;
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/gsc_t6/src/lib.rs
 pub use compile::compile;
 pub use object::{Import, Insn, ScriptObject, op_name};
-=======
-pub use object::{ScriptObject, op_name};
->>>>>>> /tmp/claude-0/zmhead/crates/gsc_t6/src/lib.rs
 pub use program::{CallKind, Program};
 pub use value::{Array, ArrayRef, FuncRef, Key, ObjKind, ObjRef, Str, Strings, Value};
 pub use vm::{Hooks, Native, ThreadId, Vm, hang_report, hash_name, truthy};

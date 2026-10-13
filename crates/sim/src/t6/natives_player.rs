@@ -4,11 +4,7 @@ use bevy_ecs::prelude::World;
 use gsc_t6::{Value, Vm};
 
 use super::{
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_player.rs
     Zm, arg, client, entnum, flag, frame, int, list, num, origin_of, text, tick, vec3, weapon,
-=======
-    Zm, arg, client, entnum, flag, frame, int, list, origin_of, text, tick, vec3, weapon,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_player.rs
     weapon_text,
 };
 use crate::script_player;
@@ -82,7 +78,6 @@ fn controls(
     Ok(Value::Undefined)
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_player.rs
 /// A shellshock ends (`stopshellshock` or its time ran out): the timer, the
 /// SHELLSHOCKED flag and the speed factor it put on the scale go.
 pub(super) fn end_shock(world: &mut World, n: u32, why: &str) {
@@ -118,8 +113,6 @@ pub(super) fn end_shock(world: &mut World, n: u32, why: &str) {
     );
 }
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_player.rs
 /// BO2's `allow*`: sets the switch and returns whether it was allowed before
 /// (scripts keep it: `prone = self allowprone( 0 ); ... self allowprone( prone );`).
 fn allow(
@@ -268,7 +261,9 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let id = client(vm, world, s)?;
         let w = weapon(world, &text(vm, a, 0))?;
         script_player::switch_to_weapon(&mut frame(world), id, w);
-        Ok(Value::Undefined)
+        Ok(Value::bool(
+            w != 0 && script_player::has_weapon(&frame(world), id, w),
+        ))
     });
     m!("switchtoweaponimmediate", |vm, world, s, a| {
         let id = client(vm, world, s)?;
@@ -476,12 +471,8 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         s,
         |c| c.switch_disabled = false
     ));
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_player.rs
     // bo2mp: BO2's `allow*` (false drops the request in constrain_cmd;
     // the answer is whether it was allowed before, as BO2's).
-=======
-    // BO2's `allow*` (false drops the request in constrain_cmd).
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_player.rs
     m!("allowprone", |vm, world, s, a| {
         let on = flag(a, 0, true);
         allow(vm, world, s, |c| {
@@ -518,7 +509,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             std::mem::replace(&mut c.ads_disabled, !on)
         })
     });
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_player.rs
     // bo2mp: `setmovespeedscale(f)` is the player's own scale; a shellshock's
     // `bg_shock_movement` rides on top while it lasts (`getmovespeedscale`
     // gives his own back). The feel window reads
@@ -567,7 +557,10 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             return Err(format!("shellshock duration {seconds} is negative"));
         }
         let Some(mut shock) = frame(world).shock(&name).cloned() else {
-            return Err(format!("no shock file for shellshock '{name}'"));
+            // bo2zm: a missing shock file is not a script error (a perk
+            // machine's `shellshock("default", 1.5)` must not stop its thread).
+            diag::warn!(Sim, "t6 shellshock '{name}': no shock file");
+            return Ok(Value::Undefined);
         };
         let now = crate::level_time_ms(tick(world));
         let index = {
@@ -626,8 +619,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         end_shock(world, id.0, "stopshellshock");
         Ok(Value::Undefined)
     });
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_player.rs
     m!("allowjump", |vm, world, s, a| {
         let on = flag(a, 0, true);
         controls(vm, world, s, |c| c.jump_disabled = !on)
@@ -679,7 +670,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         Ok(Value::Undefined)
     });
     m!("depthinwater", |_, _, _, _| Ok(Value::Float(0.0)));
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_player.rs
     // bo2mp: the gun on his back (BO2's _weapons.gsc stow_on_back): every
     // client draws its world model on his tag_stowed_back.
     m!("setstowedweapon", |vm, world, s, a| {
@@ -694,13 +684,8 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         super::playeranim::edit_body(world, id.0, |l| l.stowed = None);
         Ok(Value::Undefined)
     });
-=======
-    // The stowed gun on his back (third person): not drawn yet.
-    m!("setstowedweapon", |_, _, _, _| Ok(Value::Undefined));
-    m!("clearstowedweapon", |_, _, _, _| Ok(Value::Undefined));
     // Camo/lens/reticle options for giveweapon (Pack-a-Punch): none drawn yet.
     m!("calcweaponoptions", |_, _, _, _| Ok(Value::Int(0)));
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_player.rs
     vm.bind("getweaponstowedmodel", false, |vm, _, _, _| {
         Ok(vm.string(""))
     });
@@ -810,18 +795,11 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             use playerstate_iw4::eflags::{DUCK, PRONE};
             use playerstate_iw4::pm_flags;
             ps.e_flags &= !(DUCK | PRONE);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_player.rs
-            ps.e_flags |= match st.as_str() {
-                "crouch" => DUCK,
-                "prone" => PRONE,
-                _ => 0,
-=======
             ps.pm_flags &= !(pm_flags::CROUCH | pm_flags::PRONE);
             let (e, pm, event) = match st.as_str() {
                 "crouch" => (DUCK, pm_flags::CROUCH, 7),
                 "prone" => (PRONE, pm_flags::PRONE, 8),
                 _ => (0, 0, 6),
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_player.rs
             };
             ps.e_flags |= e;
             ps.pm_flags |= pm;
@@ -1109,15 +1087,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     });
     m!("getfractionmaxammo", |vm, world, s, a| {
         let id = client(vm, world, s)?;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_player.rs
-        let w = weapon(world, &text(vm, a, 0))?;
-        Ok(Value::Float(script_player::ammo_fraction(
-            &frame(world),
-            id,
-            w,
-            false,
-        )))
-=======
         let name = text(vm, a, 0);
         let w = weapon(world, &name)?;
         let f = frame(world);
@@ -1132,7 +1101,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             );
         }
         Ok(Value::Float(frac))
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_player.rs
     });
     for name in [
         "setclientuivisibilityflag",
@@ -1147,11 +1115,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         "openmenu",
         "closemenu",
         "closeingamemenu",
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_player.rs
-        "setblur",
-        "startfadingblur",
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_player.rs
         "enableinvulnerability",
         "disableinvulnerability",
         "allowlean",
@@ -1203,7 +1166,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     ] {
         vm.bind(name, true, |_, _, _, _| Ok(Value::Undefined));
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_player.rs
     // bo2mp: BO2's own menus open on the player's screen (lane C); the
     // server only hears his answer (`menuresponse`). BO2MP_AUTOCLASS=<class>
     // answers the class menu a second after it opens (a test aid: a hidden
@@ -1241,13 +1203,36 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                     f.client_meta_mut(id).view_effects.depth_of_field = dof;
                 }
             }
-            Err(e) => diag::warn!(Sim, "bo2mp setdepthoffield ignored: {e}"),
+            Err(e) if world.resource::<Zm>().mp => {
+                diag::warn!(Sim, "bo2mp setdepthoffield ignored: {e}")
+            }
+            // bo2zm: on a Zombies map the numbers are brought in range
+            // (near blur 4-10, far blur at most the near) and kept.
+            Err(_) => {
+                if let (Ok(a0), Ok(a1), Ok(a2), Ok(a3), Ok(a4), Ok(a5)) =
+                    (n(0), n(1), n(2), n(3), n(4), n(5))
+                {
+                    let near_blur = a4.clamp(4.0, 10.0);
+                    let far_blur = a5.clamp(0.0, near_blur);
+                    if let Ok(dof) = crate::script::host::client_effects::depth_of_field_values(
+                        a0.max(0.0),
+                        a1.max(0.0),
+                        a2.max(0.0),
+                        a3.max(0.0),
+                        near_blur,
+                        far_blur,
+                    ) {
+                        let mut f = frame(world);
+                        if f.client_meta(id).is_some() {
+                            f.client_meta_mut(id).view_effects.depth_of_field = dof;
+                        }
+                    }
+                }
+            }
         }
         Ok(Value::Undefined)
     });
     m!("getdstat", |_, _, _, _| Ok(Value::Int(0)));
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_player.rs
     // bo2zm M4: setactionslot(slot, kind[, weapon]): what his d-pad slot
     // holds (BO2's HUD draws it: `bo2zm_actionslots`); "" empties it.
     m!("setactionslot", |vm, world, s, a| {
@@ -1406,8 +1391,9 @@ fn now_ms(world: &World) -> i32 {
     crate::level_time_ms(world.resource::<crate::step::StepRequest>().tick)
 }
 
-/// Blur, depth of field and shellshock (BO2's perk machines knock players
-/// flat with `shellshock("default", 1.5)`; the game-over rocket blurs).
+/// Blur (the game-over rocket blurs). Depth of field and shellshock (BO2's
+/// perk machines knock players flat with `shellshock("default", 1.5)`) are
+/// bound in `bind`.
 fn screen_effects(vm: &mut Vm<World>) {
     vm.bind("setblur", true, |vm, world, s, a| {
         let id = client(vm, world, s)?;
@@ -1443,64 +1429,10 @@ fn screen_effects(vm: &mut Vm<World>) {
         }
         Ok(Value::Undefined)
     });
-    vm.bind("setdepthoffield", true, |vm, world, s, a| {
-        let id = client(vm, world, s)?;
-        let v: Vec<f32> = (0..6).map(|i| super::num(a, i)).collect::<Result<_, _>>()?;
-        let (near_start, near_end, far_start, far_end) = (v[0], v[1], v[2], v[3]);
-        let near_blur = v[4].clamp(4.0, 10.0);
-        let far_blur = v[5].clamp(0.0, near_blur);
-        let (near_start, near_end) = if near_end <= near_start {
-            (0.0, 0.0)
-        } else {
-            (near_start.max(0.0), near_end)
-        };
-        let (far_start, far_end) = if far_end <= far_start || far_blur == 0.0 {
-            (0.0, 0.0)
-        } else {
-            (far_start.max(0.0), far_end)
-        };
-        let mut f = frame(world);
-        if f.client_meta(id).is_some() {
-            f.client_meta_mut(id).view_effects.depth_of_field = crate::ScriptDepthOfField {
-                near_start,
-                near_end,
-                far_start,
-                far_end,
-                near_blur,
-                far_blur,
-            };
-        }
-        Ok(Value::Undefined)
-    });
-    vm.bind("shellshock", true, |vm, world, s, a| {
-        let id = client(vm, world, s)?;
-        let name = text(vm, a, 0).to_ascii_lowercase();
-        let secs = super::num(a, 1).unwrap_or(0.0).max(0.0);
-        let now = now_ms(world);
-        let mut f = frame(world);
-        let Some(shock) = f.shock(&name).cloned() else {
-            diag::warn!(Sim, "bo2zm t6 shellshock '{name}': no shock file");
-            return Ok(Value::Undefined);
-        };
-        let Some(ps) = f.player_mut(id) else {
-            return Ok(Value::Undefined);
-        };
-        diag::info!(Sim, "bo2zm t6 shellshock {name} {secs}s");
-        ps.shellshock_index = 1;
-        ps.shellshock_time = now;
-        ps.shellshock_duration = (secs * 1000.0) as i32;
-        ps.pm_flags |= playerstate_iw4::pm_flags::SHELLSHOCKED;
-        f.client_meta_mut(id).shellshock = Some(shock);
-        Ok(Value::Undefined)
-    });
-    vm.bind("stopshellshock", true, |vm, world, s, _| {
-        let id = client(vm, world, s)?;
-        if let Some(ps) = frame(world).player_mut(id) {
-            ps.shellshock_duration = 0;
-            ps.pm_flags &= !playerstate_iw4::pm_flags::SHELLSHOCKED;
-        }
-        Ok(Value::Undefined)
-    });
+    // setdepthoffield, shellshock and stopshellshock: bound in `bind` above
+    // (one implementation for both modes: the shock's index, its movement
+    // scale and its end; a Zombies map's out-of-range depth of field kept
+    // in range).
 }
 
 fn weapon_list(

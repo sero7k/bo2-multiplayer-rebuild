@@ -750,6 +750,8 @@ fn lobby_member(m: &MpState, v: &EngineValues, (allies, free): (f32, f32)) -> cr
 }
 
 pub fn install(host: &mut Host) -> Mp {
+    // bo2zm merge: the multiplayer answers hold while these menus run.
+    crate::lui::set_multiplayer(true);
     let mp: Mp = Rc::default();
     let values = host.values.clone();
     // Read the items the first time a function needs them.

@@ -7,13 +7,9 @@ use net::{
 use sim::ClientAction;
 
 use render_frontend::adapters::anim::fpv_present::LocalSpawnArmed;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/session/src/local_arm.rs
 use render_frontend::prepare::scene::camera::{
     FlyCamera, SimCamera, WorldCameraPose, transform_from_iw_view,
 };
-=======
-use render_frontend::prepare::scene::camera::SimCamera;
->>>>>>> /tmp/claude-0/zmhead/crates/session/src/local_arm.rs
 
 pub fn arm_local_from_presented(
     presented: Res<PresentedSnapshot>,
@@ -126,7 +122,6 @@ pub fn join_local_on_class_select(
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/session/src/local_arm.rs
 /// Behind the class select the camera sits where the match script put the
 /// local client: `callplayerconnect` runs `[[level.spawnspectator]]`, which
 /// takes a `mp_global_intermission` and calls `spawn(origin, angles)` on the
@@ -173,8 +168,6 @@ pub fn spectator_camera_from_presented(
     }
 }
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/session/src/local_arm.rs
 pub fn sync_prediction_metrics_to_probe(
     prediction: Res<ClientPredictionState>,
     mut report: Option<ResMut<LaunchReport>>,

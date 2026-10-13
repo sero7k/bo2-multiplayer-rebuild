@@ -1,8 +1,4 @@
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/lui_omni_row.rs
 //! bo2zm: the "Omni Movement" row in BO2's Controls menu (off
-=======
-//! bo2zm: his "Omni Movement" row in BO2's Controls menu (a tester 10-10: off
->>>>>>> /tmp/claude-0/zmhead/crates/ui/src/lui_omni_row.rs
 //! by default, an option in the Controls menu for whoever wants it).
 //!
 //! Not one of Black Ops II's rows (BO2 sprints forward only), so it goes
@@ -74,17 +70,10 @@ mod tests {
     use hks_t6::value::Table;
 
     /// Black Ops II's own menu scripts (the multiplayer front end's rawfile
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/lui_omni_row.rs
     /// dump, in the folder BO2_FRONT_SCRIPTS names); none without it.
     fn bo2_scripts() -> Option<Vec<(String, Vec<u8>)>> {
         let mut out = Vec::new();
         for e in std::fs::read_dir(std::env::var_os("BO2_FRONT_SCRIPTS")?).ok()? {
-=======
-    /// dump); none on a PC without them.
-    fn bo2_scripts() -> Option<Vec<(String, Vec<u8>)>> {
-        let mut out = Vec::new();
-        for e in std::fs::read_dir(r"raw\front").ok()? {
->>>>>>> /tmp/claude-0/zmhead/crates/ui/src/lui_omni_row.rs
             let p = e.ok()?.path();
             if p.extension().is_some_and(|x| x == "lua") {
                 out.push((p.file_name()?.to_string_lossy().into_owned(), std::fs::read(&p).ok()?));

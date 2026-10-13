@@ -2201,6 +2201,7 @@ fn collect_t6_bodies(
                     world_from_local,
                     origin,
                     light_at,
+                    eye_luminance: None,
                     // Its kept vertices, or this frame's (skinned below).
                     posed: if kept { built.skinned.get(i).cloned() } else { None },
                     hide: None,
@@ -2385,6 +2386,7 @@ fn collect_t6_bodies(
                 world_from_local,
                 origin,
                 light_at,
+                eye_luminance: None,
                 posed: Some(verts.clone()),
                 hide: None,
             });

@@ -352,13 +352,9 @@ pub(crate) fn spawn_grenade_projectile(
     let direction = forward(angles);
     let time_ms = level_time_ms(tick);
     let (pitch_rate, roll_rate) = match kind {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/equipment.rs
-        GrenadeLaunchKind::Launcher => (0.0, 0.0),
-=======
         GrenadeLaunchKind::Launcher
         | GrenadeLaunchKind::InHand
         | GrenadeLaunchKind::Magic { .. } => (0.0, 0.0),
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/equipment.rs
         GrenadeLaunchKind::Thrown { .. } if facts.weap_class == WEAPCLASS_THROWINGKNIFE => {
             (entity_iw4::GRENADE_BLADE_SPIN_PITCH, 0.0)
         }
@@ -370,15 +366,11 @@ pub(crate) fn spawn_grenade_projectile(
     } else {
         init_grenade_apos(direction, time_ms, pitch_rate, roll_rate)
     };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/equipment.rs
-    let velocity = grenade_launch_velocity(angles, &facts, owner_vel);
-=======
     let velocity = if matches!(kind, GrenadeLaunchKind::InHand | GrenadeLaunchKind::Magic { .. }) {
         owner_vel
     } else {
         grenade_launch_velocity(angles, &facts, owner_vel)
     };
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/equipment.rs
     if crate::combat::shot_log() {
         diag::info!(
             Sim,

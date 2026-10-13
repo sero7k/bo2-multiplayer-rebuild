@@ -505,6 +505,8 @@ impl WeaponCatalog {
             a.strip_prefix("iw6_").map_or(a.clone(), str::to_owned)
         });
         self.entries.push(CatalogWeapon {
+            world_attachments: Vec::new(),
+            spawned_grenade: None,
             namespace: self.capture_ns,
             name,
             alternate_weapon: alternate,

@@ -64,7 +64,6 @@ fn main() -> ExitCode {
         for (k, n) in classes {
             println!("   {n:>5}  {k}");
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6world.rs
         // T6WORLD_ENTS=<text>: print every entity block that contains it.
         if let Ok(want) = std::env::var("T6WORLD_ENTS") {
             let mut block = String::new();
@@ -79,8 +78,6 @@ fn main() -> ExitCode {
                 }
             }
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6world.rs
     }
     ExitCode::SUCCESS
 }

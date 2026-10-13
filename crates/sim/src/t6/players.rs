@@ -7,8 +7,6 @@ use gsc_t6::{Array, ObjKind, ObjRef, Value};
 
 use super::{Player, Zm, frame, with_vm};
 
-const CALLBACKS: &str = "maps/mp/gametypes_zm/_callbacksetup";
-
 /// Who each spectator watches (BO2's SpectatorClientEndFrame): a player
 /// whose `sessionstate` is "spectator" (bled out in co-op, back next round)
 /// keeps the teammate he follows while that one is still playing (down
@@ -74,7 +72,6 @@ pub(super) fn sync(world: &mut World) {
     let known: Vec<u32> = world.resource::<Zm>().players.keys().copied().collect();
     let now = world.resource::<Zm>().now_ms;
     for n in known {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/players.rs
         // bo2mp: a bot made by `addtestclient` waits for its client (up to
         // 15 s, then it is dropped like a disconnect).
         let waiting = world
@@ -86,8 +83,6 @@ pub(super) fn sync(world: &mut World) {
         if waiting {
             continue;
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/players.rs
         if !clients.iter().any(|(c, _)| *c == n) {
             world.resource_mut::<Zm>().bots.remove(&n);
             let p = world.resource_mut::<Zm>().players.remove(&n);
@@ -96,11 +91,7 @@ pub(super) fn sync(world: &mut World) {
                     let cb = super::mp::callbacks(world);
                     vm.spawn_named(
                         world,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/players.rs
                         &cb,
-=======
-                        CALLBACKS,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/players.rs
                         "codecallback_playerdisconnect",
                         Value::Object(p.obj),
                         vec![],
@@ -116,43 +107,12 @@ pub(super) fn sync(world: &mut World) {
             None => {
                 with_vm(world, |vm, world| {
                     let obj = vm.alloc_object(ObjKind::Entity(c));
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/players.rs
                     // bo2mp: back from a round restart (`map_restart( 1 )`):
                     // his pers[] and whether he is a bot carry over.
                     let back = world.resource_mut::<Zm>().rejoin.remove(&c);
                     let mut player = Player::new(obj);
                     player.test_client = back.as_ref().is_some_and(|(_, bot)| *bot);
                     world.resource_mut::<Zm>().players.insert(c, player);
-=======
-                    world.resource_mut::<Zm>().players.insert(
-                        c,
-                        Player {
-                            obj,
-                            begun: false,
-                            sessionstate: "spectator".to_owned(),
-                            perks: Default::default(),
-                            linked: None,
-                            melee_weapon: None,
-                            laststand: false,
-                            last_weapon: 0,
-                            last_wstate: 0,
-                            last_clip: 0,
-                            last_attack: false,
-                            shield_raised: None,
-                            jet: Default::default(),
-                            force_throw: false,
-                            last_dive: false,
-                            last_sprint: false,
-                            stats: Default::default(),
-                            hud_fields: Vec::new(),
-                            score_fields: Vec::new(),
-                            camera: None,
-                            camera_on: false,
-                            model: String::new(),
-                            poisoned: false,
-                        },
-                    );
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/players.rs
                     let pers = vm.intern("pers");
                     let kept = back.map(|(v, _)| v).filter(|v| !matches!(v, Value::Undefined));
                     vm.set_raw_field(obj, pers, kept.unwrap_or_else(|| Value::array(Array::new())));
@@ -161,18 +121,13 @@ pub(super) fn sync(world: &mut World) {
                     if vm
                         .spawn_named(
                             world,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/players.rs
                             &cb,
-=======
-                            CALLBACKS,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/players.rs
                             "codecallback_playerconnect",
                             Value::Object(obj),
                             vec![],
                         )
                         .is_none()
                     {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/players.rs
                         diag::warn!(Sim, "bo2zm t6: no {cb}::codecallback_playerconnect");
                     }
                 });
@@ -195,12 +150,6 @@ pub(super) fn sync(world: &mut World) {
                     );
                 });
             }
-=======
-                        diag::warn!(Sim, "bo2zm t6: no {CALLBACKS}::codecallback_playerconnect");
-                    }
-                });
-            }
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/players.rs
             Some(p) if joined && !p.begun => {
                 if let Some(pp) = world.resource_mut::<Zm>().players.get_mut(&c) {
                     pp.begun = true;
@@ -326,7 +275,6 @@ pub(super) fn sync(world: &mut World) {
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/players.rs
 /// A shellshock that has run its time ends (the engine clears it; the
 /// script's `stopshellshock` does the same earlier).
 pub(super) fn shock_tick(world: &mut World) {
@@ -340,7 +288,9 @@ pub(super) fn shock_tick(world: &mut World) {
         .collect();
     for c in ended {
         super::natives_player::end_shock(world, c, "time ran out");
-=======
+    }
+}
+
 /// The weapon tick's notes for a Black Ops II game: its shots and its
 /// detonations (a held detonator fired), told to the scripts next tick.
 pub(crate) fn weapon_notes(world: &mut World, notes: &[crate::equipment::WeaponNote]) {
@@ -358,7 +308,6 @@ pub(crate) fn weapon_notes(world: &mut World, notes: &[crate::equipment::WeaponN
             crate::equipment::WeaponNote::Fired { owner } => zm.shots.push(owner.0),
             _ => {}
         }
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/players.rs
     }
 }
 

@@ -37,15 +37,13 @@ impl Plugin for UiPlugin {
         register_equip_systems(app);
         register_gap_hud_systems(app);
         crate::zm_hud::register_zm_hud_systems(app);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/plugin.rs
         crate::scope_hint::register(app);
         crate::overhead_names::register(app);
-=======
         crate::frame_rate::register_frame_rate_systems(app);
         crate::cheat_menu::register_cheat_menu_systems(app);
         crate::bo2_globe::register_globe(app);
->>>>>>> /tmp/claude-0/zmhead/crates/ui/src/plugin.rs
         crate::lui_hud::register_lui_hud_systems(app);
+        crate::lui_hud_zm::register_lui_hud_systems(app);
         crate::hud_modern::register_modern_hud_systems(app);
         crate::hud_match::register_match_hud_systems(app);
         crate::hud_prematch::register_prematch_hud(app);

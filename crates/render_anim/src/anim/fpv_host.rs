@@ -193,11 +193,7 @@ pub fn generate_fpv_pose(args: FpvGenerateArgs<'_>) -> FpvPoseKind {
         })
     });
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/anim/fpv_host.rs
     let Some(prepared) = rigs.pick(rocket, dual_drawn, melee, ads) else {
-=======
-    let Some(prepared) = rigs.pick(rocket, dual_drawn, melee) else {
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/anim/fpv_host.rs
         *active = None;
         return FpvPoseKind::Refuse(FpvPoseRefuse::EyePoseFailed {
             gun_xmodel: equipped.gun_xmodel.clone(),

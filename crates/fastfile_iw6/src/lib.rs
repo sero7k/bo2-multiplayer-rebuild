@@ -22,6 +22,7 @@ pub mod scan;
 pub mod sound;
 pub mod stream;
 pub mod ui_image;
+pub mod ui_sound;
 pub mod walk;
 pub mod xfile;
 pub mod zone;

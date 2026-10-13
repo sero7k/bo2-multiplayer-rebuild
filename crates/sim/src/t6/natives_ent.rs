@@ -35,12 +35,8 @@ fn typed(vm: &mut Vm<World>, key: &str, val: &str, entity: bool) -> Value {
         // Names stay text even when they look like numbers.
         "targetname" | "target" | "script_noteworthy" | "script_string" | "classname" | "model"
         | "script_flag" | "script_label" | "script_parameters" | "script_linkto"
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
-        | "script_linkname" | "script_sound" | "script_fxid" | "script_animation" => vm.string(val),
-=======
         | "script_linkname" | "script_sound" | "script_fxid" | "script_animation"
         | "script_location" => vm.string(val),
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
         // Numbers are numbers (BO2's scripts compare `self.zombie_cost` with
         // a score and halve it; `trigger.script_chance` with a randomfloat).
         _ => {
@@ -85,15 +81,12 @@ pub(super) fn spawn_map_entities(vm: &mut Vm<World>, world: &mut World, texts: &
                 nodes += 1;
                 continue;
             }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
             // bo2mp: the map's north (getnorthyaw: the minimap's turn).
             if cls == "worldspawn" {
                 if let Some((_, v)) = e.iter().find(|(k, _)| k.eq_ignore_ascii_case("northyaw")) {
                     vm.dvars.insert("northyaw".to_owned(), v.trim().to_owned());
                 }
             }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
             if cls == "script_struct" {
                 let Some(cs) = createstruct else { continue };
                 let level = Value::Object(vm.level);
@@ -126,13 +119,10 @@ pub(super) fn spawn_map_entities(vm: &mut Vm<World>, world: &mut World, texts: &
                 solid: true,
                 ..Default::default()
             };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
             if let Some(ordinal) = ordinal {
                 super::map_natives::note(world, ordinal, &cls, &e);
             }
-=======
             let mut targetname = None;
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
             for (k, v) in &e {
                 let key = k.to_ascii_lowercase();
                 match key.as_str() {
@@ -161,12 +151,8 @@ pub(super) fn spawn_map_entities(vm: &mut Vm<World>, world: &mut World, texts: &
                     }
                     "radius" => ent.radius = v.trim().parse().unwrap_or(0.0),
                     "height" => ent.height = v.trim().parse().unwrap_or(0.0),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
                     // bo2mp: breaks piece by piece (t6/destructible.rs).
                     "destructibledef" => ent.destructible = Some(v.trim().to_ascii_lowercase()),
-=======
-                    "destructibledef" => ent.destructible = v.to_ascii_lowercase(),
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
                     _ => {}
                 }
                 let val = typed(vm, &key, v, true);
@@ -177,9 +163,6 @@ pub(super) fn spawn_map_entities(vm: &mut Vm<World>, world: &mut World, texts: &
                 ent.spawn_angles = Some(ent.angles);
             }
             if cls.starts_with("zbarrier") {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
-                ent.zbarrier = Some(super::zbarrier::ZBarrier::from_keys(&e));
-=======
                 let mut z = super::zbarrier::ZBarrier::from_keys(&e);
                 z.def = super::zbarrier::def_for(world, &e);
                 ent.zbarrier = Some(z);
@@ -188,7 +171,6 @@ pub(super) fn spawn_map_entities(vm: &mut Vm<World>, world: &mut World, texts: &
             zm.ents.insert(n, ent);
             if let Some(t) = targetname {
                 zm.nav.attach_movers(&t, n);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
             }
             ents += 1;
         }
@@ -329,7 +311,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         Ok(v.into_iter().next().unwrap_or_default())
     });
     f!("getentarray", |vm, world, _, a| {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
         // An undefined class name: BO2's _spawning re-adds its spawn points
         // that way after clearing them (updateallspawnpoints reads the list
         // it just cleared); an empty answer leaves no spawn points and aborts
@@ -376,8 +357,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                 return Ok(list(v));
             }
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
         let v = matching(vm, world, a);
         Ok(list(v))
     });
@@ -450,38 +429,34 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             return Err("cannot delete a player".into());
         }
         let obj = s.as_obj();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
-        let item = {
-=======
-        // The engine notifies "death" on a deleted entity before freeing it
-        // (ScrCmd_Delete): its endons end now, its `waittill("death")`
-        // threads run after it is freed (Tranzit's Denizens count down when
-        // one burrows away, powerups leave level.random_weapon_powerups; Die
-        // Rise's corpse-room count sees `self` undefined and returns).
-        if let Some(o) = obj
+        let mp = world.resource::<Zm>().mp;
+        // bo2zm: the engine notifies "death" on a deleted entity before
+        // freeing it (ScrCmd_Delete): its endons end now, its
+        // `waittill("death")` threads run after it is freed (Tranzit's
+        // Denizens count down when one burrows away, powerups leave
+        // level.random_weapon_powerups; Die Rise's corpse-room count sees
+        // `self` undefined and returns). Multiplayer keeps its own notify
+        // below (merge: each mode keeps the behaviour it was tested with).
+        if !mp
+            && let Some(o) = obj
             && vm.alive(o)
         {
             vm.notify_queued(world, o, "death", &[]);
         }
-        {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
+        let item = {
             let mut zm = world.resource_mut::<Zm>();
-            zm.ents.remove(&n);
             zm.movers.list.remove(&n);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
             zm.ents.remove(&n).and_then(|e| e.item)
         };
         if let Some(number) = item {
             super::items::forget(world, number);
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
         }
         if let Some(o) = obj {
             // bo2mp: a deleted entity tells its waiters `death` first; BO2's
             // multiplayer scripts count on it to free a scorestreak's rule
             // (the care package's helicopter is deleted once it has flown
             // off, and only its `death` ends the drop's count).
-            if world.resource::<Zm>().mp && vm.alive(o) {
+            if mp && vm.alive(o) {
                 vm.notify_str(world, o, "death", &[]);
             }
             vm.free_object(world, o);
@@ -534,23 +509,17 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         Ok(Value::Undefined)
     });
     m!("setmodel", |vm, world, s, a| {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
         // bo2mp: a player's body (BO2's faction class scripts) goes to every
-        // client, which draws him with it.
-        if is_player(vm, world, s) {
-            if let Some(n) = entnum(vm, s) {
-                let model = text(vm, a, 0);
-                super::playeranim::edit_body(world, n, |l| l.model = model);
-=======
-        // A player's body model (third person) is not drawn here yet, but
-        // kept: `self.model` is what Mob's Afterlife body is made from.
+        // client, which draws him with it. bo2zm: also kept on the player:
+        // `self.model` is what Mob's Afterlife body is made from.
         let model = text(vm, a, 0);
         if is_player(vm, world, s) {
-            if let Some(n) = entnum(vm, s)
-                && let Some(p) = world.resource_mut::<Zm>().players.get_mut(&n)
-            {
-                p.model = model;
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
+            if let Some(n) = entnum(vm, s) {
+                let body = model.clone();
+                super::playeranim::edit_body(world, n, |l| l.model = body);
+                if let Some(p) = world.resource_mut::<Zm>().players.get_mut(&n) {
+                    p.model = model;
+                }
             }
             return Ok(Value::Undefined);
         }
@@ -567,7 +536,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         Ok(Value::Undefined)
     });
     m!("attach", |vm, world, s, a| {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
         if is_player(vm, world, s) {
             if let Some(n) = entnum(vm, s) {
                 let added = (text(vm, a, 0), text(vm, a, 1));
@@ -575,8 +543,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             }
             return Ok(Value::Undefined);
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
         let Ok(n) = me(vm, world, s) else {
             return Ok(Value::Undefined);
         };
@@ -590,7 +556,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         Ok(Value::Undefined)
     });
     m!("detach", |vm, world, s, a| {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
         if is_player(vm, world, s) {
             if let Some(n) = entnum(vm, s) {
                 let gone = text(vm, a, 0);
@@ -602,8 +567,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             }
             return Ok(Value::Undefined);
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
         let Ok(n) = me(vm, world, s) else {
             return Ok(Value::Undefined);
         };
@@ -617,15 +580,12 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         Ok(Value::Undefined)
     });
     m!("detachall", |vm, world, s, _| {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
         if is_player(vm, world, s) {
             if let Some(n) = entnum(vm, s) {
                 super::playeranim::detach_all(world, n);
             }
             return Ok(Value::Undefined);
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
         let Ok(n) = me(vm, world, s) else {
             return Ok(Value::Undefined);
         };
@@ -649,26 +609,18 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     flagset!(
         "hide" => |e| {
             e.hidden = true;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
             e.shown_to = None;
-        },
-        "show" => |e| {
-            e.hidden = false;
-            e.shown_to = None;
-        },
-        "ghost" => |e| e.hidden = true,
-=======
             e.ghosted = false;
         },
         "show" => |e| {
             e.hidden = false;
+            e.shown_to = None;
             e.ghosted = false;
         },
         "ghost" => |e| {
             e.hidden = true;
             e.ghosted = true;
         },
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
         "notsolid" => |e| e.solid = false,
         "solid" => |e| e.solid = true,
         "unlink" => |e| {
@@ -802,14 +754,11 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         Ok(Value::Undefined)
     });
     m!("playloopsound", |vm, world, s, a| {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
         if std::env::var_os("BO2MP_SNDLOG").is_some() {
             let alias = text(vm, a, 0);
             let on = me(vm, world, s);
             diag::info!(Sim, "bo2mp sndlog loop {alias} on {on:?}");
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
         let Ok(n) = me(vm, world, s) else {
             return Ok(Value::Undefined);
         };
@@ -1035,13 +984,8 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     m!("rotateroll", |vm, world, s, a| rotate_axis(
         vm, world, s, a, 2
     ));
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
-    // `a istouching(b)`: whichever of the two has a volume (a brush or a
-    // trigger cylinder) against the other's box (a player's, an actor's,
-=======
     // `a istouching(b)`: whichever of the two has a volume (a brush, a
     // trigger cylinder or a spawned trigger box) against the other's box (a player's, an actor's,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
     // else a point).
     m!("istouching", |vm, world, s, a| {
         let other = arg(a, 0).clone();
@@ -1053,15 +997,11 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                 .resource::<Zm>()
                 .ents
                 .get(&n)
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
-                .filter(|e| super::triggers::brush_index(e).is_some() || e.radius > 0.0)
-=======
                 .filter(|e| {
                     super::triggers::brush_index(e).is_some()
                         || e.radius > 0.0
                         || e.box_dims.is_some()
                 })
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
                 .cloned()
         };
         let (vol, toucher) = match (volume_of(world, on), volume_of(world, sn)) {
@@ -1251,11 +1191,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     for name in [
         "triggerignoreteam",
         "setvisibletoallexceptteam",
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ent.rs
-        "setexcludeteamfortrigger",
-        "setmovingplatformenabled",
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ent.rs
         "setowner",
         "setteam",
         "setphysparams",

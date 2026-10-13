@@ -155,7 +155,6 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
     world.resource_mut::<Zm>().brush_rows = rows;
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/brushes.rs
 /// The level restarts (`map_restart`): every brush row goes; the new
 /// level's brush entities make their own.
 pub(super) fn retire_all(world: &mut World) {
@@ -167,11 +166,11 @@ pub(super) fn retire_all(world: &mut World) {
             f.remove_script_mover_by_number(number);
         }
     }
-=======
+}
+
 /// A bit per client number (players are 0..64).
 fn bits<'a>(clients: impl Iterator<Item = &'a u32>) -> u64 {
     clients.filter(|c| **c < 64).fold(0, |m, c| m | (1 << c))
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/brushes.rs
 }
 
 /// The entity's submodel bounds (its own space: a submodel's brushes are
@@ -207,11 +206,7 @@ pub(super) fn world_box(world: &mut World, e: &Ent) -> Option<([f32; 3], [f32; 3
 
 /// A model entity's world box: its model's bounds turned by its angles,
 /// placed.
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/brushes.rs
-fn model_box(world: &mut World, e: &Ent) -> Option<([f32; 3], [f32; 3])> {
-=======
 pub(super) fn model_box(world: &mut World, e: &Ent) -> Option<([f32; 3], [f32; 3])> {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/brushes.rs
     let (mid, half) = frame(world).model_capability(&e.model).flatten()?.bounds?;
     let (fw, rt, up) = gsc_t6::math::angle_vectors(e.angles);
     let left = [-rt[0], -rt[1], -rt[2]];

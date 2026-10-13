@@ -50,7 +50,6 @@ pub fn install(dobj: &mut AuthorityDObjState, definition: Arc<T5DestructibleDef>
     });
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t5_destructible.rs
 /// bo2mp: a Black Ops II map's destructible: every piece at full health,
 /// the bones the later stages show hidden (a mannequin's broken neck), its
 /// breaks kept for the scripts.
@@ -60,6 +59,14 @@ pub(crate) fn install_hosted(dobj: &mut AuthorityDObjState, definition: Arc<T5De
         state.hosted = true;
     }
     update_hide_parts(dobj);
+}
+
+/// [`install`], with the parts its first stage hides hidden now (a prop the
+/// server shows itself, not one the map install posed). bo2zm: such a prop
+/// is a Black Ops II map's, so its scripts hear its breaks as for
+/// [`install_hosted`] (t6/destructible.rs delivers the queued notices).
+pub(crate) fn install_shown(dobj: &mut AuthorityDObjState, definition: Arc<T5DestructibleDef>) {
+    install_hosted(dobj, definition);
 }
 
 /// bo2mp: whether `dobj` breaks by the definition `name`.
@@ -76,16 +83,6 @@ pub(crate) fn take_notices(dobj: &mut AuthorityDObjState) -> Vec<Notice> {
         .map(|s| std::mem::take(&mut s.notices))
         .unwrap_or_default()
 }
-
-=======
-/// [`install`], with the parts its first stage hides hidden now (a prop the
-/// server shows itself, not one the map install posed).
-pub(crate) fn install_shown(dobj: &mut AuthorityDObjState, definition: Arc<T5DestructibleDef>) {
-    install(dobj, definition);
-    update_hide_parts(dobj);
-}
-
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t5_destructible.rs
 #[derive(Clone)]
 struct Break {
     piece: usize,
@@ -200,7 +197,6 @@ fn update_hide_parts(dobj: &mut AuthorityDObjState) {
         .hide_parts(&state.health, &cap.pose.bone_names);
     if hide != dobj.semantic_state.hide_part_bits {
         if std::env::var_os("IW4L_T6_HITLOG").is_some() {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t5_destructible.rs
             diag::info!(
                 Sim,
                 "bo2mp destructible {} hides {:08x?} (bones {:?}, health {:?})",
@@ -209,9 +205,6 @@ fn update_hide_parts(dobj: &mut AuthorityDObjState) {
                 cap.pose.bone_names,
                 state.health
             );
-=======
-            diag::info!(Sim, "destructible hide {}: {:08x?}", state.definition.name, hide.words());
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t5_destructible.rs
         }
         dobj.semantic_state.hide_part_bits = hide;
         dobj.pose_request.hide_part_bits = hide;
@@ -222,7 +215,6 @@ fn update_hide_parts(dobj: &mut AuthorityDObjState) {
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t5_destructible.rs
 /// bo2mp: Black Ops II's push on a loose piece per unit of hit
 /// (`dynEnt_bulletForce`, `dynEnt_explodeForce`) and a blast's lift
 /// (`dynEnt_explodeUpbias`).
@@ -254,36 +246,28 @@ fn launch_velocity(
     (push / preset.mass.max(1e-4)).to_array()
 }
 
+/// Returns the stages' script notifies of a prop no Black Ops II script
+/// hosts (its caller hands them on); a hosted prop's breaks are queued as
+/// notices instead (t6/destructible.rs).
 #[allow(clippy::too_many_arguments)]
-=======
-/// Returns the stages' script notifies (BO2 hands them to the map's
-/// scripts: a mannequin's "headless").
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t5_destructible.rs
 fn publish(
     world: &mut FrameWorld,
     tick: Tick,
     owner: AuthorityModelOwner,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t5_destructible.rs
     out: Outcome,
     kind: DamageKind,
     dir: Option<[f32; 3]>,
     attacker: Option<ClientId>,
     weapon: u32,
-) {
+) -> Vec<String> {
+    let mut notifies = Vec::new();
     let Outcome {
         breaks,
         after,
         died,
     } = out;
     if breaks.is_empty() && after.is_empty() && !died {
-        return;
-=======
-    breaks: Vec<Break>,
-) -> Vec<String> {
-    let mut notifies = Vec::new();
-    if breaks.is_empty() {
         return notifies;
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t5_destructible.rs
     }
     let Some(dobj) = world
         .entity_collision_capabilities_mut()
@@ -293,13 +277,8 @@ fn publish(
     else {
         return notifies;
     };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t5_destructible.rs
     let Some(state) = &mut dobj.t5_destructible else {
-        return;
-=======
-    let Some(state) = &dobj.t5_destructible else {
         return notifies;
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t5_destructible.rs
     };
     let definition = state.definition.clone();
     let hosted = state.hosted;
@@ -319,10 +298,10 @@ fn publish(
         .as_ref()
         .and_then(|cap| cap.pose(&dobj.pose_request, dobj.world_from_model).ok());
     let mut events = Vec::new();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t5_destructible.rs
-=======
-    // The pieces a stage throws (a mannequin's head), from the bone.
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t5_destructible.rs
+    // The pieces a stage drops (a mannequin's head), from the bone: with a
+    // physics preset they fly as loose debris (bo2mp); without one they are
+    // thrown out from the bone (bo2zm).
+    let mut thrown: Vec<(String, [f32; 3], [f32; 3])> = Vec::new();
     let mut debris = Vec::new();
     for event in breaks {
         let piece = &definition.pieces[event.piece];
@@ -349,7 +328,6 @@ fn publish(
             st.break_effect,
             health[event.piece]
         );
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t5_destructible.rs
         // The pieces this stage drops come loose where its bone was.
         let shown = dobj.capability.as_ref().and_then(|cap| {
             cap.pose
@@ -362,8 +340,22 @@ fn publish(
             .copied()
             .unwrap_or(matrix)
             .to_scale_rotation_translation();
+        if st.has_phys_preset && st.spawn_models.iter().all(Option::is_none) {
+            diag::info!(
+                Sim,
+                "T5 destructible {} piece={} stage={}: a physics piece with no model to throw",
+                definition.name,
+                event.piece,
+                event.stage
+            );
+        }
         for (model, preset) in st.spawn_models.iter().zip(&st.spawn_presets) {
-            let (Some(model), Some(preset)) = (model, preset) else {
+            let Some(model) = model else {
+                continue;
+            };
+            let Some(preset) = preset else {
+                // bo2zm: no physics preset: thrown out from the bone.
+                thrown.push((model.clone(), origin, direction));
                 continue;
             };
             let velocity = launch_velocity(preset, kind, dir);
@@ -386,37 +378,17 @@ fn publish(
                 explosive_force_scale: preset.explosive_force_scale,
             });
         }
-        if let Some(notify) = &st.break_notify
-            && hosted
-        {
-            notices.push(Notice::Broken {
-                notify: notify.clone(),
-                attacker,
-                weapon,
-            });
-        } else if let Some(notify) = &st.break_notify {
-            diag::warn!(
-                Sim,
-                "T5 destructible script notify unhosted: {} {}",
-                definition.name,
-                notify
-            );
-=======
-        if st.has_phys_preset && st.spawn_models.iter().all(Option::is_none) {
-            diag::info!(
-                Sim,
-                "T5 destructible {} piece={} stage={}: a physics piece with no model to throw",
-                definition.name,
-                event.piece,
-                event.stage
-            );
-        }
-        for model in st.spawn_models.iter().flatten() {
-            debris.push((model.clone(), origin, direction));
-        }
         if let Some(notify) = &st.break_notify {
-            notifies.push(notify.clone());
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t5_destructible.rs
+            if hosted {
+                notices.push(Notice::Broken {
+                    notify: notify.clone(),
+                    attacker,
+                    weapon,
+                });
+            } else {
+                // bo2zm: the caller hands an unhosted prop's notifies on.
+                notifies.push(notify.clone());
+            }
         }
         if let Some(fx) = &st.break_effect {
             events.push((
@@ -442,11 +414,10 @@ fn publish(
         state.notices.extend(notices);
     }
     update_hide_parts(dobj);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t5_destructible.rs
     for record in debris {
         world.push_debris(record);
-=======
-    for (model, origin, direction) in debris {
+    }
+    for (model, origin, direction) in thrown {
         // Out along the bone, or the nearest way round with room (never
         // into the wall the prop stands against).
         let (fx, fy) = (direction[0], direction[1]);
@@ -479,7 +450,6 @@ fn publish(
         );
         let floor = if t.fraction < 1.0 { t.endpos[2] } else { origin[2] - 64.0 };
         crate::t6::throw_debris(world.ecs(), &model, origin, direction, floor);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t5_destructible.rs
     }
     for (kind, name, origin, direction) in events {
         let index = if kind == entity_iw4::EntityEventKind::PLAY_FX {
@@ -505,13 +475,28 @@ fn publish(
 
 /// A blast (a grenade) damages each standing piece of every breakable prop
 /// in reach, by the distance from the piece's bone, times the piece's
-/// explosive scale. Returns each prop's script notifies.
+/// explosive scale. Returns each unhosted prop's script notifies (a Black
+/// Ops II map's props queue theirs as notices, see [`publish`]); the breaks
+/// are nobody's (use [`apply_blast_by`] to name the attacker and weapon).
 pub(crate) fn apply_blast(
     world: &mut FrameWorld,
     tick: Tick,
     origin: [f32; 3],
     radius: f32,
     amount_at: impl Fn(f32) -> i32,
+) -> Vec<(AuthorityModelOwner, Vec<String>)> {
+    apply_blast_by(world, tick, origin, radius, amount_at, None, 0)
+}
+
+/// [`apply_blast`] by `attacker`'s `weapon`: the scripts hear who broke it.
+pub(crate) fn apply_blast_by(
+    world: &mut FrameWorld,
+    tick: Tick,
+    origin: [f32; 3],
+    radius: f32,
+    amount_at: impl Fn(f32) -> i32,
+    attacker: Option<ClientId>,
+    weapon: u32,
 ) -> Vec<(AuthorityModelOwner, Vec<String>)> {
     let origin = glam::Vec3::from_array(origin);
     let mut hits = Vec::new();
@@ -558,12 +543,12 @@ pub(crate) fn apply_blast(
             }
             let amount = (amount_at(d) as f32 * piece.explosive_damage_scale) as i32;
             if amount > 0 {
-                hits.push((row.owner, i, amount));
+                hits.push((row.owner, i, amount, (at - origin).to_array()));
             }
         }
     }
     let mut out = Vec::new();
-    for (owner, index, amount) in hits {
+    for (owner, index, amount, dir) in hits {
         let Some(dobj) = world
             .entity_collision_capabilities_mut()
             .iter_mut()
@@ -575,18 +560,27 @@ pub(crate) fn apply_blast(
         let Some(state) = &mut dobj.t5_destructible else {
             continue;
         };
-        let mut breaks = Vec::new();
-        state.damage(index, amount, None, 0, &mut breaks);
+        let mut hit = Outcome::default();
+        state.damage(index, amount, None, 0, &mut hit);
         if std::env::var_os("IW4L_T6_HITLOG").is_some() {
             diag::info!(
                 Sim,
                 "destructible blast {}: piece {index} -{amount} -> health {:?} breaks {}",
                 state.definition.name,
                 state.health,
-                breaks.len()
+                hit.breaks.len()
             );
         }
-        let notifies = publish(world, tick, owner, breaks);
+        let notifies = publish(
+            world,
+            tick,
+            owner,
+            hit,
+            DamageKind::Explosive,
+            Some(dir),
+            attacker,
+            weapon,
+        );
         out.push((owner, notifies));
     }
     out
@@ -598,7 +592,6 @@ pub(crate) fn apply_hit(
     owner: AuthorityModelOwner,
     bone: u16,
     amount: u32,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t5_destructible.rs
     dir: [f32; 3],
     attacker: Option<ClientId>,
     weapon: u32,
@@ -633,26 +626,16 @@ pub(crate) fn apply_damage(
     attacker: Option<ClientId>,
     weapon: u32,
 ) -> bool {
-=======
-) -> Option<Vec<String>> {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t5_destructible.rs
     let Some(dobj) = world
         .entity_collision_capabilities_mut()
         .iter_mut()
         .find(|r| r.owner == owner)
         .and_then(|r| r.dobj.as_mut())
     else {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t5_destructible.rs
         return false;
     };
     let Some(state) = &mut dobj.t5_destructible else {
         return false;
-=======
-        return None;
-    };
-    let Some(state) = &mut dobj.t5_destructible else {
-        return None;
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t5_destructible.rs
     };
     let index = bone
         .zip(dobj.capability.as_ref())
@@ -682,7 +665,9 @@ pub(crate) fn apply_damage(
     }
     let mut out = Outcome::default();
     state.damage(index, damage, None, 0, &mut out);
-    publish(world, tick, owner, out, kind, dir, attacker, weapon);
+    for notify in publish(world, tick, owner, out, kind, dir, attacker, weapon) {
+        diag::warn!(Sim, "T5 destructible script notify unhosted: {notify}");
+    }
     true
 }
 
@@ -694,7 +679,6 @@ fn struck_piece(state: &State, pose: &xmodel_runtime::ModelPoseSrc, bone: usize)
         let tag = pose.bone_names.get(b)?;
         let found = state.definition.pieces.iter().enumerate().position(|(i, p)| {
             p.stage(i, state.health[i])
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t5_destructible.rs
                 .is_some_and(|st| p.stages[st].show_bone.as_ref() == Some(tag))
         });
         if found.is_some() {
@@ -703,23 +687,4 @@ fn struck_piece(state: &State, pose: &xmodel_runtime::ModelPoseSrc, bone: usize)
         let step = usize::from(*pose.parent_list.get(b.checked_sub(pose.num_root_bones)?)?);
         b = b.checked_sub(step).filter(|_| step > 0)?;
     }
-=======
-                .is_some_and(|st| p.stages[st].show_bone.as_ref() == tag)
-        })
-        .unwrap_or(0);
-    let damage = (amount as f32 * state.definition.pieces[index].bullet_damage_scale) as i32;
-    let mut breaks = Vec::new();
-    state.damage(index, damage, None, 0, &mut breaks);
-    if std::env::var_os("IW4L_T6_HITLOG").is_some() {
-        diag::info!(
-            Sim,
-            "destructible hit {}: bone {bone} {:?} piece {index} -{damage} -> health {:?} breaks {}",
-            state.definition.name,
-            tag,
-            state.health,
-            breaks.len()
-        );
-    }
-    Some(publish(world, tick, owner, breaks))
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t5_destructible.rs
 }

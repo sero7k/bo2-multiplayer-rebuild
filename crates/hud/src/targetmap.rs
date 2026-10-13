@@ -339,7 +339,6 @@ pub(crate) fn update_targetmap(
         hide(&mut pass);
         return;
     };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hud/src/targetmap.rs
     // bo2mp: Black Ops II draws its own map picker (its HUD's full
     // compass), never this one.
     if snapshot
@@ -351,8 +350,6 @@ pub(crate) fn update_targetmap(
         hide(&mut pass);
         return;
     }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/hud/src/targetmap.rs
     let Some(ps) = presented.player(local.0) else {
         hide(&mut pass);
         return;

@@ -820,6 +820,11 @@ pub(crate) fn build_legacy_world(
         exposure_scale: 1.0,
         // The sky cube as the game looks it up (world x, y, z: no turn).
         sky: [0.0, 1.0, 0.0, 1.0],
+        // (Both sky cubes, the map's own and a BO2 model's, are `rgb / a`;
+        // the grade is the BO2 look's, installed on its own.)
+        sky_parms: [1.0, 0.0],
+        saturation: None,
+        grade: None,
     };
     // The baked light: each lightmap page pair from the zone (the images
     // carry their pixels), packed for the fallback pass's IW3 branch.

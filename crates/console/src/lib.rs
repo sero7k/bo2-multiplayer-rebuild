@@ -47,11 +47,7 @@ pub use plugin::{
 };
 pub use registry::{ArgCompleter, CommandSpec, ConsoleRegistry, StaticCompleter};
 pub use startup::{scripted_run, startup_commands, strip_cmds_flag};
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/console/src/lib.rs
-pub use synthetic_input::{ConsoleInputState, PRESS_SECONDS, PRESS_TICK_DT_MAX};
-=======
 pub use synthetic_input::{ConsoleInputState, PRESS_SECONDS, PRESS_TICK_DT_MAX, ScriptedKeys};
->>>>>>> /tmp/claude-0/zmhead/crates/console/src/lib.rs
 pub use weapon_dispatch::{attach_completions, weapon_completions};
 
 pub(crate) use synthetic_input::is_bind_command;

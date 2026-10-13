@@ -285,6 +285,7 @@ macro_rules! legacy_reads {
                 })
                 .unwrap_or_default();
             Some(asset_t6::XAnimRef {
+                delta_quat: Vec::new(),
                 name,
                 numframes,
                 framerate: n_float(root, "framerate"),
@@ -680,6 +681,8 @@ fn model_ref(m: &iw3::zone::XModel) -> Option<asset_t6::XModelRef> {
         .collect();
     let bones = usize::from(m.num_bones);
     Some(asset_t6::XModelRef {
+                lighting_origin_offset: [0.0; 3],
+                lighting_origin_range: 0.0,
         name: m.name.clone(),
         numsurfs: count.min(255) as u8,
         materials: m.materials.iter().map(|k| k.map(key)).collect(),

@@ -36,6 +36,25 @@ type Wanted = (
     Option<Vec<String>>,
 );
 
+/// An entity's `destructibledef` name, `None` when it has none (empty).
+/// bo2 merge: the Zombies fork kept it as a `String` (empty: none), the
+/// multiplayer fork as an `Option<String>`; this reads either.
+trait DestructibleName {
+    fn def_name(&self) -> Option<&str>;
+}
+
+impl DestructibleName for String {
+    fn def_name(&self) -> Option<&str> {
+        (!self.is_empty()).then_some(self.as_str())
+    }
+}
+
+impl DestructibleName for Option<String> {
+    fn def_name(&self) -> Option<&str> {
+        self.as_deref().filter(|s| !s.is_empty())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Shown {
     pub id: ScriptModelId,
@@ -232,15 +251,11 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                         super::zbarrier::piece_angles(zm, e, z, p, now_ms),
                         p.model.clone(),
                         Vec::new(),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/presence.rs
-                        !p.shown || e.hidden,
-=======
                         !p.shown
                             || e.hidden
                             || (p.state == "open"
                                 && z.def.as_ref().is_some_and(|d| d.auto_hide_open_pieces)),
                         None,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/presence.rs
                     ),
                 ))
             })
@@ -268,9 +283,9 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
             .find(|p| p.shown && p.model.contains("magic_box"))?;
         (!e.hidden).then(|| (*n, e.origin, e.angles, piece.model.clone()))
     }));
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/presence.rs
-    // A model shown only to some players (`showtoplayer`) is drawn when one
-    // of them plays at this PC: the server's own humans, not its bots.
+    // bo2mp: a model shown only to some players (`showtoplayer`) is drawn
+    // when one of them plays at this PC: the server's own humans, not its
+    // bots.
     let humans: Vec<u32> = zm
         .players
         .iter()
@@ -282,16 +297,6 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
             .as_ref()
             .is_none_or(|to| humans.iter().any(|h| to.contains(h)))
     };
-    let mut wanted: BTreeMap<u32, ([f32; 3], [f32; 3], String, Vec<(String, String)>, bool)> = zm
-        .ents
-        .iter()
-        .filter(|(n, e)| {
-            e.obj.is_some()
-                && !e.model.is_empty()
-                && !e.model.starts_with('*')
-                // Spawners are never drawn (the actors they spawn are).
-                && (!e.classname.starts_with("actor_") || zm.actors.contains_key(n))
-=======
     // Tranzit's bus: its body as boxes (`transit`), and its ladder once
     // built (with the faces' surface flags).
     type FlaggedBox = (([f32; 3], [f32; 3]), u32);
@@ -317,7 +322,6 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
         .iter()
         .filter(|(_, e)| {
             e.platform && !e.hidden && !super::highrise::platform_slabs(&e.model).is_empty()
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/presence.rs
         })
         .map(|(n, e)| {
             let number = zm
@@ -352,14 +356,6 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                 (
                     e.origin,
                     e.angles,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/presence.rs
-                    e.model.clone(),
-                    e.attached.clone(),
-                    e.hidden
-                        || e.invisible_to_all
-                        || !shown_here(e)
-                        || collision_only(&e.model),
-=======
                     model,
                     e.attached
                         .iter()
@@ -373,10 +369,12 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                     // Hidden from everyone. Hidden from some players only
                     // (Mob's afterlife doors while one is a ghost) is the
                     // mask below.
-                    e.hidden || e.invisible_to_all || collision_only(&e.model),
+                    e.hidden
+                        || e.invisible_to_all
+                        || !shown_here(e)
+                        || collision_only(&e.model),
                     // A breakable prop hides its own launched parts.
-                    e.destructible.is_empty().then(|| e.hidden_parts.clone()),
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/presence.rs
+                    e.destructible.def_name().is_none().then(|| e.hidden_parts.clone()),
                 ),
             )
         })
@@ -422,12 +420,14 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
         let mut shown = match existing {
             Some(s) => s,
             None => {
-                let destructible = {
+                let (destructible, mp) = {
                     let zm = world.resource::<Zm>();
-                    zm.ents
+                    let def = zm
+                        .ents
                         .get(&n)
-                        .filter(|e| !e.destructible.is_empty())
-                        .and_then(|e| zm.destructibles.get(&e.destructible).cloned())
+                        .and_then(|e| e.destructible.def_name())
+                        .and_then(|name| zm.destructibles.get(name).cloned());
+                    (def, zm.mp)
                 };
                 let serial = {
                     let mut zm = world.resource_mut::<Zm>();
@@ -452,18 +452,19 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                 }
                 let mut dobj = AuthorityDObjState::at_pose(&model, capability, origin, angles);
                 // A map prop that breaks in stages (a mannequin's head).
+                // bo2mp: on a multiplayer map its breaks are kept for the
+                // scripts (hosted, `destructible::flush`); Zombies hears them
+                // through `destructible_broken`.
                 if let Some(def) = destructible.clone() {
-                    crate::t5_destructible::install_shown(&mut dobj, def);
+                    if mp {
+                        crate::t5_destructible::install_hosted(&mut dobj, def);
+                    } else {
+                        crate::t5_destructible::install_shown(&mut dobj, def);
+                    }
                 }
                 f.insert_collision_owner(EntityCollisionCapabilities::current_tick(
                     crate::AuthorityModelOwner::ScriptModel(id),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/presence.rs
-                    Some(AuthorityDObjState::at_pose(
-                        &model, capability, origin, angles,
-                    )),
-=======
                     Some(dobj),
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/presence.rs
                     Vec::new(),
                 ));
                 Shown {
@@ -654,34 +655,36 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
             shown.model = model;
             shown.attachments = attachments;
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/presence.rs
-        // bo2mp: a map destructible (a mannequin, a car) breaks by its
-        // definition; its shown pieces stop bullets.
-        let destructible = (n & PIECE_BIT == 0)
-            .then(|| {
-                let zm = world.resource::<Zm>();
-                let name = zm.ents.get(&n)?.destructible.as_ref()?;
-                zm.destructibles.get(name).cloned()
-            })
-            .flatten();
-        if let Some(def) = &destructible {
-            let mut f = frame(world);
-            if let Some(row) = f.collision_owner_mut(shown.id)
-                && let Some(dobj) = row.dobj.as_mut()
-                && !crate::t5_destructible::installed(dobj, &def.name)
-            {
-                crate::t5_destructible::install_hosted(dobj, def.clone());
-                diag::info!(
-                    Sim,
-                    "bo2mp destructible {} ent{n} at {:?}",
-                    def.name,
-                    shown.origin
-                );
+        // bo2mp: a multiplayer map's destructible (a mannequin, a car)
+        // breaks by its definition, its breaks kept for the scripts
+        // (`destructible::flush`); installed hosted when shown, and again
+        // if its model row lost it.
+        if world.resource::<Zm>().mp {
+            let destructible = (n & PIECE_BIT == 0)
+                .then(|| {
+                    let zm = world.resource::<Zm>();
+                    let name = zm.ents.get(&n)?.destructible.def_name()?;
+                    zm.destructibles.get(name).cloned()
+                })
+                .flatten();
+            if let Some(def) = &destructible {
+                let mut f = frame(world);
+                if let Some(row) = f.collision_owner_mut(shown.id)
+                    && let Some(dobj) = row.dobj.as_mut()
+                    && !crate::t5_destructible::installed(dobj, &def.name)
+                {
+                    crate::t5_destructible::install_hosted(dobj, def.clone());
+                    diag::info!(
+                        Sim,
+                        "bo2mp destructible {} ent{n} at {:?}",
+                        def.name,
+                        shown.origin
+                    );
+                }
             }
-=======
+        }
         if let Some(hide) = &hide {
             set_hidden_parts(world, hide, shown.id);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/presence.rs
         }
         // Actors: bullets hit the living (their posed hit boxes), and the
         // playing animation goes out as the model row's one leaf.
@@ -710,7 +713,7 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                 .resource::<Zm>()
                 .ents
                 .get(&n)
-                .is_some_and(|e| !e.destructible.is_empty());
+                .is_some_and(|e| e.destructible.def_name().is_some());
         if breakable {
             let mut f = frame(world);
             if let Some(row) = f.collision_owner_mut(shown.id) {
@@ -731,20 +734,6 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                 mover.nonsolid = boxes.is_none();
             }
             if let Some(row) = f.collision_owner_mut(shown.id) {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/presence.rs
-                if destructible.is_some() && !alive_actor {
-                    // Its bones as posed (bullet_collision materialize).
-                    row.solid = !hidden;
-                } else {
-                    row.solid = boxes.is_some();
-                    if let Some(dobj) = row.dobj.as_mut() {
-                        dobj.current_collision = boxes.map(|bones| {
-                            crate::bullet_collision::AuthorityDObjCollision { bones, coll: None }
-                        });
-                        dobj.materialized_model_revision = Some(dobj.model_revision);
-                        dobj.materialized_pose_revision = Some(dobj.pose_revision);
-                    }
-=======
                 row.solid = boxes.is_some();
                 if let Some(dobj) = row.dobj.as_mut() {
                     dobj.current_collision = boxes.map(|bones| {
@@ -756,7 +745,6 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                     });
                     dobj.materialized_model_revision = Some(dobj.model_revision);
                     dobj.materialized_pose_revision = Some(dobj.pose_revision);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/presence.rs
                 }
             }
         }
@@ -767,16 +755,11 @@ pub(super) fn sync(world: &mut World, now_ms: i64) {
                 .ents
                 .get(&e)
                 .and_then(|e| e.zbarrier.as_ref())
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/presence.rs
-                .and_then(|z| z.pieces.get(i))
-                .and_then(|p| super::zbarrier::piece_pose(p, now_ms).1)
-=======
                 .and_then(|z| {
                     let boards = super::zbarrier::has_boards(z);
                     z.pieces.get(i).map(|p| (p, boards))
                 })
                 .and_then(|(p, boards)| super::zbarrier::piece_pose(p, now_ms, boards).1)
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/presence.rs
         } else {
             super::actors::present_anim(world, n, now_ms)
                 .or_else(|| super::fxanims::present(world, n, now_ms))

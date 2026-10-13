@@ -100,24 +100,16 @@ impl ZBarrier {
                 open_anim: get(&format!("zbarriertearanim{i}")).to_ascii_lowercase(),
                 close_anim: get(&format!("zbarrierboardanim{i}")).to_ascii_lowercase(),
                 state: "closed".to_owned(),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/zbarrier.rs
-                shown: false,
-=======
                 // Pieces start shown, as in the game: window boards stand
                 // in their windows; the box's scripts hide the pieces
                 // they don't want.
                 shown: true,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/zbarrier.rs
                 playing: None,
                 box_rise: false,
                 rise: Vec::new(),
             })
             .collect();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/zbarrier.rs
-        Self { pieces }
-=======
         Self { pieces, def: None }
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/zbarrier.rs
     }
 }
 
@@ -160,11 +152,7 @@ pub(crate) fn advance(world: &mut World, now: i64) {
                 .collect();
             diag::info!(
                 Sim,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/zbarrier.rs
-                "bo2zm t6 zbarrier ent{n} at ({:.0} {:.0} {:.0}): {}",
-=======
                 "bo2zm t6 zbarrier ent{n} at ({:.0} {:.0} {:.0}) hide_open={:?}: {}",
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/zbarrier.rs
                 e.origin[0],
                 e.origin[1],
                 e.origin[2],
@@ -193,13 +181,6 @@ pub(crate) fn advance(world: &mut World, now: i64) {
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/zbarrier.rs
-/// What a piece shows: (model, clip, fraction, rate) at `now`.
-pub(crate) fn piece_pose(p: &Piece, now: i64) -> (String, Option<(String, f32, f32)>) {
-    let anim = p.playing.as_ref().map(|(clip, start, len)| {
-        let frac = ((now - start) as f32 / (*len).max(1) as f32).clamp(0.0, 1.0);
-        let rate = if frac >= 1.0 {
-=======
 /// A clip held at its end: just short of 1.0, so a held pose never lands
 /// on a wrap back to the clip's first frame.
 const HELD_END: f32 = 0.999;
@@ -219,7 +200,6 @@ pub(crate) fn piece_pose(
     let anim = p.playing.as_ref().map(|(clip, start, len)| {
         let frac = ((now - start) as f32 / (*len).max(1) as f32).clamp(0.0, HELD_END);
         let rate = if frac >= HELD_END {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/zbarrier.rs
             0.0
         } else {
             1000.0 / (*len).max(1) as f32
@@ -610,25 +590,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     ] {
         vm.bind(name, true, |_, _, _, _| Ok(Value::Undefined));
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/zbarrier.rs
-    for name in [
-        "zbarriersupportszombietaunts",
-        "zbarriersupportszombiereachthroughattacks",
-        "getzbarriernumattackslots",
-    ] {
-        vm.bind(name, true, |_, _, _, _| Ok(Value::Int(0)));
-    }
-    m!("getzbarrierattackslothorzoffset", |_, _, _, _| Ok(
-        Value::Float(0.0)
-    ));
-    for name in [
-        "getzbarriertauntanimstate",
-        "getzbarrierreachthroughattackanimstate",
-        "getzbarrierpieceanimstate",
-        "getzbarrierpieceanimsubstate",
-    ] {
-        vm.bind(name, true, |vm, _, _, _| Ok(vm.string("")));
-=======
     // The barrier type's facts (zero / "" when the zones lack the type).
     m!("zbarriersupportszombietaunts", |vm, world, s, _| Ok(
         Value::Int(i32::from(def(vm, world, s).is_some_and(|d| d.taunts)))
@@ -712,6 +673,5 @@ mod tests {
         assert!(close(turned([0.0, 0.0, 0.0], mid), [0.0, 45.0, 0.0]));
         let still = super::super::T6Anim::default();
         assert!(root_turn(&still, 0.5).is_none());
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/zbarrier.rs
     }
 }

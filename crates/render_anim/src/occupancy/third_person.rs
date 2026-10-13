@@ -24,13 +24,9 @@ pub fn presented_is_third_person(
     if in_killcam && ps.kill_cam_entity != playerstate_iw4::ENTITYNUM_NONE {
         return true;
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/third_person.rs
     if remote_missile_camera(presented, local, 0).is_some()
         || vehicle_view(presented, local).is_some()
     {
-=======
-    if remote_missile_camera(presented, local, 0).is_some() {
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/third_person.rs
         return true;
     }
     is_third_person_view(ThirdPersonViewInputs {
@@ -64,7 +60,6 @@ pub fn remote_missile_camera(
     })
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/third_person.rs
 /// bo2mp: riding a Black Ops II scorestreak vehicle (`bo2mp_vehicle_view`
 /// from the server, the vehicle def's own values): "<script model> 0
 /// <range> <height> 0 <up> <down> <fov>" sees it from behind (the RC-XD),
@@ -163,8 +158,6 @@ pub fn vehicle_camera(
 /// The vehicle camera's box against walls (the engine's own size).
 const VEHICLE_CAMERA_BOX_HALF: f32 = 6.0;
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/third_person.rs
 pub fn death_watch_camera(
     presented: &PresentedSnapshot,
     local: ClientId,
@@ -204,11 +197,7 @@ pub fn death_watch_camera(
             pm_type: ps.pm_type,
             look_at_killer_yaw: yaw,
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/third_person.rs
             corpse_j_mainroot,
-=======
-            corpse_j_mainroot: None,
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/third_person.rs
             other_flags: ps.other_flags,
             delta_time: ps.delta_time,
             cg_third_person_angle: CG_THIRD_PERSON_ANGLE_MP,

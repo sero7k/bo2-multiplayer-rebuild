@@ -97,12 +97,14 @@ pub fn parse_launch_args(mut args: impl Iterator<Item = String>) -> Result<Launc
             };
             Ok(LaunchMode::Map(zone))
         }
-        Some("frontend") => {
-            let Some(zone) = args.next().filter(|z| !z.is_empty()) else {
-                return Err("usage: iw4l frontend <zone> [--cmds '<script>']".into());
-            };
-            Ok(LaunchMode::Frontend(zone))
-        }
+        // bo2mp lane C: `frontend t6mp` is Black Ops II's multiplayer front
+        // end; bo2zm M4: `frontend <zone>` opens on BO2's own (zombies) menu
+        // and Start loads that map.
+        Some("frontend") => match (args.next().filter(|z| !z.is_empty()), args.next()) {
+            (Some(z), None) if z == "t6mp" => Ok(LaunchMode::FrontendT6Mp),
+            (Some(zone), _) => Ok(LaunchMode::Frontend(zone)),
+            _ => Err("usage: iw4l frontend t6mp | frontend <zone> [--cmds '<script>']".into()),
+        },
         Some("serve") => {
             let Some(zone) = args.next().filter(|z| !z.is_empty()) else {
                 return Err("usage: iw4l serve <zone> [--cmds '<script>']".into());
@@ -125,16 +127,9 @@ pub fn parse_launch_args(mut args: impl Iterator<Item = String>) -> Result<Launc
             Ok(LaunchMode::Menu)
         }
         Some("play") => parse_play_args(args),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bootstrap/src/args.rs
         Some("check-maps") => Ok(LaunchMode::CheckMaps),
         Some("check-guns") => Ok(LaunchMode::CheckGuns),
         Some("check-ghosts") => Ok(LaunchMode::CheckGhosts(args.next().filter(|z| !z.is_empty()))),
-        Some("frontend") => match (args.next().as_deref(), args.next()) {
-            (Some("t6mp"), None) => Ok(LaunchMode::FrontendT6Mp),
-            _ => Err("usage: iw4l frontend t6mp [--cmds '<script>']".into()),
-        },
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/bootstrap/src/args.rs
         Some(other) => Err(format!(
             "unknown launch args starting with `{other}` — expected: map <zone> | serve <zone> | menu | play <demo> [--cmds '<script>'] | export-gltf <zone>"
         )),

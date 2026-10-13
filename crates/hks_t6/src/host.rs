@@ -68,13 +68,76 @@ pub struct EngineValues {
     /// His profile settings (`Engine.SetProfileVar`, `UIExpression.Profile*`)
     /// and hardware profile (`Engine.*HardwareProfileValue*`).
     pub profile: HashMap<String, String>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
     /// bo2mp: the zones' config files by lower-case name, for the menus'
     /// `exec <file>` (`run_command`).
     pub configs: HashMap<String, String>,
     /// bo2mp: the stats commands those lines ran (`STAT_COMMANDS`), in
     /// order, for the stats' owner to carry out (`hks_t6::mp`).
     pub stat_commands: Vec<String>,
+    /// bo2zm M4: his player stats by path (`Engine.GetPlayerStats(c)`'s
+    /// `cacLoadouts.resetWarningDisplayed`), each 0 until set.
+    pub stats: HashMap<String, Value>,
+    /// bo2zm M4: the maps this game plays (`Engine.GetMaps`), load names.
+    pub maps: Vec<String>,
+    /// bo2zm M4: the front end's game modes (`Engine.GameModeSetMode`).
+    pub game_modes: Vec<f32>,
+    /// bo2zm M4: the playlist picked (`Engine.SetPlaylistID`), 0 = none.
+    pub playlist: usize,
+    /// bo2zm M4: these menus are the front end (not in a game).
+    pub front_end: bool,
+    /// bo2zm M4: his name (his settings' player name), the lobby's card.
+    pub player_name: String,
+    /// bo2zm: when (LUI ms) he entered a Public Match lobby
+    /// (`xstartparty`); None outside one. It looks for players a while,
+    /// counts down, then starts the match with him alone.
+    pub public_lobby_since: Option<f64>,
+    /// bo2zm H28: the other players in his Public Match lobby (their
+    /// names), found through the relay.
+    pub party: Vec<String>,
+    /// bo2zm H28: he joined someone else's lobby: its host starts the match.
+    pub party_follower: bool,
+    /// bo2zm H28: his Friends list (`Engine.GetPlayerInfoByIndex` list 0):
+    /// the other players' lobbies on the relay.
+    pub friends: Vec<Friend>,
+    /// bo2zm: each weapon the HUD was told of, by name, with its Black Ops
+    /// II `weapType` (`Engine.IsWeaponType`: 7 melee, 4 gas).
+    pub weapon_types: HashMap<String, i32>,
+}
+
+/// bo2zm H28: one row of his Friends list.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Friend {
+    /// The menus pass it back (`joinplayersessionbyxuid <xuid>`): a decimal
+    /// string, never one of the lobby rows' ("1", "2", ...).
+    pub xuid: String,
+    pub name: String,
+    /// The line under the name (where the friend is).
+    pub status: String,
+    /// His lobby has room and has not started: the row's JOIN.
+    pub joinable: bool,
+}
+
+/// The table the Friends list and the player card read for one friend.
+fn friend_row(f: &Friend) -> TableRef {
+    let t = Table::new_ref();
+    {
+        let mut t = t.borrow_mut();
+        for key in ["name", "gamertag", "clean_gamertag"] {
+            t.set_str(key, Value::str(&f.name));
+        }
+        t.set_str("xuid", Value::str(&f.xuid));
+        t.set_str("playerXuid", Value::str(&f.xuid));
+        t.set_str("status", Value::str(&f.status));
+        // A string, as the rows read it ("0" or nil hides the rank).
+        t.set_str("rank", Value::str("1"));
+        t.set_str("rankIcon", Value::str("menu_zm_rank_1"));
+        t.set_str("prestige", Value::Num(0.0));
+        t.set_str("clantag", Value::str(""));
+        // The row's rank icon column (rankicontable_zm: 5 + days); nil is a
+        // script error and the Friends list never opens.
+        t.set_str("daysPlayedInLast5Days", Value::Num(0.0));
+    }
+    t
 }
 
 /// bo2mp: BO2's console commands that write his stats (mp/prestige_reset.cfg,
@@ -163,72 +226,8 @@ fn run_command_depth(values: &RefCell<EngineValues>, line: &str, depth: usize) -
                 ran = true;
             }
             _ => {}
-=======
-    /// bo2zm M4: his player stats by path (`Engine.GetPlayerStats(c)`'s
-    /// `cacLoadouts.resetWarningDisplayed`), each 0 until set.
-    pub stats: HashMap<String, Value>,
-    /// bo2zm M4: the maps this game plays (`Engine.GetMaps`), load names.
-    pub maps: Vec<String>,
-    /// bo2zm M4: the front end's game modes (`Engine.GameModeSetMode`).
-    pub game_modes: Vec<f32>,
-    /// bo2zm M4: the playlist picked (`Engine.SetPlaylistID`), 0 = none.
-    pub playlist: usize,
-    /// bo2zm M4: these menus are the front end (not in a game).
-    pub front_end: bool,
-    /// bo2zm M4: his name (his settings' player name), the lobby's card.
-    pub player_name: String,
-    /// bo2zm: when (LUI ms) he entered a Public Match lobby
-    /// (`xstartparty`); None outside one. It looks for players a while,
-    /// counts down, then starts the match with him alone.
-    pub public_lobby_since: Option<f64>,
-    /// bo2zm H28: the other players in his Public Match lobby (their
-    /// names), found through the relay.
-    pub party: Vec<String>,
-    /// bo2zm H28: he joined someone else's lobby: its host starts the match.
-    pub party_follower: bool,
-    /// bo2zm H28: his Friends list (`Engine.GetPlayerInfoByIndex` list 0):
-    /// the other players' lobbies on the relay.
-    pub friends: Vec<Friend>,
-    /// bo2zm: each weapon the HUD was told of, by name, with its Black Ops
-    /// II `weapType` (`Engine.IsWeaponType`: 7 melee, 4 gas).
-    pub weapon_types: HashMap<String, i32>,
-}
-
-/// bo2zm H28: one row of his Friends list.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Friend {
-    /// The menus pass it back (`joinplayersessionbyxuid <xuid>`): a decimal
-    /// string, never one of the lobby rows' ("1", "2", ...).
-    pub xuid: String,
-    pub name: String,
-    /// The line under the name (where the friend is).
-    pub status: String,
-    /// His lobby has room and has not started: the row's JOIN.
-    pub joinable: bool,
-}
-
-/// The table the Friends list and the player card read for one friend.
-fn friend_row(f: &Friend) -> TableRef {
-    let t = Table::new_ref();
-    {
-        let mut t = t.borrow_mut();
-        for key in ["name", "gamertag", "clean_gamertag"] {
-            t.set_str(key, Value::str(&f.name));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
         }
-        t.set_str("xuid", Value::str(&f.xuid));
-        t.set_str("playerXuid", Value::str(&f.xuid));
-        t.set_str("status", Value::str(&f.status));
-        // A string, as the rows read it ("0" or nil hides the rank).
-        t.set_str("rank", Value::str("1"));
-        t.set_str("rankIcon", Value::str("menu_zm_rank_1"));
-        t.set_str("prestige", Value::Num(0.0));
-        t.set_str("clantag", Value::str(""));
-        // The row's rank icon column (rankicontable_zm: 5 + days); nil is a
-        // script error and the Friends list never opens.
-        t.set_str("daysPlayedInLast5Days", Value::Num(0.0));
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
     ran
 }
 
@@ -240,9 +239,6 @@ impl EngineValues {
             .get(command)
             .or_else(|| self.vehicle_binds.get(command).and_then(|from| self.binds.get(from)))
     }
-=======
-    t
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
 }
 
 /// bo2zm: a Public Match lobby looks for players this long (ms) ...
@@ -268,11 +264,9 @@ pub enum EngineCall {
     /// `Engine.BlurWorld(controller, amount)`: blur the world behind the
     /// menus (0 = none).
     BlurWorld(f32),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
     /// `Engine.FetchLeagueTeams(...)`: the engine answers with
     /// `league_team_info_fetched`.
     FetchLeagueTeams,
-=======
     /// `Engine.PlayMenuMusic(alias)`: the menus' music (the front end's
     /// `mus_mp_frontend`).
     PlayMusic(String),
@@ -280,7 +274,6 @@ pub enum EngineCall {
     /// is ready (Theater's film browser: `fileshare_slots_available`,
     /// `fileshare_search_complete`), with its number fields.
     Event(String, Vec<(String, f32)>),
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
 }
 
 /// One element as drawn: its rectangle in root units (0,0 = the root's top
@@ -304,35 +297,27 @@ pub struct Drawn {
     /// Horizontal anchors (left, right): where unaligned text sits.
     pub anchors: (bool, bool),
     pub z_rot: f32,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
     /// bo2mp: turned out of the screen's plane (a 3D widget: the front
     /// end's holotable grid).
     pub x_rot: f32,
     pub y_rot: f32,
-    /// A dashes bar's (count, lit, change) and units per dash.
+    /// A dashes bar's (count, lit, change) and units per dash (bo2zm: also
+    /// Settings' voice `meter`, change 0).
     pub dashes: (i32, i32, i32),
     pub dash_pitch: f32,
     /// `setupTiles(n)`: the picture repeats in tiles n units wide.
     pub tiles: f32,
-    /// bo2mp: the globe's `setShaderVector(0, ..)` (0 hidden, 1 wireframe, 2 map in).
-    pub shader: [f32; 4],
+    /// bo2zm M4: the material's shader vectors (`setShaderVector`); bo2mp:
+    /// vector 0's x is the multiplayer globe's reveal (0 hidden, 1
+    /// wireframe, 2 map in).
+    pub shader: [[f32; 4]; 4],
     /// What is drawn under it shows blurred (`setBlur`).
     pub blur: bool,
     /// bo2mp: the main menu covered by Options or the Quit prompt: drawn
     /// blurred and dimmed, without its text.
     pub behind: bool,
-    /// bo2mp: the box it is clipped to (an ancestor's `setUseStencil`), if any.
-=======
-    /// A dashes bar's (count, lit) and units per dash.
-    pub dashes: (i32, i32),
-    pub dash_pitch: f32,
-    /// bo2zm M4: the material's shader vectors (`setShaderVector`).
-    pub shader: [[f32; 4]; 4],
-    /// bo2zm M4: it blurs what is behind it (`setBlur`).
-    pub blur: bool,
-    /// bo2zm M4: the box its clipping ancestors (`setUseStencil`) keep it
-    /// in, root units; None = not clipped.
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
+    /// The box it is clipped to (its ancestors' `setUseStencil`), root
+    /// units; None = not clipped.
     pub clip: Option<Rect>,
 }
 
@@ -364,9 +349,6 @@ pub struct Host {
 fn script_key(name: &str) -> String {
     let lower = name.to_ascii_lowercase();
     let stem = lower.strip_suffix(".lua").unwrap_or(&lower);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-    stem.chars().filter(|c| !matches!(c, '/' | '\\' | '_' | '.')).collect()
-=======
     stem.chars()
         .filter(|c| !matches!(c, '/' | '\\' | '_' | '.'))
         .collect()
@@ -537,14 +519,12 @@ fn drop_buttons(p: &mut crate::Proto) {
     for c in p.protos.iter_mut() {
         drop_buttons(std::rc::Rc::make_mut(c));
     }
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
 }
 
 fn arg(a: &[Value], i: usize) -> Value {
     a.get(i).cloned().unwrap_or(Value::Nil)
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
 /// The mouse keys BO2 shows as a button picture in the Controls rows, with
 /// the FontIcon entry that is its glyph (BO2's own icon set names the
 /// picture and its size; the text carries `^B<entry>^`).
@@ -556,8 +536,6 @@ pub const MOUSE_GLYPHS: [(&str, &str); 5] = [
     ("MWHEELDOWN", "mouseWheelDown"),
 ];
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
 impl Host {
     /// A VM with the standard library, LUI's natives and the engine tables,
     /// and `scripts` ((rawfile name, bytes); a later name wins) behind
@@ -590,8 +568,8 @@ impl Host {
                 let (v1, v2) = (vals.clone(), vals.clone());
                 let n1 = name.clone();
                 let get = vm.native("dvar_get", move |_, _| {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-                    let v = v1.borrow().dvars.get(&n1).cloned();
+                    // bo2zm: any spelling of its name (`dvar_get`).
+                    let v = dvar_get(&v1.borrow().dvars, &n1);
                     // A colour dvar ("0.6 0.64 0.69") answers its r, g, b (the team colours the
                     // scripts read as `local r, g, b = Dvar.g_TeamColor_MyTeam:get()`).
                     if n1.starts_with("g_TeamColor_")
@@ -614,18 +592,7 @@ impl Host {
                     .collect())
                 });
                 let set = vm.native("dvar_set", move |_, a| {
-                    v2.borrow_mut().dvars.insert(name.clone(), arg(&a, 1).to_string());
-=======
-                    let v = dvar_get(&v1.borrow().dvars, &n1);
-                    Ok(
-                        v.map(|s| s.parse::<f32>().map_or_else(|_| Value::str(&s), Value::Num))
-                            .into_iter()
-                            .collect(),
-                    )
-                });
-                let set = vm.native("dvar_set", move |_, a| {
                     dvar_set(&mut v2.borrow_mut().dvars, &name, arg(&a, 1).to_string());
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
                     Ok(vec![])
                 });
                 // getDomainEnumStrings(): an enum dvar's choices
@@ -635,12 +602,8 @@ impl Host {
                 let domain = vm.native("dvar_domain", move |_, _| {
                     let t = Table::new_ref();
                     for (i, c) in v3.borrow().enums.get(&n3).into_iter().flatten().enumerate() {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-                        t.borrow_mut().set(Value::Num((i + 1) as f32), Value::str(c));
-=======
                         t.borrow_mut()
                             .set(Value::Num((i + 1) as f32), Value::str(c));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
                     }
                     Ok(vec![Value::Table(t)])
                 });
@@ -661,57 +624,38 @@ impl Host {
         });
         set_field(&ui, "IsUsingGamepad", pad);
         let dvar = |vals: &Rc<RefCell<EngineValues>>, a: &[Value]| {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            vals.borrow().dvars.get(&arg(a, 1).to_string()).cloned().unwrap_or_default()
-        };
-        let v = values.clone();
-        let f = vm.native("DvarString", move |_, a| Ok(vec![Value::str(&dvar(&v, &a))]));
-=======
             dvar_get(&vals.borrow().dvars, &arg(a, 1).to_string()).unwrap_or_default()
         };
         let v = values.clone();
         let f = vm.native("DvarString", move |_, a| {
             Ok(vec![Value::str(&dvar(&v, &a))])
         });
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
         set_field(&ui, "DvarString", f);
         for name in ["DvarInt", "DvarFloat"] {
             let v = values.clone();
             let f = vm.native(name, move |_, a| {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-                Ok(vec![Value::Num(dvar(&v, &a).trim().parse::<f32>().unwrap_or(0.0))])
-=======
                 Ok(vec![Value::Num(
                     dvar(&v, &a).trim().parse::<f32>().unwrap_or(0.0),
                 )])
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             });
             set_field(&ui, name, f);
         }
         let v = values.clone();
         let f = vm.native("DvarBool", move |_, a| {
             let s = dvar(&v, &a);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            let on = matches!(s.trim(), "1" | "true") || s.trim().parse::<f32>().is_ok_and(|n| n != 0.0);
-=======
             let on =
                 matches!(s.trim(), "1" | "true") || s.trim().parse::<f32>().is_ok_and(|n| n != 0.0);
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             Ok(vec![Value::Num(if on { 1.0 } else { 0.0 })])
         });
         set_field(&ui, "DvarBool", f);
         let v = values.clone();
         let f = vm.native("IsVisibilityBitSet", move |_, a| {
             let bit = arg(&a, 1).as_num().map_or(-1, |n| n as i32);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            Ok(vec![Value::Num(if v.borrow().bits.contains(&bit) { 1.0 } else { 0.0 })])
-=======
             Ok(vec![Value::Num(if v.borrow().bits.contains(&bit) {
                 1.0
             } else {
                 0.0
             })])
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
         });
         set_field(&ui, "IsVisibilityBitSet", f);
         // ToUpper(controller, text).
@@ -725,17 +669,6 @@ impl Host {
         set_field(&ui, "GetCurrentPlatform", f);
         let f = vm.native("GetCurrentExe", |_, _| Ok(vec![Value::str("multiplayer")]));
         set_field(&ui, "GetCurrentExe", f);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-        let f = vm.native("SessionMode_IsZombiesGame", |_, _| Ok(vec![Value::Num(1.0)]));
-        set_field(&ui, "SessionMode_IsZombiesGame", f);
-        // TableLookup(controller, table, column, value, return column).
-        let v = values.clone();
-        let f = vm.native("TableLookup", move |_, a| {
-            let table = arg(&a, 1).to_string();
-            let col = arg(&a, 2).as_num().map_or(0, |n| n as usize);
-            let want = arg(&a, 3).to_string();
-            let ret = arg(&a, 4).as_num().map_or(0, |n| n as usize);
-=======
         let f = vm.native("SessionMode_IsZombiesGame", |_, _| {
             Ok(vec![Value::Num(1.0)])
         });
@@ -757,19 +690,18 @@ impl Host {
                 .chunks_exact(2)
                 .map(|p| (p[0].as_num().map_or(0, |n| n as usize), p[1].to_string()))
                 .collect();
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             let v = v.borrow();
             // Table names are case-blind (`mp/rankIconTable.csv`).
             let rows = v.tables.get(&table).or_else(|| {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-                v.tables.iter().find(|(k, _)| k.eq_ignore_ascii_case(&table)).map(|(_, r)| r)
-            });
-            let hit = rows
-                .and_then(|rows| rows.iter().find(|r| r.get(col).is_some_and(|c| *c == want)))
-=======
-                table
-                    .strip_prefix("maps/")
-                    .and_then(|x| v.tables.get(&format!("zm/{x}")))
+                v.tables
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case(&table))
+                    .map(|(_, r)| r)
+                    .or_else(|| {
+                        table
+                            .strip_prefix("maps/")
+                            .and_then(|x| v.tables.get(&format!("zm/{x}")))
+                    })
             });
             let hit = rows
                 .and_then(|rows| {
@@ -779,7 +711,6 @@ impl Host {
                             .all(|(c, want)| r.get(*c).is_some_and(|x| x == want))
                     })
                 })
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
                 .and_then(|r| r.get(ret).cloned())
                 .unwrap_or_default();
             Ok(vec![Value::str(&hit)])
@@ -803,13 +734,9 @@ impl Host {
         });
         set_field(&ui, "FormatNumberWithCommas", f);
         // The maps table a zombies game reads (CoD.mapsTable).
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-        let f = vm.native("GetCurrentMapTableName", |_, _| Ok(vec![Value::str("zm/mapstable.csv")]));
-=======
         let f = vm.native("GetCurrentMapTableName", |_, _| {
             Ok(vec![Value::str("zm/mapstable.csv")])
         });
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
         set_field(&ui, "GetCurrentMapTableName", f);
 
         // Engine: the safe area, settings, localized text.
@@ -820,16 +747,12 @@ impl Host {
         let v = values.clone();
         let f = vm.native("GetUserSafeAreaForController", move |_, _| {
             let (w, h) = v.borrow().safe_area;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            Ok(vec![Value::Num(-w / 2.0), Value::Num(-h / 2.0), Value::Num(w / 2.0), Value::Num(h / 2.0)])
-=======
             Ok(vec![
                 Value::Num(-w / 2.0),
                 Value::Num(-h / 2.0),
                 Value::Num(w / 2.0),
                 Value::Num(h / 2.0),
             ])
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
         });
         set_field(&engine, "GetUserSafeAreaForController", f);
         let v = values.clone();
@@ -840,9 +763,6 @@ impl Host {
         set_field(&engine, "GetUserSafeArea", f);
         let v = values.clone();
         let f = vm.native("GetGametypeSetting", move |_, a| {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            Ok(vec![Value::Num(v.borrow().settings.get(&arg(&a, 0).to_string()).copied().unwrap_or(0.0))])
-=======
             Ok(vec![Value::Num(
                 v.borrow()
                     .settings
@@ -850,23 +770,13 @@ impl Host {
                     .copied()
                     .unwrap_or(0.0),
             )])
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
         });
         set_field(&engine, "GetGametypeSetting", f);
         // SetGametypeSetting(name, value): Custom Games' options.
         let v = values.clone();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-        let strict = std::env::var_os("BO2MP_STRICT_LOCALIZE").is_some();
-        let f = vm.native("Localize", move |_, a| {
-            // BO2MP_STRICT_LOCALIZE=1: Localize(nil) is an error with its
-            // trace (debugging aid: which engine answer came back nil).
-            if strict && matches!(arg(&a, 0), Value::Nil) {
-                return Err(LuaError::new("Localize(nil)".to_owned()));
-=======
         let f = vm.native("SetGametypeSetting", move |_, a| {
             if let Some(x) = arg(&a, 1).as_num() {
                 v.borrow_mut().settings.insert(arg(&a, 0).to_string(), x);
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             }
             Ok(vec![])
         });
@@ -881,7 +791,13 @@ impl Host {
         });
         set_field(&engine, "IsGametypeSettingDefault", f);
         let v = values.clone();
+        let strict = std::env::var_os("BO2MP_STRICT_LOCALIZE").is_some();
         let f = vm.native("Localize", move |_, a| {
+            // BO2MP_STRICT_LOCALIZE=1: Localize(nil) is an error with its
+            // trace (debugging aid: which engine answer came back nil).
+            if strict && matches!(arg(&a, 0), Value::Nil) {
+                return Err(LuaError::new("Localize(nil)".to_owned()));
+            }
             let key = arg(&a, 0).to_string();
             // A "@KEY" reference (the notices' dvars hold them, set by the
             // engine's party code) is the same KEY.
@@ -891,7 +807,7 @@ impl Host {
                 .localize
                 .get(&up)
                 .cloned()
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
+                .or_else(|| caps_word(&up))
                 .unwrap_or(key);
             // "&&1".. take the arguments; an argument that is a text key is
             // its text (Create-a-Class's camo challenges pass the weapon's
@@ -935,37 +851,25 @@ impl Host {
                 };
                 text.replace_range(start..start + len + 2, &format!("[{name}]"));
                 from = start + name.len() + 2;
-=======
-                .or_else(|| caps_word(&up))
-                .unwrap_or(key.clone());
-            // "&&1".. take the arguments.
-            for (i, x) in a.iter().enumerate().skip(1) {
-                text = text.replace(&format!("&&{i}"), &x.to_string());
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             }
             Ok(vec![Value::str(&text)])
         });
         set_field(&engine, "Localize", f);
         let falsy = vm.native("false", |_, _| Ok(vec![Value::Bool(false)]));
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-        for name in ["GameModeIsMode", "IsSplitscreen", "IsDemoShoutcaster", "IsInGame"] {
-=======
+        // (GameModeIsMode: bo2zm's below; bo2mp's `mp` binds its own.)
         for name in ["IsSplitscreen", "IsDemoShoutcaster", "IsInGame"] {
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             set_field(&engine, name, falsy.clone());
         }
         // SessionModeIsMode(mode): the session's modes (`session_modes`).
         let v = values.clone();
         let f = vm.native("SessionModeIsMode", move |_, a| {
             let m = arg(&a, 0).as_num().unwrap_or(f32::NAN);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            Ok(vec![Value::Bool(v.borrow().session_modes.contains(&m))])
-=======
-            // (A Zombies session always: CoD.SESSIONMODE_ZOMBIES, 4.)
+            // bo2zm: a Zombies session always (CoD.SESSIONMODE_ZOMBIES, 4);
+            // bo2mp: in the multiplayer front end only when set.
+            let zombies = m == 4.0 && !lui::mp_front_end();
             Ok(vec![Value::Bool(
-                m == 4.0 || v.borrow().session_modes.contains(&m),
+                zombies || v.borrow().session_modes.contains(&m),
             )])
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
         });
         set_field(&engine, "SessionModeIsMode", f);
         // bo2zm M4: the front end's game modes (CoD.GAMEMODE_*: public
@@ -1093,15 +997,6 @@ impl Host {
             set_field(&engine, name, one_pad.clone());
             set_field(&ui, name, one_pad.clone());
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-        set_field(&engine, "PartyConnectingToDedicated", falsy.clone());
-        // bo2mp: whether he plays with a controller now (the menus' button
-        // glyphs and prompts follow it).
-        let pad = vm.native("LastInput_Gamepad", |_, _| Ok(vec![Value::Bool(gamepad_active())]));
-        set_field(&engine, "LastInput_Gamepad", pad);
-        let nothing = vm.native("nothing", |_, _| Ok(vec![]));
-        for name in ["SetDvar", "PlayMenuMusic", "SetForceMouseRootFull", "StopEditingPresetClass"] {
-=======
         // ONLINE's checks (the PC front end's online service): the
         // connection is up, nothing is banned, the Steam ticket and the
         // service's fetches are done, every rating allowed.
@@ -1367,6 +1262,12 @@ impl Host {
                 Some(Value::Num(n)) => *n,
                 _ => 0.0,
             };
+            // bo2mp: the multiplayer front end raises it from its own
+            // command (the UI answers `bo2mpDwSearch <folder>`).
+            if lui::mp_front_end() {
+                c.borrow_mut().push(EngineCall::Exec(format!("bo2mpDwSearch {}", folder as i64)));
+                return Ok(vec![Value::Bool(true)]);
+            }
             c.borrow_mut().push(EngineCall::Event(
                 "fileshare_search_complete".to_owned(),
                 vec![
@@ -1619,7 +1520,9 @@ impl Host {
         set_field(&engine, "GetPlayerStats", f);
         let v = values.clone();
         let f = vm.native("LastInput_Gamepad", move |_, _| {
-            Ok(vec![Value::Bool(v.borrow().gamepad)])
+            // bo2mp: whether he plays with a controller now (the menus'
+            // button glyphs and prompts follow it); bo2zm: his last input.
+            Ok(vec![Value::Bool(gamepad_active() || v.borrow().gamepad)])
         });
         set_field(&engine, "LastInput_Gamepad", f);
         let nothing = vm.native("nothing", |_, _| Ok(vec![]));
@@ -1635,7 +1538,6 @@ impl Host {
         });
         set_field(&engine, "SetDvar", f);
         for name in ["SetForceMouseRootFull", "StopEditingPresetClass"] {
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             set_field(&engine, name, nothing.clone());
         }
         let c = calls.clone();
@@ -1647,40 +1549,16 @@ impl Host {
         set_field(&engine, "PlayMenuMusic", f);
         let c = calls.clone();
         let f = vm.native("SendMenuResponse", move |_, a| {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            c.borrow_mut().push(EngineCall::MenuResponse(arg(&a, 1).to_string(), arg(&a, 2).to_string()));
-=======
             c.borrow_mut().push(EngineCall::MenuResponse(
                 arg(&a, 1).to_string(),
                 arg(&a, 2).to_string(),
             ));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             Ok(vec![])
         });
         set_field(&engine, "SendMenuResponse", f);
         let c = calls.clone();
         let f = vm.native("Exec", move |_, a| {
             // Exec(controller, command) or Exec(command).
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            let cmd = a.iter().rev().find_map(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
-            c.borrow_mut().push(EngineCall::Exec(cmd));
-            Ok(vec![])
-        });
-        set_field(&engine, "Exec", f);
-        // LoadCodtvDWContent(controller, folderIndex, offset, userData): the
-        // online file list's request; offline the answer is at once (no
-        // files), raised by the UI as `fileshare_search_complete`.
-        let c = calls.clone();
-        let f = vm.native("LoadCodtvDWContent", move |_, a| {
-            let folder = arg(&a, 1).as_num().unwrap_or(0.0) as i64;
-            c.borrow_mut().push(EngineCall::Exec(format!("bo2mpDwSearch {folder}")));
-            Ok(vec![Value::Bool(true)])
-        });
-        set_field(&engine, "LoadCodtvDWContent", f);
-        let c = calls.clone();
-        let f = vm.native("PlaySound", move |_, a| {
-            c.borrow_mut().push(EngineCall::PlaySound(arg(&a, 0).to_string()));
-=======
             let cmd = a
                 .iter()
                 .rev()
@@ -1688,7 +1566,7 @@ impl Host {
                 .unwrap_or_default();
             // Theater's film browser asks for its save slots: there are
             // none to fill, but the answer comes (BO2 asks Demonware).
-            if cmd == "fileshareGetSlots" {
+            if cmd == "fileshareGetSlots" && !lui::mp_front_end() {
                 c.borrow_mut().push(EngineCall::Event(
                     "fileshare_slots_available".to_owned(),
                     vec![("controller".to_owned(), 0.0), ("valid".to_owned(), 1.0)],
@@ -1705,7 +1583,6 @@ impl Host {
         let f = vm.native("PlaySound", move |_, a| {
             c.borrow_mut()
                 .push(EngineCall::PlaySound(arg(&a, 0).to_string()));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             Ok(vec![])
         });
         set_field(&engine, "PlaySound", f);
@@ -1722,7 +1599,6 @@ impl Host {
             Ok(vec![])
         });
         set_field(&engine, "BlurWorld", f);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
         let c = calls.clone();
         let f = vm.native("FetchLeagueTeams", move |_, _| {
             c.borrow_mut().push(EngineCall::FetchLeagueTeams);
@@ -1739,12 +1615,6 @@ impl Host {
             Ok(vec![])
         });
         set_field(&engine, "SystemNeedsUpdate", f);
-        for name in ["IsMigrating", "LockInput", "SetUIActive", "ProbationCheckIfPenalizedForQuit"] {
-            set_field(&engine, name, if name == "IsMigrating" || name == "ProbationCheckIfPenalizedForQuit" { falsy.clone() } else { nothing.clone() });
-        }
-        let one = vm.native("one", |_, _| Ok(vec![Value::Num(1.0)]));
-        set_field(&ui, "IsInGame", one.clone());
-=======
         for name in [
             "IsMigrating",
             "LockInput",
@@ -1772,7 +1642,6 @@ impl Host {
             })])
         });
         set_field(&ui, "IsInGame", f);
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
         // His keyboard and mouse are controller 0 (menus pass on input only
         // from a controller in use).
         set_field(&ui, "IsControllerBeingUsed", one.clone());
@@ -1791,9 +1660,6 @@ impl Host {
         let f = vm.native("GetTeamPositions", move |_, _| {
             let t = Table::new_ref();
             let row = Table::new_ref();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            row.borrow_mut().set_str("team", Value::Num(v.borrow().team as f32));
-=======
             let v = v.borrow();
             // The team's score: its players' first column (score).
             let score: f32 = v
@@ -1803,18 +1669,16 @@ impl Host {
                 .sum();
             row.borrow_mut().set_str("team", Value::Num(v.team as f32));
             row.borrow_mut().set_str("score", Value::Num(score));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             t.borrow_mut().set(Value::Num(1.0), Value::Table(row));
             Ok(vec![Value::Table(t)])
         });
         set_field(&engine, "GetTeamPositions", f);
         let v = values.clone();
         let f = vm.native("GetMatchScoreboardClientCount", move |_, _| {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            Ok(vec![Value::Num(v.borrow().players.len().max(1) as f32)])
-=======
-            Ok(vec![Value::Num(v.borrow().players.len() as f32)])
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
+            // bo2mp: at least his own row in multiplayer; bo2zm: the rows.
+            let n = v.borrow().players.len();
+            let n = if lui::mp_front_end() { n.max(1) } else { n };
+            Ok(vec![Value::Num(n as f32)])
         });
         set_field(&engine, "GetMatchScoreboardClientCount", f);
         // GetMatchScoreboardIndexAndClientNumForTeam(i, team, sort): row i
@@ -1888,13 +1752,9 @@ impl Host {
         let v = values.clone();
         let f = vm.native("GetScoreBoardColumnName", move |_, a| {
             let i = arg(&a, 1).as_num().map_or(0, |n| n as usize);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            Ok(vec![Value::str(v.borrow().columns.get(i).map_or("", String::as_str))])
-=======
             Ok(vec![Value::str(
                 v.borrow().columns.get(i).map_or("", String::as_str),
             )])
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
         });
         set_field(&engine, "GetScoreBoardColumnName", f);
         // Weapons (the HUD passes the weapon the engine named in
@@ -1904,11 +1764,6 @@ impl Host {
         let v = values.clone();
         let f = vm.native("IsWeaponType", move |_, a| {
             let w = arg(&a, 0).to_string();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            let hit = match arg(&a, 1).to_string().as_str() {
-                "melee" => ["knife", "bowie", "tazer", "fists", "sickle"].iter().any(|k| w.contains(k)),
-                "grenade" => ["grenade", "monkey", "claymore", "emp"].iter().any(|k| w.contains(k)),
-=======
             let kind = arg(&a, 1).to_string();
             let own = v.borrow().weapon_types.get(&w).copied();
             if let Some(t) = own {
@@ -1927,7 +1782,6 @@ impl Host {
                 "grenade" => ["grenade", "monkey", "claymore", "emp"]
                     .iter()
                     .any(|k| w.contains(k)),
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
                 _ => false,
             };
             Ok(vec![Value::Bool(hit)])
@@ -1939,19 +1793,14 @@ impl Host {
         set_field(&engine, "GetActiveLocalClientsCount", one.clone());
         // The key a command is bound to (the string argument naming it).
         // (controller, command[, index]): the index-th key (0 first).
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-        for (table, name) in [(&engine, "GetKeyBindingLocalizedString"), (&ui, "KeyBinding")] {
-=======
         for (table, name) in [
             (&engine, "GetKeyBindingLocalizedString"),
             (&ui, "KeyBinding"),
         ] {
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             let v = values.clone();
             let f = vm.native(name, move |_, a| {
                 let at = a.iter().position(|x| x.as_str().is_some());
                 let cmd = at.and_then(|i| a[i].as_str()).unwrap_or("").to_owned();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
                 let index = at.and_then(|i| a.get(i + 1)).and_then(Value::as_num).map_or(0, |n| n as usize);
                 let keys: Vec<String> = v.borrow().keys_of(&cmd).map(|k| k.iter().skip(index).cloned().collect()).unwrap_or_default();
                 let key = keys.first().cloned().unwrap_or_default();
@@ -1990,31 +1839,6 @@ impl Host {
                     }
                 }
                 Ok(vec![Value::str(&once.join(&format!(" {or} ")))])
-=======
-                let index = at
-                    .and_then(|i| a.get(i + 1))
-                    .and_then(Value::as_num)
-                    .map_or(0, |n| n as usize);
-                let vb = v.borrow();
-                let mut keys = vb.binds.get(&cmd).cloned().unwrap_or_default();
-                // Left and right Shift are one SHIFT on the page.
-                let mut seen = std::collections::HashSet::new();
-                keys.retain(|k| seen.insert(k.to_uppercase()));
-                // The Controls page's long form (9 arguments) lists every key
-                // ("V OR MOUSE 5") and says UNBOUND; HUD prompts take one key.
-                if a.len() > 3 {
-                    let word = |k: &str| vb.localize.get(k).cloned();
-                    let text = if keys.is_empty() {
-                        word("KEY_UNBOUND").unwrap_or_else(|| "UNBOUND".into())
-                    } else {
-                        let or = word("KEY_OR").unwrap_or_else(|| "or".into());
-                        keys.join(&format!(" {or} "))
-                    };
-                    return Ok(vec![Value::str(&text.to_uppercase())]);
-                }
-                let key = keys.get(index).cloned().unwrap_or_default();
-                Ok(vec![Value::str(&key.to_uppercase())])
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             });
             set_field(table, name, f);
         }
@@ -2023,13 +1847,9 @@ impl Host {
             let v = values.clone();
             let f = vm.native(name, move |_, a| {
                 let key = arg(&a, arg_at).to_string();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-                v.borrow_mut().profile.insert(key, arg(&a, arg_at + 1).to_string());
-=======
                 v.borrow_mut()
                     .profile
                     .insert(key, arg(&a, arg_at + 1).to_string());
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
                 Ok(vec![])
             });
             set_field(&engine, name, f);
@@ -2038,18 +1858,6 @@ impl Host {
         let f = vm.native("GetHardwareProfileValueAsString", move |_, a| {
             let key = arg(&a, 0).to_string();
             let vb = v.borrow();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            Ok(vec![Value::str(vb.profile.get(&key).or_else(|| vb.dvars.get(&key)).map_or("0", String::as_str))])
-        });
-        set_field(&engine, "GetHardwareProfileValueAsString", f);
-        set_field(&engine, "SyncHardwareProfileWithDvars", nothing.clone());
-        for (name, number) in [("ProfileValueAsString", false), ("ProfileInt", true), ("ProfileFloat", true), ("ProfileBool", true)] {
-            let v = values.clone();
-            let f = vm.native(name, move |_, a| {
-                let key = arg(&a, 1).to_string();
-                let s = v.borrow().profile.get(&key).cloned().unwrap_or_default();
-                Ok(vec![if number { Value::Num(s.trim().parse().unwrap_or(0.0)) } else { Value::str(&s) }])
-=======
             Ok(vec![Value::str(
                 vb.profile
                     .get(&key)
@@ -2068,20 +1876,20 @@ impl Host {
             let v = values.clone();
             let f = vm.native(name, move |_, a| {
                 let key = arg(&a, 1).to_string();
-                // An unset profile value reads 0, as BO2's profile defaults
-                // it (the map picker's `unlock_crumbs_zm` bits).
+                // bo2zm: an unset profile value reads 0, as BO2's profile
+                // defaults it (the map picker's `unlock_crumbs_zm` bits);
+                // bo2mp: empty in the multiplayer front end.
                 let s = v
                     .borrow()
                     .profile
                     .get(&key)
                     .cloned()
-                    .unwrap_or_else(|| "0".to_owned());
+                    .unwrap_or_else(|| if lui::mp_front_end() { String::new() } else { "0".to_owned() });
                 Ok(vec![if number {
                     Value::Num(s.trim().parse().unwrap_or(0.0))
                 } else {
                     Value::str(&s)
                 }])
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             });
             set_field(&ui, name, f);
         }
@@ -2089,20 +1897,6 @@ impl Host {
         let c = calls.clone();
         let f = vm.native("BindCommand", move |_, a| {
             let cmd = arg(&a, 1).to_string();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            c.borrow_mut().push(EngineCall::BindCommand(cmd, arg(&a, 2).as_num().map_or(0, |n| n as usize)));
-            Ok(vec![])
-        });
-        set_field(&engine, "BindCommand", f);
-        // ExecNow(controller, command): config files and dvars here.
-        let v = values.clone();
-        let f = vm.native("ExecNow", move |_, a| {
-            let cmd = a.iter().rev().find_map(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
-            run_command(&v, &cmd);
-            Ok(vec![])
-        });
-        set_field(&engine, "ExecNow", f);
-=======
             c.borrow_mut().push(EngineCall::BindCommand(
                 cmd,
                 arg(&a, 2).as_num().map_or(0, |n| n as usize),
@@ -2110,7 +1904,21 @@ impl Host {
             Ok(vec![])
         });
         set_field(&engine, "BindCommand", f);
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
+        // ExecNow(controller, command): bo2mp: config files and dvars here
+        // (`run_command`; `mp` binds its own); bo2zm: the same as Exec, done
+        // at once (the solo lobby's Start Match: `xpartyready 1`).
+        let v = values.clone();
+        let c = calls.clone();
+        let f = vm.native("ExecNow", move |_, a| {
+            let cmd = a.iter().rev().find_map(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
+            if lui::mp_front_end() {
+                run_command(&v, &cmd);
+            } else {
+                c.borrow_mut().push(EngineCall::Exec(cmd));
+            }
+            Ok(vec![])
+        });
+        set_field(&engine, "ExecNow", f);
 
         // GetTextDimensions(text, font, height) -> left, top, right, bottom.
         let f = vm.native("GetTextDimensions", move |_, a| {
@@ -2120,16 +1928,12 @@ impl Host {
                 other => other.to_string(),
             };
             let h = arg(&a, 2).as_num().unwrap_or(0.0);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            Ok(vec![Value::Num(0.0), Value::Num(0.0), Value::Num(measure(&text, &font, h)), Value::Num(h)])
-=======
             Ok(vec![
                 Value::Num(0.0),
                 Value::Num(0.0),
                 Value::Num(measure(&text, &font, h)),
                 Value::Num(h),
             ])
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
         });
         vm.set_global("GetTextDimensions", f);
 
@@ -2149,14 +1953,10 @@ impl Host {
                 return Ok(vec![hit]);
             }
             let stem = script_key(&module);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            let Some(bytes) = ["ui", "uimp"].iter().find_map(|p| by_key.get(&format!("{p}{stem}"))).cloned()
-=======
             let Some(bytes) = ["ui", "uimp"]
                 .iter()
                 .find_map(|p| by_key.get(&format!("{p}{stem}")))
                 .cloned()
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             else {
                 // The engine's require skips a script the zones lack (the
                 // zombies HUD names multiplayer-only ones).
@@ -2164,31 +1964,23 @@ impl Host {
                 return Ok(vec![]);
             };
             loaded.borrow_mut().set_str(&module, Value::Bool(true));
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            let chunk = crate::parse(&bytes).map_err(|e| LuaError::new(format!("{module}: {e}")))?;
+            let mut chunk =
+                crate::parse(&bytes).map_err(|e| LuaError::new(format!("{module}: {e}")))?;
+            // bo2zm: the Zombies front end leaves out [`DROPPED_BUTTONS`]
+            // (bo2mp: the multiplayer menus keep theirs).
+            if !lui::mp_front_end()
+                && ["mainmenu", "mainlobby", "publicgamelobby", "theaterlobby"]
+                    .iter()
+                    .any(|m| stem.contains(m))
+            {
+                drop_buttons(&mut chunk.main);
+            }
             let f = vm.load(chunk.main);
             let r = vm.call(f, vec![])?;
             allow_bots_in_every_mode(vm);
             hide_for_bo1_hud(vm);
             extend_map_categories(vm);
             let v = r.into_iter().next().filter(Value::truthy).unwrap_or(Value::Bool(true));
-=======
-            let mut chunk =
-                crate::parse(&bytes).map_err(|e| LuaError::new(format!("{module}: {e}")))?;
-            if ["mainmenu", "mainlobby", "publicgamelobby", "theaterlobby"]
-                .iter()
-                .any(|m| stem.contains(m))
-            {
-                drop_buttons(&mut chunk.main);
-            }
-            let f = vm.load(chunk.main);
-            let r = vm.call(f, vec![])?;
-            let v = r
-                .into_iter()
-                .next()
-                .filter(Value::truthy)
-                .unwrap_or(Value::Bool(true));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             loaded.borrow_mut().set_str(&module, v.clone());
             Ok(vec![v])
         });
@@ -2196,14 +1988,10 @@ impl Host {
 
         // The fonts' resolution (`fonts/720/...`), read while CoD's base
         // loads.
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-        values.borrow_mut().dvars.insert("r_fontResolution".to_owned(), "720".to_owned());
-=======
         values
             .borrow_mut()
             .dvars
             .insert("r_fontResolution".to_owned(), "720".to_owned());
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
         values.borrow_mut().safe_area = (1280.0, 720.0);
         Host {
             vm,
@@ -2237,31 +2025,15 @@ impl Host {
 
     pub fn require(&mut self, module: &str) -> Option<Value> {
         let r = self.vm.global("require");
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-        self.call(r, vec![Value::str(module)]).map(|v| v.into_iter().next().unwrap_or(Value::Nil))
-=======
         self.call(r, vec![Value::str(module)])
             .map(|v| v.into_iter().next().unwrap_or(Value::Nil))
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
     }
 
     /// LUI's core and CoD's base, as the engine loads them first.
     pub fn load_base(&mut self) {
         let metas: Vec<(&str, Option<TableRef>)> = ["Engine", "UIExpression"]
             .into_iter()
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
             .map(|n| (n, self.vm.global(n).table().and_then(|t| t.borrow().meta.clone())))
-=======
-            .map(|n| {
-                (
-                    n,
-                    self.vm
-                        .global(n)
-                        .table()
-                        .and_then(|t| t.borrow().meta.clone()),
-                )
-            })
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             .collect();
         for base in ["LUI.LUI", "T6.CoDBase"] {
             self.require(base);
@@ -2304,13 +2076,9 @@ impl Host {
     /// A material, as the scripts' `RegisterMaterial(name)` makes it.
     pub fn material(&mut self, name: &str) -> Value {
         let f = self.vm.global("RegisterMaterial");
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-        self.call(f, vec![Value::str(name)]).and_then(|r| r.into_iter().next()).unwrap_or(Value::Nil)
-=======
         self.call(f, vec![Value::str(name)])
             .and_then(|r| r.into_iter().next())
             .unwrap_or(Value::Nil)
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
     }
 
     /// A field of a global table (`CoD.BIT_HUD_VISIBLE`).
@@ -2358,14 +2126,10 @@ impl Host {
             let ui_root = self.field("LUI", "UIRoot");
             let new = self.vm.index(&ui_root, &Value::str("new")).ok()?;
             for name in ["UIRoot0", "UIRootFull"] {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-                let root = self.call(new.clone(), vec![Value::str(name)])?.into_iter().next()?;
-=======
                 let root = self
                     .call(new.clone(), vec![Value::str(name)])?
                     .into_iter()
                     .next()?;
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
                 lui::add_root(lui::element(&root)?);
                 self.roots.push(root);
             }
@@ -2379,15 +2143,11 @@ impl Host {
                 self.event(
                     &root,
                     "resize",
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-                    &[("width", Value::Num(w)), ("height", Value::Num(720.0)), ("unitsToPixels", Value::Num(1.0))],
-=======
                     &[
                         ("width", Value::Num(w)),
                         ("height", Value::Num(720.0)),
                         ("unitsToPixels", Value::Num(1.0)),
                     ],
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
                 );
             }
         }
@@ -2402,14 +2162,10 @@ impl Host {
         for (k, v) in fields {
             t.borrow_mut().set_str(k, v.clone());
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-        let pe = self.vm.index(target, &Value::str("processEvent")).unwrap_or(Value::Nil);
-=======
         let pe = self
             .vm
             .index(target, &Value::str("processEvent"))
             .unwrap_or(Value::Nil);
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
         self.call(pe, vec![target.clone(), Value::Table(t)]);
     }
 
@@ -2420,7 +2176,6 @@ impl Host {
         }
     }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
     /// An event whose fields are a table already made (a name card the
     /// engine sends as the event itself: `player_obituary_callout`).
     pub fn root_event_table(&mut self, name: &str, t: TableRef) {
@@ -2445,8 +2200,6 @@ impl Host {
         self.call(pe, vec![root, Value::Table(t)]);
     }
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
     /// The mouse, as the engine sends it to the root: `name` is
     /// mousemove / mousedown / mouseup, (x, y) in root units, `button`
     /// left / right.
@@ -2470,9 +2223,6 @@ impl Host {
     pub fn button(&mut self, button: &str, down: bool) {
         self.root_event(
             "gamepad_button",
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            &[("button", Value::str(button)), ("down", Value::Bool(down)), ("qualifier", Value::str("keyboard"))],
-=======
             &[
                 ("button", Value::str(button)),
                 ("down", Value::Bool(down)),
@@ -2500,7 +2250,6 @@ impl Host {
                 ("qualifier", Value::str("keyboard")),
                 ("controller", Value::Num(0.0)),
             ],
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
         );
     }
 
@@ -2546,7 +2295,6 @@ impl Host {
             .collect()
     }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
     /// bo2mp: close the open menu whose id is `id` (e.g. a confirm
     /// prompt's `Menu.SetDefaultPopup`; the newest if several) as its own NO
     /// does (`CoD.PopupMenus.GoBack(menu, { controller = 0 })`); false if
@@ -2603,7 +2351,8 @@ impl Host {
         }
         let Ok(set) = self.vm.index(&label, &Value::str("setText")) else { return false };
         self.call(set, vec![label, Value::str(text)]).is_some()
-=======
+    }
+
     /// The engine ids of a menu's elements (its `id`, e.g.
     /// `Menu.Scoreboard`), wherever it was added.
     pub fn menu_element_ids(&self, id: &str) -> Option<std::collections::HashSet<usize>> {
@@ -2611,7 +2360,6 @@ impl Host {
             .iter()
             .filter_map(lui::element)
             .find_map(|r| lui::ids_under_named(&r, id))
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
     }
 
     /// Open a menu on the root (the root's `addmenu`), as the engine does.
@@ -2624,14 +2372,8 @@ impl Host {
     /// `transition_complete_<name>` (the handlers may start more, so this
     /// repeats a few times).
     pub fn frame(&mut self, now_ms: f64) {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
         for (el, ev) in lui::stream_events(now_ms) {
             self.event(&Value::User(el), ev, &[]);
-=======
-        // Streamed pictures the scripts set are ready (resident here).
-        for el in lui::take_streamed_ready() {
-            self.event(&Value::User(el), "streamed_image_ready", &[]);
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
         }
         for _ in 0..4 {
             lui::commit_pending();
@@ -2648,13 +2390,6 @@ impl Host {
                     );
                 }
                 let target = Value::User(el);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-                self.event(
-                    &target,
-                    &format!("transition_complete_{anim}"),
-                    &[("interrupted", Value::Bool(interrupted)), ("lateness", Value::Num(late as f32))],
-                );
-=======
                 // `interrupted` only when a new animation cut it short (the
                 // globe's handlers test `event.interrupted == nil`).
                 let mut fields = vec![("lateness", Value::Num(late as f32))];
@@ -2662,7 +2397,6 @@ impl Host {
                     fields.push(("interrupted", Value::Bool(true)));
                 }
                 self.event(&target, &format!("transition_complete_{anim}"), &fields);
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             }
         }
     }
@@ -2674,15 +2408,11 @@ impl Host {
 
     /// The element with this id, as a value (debugging aid).
     pub fn element_by_id(&self, id: usize) -> Option<Value> {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-        self.roots.iter().filter_map(lui::element).find_map(|r| lui::find(&r, id)).map(Value::User)
-=======
         self.roots
             .iter()
             .filter_map(lui::element)
             .find_map(|r| lui::find(&r, id))
             .map(Value::User)
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
     }
 
     /// The element trees under the roots (debugging aid).
@@ -2700,8 +2430,7 @@ impl Host {
         self.roots
             .iter()
             .filter_map(lui::element)
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-            .flat_map(|root| lui::layout_clipped(&root, [0.0, 0.0, w, h]))
+            .flat_map(|root| lui::layout_clipped(&root, [0.0, 0.0, w, h], &*self.measure))
             .map(|(u, rect, alpha, clip)| drawn_of(&u, rect, alpha, clip))
             .collect()
     }
@@ -2716,7 +2445,7 @@ impl Host {
             .roots
             .iter()
             .filter_map(lui::element)
-            .flat_map(|root| lui::layout_clipped(&root, [0.0, 0.0, w, h]))
+            .flat_map(|root| lui::layout_clipped(&root, [0.0, 0.0, w, h], &*self.measure))
             .inspect(|_| all += 1)
             .filter(|(_, _, alpha, _)| *alpha > min_alpha)
             .map(|(u, rect, alpha, clip)| drawn_of(&u, rect, alpha, clip))
@@ -2733,13 +2462,6 @@ impl Host {
             .filter(|(u, ..)| {
                 let t = lui::top(u);
                 roots.iter().any(|r| Rc::ptr_eq(r, &t))
-=======
-            .flat_map(|root| lui::layout_clipped(&root, [0.0, 0.0, w, h], &*self.measure))
-            .map(|(u, rect, alpha, clip)| {
-                let mut d = drawn_of(&u, rect, alpha);
-                d.clip = clip;
-                d
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
             })
             .collect()
     }
@@ -2754,11 +2476,7 @@ impl Host {
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
 fn drawn_of(u: &Rc<UserData>, rect: Rect, alpha: f32, clip: Option<Rect>) -> Drawn {
-=======
-fn drawn_of(u: &Rc<UserData>, rect: Rect, alpha: f32) -> Drawn {
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
     let d = u.data.borrow();
     let e = d.downcast_ref::<lui::Element>().expect("element");
     let s = &e.state;
@@ -2771,7 +2489,6 @@ fn drawn_of(u: &Rc<UserData>, rect: Rect, alpha: f32) -> Drawn {
         material: s.material.clone(),
         text: s.text.clone(),
         font: s.font.clone(),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
         alignment: match (s.alignment, s.left_anchor, s.right_anchor) {
             (0, true, false) => 1,
             (0, false, true) => 3,
@@ -2783,26 +2500,17 @@ fn drawn_of(u: &Rc<UserData>, rect: Rect, alpha: f32) -> Drawn {
             (0, ..) => 2,
             (a, ..) => a,
         },
+        anchors: (s.left_anchor, s.right_anchor),
         z_rot: s.z_rot + e.extra_rot,
         x_rot: s.x_rot,
         y_rot: s.y_rot,
         dashes: e.dashes,
         dash_pitch: e.dash_pitch,
         tiles: e.tiles,
-        shader: e.shader,
+        shader: s.shader,
         blur: e.blur,
         behind: e.behind,
         clip,
-=======
-        alignment: s.alignment,
-        anchors: (s.left_anchor, s.right_anchor),
-        z_rot: s.z_rot,
-        dashes: e.dashes,
-        dash_pitch: e.dash_pitch,
-        shader: s.shader,
-        blur: e.blur,
-        clip: None,
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
     }
 }
 
@@ -2813,9 +2521,6 @@ fn font_name(u: &UserData) -> Option<String> {
     u.data.borrow().downcast_ref::<String>().cloned()
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-pub(crate) fn set_field(t: &Value, name: &str, v: Value) {
-=======
 /// A zombies mode's group, the gametypes table's tenth column: `zclassic`
 /// for the story modes, `zsurvival` for zstandard, `zencounter` for Grief
 /// and Turned (`ui_zm_gamemodegroup`).
@@ -2877,8 +2582,7 @@ fn caps_word(up: &str) -> Option<String> {
     Some(word.replace('_', " "))
 }
 
-fn set_field(t: &Value, name: &str, v: Value) {
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
+pub(crate) fn set_field(t: &Value, name: &str, v: Value) {
     if let Value::Table(t) = t {
         t.borrow_mut().set_str(name, v);
     }
@@ -3246,27 +2950,19 @@ fn stat_node(vm: &mut Vm, values: Rc<RefCell<EngineValues>>, path: String) -> Va
 }
 
 /// A table whose missing fields are do-nothing functions, counted.
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-fn stub_table(vm: &mut Vm, name: &'static str, asked: Rc<RefCell<BTreeMap<String, usize>>>) -> Value {
-=======
 fn stub_table(
     vm: &mut Vm,
     name: &'static str,
     asked: Rc<RefCell<BTreeMap<String, usize>>>,
 ) -> Value {
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
     let t: TableRef = Table::new_ref();
     let meta = Table::new_ref();
     let index = vm.native("stub_index", move |vm, a| {
         let key = arg(&a, 1).to_string();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-        *asked.borrow_mut().entry(format!("{name}.{key}")).or_insert(0) += 1;
-=======
         *asked
             .borrow_mut()
             .entry(format!("{name}.{key}"))
             .or_insert(0) += 1;
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
         Ok(vec![vm.native("stub_fn", |_, _| Ok(vec![]))])
     });
     meta.borrow_mut().set_str("__index", index);
@@ -3523,10 +3219,6 @@ mod tests {
 
     #[test]
     fn script_names_meet_modules() {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/host.rs
-        assert_eq!(script_key("ui_mp/t6/hud.lua"), script_key("ui_mp_t6_hud.lua"));
-        assert_eq!(script_key("ui_mp__t6__zombie__basezombie.lua"), format!("uimp{}", script_key("T6.Zombie.BaseZombie")));
-=======
         assert_eq!(
             script_key("ui_mp/t6/hud.lua"),
             script_key("ui_mp_t6_hud.lua")
@@ -3535,7 +3227,6 @@ mod tests {
             script_key("ui_mp__t6__zombie__basezombie.lua"),
             format!("uimp{}", script_key("T6.Zombie.BaseZombie"))
         );
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/host.rs
     }
 }
 

@@ -131,11 +131,8 @@ pub(crate) fn spawn_loading_screen(
     cameras: Query<Entity, With<LoadingCamera>>,
     leftover_overlay: Query<Entity, With<OverlayUiCamera>>,
     inflight_preview: Option<Res<LoadingPreviewTask>>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/loading.rs
     bo2mp: Option<Res<session::Bo2mpMatchSetup>>,
-=======
-    (front, mut images): (Option<Res<assets::T6Frontend>>, ResMut<Assets<Image>>),
->>>>>>> /tmp/claude-0/zmhead/crates/ui/src/loading.rs
+    (front, mut images): (Option<Res<assets::T6ZmFrontend>>, ResMut<Assets<Image>>),
 ) {
     let Some(screen) = screen else {
         return;
@@ -166,7 +163,10 @@ pub(crate) fn spawn_loading_screen(
     // BO2's loading script builds it: map, game type, start
     // (`loadscreen_zm_prison_zgrief_cellblock`), read with the front end.
     // Then the map's picture for that game type, then any of the map's.
-    let bo2_picture = zone_ff.as_deref().and_then(|source| {
+    // bo2mp: a Black Ops II multiplayer match (its setup from the front
+    // end, not a Zombies map) draws BO2's own Loading menu instead.
+    let bo2mp_loading = bo2mp.as_deref().is_some_and(|s| !s.map.starts_with("zm_"));
+    let bo2_picture = zone_ff.as_deref().filter(|_| !bo2mp_loading).and_then(|source| {
         let map = &source.map_name;
         let icons = &front.as_deref()?.icons.0;
         let mut wanted = Vec::new();
@@ -193,14 +193,11 @@ pub(crate) fn spawn_loading_screen(
         LoadingCamera,
     ));
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/loading.rs
-    // bo2mp: BO2's own loading screen (its Loading menu, `lui_hud`) draws
-    // over this black root: no title, mode or load table of ours.
-    let mut root = commands.spawn((
-=======
+    // bo2mp: in a multiplayer match BO2's own loading screen (its Loading
+    // menu, `lui_hud`) draws over this black root: no title, mode or load
+    // table of ours (nor the Zombies loading picture).
     commands
         .spawn((
->>>>>>> /tmp/claude-0/zmhead/crates/ui/src/loading.rs
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
@@ -217,11 +214,6 @@ pub(crate) fn spawn_loading_screen(
             Visibility::Inherited,
             LoadingRoot,
             LoadingOverlayTitle(title.to_owned()),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/loading.rs
-        ));
-    if bo2mp.is_none() {
-        root.with_children(|root| {
-=======
         ))
         .insert_if(
             ImageNode::new(bo2_picture.clone().unwrap_or_default())
@@ -229,10 +221,9 @@ pub(crate) fn spawn_loading_screen(
             || bo2_picture.is_some(),
         )
         .with_children(|root| {
-            if bo2_picture.is_some() {
+            if bo2_picture.is_some() || bo2mp_loading {
                 return;
             }
->>>>>>> /tmp/claude-0/zmhead/crates/ui/src/loading.rs
             root.spawn(Node {
                 width: Val::Percent(78.0),
                 margin: UiRect {
@@ -307,11 +298,7 @@ pub(crate) fn spawn_loading_screen(
         screen.title(),
         screen.mode_label()
     );
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/loading.rs
-    if let Some(source) = zone_ff {
-=======
     if let Some(source) = zone_ff.filter(|_| bo2_picture.is_none()) {
->>>>>>> /tmp/claude-0/zmhead/crates/ui/src/loading.rs
         let same = inflight_preview
             .as_deref()
             .is_some_and(|task| task.identity.matches(&source));

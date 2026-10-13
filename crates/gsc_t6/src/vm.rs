@@ -1089,15 +1089,12 @@ impl<H> Vm<H> {
             }
             BinOp::Add => match (&a, &b) {
                 (Int(x), Int(y)) => Int(x.wrapping_add(*y)),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/gsc_t6/src/vm.rs
                 // bo2mp: a hashed dvar name plus an index (`_class`'s
                 // exclusion lists walk `#"..." + n` until one is unset): a
                 // hash no dvar of ours has, so it reads as unset.
                 (Value::Hash(h), Int(y)) | (Int(y), Value::Hash(h)) => {
                     Value::Hash(h.wrapping_add(*y as u32))
                 }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/gsc_t6/src/vm.rs
                 (Vec3(x), Vec3(y)) => Vec3([x[0] + y[0], x[1] + y[1], x[2] + y[2]]),
                 (Value::Str(_) | Value::IStr(_), _) | (_, Value::Str(_) | Value::IStr(_)) => {
                     let s = format!("{}{}", self.to_text(&a), self.to_text(&b));
@@ -1534,29 +1531,6 @@ impl<H> Vm<H> {
                 }
             }
             steps += 1;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/gsc_t6/src/vm.rs
-            if steps > STEP_LIMIT {
-                let chain: Vec<String> = th
-                    .frames
-                    .iter()
-                    .map(|fr| {
-                        let func = &program.functions[fr.func as usize];
-                        let at = func
-                            .addrs
-                            .get(fr.pc.saturating_sub(1) as usize)
-                            .copied()
-                            .unwrap_or(0);
-                        format!(
-                            "{}::{}@{at:#x}",
-                            program.scripts[func.script as usize].name,
-                            self.strings.get(func.name)
-                        )
-                    })
-                    .collect();
-                fail!(
-                    "thread ran {STEP_LIMIT} instructions without waiting; ended ({})",
-                    chain.join(" > ")
-=======
             if steps & 0xFFF == 0 {
                 STEPS_RUN.fetch_add(0x1000, Relaxed);
                 SAMPLE_FUNC.store(th.frames.last().map_or(u32::MAX, |f| f.func), Relaxed);
@@ -1571,7 +1545,6 @@ impl<H> Vm<H> {
                     "bo2zm gsc: thread running {} ms, {steps} instructions without waiting: {}",
                     started.elapsed().as_millis(),
                     self.frame_chain(program, th)
->>>>>>> /tmp/claude-0/zmhead/crates/gsc_t6/src/vm.rs
                 );
             }
             if steps > STEP_LIMIT {

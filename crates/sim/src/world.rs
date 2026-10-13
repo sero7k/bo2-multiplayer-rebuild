@@ -486,7 +486,6 @@ impl SimContentBuilder {
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
 /// bo2mp: how far from the way a riot shield faces a bullet may come and
 /// still be taken for a hit on it, for a shield whose model gives no boxes
 /// to shoot (the fallback only). BO2 registers `shieldPlayerBulletProtectionDegrees`
@@ -496,8 +495,6 @@ impl SimContentBuilder {
 /// side at 18 in front: 43 degrees).
 pub(crate) const SHIELD_PROTECTION_DEGREES: f32 = 50.0;
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
 #[derive(Component, Clone, Debug)]
 pub struct SimState {
     content: Arc<SimContent>,
@@ -584,12 +581,9 @@ pub struct SimState {
     debris: Vec<crate::DebrisRecord>,
     /// bo2zm: solid turned boxes (see `SnapshotMeta::oriented_blockers`).
     oriented_blockers: Vec<crate::OrientedBlocker>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
-=======
     /// bo2zm: (spectator, the teammate he watches) (see
     /// `SnapshotMeta::follows`).
     follows: Vec<(ClientId, ClientId)>,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
     /// bo2zm: the movement rules (see `SnapshotMeta::feel`): the game's own,
     /// or on the guessing side the ones from the last snapshot.
     feel: Option<movement_iw4::Bo2Feel>,
@@ -706,10 +700,7 @@ impl Default for SimState {
             pellet_fx: Vec::new(),
             debris: Vec::new(),
             oriented_blockers: Vec::new(),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
-=======
             follows: Vec::new(),
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
             feel: None,
             world_objects: WorldObjectState::default(),
             script_gaps: ScriptGaps::default(),
@@ -2161,7 +2152,6 @@ impl SimState {
             let Some(ps) = player(*id) else {
                 continue;
             };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
             // (A BO2 body's boxes move with its animations and aim, so they are
             // placed again each time.)
             if meta.t6_hit_bones.is_none()
@@ -2171,13 +2161,6 @@ impl SimState {
                         && pose.origin == ps.origin
                 })
             {
-=======
-            if let Some(pose) = reuse.iter().find(|pose| {
-                pose.client == *id
-                    && pose.life_sequence == meta.life_sequence
-                    && pose.origin == ps.origin
-            }) {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
                 poses.push(pose.clone());
                 continue;
             }
@@ -2188,15 +2171,12 @@ impl SimState {
                     Vec::new()
                 }
             };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
             // bo2mp: a Black Ops II player's boxes (his body's own, posed),
             // placed where he stands and facing his view.
             let bones = match (&meta.t6_hit_bones, bones.is_empty()) {
                 (Some(t6), true) => t6_world_bones(t6, &ps),
                 _ => bones,
             };
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
             poses.push(PlayerCollisionPose {
                 client: *id,
                 origin: ps.origin,
@@ -2208,7 +2188,6 @@ impl SimState {
                 shield: None,
             });
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
         // bo2mp: the riot shield each one bears, as he faces now.
         for pose in &mut poses {
             pose.shield = self.client_meta(pose.client).and_then(|m| m.riot_shield).and_then(|held| {
@@ -2221,8 +2200,6 @@ impl SimState {
                 })
             });
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
         poses.extend(
             self.prediction_remote_bodies
                 .iter()
@@ -2241,7 +2218,6 @@ impl SimState {
         poses
     }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
     /// bo2mp: his BO2 hit boxes this tick (his own space), or none.
     pub(crate) fn set_t6_hit_bones(
         &mut self,
@@ -2256,8 +2232,6 @@ impl SimState {
         self.client_meta_mut(id).riot_shield = held;
     }
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
     fn player_dobj_request(
         &self,
         id: ClientId,
@@ -2814,10 +2788,7 @@ impl SimState {
                 pellet_fx: self.pellet_fx.clone(),
                 debris: self.debris.clone(),
                 oriented_blockers: self.oriented_blockers.clone(),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
-=======
                 follows: self.follows.clone(),
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
                 feel: self.feel,
                 sound_aliases: self.sound_alias_cs.occupied(),
                 effect_names: self.effect_name_cs.occupied(),
@@ -3182,8 +3153,6 @@ impl SimState {
         }
     }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
-=======
     pub(crate) fn follows(&self) -> &[(ClientId, ClientId)] {
         &self.follows
     }
@@ -3192,7 +3161,6 @@ impl SimState {
         self.follows = follows;
     }
 
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
     pub(crate) fn feel(&self) -> Option<movement_iw4::Bo2Feel> {
         self.feel
     }
@@ -3618,7 +3586,6 @@ impl HitvolControllerCensus {
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/world.rs
 /// bo2mp: a BO2 player's hit boxes (his own space) where he stands, facing
 /// his view (as his body is drawn).
 fn t6_world_bones(
@@ -3641,8 +3608,6 @@ fn t6_world_bones(
         .collect()
 }
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/world.rs
 fn player_controller_input(ps: &PlayerState) -> xmodel_runtime::PlayerControllerInput {
     xmodel_runtime::PlayerControllerInput {
         view_pitch_deg: ps.viewangles[0],

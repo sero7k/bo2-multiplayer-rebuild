@@ -149,7 +149,6 @@ fn reset_roster_on_match_torn_down(
     ready.0 = false;
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bots/src/plugin.rs
 /// bo2mp: the next lobby gamertag: the pregame lobby's names in its order
 /// (`sim::lobby_bots`), so the bots play under the names the lobby showed.
 fn next_bot_name() -> String {
@@ -175,8 +174,6 @@ fn drain_t6_test_clients(mut roster: ResMut<BotRoster>, world: Option<ResMut<Aut
     }
 }
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/bots/src/plugin.rs
 fn drain_bot_add_queue(
     mut queue: ResMut<BotAddQueue>,
     mut roster: ResMut<BotRoster>,
@@ -261,17 +258,10 @@ fn boot_bots(
                 bot.id,
                 ClientAction::SetName {
                     request_id: name_request,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bots/src/plugin.rs
                     name: entity_iw4::pack_client_state_name(match &bot.name {
                         Some(name) => name.as_str(),
                         None if bot.brain.is_none() => "dummy",
                         None => "bot",
-=======
-                    name: entity_iw4::pack_client_state_name(if bot.brain.is_none() {
-                        "dummy"
-                    } else {
-                        "bot"
->>>>>>> /tmp/claude-0/zmhead/crates/bots/src/plugin.rs
                     }),
                 },
             ),

@@ -6,7 +6,7 @@
 
 mod config;
 mod director;
-mod ghosts;
+pub(crate) mod ghosts;
 mod logic;
 mod manifest;
 mod stream;

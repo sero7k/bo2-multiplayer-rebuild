@@ -770,11 +770,7 @@ fn start_map_ambient_prepared(
 }
 
 pub(crate) fn emitter_gain(emitter: &MapEmitter, ear_inches: [f32; 3]) -> f32 {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/ambient.rs
-    let dist = distance_inches(ear_inches, emitter.origin_inches);
-=======
     let dist = distance_inches(ear_inches, emitter.heard_from(ear_inches));
->>>>>>> /tmp/claude-0/zmhead/crates/audio/src/ambient.rs
     if emitter.knots.is_empty() {
         return 0.0;
     }
@@ -818,11 +814,7 @@ pub fn update_map_emitter_gain(
             entity,
             emitter_gain(&emitter, ear_inches),
             emitter.pcm.clone(),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/ambient.rs
-            emitter.origin_inches,
-=======
             emitter.heard_from(ear_inches),
->>>>>>> /tmp/claude-0/zmhead/crates/audio/src/ambient.rs
             has_player,
         )
     }));
@@ -864,16 +856,12 @@ pub fn update_map_emitter_gain(
                     }
                 }
                 if let Ok(mut sink) = sinks.get_mut(entity) {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/ambient.rs
-                    sink.set_volume(Volume::Linear(gain * settings.master_volume));
-                    if (sink.speed() - speed).abs() > 0.001 {
-                        sink.set_speed(speed);
-                    }
-=======
                     sink.set_volume(Volume::Linear(
                         gain * settings.master_volume * crate::bus_gain::sfx(),
                     ));
->>>>>>> /tmp/claude-0/zmhead/crates/audio/src/ambient.rs
+                    if (sink.speed() - speed).abs() > 0.001 {
+                        sink.set_speed(speed);
+                    }
                     if sink.is_paused() {
                         sink.play();
                     }

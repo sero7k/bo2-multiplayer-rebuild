@@ -30,11 +30,7 @@ pub fn weapon_check_for_sprint(
         begin_sprint(hand, facts);
     } else if !sprinting && pm_flags & PMF_DIVE_ANY != 0 && ws.is_sprint() {
         // bo2zm: a dive ends the sprint with the gun ready at once, so the
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/weapon_iw4/src/sprint.rs
         // player can aim and fire through it (an owner's ask, 10-09), and plays
-=======
-        // player can aim and fire through it (a tester's ask, 10-09), and plays
->>>>>>> /tmp/claude-0/zmhead/crates/weapon_iw4/src/sprint.rs
         // Black Ops II's dive animation on it.
         hand.weaponstate = WeaponState::Ready as i32;
         hand.weapon_time = 0;

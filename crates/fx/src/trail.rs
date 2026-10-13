@@ -636,7 +636,6 @@ pub fn update_effect_trails(
                     elem_def.inv_split_arc_dist,
                     arc_delta,
                 );
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/fx/src/trail.rs
                 let (leftover, mut extra) = match split {
                     FxTrailSplit::Hold { leftover } => (leftover, 0),
                     FxTrailSplit::Interpolate { leftover, extra } => (leftover, extra),
@@ -645,44 +644,23 @@ pub fn update_effect_trails(
                 // holds (each needs a free slot). An effect that jumps far,
                 // or a split distance read as near zero, asked for billions
                 // here and stalled the game for minutes (BO2's Warthog
-                // contrail): keep the newest pool's worth.
-                let leftover = if leftover.is_finite() { leftover } else { 0.0 };
-                if extra > FX_TRAIL_ELEM_POOL_CAPACITY as i32 {
+                // contrail; a zombie's limb flying off): keep at most a few
+                // dozen samples, and drop the rest of that stretch.
+                const MAX_SPLITS: i32 = 32;
+                let cap = MAX_SPLITS.min(FX_TRAIL_ELEM_POOL_CAPACITY as i32);
+                let mut leftover = if leftover.is_finite() { leftover } else { 0.0 };
+                if extra > cap {
                     static ONCE: std::sync::Once = std::sync::Once::new();
                     ONCE.call_once(|| {
                         diag::warn!(
                             World,
-                            "fx: trail asked for {extra} pieces in one update (split dist {} moved {distance_delta}); capped",
+                            "fx: trail asked for {extra} pieces in one update (split dist {} moved {distance_delta}); capped at {cap}",
                             elem_def.inv_split_dist
                         );
                     });
-                    extra = FX_TRAIL_ELEM_POOL_CAPACITY as i32;
+                    extra = cap;
+                    leftover = 0.0;
                 }
-=======
-                let (leftover, extra) = match split {
-                    FxTrailSplit::Hold { leftover } => (leftover, 0),
-                    FxTrailSplit::Interpolate { leftover, extra } => (leftover, extra),
-                };
-                // bo2zm: at most a few dozen samples an update. A trail on
-                // something flying fast with a tiny split distance asked for
-                // millions in one frame (a zombie's limb flying off froze
-                // the game); the rest of that stretch is dropped.
-                const MAX_SPLITS: i32 = 32;
-                let (leftover, extra) = if extra > MAX_SPLITS {
-                    static TOLD: std::sync::atomic::AtomicBool =
-                        std::sync::atomic::AtomicBool::new(false);
-                    if !TOLD.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                        diag::info!(
-                            World,
-                            "fx trail: {extra} splits asked in one update (inv split dist {}, moved {distance_delta:.1}); capped at {MAX_SPLITS}",
-                            elem_def.inv_split_dist
-                        );
-                    }
-                    (0.0, MAX_SPLITS)
-                } else {
-                    (leftover, extra)
-                };
->>>>>>> /tmp/claude-0/zmhead/crates/fx/src/trail.rs
                 host.trails[trail_slot].split_leftover = leftover;
                 if extra > 0 {
                     let acc = leftover + extra as f32;

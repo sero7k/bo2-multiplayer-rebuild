@@ -22,7 +22,6 @@ pub struct T6ScriptSet {
     pub strings: Vec<(String, String)>,
     /// Every sound alias the map's banks hold (lower case).
     pub sound_aliases: Vec<String>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/script_sources.rs
     /// bo2mp: the game type settings files (`mp/gamesettings_default.cfg`,
     /// `mp/gamesettings_tdm.cfg`, ...): (name, text), later zones last.
     pub gamesettings: Vec<(String, String)>,
@@ -34,27 +33,20 @@ pub struct T6ScriptSet {
     /// scorestreak helicopters' guns) and how it drives, later zones
     /// replacing earlier.
     pub vehicles: Vec<asset_t6::VehicleRef>,
-    /// bo2mp: BO2's shellshock files (`shock/<name>.shock`): (name, text),
-    /// later zones replacing earlier.
+    /// Screen shakes and blurs (`shock/NAME.shock`): (name, text), later
+    /// zones replacing earlier (bo2mp: BO2's shellshock files).
     pub shocks: Vec<(String, String)>,
     /// bo2mp: the third-person player animation script and its anim type
     /// list (`mp/playeranim.script`, `mp/playeranimtypes.txt`).
     pub playeranim: Option<(String, String)>,
-    /// bo2mp: the zones' destructible definitions (the mannequins, cars,
-    /// clock that break piece by piece when shot), later zones replacing
-    /// earlier.
+    /// Props that break in stages, by name (the mannequins, cars, clock
+    /// that break piece by piece when shot), later zones replacing earlier.
     pub destructibles: Vec<std::sync::Arc<xmodel_runtime::T5DestructibleDef>>,
     /// bo2mp: the ragdoll definitions (`ragdoll.cfg`), how a dead body
     /// goes limp.
     pub ragdoll: Option<String>,
-=======
-    /// Props that break in stages, by name (later zones win).
-    pub destructibles: Vec<xmodel_runtime::T5DestructibleDef>,
-    /// Screen shakes and blurs (`shock/NAME.shock`): (name, text).
-    pub shocks: Vec<(String, String)>,
-    /// Barrier types (`ZBarrierDef`), later zones winning a name.
+    /// bo2zm: barrier types (`ZBarrierDef`), later zones winning a name.
     pub zbarriers: Vec<asset_t6::ZBarrierDefRef>,
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/script_sources.rs
 }
 
 /// bo2zm M3: what the server needs of an animation.
@@ -135,12 +127,6 @@ impl ScriptSources {
     }
 
     pub fn shocks(&self) -> impl Iterator<Item = (&str, &str)> {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/script_sources.rs
-        self.configs.iter().filter_map(|(path, text)| {
-            let name = path.strip_prefix("shock/")?.strip_suffix(".shock")?;
-            Some((name, text.as_str()))
-        })
-=======
         let t6 = self
             .t6
             .iter()
@@ -152,7 +138,6 @@ impl ScriptSources {
                 Some((name, text.as_str()))
             })
             .chain(t6)
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/script_sources.rs
     }
 
     pub(crate) fn capture(&mut self, name: &str, data: &[u8], compressed: bool) {

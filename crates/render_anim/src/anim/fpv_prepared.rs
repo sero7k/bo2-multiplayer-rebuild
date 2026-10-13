@@ -36,7 +36,6 @@ pub struct FpvRigSet {
 }
 
 impl FpvRigSet {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/anim/fpv_prepared.rs
     pub fn pick(
         &self,
         rocket: bool,
@@ -44,21 +43,15 @@ impl FpvRigSet {
         melee: bool,
         ads: bool,
     ) -> Option<&Arc<PreparedFpvRig>> {
-=======
-    pub fn pick(&self, rocket: bool, dual: bool, melee: bool) -> Option<&Arc<PreparedFpvRig>> {
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/anim/fpv_prepared.rs
         let hand = usize::from(dual && !self.combined);
         if melee && let Some(rig) = &self.melee[hand] {
             return Some(rig);
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/anim/fpv_prepared.rs
         // (`rocket` is true for any gun with a round in it; only a gun with a
         // rocket rig has a rocket to show instead.)
         if ads && self.rocket[hand].is_none() && let Some(rig) = &self.ads[hand] {
             return Some(rig);
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/anim/fpv_prepared.rs
         match (rocket, &self.rocket[hand]) {
             (true, Some(rig)) => Some(rig),
             _ => self.bare[hand].as_ref(),
@@ -877,7 +870,6 @@ impl FpvPreparationJob {
                     name: refusal.to_string(),
                 });
             }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/anim/fpv_prepared.rs
             let ads = match assemblies
                 .ads
                 .as_ref()
@@ -900,8 +892,6 @@ impl FpvPreparationJob {
                     name: refusal.to_string(),
                 });
             }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/anim/fpv_prepared.rs
             let mut rigs = FpvRigSet::default();
             // bo2zm: both guns on one set of arms (Black Ops II dual
             // wield): one rig binding both hands' clips.
@@ -914,12 +904,9 @@ impl FpvPreparationJob {
                 if let Some(melee) = &melee {
                     rigs.melee[0] = Some(self.rig(melee, false, &right_orders, &left_orders));
                 }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/anim/fpv_prepared.rs
                 if let Some(ads) = &ads {
                     rigs.ads[0] = Some(self.rig(ads, false, &right_orders, &left_orders));
                 }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/anim/fpv_prepared.rs
             } else {
                 rigs.bare[0] = Some(self.rig(&bare, false, &right_orders, &[]));
                 if left.is_some() {
@@ -937,15 +924,12 @@ impl FpvPreparationJob {
                         rigs.melee[1] = Some(self.rig(melee, true, &right_orders, &left_orders));
                     }
                 }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/anim/fpv_prepared.rs
                 if let Some(ads) = &ads {
                     rigs.ads[0] = Some(self.rig(ads, false, &right_orders, &[]));
                     if left.is_some() {
                         rigs.ads[1] = Some(self.rig(ads, true, &right_orders, &left_orders));
                     }
                 }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/anim/fpv_prepared.rs
             }
             FpvWeaponSlot::Ready(Arc::new(FpvWeaponView {
                 gun_name: gun_name.clone(),

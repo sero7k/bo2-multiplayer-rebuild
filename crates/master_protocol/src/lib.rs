@@ -3,11 +3,7 @@
 use core::{fmt, str::FromStr};
 
 pub const PROTOCOL_VERSION: u16 = 10;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/master_protocol/src/lib.rs
 pub const ALPN: &[u8] = b"iw4l-master/10";
-=======
-pub const ALPN: &[u8] = b"iw4l-master/9";
->>>>>>> /tmp/claude-0/zmhead/crates/master_protocol/src/lib.rs
 pub const MAX_CONTROL_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_PAYLOAD: usize = 1100;
 
@@ -134,11 +130,10 @@ const TAG_BOOTSTRAP_APPLIED: u8 = 12;
 const TAG_ENTER_MATCH: u8 = 13;
 const TAG_VOTE_TO_SKIP: u8 = 14;
 const TAG_ADMISSION_FAILED: u8 = 15;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/master_protocol/src/lib.rs
 const TAG_FRIENDS: u8 = 16;
-=======
-const TAG_KICK_MEMBER: u8 = 16;
->>>>>>> /tmp/claude-0/zmhead/crates/master_protocol/src/lib.rs
+// bo2zm: a host removing a party member (Zombies lobby); after bo2mp's
+// Friends, which took 16 first.
+const TAG_KICK_MEMBER: u8 = 17;
 const TAG_ERROR: u8 = 0x7f;
 
 const EVENT_HOST_WORLD_READY: u8 = 1;
@@ -977,7 +972,6 @@ fn encode_request_body(body: &RequestBody) -> Result<Vec<u8>, ProtocolError> {
             reason.encode(&mut out);
         }
         RequestBody::VoteToSkip => out.u8(TAG_VOTE_TO_SKIP),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/master_protocol/src/lib.rs
         RequestBody::Friends { codes } => {
             if codes.len() > MAX_FRIENDS {
                 return Err(ProtocolError::LengthExceeded(codes.len()));
@@ -987,11 +981,10 @@ fn encode_request_body(body: &RequestBody) -> Result<Vec<u8>, ProtocolError> {
             for code in codes {
                 out.u32(*code);
             }
-=======
+        }
         RequestBody::KickMember { member_id } => {
             out.u8(TAG_KICK_MEMBER);
             out.bytes(&member_id.0);
->>>>>>> /tmp/claude-0/zmhead/crates/master_protocol/src/lib.rs
         }
     }
     Ok(out.0)
@@ -1059,7 +1052,6 @@ fn decode_request_body(body: &mut Reader<'_>) -> Result<RequestBody, ProtocolErr
             reason: AdmissionFailure::decode(body)?,
         },
         TAG_VOTE_TO_SKIP => RequestBody::VoteToSkip,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/master_protocol/src/lib.rs
         TAG_FRIENDS => {
             let count = body.u8()? as usize;
             if count > MAX_FRIENDS {
@@ -1071,11 +1063,9 @@ fn decode_request_body(body: &mut Reader<'_>) -> Result<RequestBody, ProtocolErr
             }
             RequestBody::Friends { codes }
         }
-=======
         TAG_KICK_MEMBER => RequestBody::KickMember {
             member_id: MemberId(body.array()?),
         },
->>>>>>> /tmp/claude-0/zmhead/crates/master_protocol/src/lib.rs
         tag => return Err(ProtocolError::UnknownTag(tag)),
     })
 }

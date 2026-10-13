@@ -56,8 +56,10 @@ pub(crate) struct Nav {
     /// pile), by entity, until its `connectpaths`; both directions.
     cut_by: HashMap<u32, Vec<(u32, u32)>>,
     cut: HashSet<(u32, u32)>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/nav.rs
     pub baked: Baked,
+    /// Nodes on movers: (node, entity, its place in the entity's own space
+    /// once first seen).
+    movers: Vec<(u32, u32, Option<[f32; 3]>)>,
 }
 
 impl Nav {
@@ -140,11 +142,6 @@ impl Baked {
         let k = n * i + j;
         self.smooth[k >> 3] & (1 << (k & 7)) != 0
     }
-=======
-    /// Nodes on movers: (node, entity, its place in the entity's own space
-    /// once first seen).
-    movers: Vec<(u32, u32, Option<[f32; 3]>)>,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/nav.rs
 }
 
 /// Does the segment a -> b pass through the box?

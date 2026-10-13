@@ -1,10 +1,6 @@
 //! Actors (zombies): spawned from spawners (`spawnactor`), driven by the
 //! game's own animscripts the way the engine drives them, measured from
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
 //! the scripts (see docs/):
-=======
-//! the scripts (notes kept outside the repo):
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
 //! - one animscript runs at a time: `killanimscript`, then the new state's
 //!   `maps/mp/animscripts/zm_<state>::main` (init on spawn; stop, move,
 //!   combat, death, scripted, traverse/<node animscript>);
@@ -229,7 +225,6 @@ pub(crate) fn set_state(
     state: &str,
     sub: &Value,
 ) -> Option<usize> {
-    let now = world.resource::<Zm>().now_ms;
     let (asd, missing_legs) = {
         let zm = world.resource::<Zm>();
         let a = zm.actors.get(&n)?;
@@ -243,27 +238,27 @@ pub(crate) fn set_state(
                 .is_some_and(|st| !st.substates.is_empty())
         })
     };
-    if !found {
+    // bo2mp: a K9 Unit dog has no animstatedef (its states below).
+    let dog = world.resource::<Zm>().actors.get(&n).is_some_and(is_mp_dog);
+    if !found && !dog {
         vm.report_once(format!("bo2zm t6: animstatedef {asd} has no state {state}"));
         return None;
     }
     let picked = {
         let zm = world.resource::<Zm>();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
         // bo2mp: a K9 Unit dog has no animstatedef; BO2's exe plays its
         // states itself (`dog_state_anim`), each notifying "done".
         let Some(def) = zm.asds.get(&asd) else {
-            let dog = zm.actors.get(&n).is_some_and(is_mp_dog);
             let anim = dog.then(|| dog_state_anim(state)).flatten()?;
             let looping = zm.anims.get(anim).is_some_and(|x| x.looping);
             return Some(start_state(world, n, state, 0, anim, "done", !looping, sub));
         };
-=======
-        let def = zm.asds.get(&asd)?;
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
         let st = def
             .state(state, false)
             .or_else(|| def.state(state, missing_legs))?;
+        if st.substates.is_empty() {
+            return None;
+        }
         let i = match sub {
             Value::Int(i) => (*i).clamp(0, st.substates.len() as i32 - 1) as usize,
             Value::Float(f) => (*f as i32).clamp(0, st.substates.len() as i32 - 1) as usize,
@@ -285,7 +280,6 @@ pub(crate) fn set_state(
         )
     };
     let (state_name, i, anim, notify, restart) = picked;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     Some(start_state(world, n, &state_name, i, &anim, &notify, restart, sub))
 }
 
@@ -303,8 +297,6 @@ fn start_state(
 ) -> usize {
     let now = world.resource::<Zm>().now_ms;
     let (state_name, anim, notify) = (state_name.to_owned(), anim.to_owned(), notify.to_owned());
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
     let (length_ms, looping) = {
         let zm = world.resource::<Zm>();
         match zm.anims.get(&anim) {
@@ -320,13 +312,9 @@ fn start_state(
     };
     let parent_from = super::movers::link_parent_pose(world, n);
     let mut zm = world.resource_mut::<Zm>();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     let Some(a) = zm.actors.get_mut(&n) else {
         return i;
     };
-=======
-    let a = zm.actors.get_mut(&n)?;
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
     // A looping state already playing goes on unless asked to restart.
     if let Some(p) = &a.playing
         && p.state == state_name
@@ -334,11 +322,7 @@ fn start_state(
         && !restart
         && matches!(sub, Value::Undefined)
     {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
         return i;
-=======
-        return Some(i);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
     }
     // IW4L_T6_ANIMLOG=1: every animation start (test aid): actor, state,
     // clip, and whether it restarts the clip already playing.
@@ -371,7 +355,6 @@ fn start_state(
         rate: a.anim_rate.unwrap_or(1.0),
         base_ms: 0,
     });
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     i
 }
 
@@ -494,9 +477,6 @@ fn dog_enemy(
         }
     }
     best.map(|(_, o)| o)
-=======
-    Some(i)
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
 }
 
 /// Switch actor `n` to animscript `script` (killanimscript first).
@@ -514,7 +494,6 @@ pub(crate) fn run_script(vm: &mut Vm<World>, world: &mut World, n: u32, script: 
     };
     let Some(obj) = obj else { return };
     vm.notify_str(world, obj, "killanimscript", &[]);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     // bo2mp: a K9 Unit dog runs BO2's dog animscripts.
     let kind = if world.resource::<Zm>().actors.get(&n).is_some_and(is_mp_dog) {
         "dog"
@@ -525,12 +504,6 @@ pub(crate) fn run_script(vm: &mut Vm<World>, world: &mut World, n: u32, script: 
         format!("{ANIMSCRIPTS}/traverse/{rest}")
     } else {
         format!("{ANIMSCRIPTS}/{kind}_{script}")
-=======
-    let path = if let Some(rest) = script.strip_prefix("traverse/") {
-        format!("{ANIMSCRIPTS}/traverse/{rest}")
-    } else {
-        format!("{ANIMSCRIPTS}/zm_{script}")
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
     };
     if vm
         .spawn_named(world, &path, "main", Value::Object(obj), vec![])
@@ -656,9 +629,6 @@ pub(crate) fn walk_move(
             // monster clip and stand there for good (the sprinters in the
             // clipped ditch behind the ledge, M4 retest 1).
             let inside = f.trace_static_world(end, end, mins, maxs, MASK_AI).startsolid != 0;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
-            if !clear || !inside {
-=======
             // A walking step is ~1 unit: one left just inside a window's
             // clip by its climb-in anim never got a step that ends outside
             // and stood there till the scripts killed it (Origins round 1
@@ -668,7 +638,6 @@ pub(crate) fn walk_move(
             let ahead = [p[0] + rem[0] / len * 16.0, p[1] + rem[1] / len * 16.0, p[2]];
             let out_ahead = || f.trace_static_world(ahead, ahead, mins, maxs, MASK_AI).startsolid == 0;
             if !clear || !inside || (len < 16.0 && out_ahead()) {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
                 p = end;
             }
             break;
@@ -698,9 +667,6 @@ pub(crate) fn walk_move(
     if t.startsolid != 0 {
         return ([p[0], p[1], from[2]], false);
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
-    (lerp3(p, down, t.fraction), true)
-=======
     // A brush model under it is ground too, and so is a thin turned box (a
     // floor slab of a Die Rise elevator car or the crashed escape pod over
     // its pit: the zombies that came in fell through it).
@@ -836,7 +802,6 @@ pub(crate) fn floor_below(world: &mut World, p: [f32; 3], r: f32, h: f32) -> [f3
     }
     let at = lerp3(from, down, frac);
     if at[2] < p[2] { at } else { p }
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
 }
 
 /// The node a goal routes to: the nearest one that walks to it.
@@ -1200,7 +1165,6 @@ fn think_one(vm: &mut Vm<World>, world: &mut World, n: u32, now: i64) {
         advance_anim(vm, world, n, obj, now, dt);
         return;
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     let dog = is_mp_dog(&a);
     let here = world
         .resource::<Zm>()
@@ -1210,9 +1174,6 @@ fn think_one(vm: &mut Vm<World>, world: &mut World, n: u32, now: i64) {
         .unwrap_or([0.0; 3]);
     // Enemy: the favorite enemy when not ignoring all (a dog finds its
     // own).
-=======
-    // Enemy: the favorite enemy when not ignoring all.
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
     let ignoreall = gsc_t6::truthy(&field(vm, obj, "ignoreall"));
     let fav = field(vm, obj, "favoriteenemy");
     let enemy = match fav {
@@ -1233,8 +1194,21 @@ fn think_one(vm: &mut Vm<World>, world: &mut World, n: u32, now: i64) {
         .get(&n)
         .map(|e| e.origin)
         .unwrap_or([0.0; 3]);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
-    let scripted = a.scripted.is_some();
+    let custom = a.custom.is_some_and(|t| vm.thread_running(t));
+    if a.custom.is_some() && !custom {
+        if let Some(act) = world.resource_mut::<Zm>().actors.get_mut(&n) {
+            act.custom = None;
+            act.script.clear();
+        }
+        diag::info!(
+            Sim,
+            "bo2zm t6 animcustom ent{n} done at ({:.0} {:.0} {:.0})",
+            me[0],
+            me[1],
+            me[2]
+        );
+    }
+    let scripted = a.scripted.is_some() || custom;
     let traversing = a.traverse.is_some();
     let mut a = a;
     if dog && !scripted && !traversing && a.alive {
@@ -1267,34 +1241,15 @@ fn think_one(vm: &mut Vm<World>, world: &mut World, n: u32, now: i64) {
         if let Some(x) = world.resource::<Zm>().actors.get(&n).cloned() {
             a = x;
         }
-=======
-    let custom = a.custom.is_some_and(|t| vm.thread_running(t));
-    if a.custom.is_some() && !custom {
-        if let Some(act) = world.resource_mut::<Zm>().actors.get_mut(&n) {
-            act.custom = None;
-            act.script.clear();
-        }
-        diag::info!(
-            Sim,
-            "bo2zm t6 animcustom ent{n} done at ({:.0} {:.0} {:.0})",
-            me[0],
-            me[1],
-            me[2]
-        );
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
     }
     let scripted = a.scripted.is_some() || custom;
     let traversing = a.traverse.is_some();
     if !scripted && !traversing && a.script != "init" {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
         let fight = if dog {
             dog_attack_range(world)
         } else {
             field_num(vm, obj, "pathenemyfightdist", 64.0).max(1.0)
         };
-=======
-        let fight = field_num(vm, obj, "pathenemyfightdist", 64.0).max(1.0);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
         let goalradius = field_num(vm, obj, "goalradius", 32.0).max(1.0);
         let goalheight = field_num(vm, obj, "goalheight", GOAL_HEIGHT).max(1.0);
         let near_enemy = enemy
@@ -1944,15 +1899,10 @@ fn advance_anim(vm: &mut Vm<World>, world: &mut World, n: u32, obj: ObjRef, now:
         }
         sent = notes.len();
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
     // Scripted animations move by their root motion from where they began
     // (and a dog's leap: its attack carries it at him).
     let leap = is_mp_dog(&a) && p.state.starts_with("combat_attack");
-    if (a.scripted.is_some() || leap)
-=======
-    // Scripted animations move by their root motion from where they began.
-    if (a.scripted.is_some() || a.custom.is_some())
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
+    if (a.scripted.is_some() || a.custom.is_some() || leap)
         && let Some(anim) = &anim
     {
         let root = anim_root(anim, frac);
@@ -1999,10 +1949,6 @@ fn advance_anim(vm: &mut Vm<World>, world: &mut World, n: u32, obj: ObjRef, now:
         let note = vm.string(&ev);
         vm.notify_str(world, obj, &p.notify, &[note]);
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
-    // A scripted animation's end hands the actor back to its AI.
-    if finished && a.scripted.is_some() && a.alive {
-=======
     // A scripted animation's end hands the actor back to its AI, unless its
     // `end` already started the next scripted one (the window boards' tear
     // in, out). A plain `setanimstatefromasd` there does not keep it
@@ -2023,7 +1969,6 @@ fn advance_anim(vm: &mut Vm<World>, world: &mut World, n: u32, obj: ObjRef, now:
             let q = [q[0], q[1], q[2] + STEP];
             frame(world).trace_static_world(q, q, mins, maxs, MASK_AI).startsolid != 0
         });
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
         if let Some(act) = world.resource_mut::<Zm>().actors.get_mut(&n) {
             act.scripted = None;
             act.script.clear();
@@ -2112,17 +2057,12 @@ pub(crate) fn spawn_actor(
     if let Some(act) = world.resource_mut::<Zm>().actors.get_mut(&n) {
         act.asd = asd;
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
+    let team = field(vm, obj, "team");
+    // bo2mp: a K9 Unit dog runs BO2's dog animscripts.
     let kind = if aitype.ends_with("dog_mp") { "dog" } else { "zm" };
     vm.spawn_named(
         world,
         &format!("{ANIMSCRIPTS}/{kind}_init"),
-=======
-    let team = field(vm, obj, "team");
-    vm.spawn_named(
-        world,
-        &format!("{ANIMSCRIPTS}/zm_init"),
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
         "main",
         Value::Object(obj),
         vec![],
@@ -2172,11 +2112,7 @@ pub(crate) fn die(
     let cb = super::mp::callbacks(world);
     vm.spawn_named(
         world,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
         &cb,
-=======
-        "maps/mp/gametypes_zm/_callbacksetup",
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
         "codecallback_actorkilled",
         Value::Object(obj),
         args,
@@ -2234,11 +2170,7 @@ pub(crate) fn damage(
     let cb = super::mp::callbacks(world);
     vm.spawn_named(
         world,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/actors.rs
         &cb,
-=======
-        "maps/mp/gametypes_zm/_callbacksetup",
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/actors.rs
         "codecallback_actordamage",
         Value::Object(obj),
         args,

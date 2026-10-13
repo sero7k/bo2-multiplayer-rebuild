@@ -1,9 +1,3 @@
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/t6_fog.rs
-//! bo2zm M3: a Black Ops II world's fog bank as its client scripts pick it
-//! (`setworldfogactivebank`, which the server sends as the client dvar
-//! `bo2zm_fogbank`): the light table's two fog rows become that bank's.
-//! Nuketown's game over picks bank 2 (no fog) for the rocket shot.
-=======
 //! bo2zm M3: a Black Ops II world's fog as the game picks it: the fog
 //! volume the camera is in, among the banks the client scripts switched on
 //! (`setworldfogactivebank`, a bit mask, which the server sends as the
@@ -15,7 +9,6 @@
 //! the fog: its half distance by the volume's depth scale, the fog and sun
 //! fog colours and opacities by its colour adjust (BO2 blends into and out
 //! of a modifier over its transition time; ours switches at once).
->>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/t6_fog.rs
 
 use std::sync::Arc;
 
@@ -34,9 +27,6 @@ pub(crate) fn register(app: &mut App) {
     app.add_systems(Update, apply_t6_fog_bank.in_set(frame::RenderSet::Anim));
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/t6_fog.rs
-fn apply_t6_fog_bank(
-=======
 /// The fog volume at `pos` among `banks`: the first one holding it (inside
 /// where `dot(n, p) + d <= 0` for every plane, as exposure volumes).
 pub fn t6_fog_volume_at(
@@ -69,57 +59,20 @@ pub fn t6_fog_modifier_at(
 }
 
 pub(crate) fn apply_t6_fog_bank(
->>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/t6_fog.rs
     presented: Option<Res<PresentedSnapshot>>,
     local: Option<Res<LocalPresentClient>>,
     scene: Option<ResMut<WorldScene>>,
     cameras: Query<&GlobalTransform, With<FpvLens>>,
     mut shown: Local<Option<(usize, u32, Option<usize>, Option<usize>)>>,
 ) {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/t6_fog.rs
-    let Some(mut scene) = scene else { return };
-=======
     let Some(mut scene) = scene else {
         *shown = None;
         return;
     };
->>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/t6_fog.rs
     if scene.t6_fog_banks.is_empty() {
         *shown = None;
         return;
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/t6_fog.rs
-    let want = match (presented.as_deref(), local.as_deref()) {
-        (Some(p), Some(l)) => p
-            .snapshot()
-            .and_then(|s| {
-                s.meta
-                    .script_dvars(l.0)
-                    .string("bo2zm_fogbank")
-                    .and_then(|v| v.trim().parse::<u32>().ok())
-            })
-            .unwrap_or(0),
-        _ => 0,
-    };
-    if want == scene.t6_fog_bank {
-        return;
-    }
-    let mut table = (*scene.t6_lights_loaded).clone();
-    let rows = scene
-        .t6_fog_banks
-        .iter()
-        .find(|(bank, _)| *bank == want)
-        .map(|(_, rows)| *rows);
-    if let Some([sun, fog]) = rows
-        && table.len() > FOG_SLOT
-    {
-        table[SUN_FOG_SLOT] = sun;
-        table[FOG_SLOT] = fog;
-    }
-    diag::info!(World, "bo2zm fog bank {} -> {want}", scene.t6_fog_bank);
-    scene.t6_lights = Arc::new(table);
-    scene.t6_fog_bank = want;
-=======
     // IW4L_T6_FOGBANK=4: as if a script picked that bank (test aid).
     let test = std::env::var("IW4L_T6_FOGBANK").ok().and_then(|v| v.trim().parse::<u32>().ok());
     let banks = match (presented.as_deref(), local.as_deref()) {
@@ -193,5 +146,4 @@ pub(crate) fn apply_t6_fog_bank(
     scene.t6_lights = Arc::new(table);
     scene.t6_fog_bank = banks;
     *shown = Some(key);
->>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/t6_fog.rs
 }

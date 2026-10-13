@@ -131,23 +131,20 @@ impl WalkSink for Lister {
                     );
                 }
             }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6list.rs
             // bo2mp lane D: a vehicle's guns (its turret and gunner
-            // weapons, by name).
+            // weapons, by name). Speeds as loaded: units a second (the
+            // vehicle files' miles per hour times 17.6; Buried's ghost
+            // lantern is 88 = 5 mph).
             AssetType::VehicleDef => {
                 let turret = string_field(s, body, l::VehicleDef::turretWeapon).unwrap_or_default();
                 let gunners: Vec<String> = (0..4)
                     .map(|i| string_field(s, body, l::VehicleDef::gunnerWeapon + i * 4).unwrap_or_default())
                     .filter(|g| !g.is_empty())
                     .collect();
-                extra = format!(" turret='{turret}' gunners='{}'", gunners.join(","));
-=======
-            // Speeds as loaded: units a second (the vehicle files' miles per
-            // hour times 17.6; Buried's ghost lantern is 88 = 5 mph).
-            AssetType::VehicleDef => {
                 let f = |off| s.f32_at(body, off);
                 extra = format!(
-                    " type={} maxSpeed={} maxSpeedVertical={} accel={} accelVertical={} rotAccel={} decelFwd={} decelSide={} decelUp={} quadRotor={} radius={}",
+                    " turret='{turret}' gunners='{}' type={} maxSpeed={} maxSpeedVertical={} accel={} accelVertical={} rotAccel={} decelFwd={} decelSide={} decelUp={} quadRotor={} radius={}",
+                    gunners.join(","),
                     s.i16_at(body, l::VehicleDef::r#type)?,
                     f(l::VehicleDef::maxSpeed)?,
                     f(l::VehicleDef::maxSpeedVertical)?,
@@ -160,7 +157,6 @@ impl WalkSink for Lister {
                     s.i32_at(body, l::VehicleDef::vehHelicopterQuadRotor)?,
                     f(l::VehicleDef::radius)?,
                 );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6list.rs
             }
             _ => {}
         }

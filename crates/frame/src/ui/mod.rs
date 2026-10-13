@@ -8,11 +8,7 @@ pub use audio::{MenuMusicScreen, UiPlayMusic, UiPlaySound, UiStopMusic};
 pub use input::{UiBindRequest, UiBindingCapture};
 pub use menu::{
     GamePaused, HostMatchRules, LuiMenus, UiExecCommand, UiMenuDvars, UiMenuKey, UiMenuRequest,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/frame/src/ui/mod.rs
-    MenuDims, UiPartyState, WorldBlur, WorldDim,
-=======
-    ScriptScreenFilter, UiPartyState, WorldBlur,
->>>>>>> /tmp/claude-0/zmhead/crates/frame/src/ui/mod.rs
+    MenuDims, ScriptScreenFilter, UiPartyState, WorldBlur, WorldDim,
 };
 
 pub fn register_ui_contracts(app: &mut App) {

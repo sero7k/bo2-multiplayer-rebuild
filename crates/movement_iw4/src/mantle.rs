@@ -1063,8 +1063,6 @@ mod bo2_weapon_tests {
         assert!(is_weapon_inactive(&climbing(4), true));
     }
 }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/movement_iw4/src/mantle.rs
-=======
 
 #[cfg(test)]
 mod hatch_tests {
@@ -1168,4 +1166,3 @@ mod hatch_tests {
         assert!(!step(&mut at(90.0), false));
     }
 }
->>>>>>> /tmp/claude-0/zmhead/crates/movement_iw4/src/mantle.rs

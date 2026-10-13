@@ -30,12 +30,8 @@ fn main() -> ExitCode {
     let root = std::env::args()
         .nth(1)
         .map_or_else(|| PathBuf::from(DEFAULT_BO2), PathBuf::from);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6check.rs
-    match run(&root) {
-=======
     let zones: Vec<String> = std::env::args().skip(2).collect();
     match run(&root, &zones) {
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6check.rs
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
         Err(e) => {
@@ -45,11 +41,7 @@ fn main() -> ExitCode {
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6check.rs
-fn run(root: &Path) -> Result<bool, String> {
-=======
 fn run(root: &Path, zones: &[String]) -> Result<bool, String> {
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6check.rs
     let started = Instant::now();
     let dir = root.join("zone").join("all");
     let packs = PackSet::open_dir(&dir)?;
@@ -69,10 +61,6 @@ fn run(root: &Path, zones: &[String]) -> Result<bool, String> {
     let mut missing = Vec::new();
     let mut size_mismatch = Vec::new();
     let mut decode_fail = Vec::new();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6check.rs
-    for zone in NUKETOWN_ZONES {
-        let capture = capture_zone(&dir.join(format!("{zone}.ff")))?;
-=======
     let names: Vec<&str> = if zones.is_empty() {
         NUKETOWN_ZONES.to_vec()
     } else {
@@ -82,7 +70,6 @@ fn run(root: &Path, zones: &[String]) -> Result<bool, String> {
     for zone in names {
         let path = asset_transport::t6_extra::file_in(&dir, &format!("{zone}.ff"));
         let capture = capture_zone(&path)?;
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6check.rs
         println!("{zone}: {} images", capture.images.len());
         if std::env::var_os("T6CHECK_DUMP").is_some() {
             dump(&capture);
@@ -133,11 +120,7 @@ fn run(root: &Path, zones: &[String]) -> Result<bool, String> {
         if !list.is_empty() {
             ok = false;
             println!("{label}: {}", list.len());
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6check.rs
-            for item in list.iter().take(12) {
-=======
             for item in list.iter().take(if all { usize::MAX } else { 12 }) {
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6check.rs
                 println!("   {item}");
             }
         }

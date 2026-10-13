@@ -204,7 +204,6 @@ pub struct SessionViewKick {
 
     /// bo2zm: how much of the kick (pitch, yaw) is already in the aim.
     aim_applied: [f32; 2],
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/view_kick.rs
 
     /// bo2mp: a scoped Black Ops II gun's drift (its ADS idle) moves the
     /// aim as well, so the bullet goes to the scope's crosshair: how much
@@ -327,8 +326,6 @@ impl HoldBreath {
             self.holding = false;
         }
     }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/view_kick.rs
 }
 
 impl SessionViewKick {
@@ -508,7 +505,6 @@ pub fn tick_session_view_kick(
             kick.idle_aim_pending[axis] = 0.0;
         }
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/view_kick.rs
     // bo2mp: Variable Zoom: melee while scoped changes the zoom.
     if let Some(look) = look.as_mut() {
         look.melee_is_zoom = kick.vzoom_scoped;
@@ -520,8 +516,6 @@ pub fn tick_session_view_kick(
             kick.vzoom_presses = look.zoom_presses;
         }
     }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/view_kick.rs
 
     let overlay_active = facts.overlay_reticle != 0;
     if bo2_camera(&kick) && facts.aim_down_sight && overlay_active && ps.f_weapon_pos_frac > 0.0 {
@@ -580,12 +574,14 @@ pub fn sync_camera_from_presented(
     mut lenses: Query<&mut Projection, With<FpvLens>>,
     view: Res<ViewSubject>,
     death_cam_clip: Res<crate::occupancy::dyn_ent::DynEntPhysClip>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/view_kick.rs
-    corpse_root: Option<Res<crate::occupancy::t6_body::LocalCorpseRoot>>,
-    script_models: Query<(&WorldScriptModelInstance, &Transform), Without<FlyCamera>>,
-=======
-    carry: Res<crate::occupancy::platform_carry::PlatformCarry>,
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/view_kick.rs
+    // (Grouped: a system takes at most 16 parameters.) bo2mp: the corpse
+    // the death cam watches and the vehicles he may ride; bo2zm: the bus
+    // he may be carried on.
+    (corpse_root, script_models, carry): (
+        Option<Res<crate::occupancy::t6_body::LocalCorpseRoot>>,
+        Query<(&WorldScriptModelInstance, &Transform), Without<FlyCamera>>,
+        Res<crate::occupancy::platform_carry::PlatformCarry>,
+    ),
 ) {
     kick.killcam_focus_distance = None;
     if !sim_cam.enabled {
@@ -641,7 +637,6 @@ pub fn sync_camera_from_presented(
         kick.horiz_fov_deg = horiz;
         return;
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/view_kick.rs
     // bo2mp: riding a scorestreak vehicle - his view rides its model.
     if let Some(vehicle) = super::third_person::vehicle_view(&presented, local.0)
         && let Some((_, at)) = script_models
@@ -698,10 +693,6 @@ pub fn sync_camera_from_presented(
     }
     if presented_is_third_person(&presented, local.0, view.in_killcam()) {
         let Some(pose) = death_watch_camera(&presented, local.0, death_cam_clip.0.as_deref(), corpse_root.as_ref().and_then(|r| r.0))
-=======
-    if presented_is_third_person(&presented, local.0, view.in_killcam()) {
-        let Some(pose) = death_watch_camera(&presented, local.0, death_cam_clip.0.as_deref())
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/view_kick.rs
         else {
             // No collision to pull the camera back against: it holds.
             kick.note_death_cam_source(clock.time(), "frozen", ps.pm_type);
@@ -729,22 +720,18 @@ pub fn sync_camera_from_presented(
         );
         return;
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/view_kick.rs
     let first_person_source = if ps.pm_type == playerstate_iw4::PM_TYPE_SPECTATOR {
         "spectator"
     } else {
         "alive"
     };
     kick.note_death_cam_source(clock.time(), first_person_source, ps.pm_type);
-    let offset = presented.view_offset();
-=======
     // bo2zm: riding the bus, his view keeps his place in the bus as drawn
     // (the server's 20 Hz carry steps are not a prediction miss to ease).
     let (base, offset, yaw_lead) = match carry.0 {
         Some(pose) => (pose.carry_point(ps.origin), [0.0; 3], pose.yaw_lead()),
         None => (ps.origin, presented.view_offset(), 0.0),
     };
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/view_kick.rs
     let xyspeed = {
         let vx = ps.velocity[0];
         let vy = ps.velocity[1];
@@ -784,7 +771,6 @@ pub fn sync_camera_from_presented(
             aim_down_sight: facts.aim_down_sight,
             idle: facts.idle,
             frametime: clock.frametime_secs(),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/view_kick.rs
             hold_breath_scale: {
                 let held = actions
                     .as_deref()
@@ -807,9 +793,6 @@ pub fn sync_camera_from_presented(
                     clock.frametime() as f32,
                 )
             },
-=======
-            hold_breath_scale: 1.0,
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/view_kick.rs
             weap_idle_time: kick.weap_idle_time,
             view_last_idle_factor: kick.view_last_idle_factor,
         }),
@@ -824,7 +807,6 @@ pub fn sync_camera_from_presented(
     };
     kick.weap_idle_time = bob_angles.weap_idle_time;
     kick.view_last_idle_factor = bob_angles.view_last_idle_factor;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/view_kick.rs
     // bo2mp: a Black Ops II scope's drift is in the aim (queued for the next
     // command, as the kick is), so the camera does not add it again: the
     // bullet goes where the scope's crosshair is.
@@ -838,8 +820,6 @@ pub fn sync_camera_from_presented(
         bob_angles.pitch -= idle[0];
         bob_angles.yaw -= idle[1];
     }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/view_kick.rs
     // bo2zm: a Black Ops II gun's kick is in the aim already; only its
     // roll is the camera's own.
     let camera_kick = if kick.aim_kick {
@@ -919,7 +899,6 @@ pub fn sync_camera_from_presented(
         ps.e_flags,
         ps.f_weapon_pos_frac,
         viewmodel,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/view_kick.rs
         weapons.as_ref().and_then(|w| w.0.facts_of(viewmodel)).map(|mut f| {
             // bo2mp: a Variable Zoom scope zoomed in.
             if kick.vzoom_in && f.variable_zoom_fovs[1] > 0.0 {
@@ -927,9 +906,6 @@ pub fn sync_camera_from_presented(
             }
             f
         }),
-=======
-        weapons.as_ref().and_then(|w| w.0.facts_of(viewmodel)),
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/view_kick.rs
         kick.b_position_to_ads,
         actions.as_deref_mut(),
     ) {
@@ -1092,11 +1068,7 @@ fn stamp_damage_feedback(
 pub(crate) fn bo2_camera(kick: &SessionViewKick) -> bool {
     static MW2: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let mw2 =
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/view_kick.rs
         *MW2.get_or_init(|| false);
-=======
-        *MW2.get_or_init(|| std::env::var("BO2_FEEL").is_ok_and(|v| v.eq_ignore_ascii_case("mw2")));
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/view_kick.rs
     kick.aim_kick && !mw2
 }
 
@@ -1156,7 +1128,6 @@ fn earthquake_pose(
     }
     pose
 }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/view_kick.rs
 
 #[cfg(test)]
 mod linked_weapon_view_tests {
@@ -1215,5 +1186,3 @@ mod hold_breath_tests {
         assert!(!b.holding);
     }
 }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/view_kick.rs

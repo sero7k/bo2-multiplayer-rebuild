@@ -38,21 +38,17 @@ pub mod spawn;
 mod step;
 // bo2zm M3: Black Ops II Zombies' own scripts.
 mod t6;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/lib.rs
 pub mod t6_playeranim;
 pub mod t6_ragdoll;
 pub use t6::stats::{ranked as local_match_ranked, set_local_class_set, set_local_match_ranked, set_local_stats_path}; // bo2mp lane C
 pub use t6::mp::set_moab_kills;
-pub use t6::{T6Anim, T6Install, T6PathNode, T6PathTables, T6Table, T6Vehicle, T6VehicleDrive};
-=======
 pub use t6::{
-    Cheat, T6Anim, T6Install, T6PathNode, T6Table, T6ZBarrierDef, cheat_on, cheat_pick,
-    cheats_allowed, client_frame_heartbeat,
+    Cheat, T6Anim, T6Install, T6PathNode, T6PathTables, T6Table, T6Vehicle, T6VehicleDrive,
+    T6ZBarrierDef, cheat_on, cheat_pick, cheats_allowed, client_frame_heartbeat,
     platform_ride_box, platform_rides_on_ground,
     set_t6_game_settings, set_t6_party_size,
     set_t6_profile, zm_gametype,
 };
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/lib.rs
 pub mod t5_destructible;
 mod world;
 pub mod world_objects;
@@ -114,17 +110,10 @@ pub use match_state::{
     ConfigurationChangeRejectReason, DebrisRecord, DroppedItemAmmo, EntityEventPayload, EntityEventRecord,
     EventAudience, EventRecord, GiveRejectReason, HealthRegenCensus, InputReceipt,
     ItemPickupRecord, KillcamHud, LoadoutSpec, LocationSelection, MENU_COMMAND_TAIL,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/lib.rs
-    MatchEndReason, MenuCommand, MenuCommandKind, PelletFxRecord, PersonalClass, RadarMode,
-    RemoteMissile, RngDebugMeta, SIM_EVENT_ROSTER, ScriptBlur, ScriptControls, ScriptDepthOfField,
-    OrientedBlocker, ScriptDvars, ScriptSeat, SimEvent, SimEventRow, SnapshotMeta, UNRELIABLE_SIM_EVENT_COUNT,
-    ViewEffects, VisionChange, is_postfx_dvar, sim_event_is_reliable,
-=======
     MatchEndReason, MenuCommand, MenuCommandKind, OrientedBlocker, PelletFxRecord, PersonalClass,
     RadarMode, RemoteMissile, RngDebugMeta, SIM_EVENT_ROSTER, ScriptBlur, ScriptControls,
     ScriptDepthOfField, ScriptDvars, ScriptSeat, SimEvent, SimEventRow, SnapshotMeta,
     UNRELIABLE_SIM_EVENT_COUNT, ViewEffects, VisionChange, is_postfx_dvar, sim_event_is_reliable,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/lib.rs
 };
 pub use player_anim_script::{
     AnimConditions, AnimScriptCommand, AnimScriptCondition, AnimScriptItem, PlayerAnimScript,

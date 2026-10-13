@@ -222,20 +222,10 @@ pub fn update_sprint(
             }
             return SprintResult::Ended;
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/movement_iw4/src/sprint.rs
-        if (old_buttons & BUTTON_SPRINT) != 0 || (cmd.buttons & BUTTON_SPRINT) == 0 {
-            return SprintResult::Unchanged;
-        }
-
-        end_sprint(ps, cmd);
-        ps.sprint_button_up_required = 1;
-        return SprintResult::Ended;
-=======
         // bo2zm: sprint pressed again while sprinting keeps the sprint (IW4
         // turned it off; Black Ops II does not).
         let _ = old_buttons;
         return SprintResult::Unchanged;
->>>>>>> /tmp/claude-0/zmhead/crates/movement_iw4/src/sprint.rs
     }
 
     if ps.sprint_delay != 0 {

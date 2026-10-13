@@ -140,16 +140,7 @@ fn t6_trail(el: &asset_t6::FxElemRef) -> Option<OwnedFxTrailDef> {
     Some(OwnedFxTrailDef {
         scroll_time_msec: trail.scroll_time_msec,
         repeat_dist: trail.repeat_dist,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/fx_catalog_t6.rs
-        // A split distance of (almost) nothing splits by distance not at
-        // all: the Warthog's contrail stores a denormal here, whose inverse
-        // is infinite and asked the trail for billions of pieces a frame.
-        inv_split_dist: Some(1.0 / trail.split_dist)
-            .filter(|inv| trail.split_dist > 0.0 && inv.is_finite())
-            .unwrap_or(0.0),
-=======
         inv_split_dist: t6_inv_split_dist(trail.split_dist),
->>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/fx_catalog_t6.rs
         inv_split_arc_dist: 0.0,
         inv_split_time: 0.0,
         verts: trail

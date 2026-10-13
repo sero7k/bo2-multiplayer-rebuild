@@ -28,15 +28,9 @@ const EV_STANCE_FORCE_PRONE: i32 = 8;
 
 const PMF_STANCE_LOCKED: u32 = 0xc00;
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/movement_iw4/src/stance.rs
-/// bo2zm: bodies (0x0200_0000) and 0x8000, left out of BO2's stand-up and
-/// crouch-up checks.
-const BO2_GETUP_IGNORES: u32 = 0x0200_0000 | 0x8000;
-=======
 /// What a stance change checks for room against: the move mask without
 /// players and zombies (BO2's `tracemask & 0xfdff7fff`).
 pub const STANCE_ROOM_MASK: u32 = 0xfdff_7fff;
->>>>>>> /tmp/claude-0/zmhead/crates/movement_iw4/src/stance.rs
 
 /// bo2zm: lying down, Black Ops II lifts the body this far and drops it back.
 const LIE_DOWN_LIFT: f32 = 10.0;
@@ -56,17 +50,10 @@ fn stance_hull_allsolid<C: CollisionBackend>(
     maxs_z: f32,
     bo2: bool,
 ) -> bool {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/movement_iw4/src/stance.rs
-    // bo2zm: in Black Ops II other players and zombies never stop you
-    // getting up; only the world does.
-    let tracemask = if bo2 {
-        bounds.tracemask & !BO2_GETUP_IGNORES
-=======
     // bo2zm: BO2 (PM_CanStand, PM_CheckDuck) leaves players (0x0200_0000)
     // and zombies (0x8000) out: someone in the way never stops a stand-up.
     let tracemask = if bo2 {
         bounds.tracemask & STANCE_ROOM_MASK
->>>>>>> /tmp/claude-0/zmhead/crates/movement_iw4/src/stance.rs
     } else {
         bounds.tracemask
     };
@@ -198,11 +185,7 @@ pub fn bo2_lie_down<C: CollisionBackend>(
                 end,
                 mins: bounds.mins,
                 maxs: bounds.maxs,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/movement_iw4/src/stance.rs
-                tracemask: bounds.tracemask & !BO2_GETUP_IGNORES,
-=======
                 tracemask: bounds.tracemask & STANCE_ROOM_MASK,
->>>>>>> /tmp/claude-0/zmhead/crates/movement_iw4/src/stance.rs
             })
         };
         let lerp = |from: [f32; 3], to: [f32; 3], frac: f32| {
@@ -303,13 +286,8 @@ pub fn view_height_lerp_duration(lerp_target: i32, lerp_down: i32) -> i32 {
 
 /// bo2zm: the stance change's time. `prone_ms` is the crouch-to-prone
 /// stage's time (BO2 600; 0 = MW2's 400). bo2mp: getting up from a dive runs
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/movement_iw4/src/stance.rs
 /// at the usual speed, as BO2's (it has no get-up dvar of its own; an earlier
 /// double speed was too fast in testing).
-=======
-/// at the usual speed, as BO2's (it has no get-up dvar of its own; the 10-09
-/// double speed was "way too fast" in his 10-10 test).
->>>>>>> /tmp/claude-0/zmhead/crates/movement_iw4/src/stance.rs
 fn lerp_duration(_ps: &PlayerState, lerp_target: i32, lerp_down: i32, prone_ms: i32) -> i32 {
     if lerp_target == view_height::PRONE && prone_ms > 0 {
         prone_ms

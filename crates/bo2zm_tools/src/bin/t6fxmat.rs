@@ -2,11 +2,7 @@
 //! read-only. `t6fxmat [bo2 root]` reads Nuketown's zones and scripts, walks
 //! every effect placed at load (and the effects they spawn), and prints per
 //! material its technique set, blend, colour map and pixel format, then a
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6fxmat.rs
-//! count per (technique, blend, format).
-=======
 //! count per (technique, blend, format). `FXMAT_MAP=<map>`: another map's.
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6fxmat.rs
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
@@ -32,11 +28,7 @@ fn main() -> ExitCode {
     let map = std::env::var("FXMAT_MAP").unwrap_or_else(|_| "zm_nuked".to_owned());
     let zones = ZONES.map(|z| z.replace("zm_nuked", &map));
     let mut caps: Vec<ZoneCapture> = Vec::new();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6fxmat.rs
-    for z in ZONES {
-=======
     for z in &zones {
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6fxmat.rs
         match asset_t6::capture_zone(&dir.join(format!("{z}.ff"))) {
             Ok(c) => caps.push(c),
             Err(e) => eprintln!("{z}: {e}"),
@@ -46,11 +38,7 @@ fn main() -> ExitCode {
         eprintln!("no image packs");
         return ExitCode::FAILURE;
     };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6fxmat.rs
-    let facts = MapScriptFacts::read("zm_nuked", |name| {
-=======
     let facts = MapScriptFacts::read(&map, |name| {
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6fxmat.rs
         let want = format!("script:{name}");
         caps.iter().rev().find_map(|c| c.raw_files.iter().find(|(n, _)| *n == want).map(|(_, b)| b.clone()))
     });

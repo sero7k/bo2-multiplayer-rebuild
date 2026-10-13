@@ -120,16 +120,12 @@ impl Bo2Fonts {
             .iter()
             .map(|(name, f)| {
                 let space = f.glyphs.get(&' ').map_or(f.pixel_height * 0.3, |g| g.dx);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/bo2_font.rs
-                (name.clone(), (f.pixel_height, f.glyphs.iter().map(|(c, g)| (*c, g.dx)).collect(), space))
-=======
                 let mut adv: HashMap<char, f32> = f.glyphs.iter().map(|(c, g)| (*c, g.dx)).collect();
                 // Button pictures: a little wider than the font is tall.
                 for c in self.icons.keys() {
                     adv.insert(*c, f.pixel_height * 1.1);
                 }
                 (name.clone(), (f.pixel_height, adv, space))
->>>>>>> /tmp/claude-0/zmhead/crates/ui/src/bo2_font.rs
             })
             .collect()
     }
@@ -151,7 +147,6 @@ impl Bo2Fonts {
             * s
     }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/bo2_font.rs
     /// bo2mp: the glyph coverage of `lines` (text, left edge in units from the
     /// block's left) in `font` at `px_u` units tall, laid out as `spawn_line`
     /// does one line under the other, as a white RGBA8 picture whose alpha is
@@ -233,8 +228,6 @@ impl Bo2Fonts {
         self.font(font).map_or(0.0, |f| (f.ascent + f.descent) * px_u / f.pixel_height.max(1.0))
     }
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/ui/src/bo2_font.rs
     /// One line of coloured runs in `font`, `px` tall for the font's own
     /// pixel height, as a node of its size holding a glyph image per letter
     /// (a dark copy under each, offset by `shadow` pixels, when it is not
@@ -357,11 +350,7 @@ pub(crate) fn load_bo2_fonts(
     let Some(staged) = staged else {
         return;
     };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/bo2_font.rs
-    if !staged.is_changed() {
-=======
     if !staged.is_changed() && !hud_icons.as_ref().is_some_and(|i| i.is_changed()) {
->>>>>>> /tmp/claude-0/zmhead/crates/ui/src/bo2_font.rs
         return;
     }
     let Some(sheet) = staged.sheet.as_ref() else {
@@ -392,19 +381,12 @@ pub(crate) fn load_bo2_fonts(
                     ))
                 })
                 .collect();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/ui/src/bo2_font.rs
             // The glyph tables' y0 is against the line's reference, which
             // the engine puts one pixelHeight below the line's top (the line
             // step of `RB_DrawText` and `R_TextHeight` is the font's
             // pixelHeight): ExtraSmall's tallest glyph
             // reaches 21 over a 20 px font and simply stands out of its box.
             let ascent = font.pixel_height;
-=======
-            let ascent = glyphs
-                .values()
-                .map(|g| -g.y0)
-                .fold(font.pixel_height * 0.8, f32::max);
->>>>>>> /tmp/claude-0/zmhead/crates/ui/src/bo2_font.rs
             let descent = glyphs.values().map(|g| g.y0 + g.h).fold(0.0, f32::max);
             (
                 font.name.clone(),

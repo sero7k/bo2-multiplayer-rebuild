@@ -3409,7 +3409,6 @@ mod feel_wire_tests {
     }
 
     #[test]
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/transport/meta_wire.rs
     fn a_broken_off_piece_reaches_the_second_pc_whole() {
         let meta = SnapshotMeta {
             debris: vec![DebrisRecord {
@@ -3442,8 +3441,6 @@ mod feel_wire_tests {
     }
 
     #[test]
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/net/src/transport/meta_wire.rs
     fn no_rules_sent_stays_none() {
         let mut out = WireWriter::new();
         encode_feel(&mut out, None);

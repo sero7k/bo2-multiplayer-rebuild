@@ -649,17 +649,9 @@ impl AuthorityDObjState {
             MASK_BULLET_WORLD,
         ) {
             Ok(mut bones) => {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
-                // bo2mp: a destructible's hidden pieces (broken off, or a
-                // stage not reached yet) stop nothing.
-                if self.t5_destructible.is_some() {
-                    bones.retain(|b| !self.pose_request.hide_part_bits.get(usize::from(b.bone)));
-                }
-=======
                 // A hidden part (a mannequin's shot-off head) takes no hits.
                 let hide = &self.pose_request.hide_part_bits;
                 bones.retain(|b| !hide.get(usize::from(b.bone)));
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
                 let coll = coll_trace_from_capability(
                     capability,
                     &self.pose_request,
@@ -667,15 +659,11 @@ impl AuthorityDObjState {
                 );
                 match coll {
                     Ok(coll) => {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
-                        self.current_collision = Some(AuthorityDObjCollision { bones, coll });
-=======
                         self.current_collision = Some(AuthorityDObjCollision {
                             bones,
                             coll,
                             surface_flags: capability.surface_flags,
                         });
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
                         self.materialized_model_revision = Some(self.model_revision);
                         self.materialized_pose_revision = Some(self.pose_revision);
                         self.materialize_error = None;
@@ -993,7 +981,6 @@ pub struct PlayerCollisionPose {
     pub life_sequence: LifeSequence,
     pub hit_volume: HitVolumeKind,
     pub bones: Vec<AuthorityDObjCollisionBone>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
     /// The riot shield he bears (Black Ops II), if any.
     pub shield: Option<ShieldCover>,
 }
@@ -1063,8 +1050,6 @@ fn shield_hits(candidates: &mut [TraceCandidate], players: &[PlayerCollisionPose
 
 fn is_shield(collider: ColliderId) -> bool {
     matches!(collider, ColliderId::Player { hitloc: HITLOC_SHIELD, .. })
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1883,11 +1868,7 @@ fn fire_extended(
                     break;
                 }
                 ignore_hit = player_id(hit.collider).or(ignore_hit);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
                 if !pen.rifle_bullet || !is_player(hit.collider) || is_shield(hit.collider) {
-=======
-                if !pen.rifle_bullet || !is_player(hit.collider) {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
                     break;
                 }
                 multiplier *= RIFLE_COLLATERAL_SCALE;
@@ -1984,14 +1965,11 @@ fn fire_penetrate(
     let mut last_hit = first;
 
     for _ in 0..MAX_PENETRATE_STEPS {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
         // A riot shield stops the bullet.
         if is_shield(last_hit.collider) {
             pen_stop_log("riot shield", last_hit.end);
             break;
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
         let mut max_depth = table.depth(pen.penetrate_type, last_surf) * pen.penetrate_multiplier;
         if max_depth <= 0.0 {
             pen_stop_log("no depth for this surface", last_hit.end);
@@ -2012,13 +1990,9 @@ fn fire_penetrate(
         start = next_start;
         seg_start = last_hit.end;
         let entry_pos = last_hit.end;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
-        let fwd = decode_hit(trace_from(world, query, start, ignore_hit));
-=======
         let fwd = decode_hit(trace_from_skipping(
             world, query, start, ignore_hit, skip_model,
         ));
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
         let (trace_hit, fwd_hit) = match fwd {
             Decode::Hit(hit) => (true, Some(hit)),
             Decode::StopMiss { end } => {
@@ -2052,11 +2026,7 @@ fn fire_penetrate(
                     thickness = PEN_THICKNESS_FLOOR;
                 }
                 multiplier -= thickness / max_depth;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
-                if multiplier <= 0.0 {
-=======
                 if multiplier <= SPENT_BULLET {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
                     break;
                 }
                 last_hit.end = exit;
@@ -2107,14 +2077,10 @@ fn fire_penetrate(
             mask: query.mask,
             ignore: query.ignore,
             ignore_hit: rev_ignore,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
-            ignore_model: query.ignore_model,
-=======
             ignore_model: fwd_hit
                 .as_ref()
                 .and_then(|h| body_model(h.collider))
                 .or(query.ignore_model),
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
         };
         let rev = bullet_trace_filtered(
             world.brushes,
@@ -2157,12 +2123,8 @@ fn fire_penetrate(
                 }
             }
             multiplier -= thickness / max_depth;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
-            if multiplier <= 0.0 {
-=======
             // bo2zm: a spent bullet (rounding leaves ~1e-7) hits nothing more.
             if multiplier <= SPENT_BULLET {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
                 break;
             }
         } else if !trace_hit {
@@ -2266,11 +2228,7 @@ fn trace_from_skipping(
             mask: query.mask,
             ignore: query.ignore,
             ignore_hit,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/bullet_collision.rs
-            ignore_model: query.ignore_model,
-=======
             ignore_model,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/bullet_collision.rs
         },
         world.glass_is_solid,
     )

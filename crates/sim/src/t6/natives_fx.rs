@@ -42,13 +42,13 @@ pub(super) fn sound(world: &mut World, audience: EventAudience, alias: &str, ori
     );
 }
 
-/// A sound its listener hears as his own, not from a place: BO2's
-/// `playlocalsound` (the announcer's lines, `_zm_audio_announcer`
-/// `playleaderdialogonplayer`) and a player's sound to himself
-/// (`self playsoundtoplayer(alias, self)`: his own quotes, `_zm_audio`).
-/// Sent from the local sound entity, his client plays it unplaced; placed
-/// where he stood, it faded as he ran on.
-fn local_sound(world: &mut World, audience: EventAudience, alias: &str) {
+/// bo2zm: a sound its listener hears as his own, not from a place: a
+/// player's sound to himself (`self playsoundtoplayer(alias, self)`: his
+/// own quotes, `_zm_audio`). Sent from the local sound entity, his client
+/// plays it unplaced; placed where he stood, it faded as he ran on.
+/// (`playlocalsound`, the announcer's lines, goes through bo2mp's
+/// `local_sound` below.)
+fn own_sound(world: &mut World, audience: EventAudience, alias: &str) {
     sound_as(
         world,
         audience,
@@ -66,7 +66,7 @@ fn entity_sound(vm: &mut Vm<World>, world: &mut World, s: &Value, alias: &str) {
     let origin = origin_of(vm, world, s).unwrap_or([0.0; 3]);
     match entnum(vm, s).filter(|n| world.resource::<Zm>().players.contains_key(n)) {
         Some(n) => {
-            local_sound(world, EventAudience::Client(ClientId(n)), alias);
+            own_sound(world, EventAudience::Client(ClientId(n)), alias);
             sound(world, EventAudience::AllExcept(ClientId(n)), alias, origin);
         }
         None => sound(world, EventAudience::All, alias, origin),
@@ -83,14 +83,11 @@ fn sound_as(
     if alias.is_empty() {
         return;
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_fx.rs
     // bo2mp: BO2MP_SNDLOG=1 logs every sound the scripts play (test aid:
     // checked against the client's own sound starts).
     if std::env::var_os("BO2MP_SNDLOG").is_some() {
         diag::info!(Sim, "bo2mp sndlog play {alias} {audience:?}");
     }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_fx.rs
     // Black Ops II's own aliases (the client looks names up by game).
     let index = frame(world).sound_alias_index(&format!("t6:{}", alias.to_ascii_lowercase()));
     // IW4L_T6_SNDLOG=<parts of names, comma-separated> (1 = all): each
@@ -438,7 +435,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         };
         // On himself, to himself: his own line.
         if entnum(vm, s).is_some() && entnum(vm, s) == entnum(vm, &who) {
-            local_sound(world, audience, &alias);
+            own_sound(world, audience, &alias);
             return Ok(Value::Undefined);
         }
         let origin = origin_of(vm, world, s)
@@ -452,11 +449,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let Some(EventAudience::Client(client)) = player_audience(vm, world, s) else {
             return Ok(Value::Undefined);
         };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_fx.rs
         local_sound(world, client, &alias);
-=======
-        local_sound(world, audience, &alias);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_fx.rs
         Ok(Value::Undefined)
     });
     vm.bind("playsoundtoteam", true, |vm, world, s, a| {

@@ -8,10 +8,7 @@ pub mod item;
 pub mod killcam;
 pub mod match_reset;
 pub mod missile;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_anim/src/occupancy/mod.rs
-=======
 pub mod platform_carry;
->>>>>>> /tmp/claude-0/zmhead/crates/render_anim/src/occupancy/mod.rs
 pub mod ragdoll;
 pub mod remote_body;
 pub mod script_model;

@@ -636,16 +636,12 @@ fn view_camera_idle(angles: &mut ViewAngleBob, inputs: ViewAngleBobInputs) {
         ..WeaponPlacementPsInputs::default()
     };
     let (amount, speed) = weapon_idle_amount_speed(ps, inputs.idle);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/weapon_iw4/src/view_bob.rs
     // bo2mp: holding the breath slows the scope's drift in time as well
     // as in size (Black Ops' view idle: the time step is scaled by
     // `holdBreathScale`).
     let add = libm::roundf(
         inputs.hold_breath_scale * speed * WEAPON_IDLE_TIME_MS_SCALE * inputs.frametime,
     ) as i32;
-=======
-    let add = libm::roundf(speed * WEAPON_IDLE_TIME_MS_SCALE * inputs.frametime) as i32;
->>>>>>> /tmp/claude-0/zmhead/crates/weapon_iw4/src/view_bob.rs
     angles.weap_idle_time = angles.weap_idle_time.wrapping_add(add);
 
     let e_flags = idle_e_flags(inputs.e_flags, inputs.org.pm_flags);

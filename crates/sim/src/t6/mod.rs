@@ -24,22 +24,16 @@ mod actors;
 mod asd;
 mod audio_triggers;
 mod autoplay;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
 mod bots;
-=======
 mod autoplay_prison;
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
 mod brushes;
 mod buried_egg;
 mod cheats; // bo2zm: the solo cheat menu (Num 1)
 mod clientfields;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
 mod destructible;
 mod engine_sounds;
-=======
 mod darts;
 mod bo1_maps;
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
 mod fields;
 mod flight;
 mod fxanims;
@@ -66,9 +60,7 @@ mod objectives;
 mod playeranim;
 mod players;
 mod presence;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
 pub mod stats;
-=======
 mod prison_box;
 mod prison_plane;
 mod prison_retriever;
@@ -86,10 +78,8 @@ mod riders;
 mod riotshield;
 pub(crate) mod jetgun;
 mod limits;
-mod stats;
 mod offhand;
 mod transit;
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
 mod triggers;
 mod turrets;
 pub(crate) use players::weapon_notes;
@@ -100,11 +90,8 @@ mod vehicles;
 mod wallbuys;
 mod zbarrier;
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
 pub(crate) use items::collect_pickups as collect_item_pickups;
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
 /// A string table (`mp/zombiemode.csv`, ...).
 #[derive(Clone, Debug, Default)]
 pub struct T6Table {
@@ -142,7 +129,6 @@ pub struct T6Install {
     pub strings: std::collections::HashMap<String, String>,
     /// Every sound alias the banks hold (lower case).
     pub sound_aliases: BTreeSet<String>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
     /// bo2mp: the game type's settings (`getgametypesetting`), lower-case
     /// name -> value: `mp/gamesettings_default.cfg` then the game type's own.
     pub gamesettings: BTreeMap<String, String>,
@@ -158,6 +144,24 @@ pub struct T6Install {
     pub playeranim: Option<Arc<crate::t6_playeranim::T6PlayerAnims>>,
     /// bo2mp: the destructibles the map's entities name (`destructibledef`).
     pub destructibles: Vec<Arc<xmodel_runtime::T5DestructibleDef>>,
+    /// Barrier types (`ZBarrierDef`) the map's zbarriers name by `type`.
+    pub zbarrier_defs: Vec<T6ZBarrierDef>,
+}
+
+/// A barrier type: the zombie animation states its windows ask for.
+#[derive(Clone, Debug, Default)]
+pub struct T6ZBarrierDef {
+    pub name: String,
+    pub taunts: bool,
+    pub reach_through: bool,
+    /// Pieces torn off (state "open") stop drawing (`autoHideOpenPieces`).
+    pub auto_hide_open_pieces: bool,
+    pub taunt_state: String,
+    pub reach_through_state: String,
+    pub num_attack_slots: u32,
+    pub attack_spot_horz_offset: f32,
+    /// Per board: (tear anim state, tear anim substate).
+    pub boards: Vec<(String, String)>,
 }
 
 /// bo2mp: a vehicle def from his zones: its guns, how it drives and how
@@ -197,28 +201,6 @@ pub struct T6VehicleDrive {
     /// `switchSeatButtonName`, `attackButtonName`, `attackSecondaryButtonName`
     /// in BO2's default controller binds ("" for none).
     pub buttons: [&'static str; 5],
-=======
-    /// Props that break in stages (`destructibledef`), by name.
-    pub destructibles: Vec<Arc<xmodel_runtime::T5DestructibleDef>>,
-    /// Barrier types (`ZBarrierDef`) the map's zbarriers name by `type`.
-    pub zbarrier_defs: Vec<T6ZBarrierDef>,
-}
-
-/// A barrier type: the zombie animation states its windows ask for.
-#[derive(Clone, Debug, Default)]
-pub struct T6ZBarrierDef {
-    pub name: String,
-    pub taunts: bool,
-    pub reach_through: bool,
-    /// Pieces torn off (state "open") stop drawing (`autoHideOpenPieces`).
-    pub auto_hide_open_pieces: bool,
-    pub taunt_state: String,
-    pub reach_through_state: String,
-    pub num_attack_slots: u32,
-    pub attack_spot_horz_offset: f32,
-    /// Per board: (tear anim state, tear anim substate).
-    pub boards: Vec<(String, String)>,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
 }
 
 /// An AI path node and its links (node, distance, negotiation).
@@ -292,8 +274,6 @@ pub(crate) struct Ent {
     /// A brush entity's angles as the map placed it (its brushes are built
     /// that way; a trigger turned since turns them, `triggers::touches`).
     pub spawn_angles: Option<[f32; 3]>,
-    /// The map's `destructibledef`: the prop breaks in stages as it is hit.
-    pub destructible: String,
     /// Trigger radius/height (`trigger_radius*`) or brush extents.
     pub radius: f32,
     pub height: f32,
@@ -329,13 +309,11 @@ pub(crate) struct Ent {
     /// `None` is everyone; `hide` and `show` clear it.
     pub shown_to: Option<BTreeSet<u32>>,
     pub trigger_off: bool,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
     /// bo2mp: the engine's dropped item (a gun, a scavenger bag) this is.
     pub item: Option<i32>,
     /// bo2mp: the destructible definition (`destructibledef`) a map entity
     /// breaks by, lower case.
     pub destructible: Option<String>,
-=======
     /// `setteamfortrigger` (the team, false) or `setexcludeteamfortrigger`
     /// (the team, true): which zombies a radius, box or use trigger answers
     /// (`triggers::actor_touches`).
@@ -353,7 +331,6 @@ pub(crate) struct Ent {
     /// bo2zm round 1: its eye brightness (`mapshaderconstant` scriptVector2.y
     /// from zombie_eyes_clientfield_cb): 2 alive (Origins 3), 0.25 out.
     pub eye_luminance: Option<f32>,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
 }
 
 #[derive(Clone, Debug)]
@@ -373,8 +350,6 @@ pub(crate) struct Player {
     pub last_weapon: u32,
     pub last_wstate: i32,
     pub last_clip: i32,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
-=======
     /// Fire held last tick, and when he raised the Zombie Shield (its
     /// plant is due).
     pub last_attack: bool,
@@ -383,7 +358,6 @@ pub(crate) struct Player {
     pub jet: jetgun::JetState,
     /// `forcegrenadethrow`: let go of his grenade for him (t6::offhand).
     pub force_throw: bool,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
     /// Whether he was diving / sprinting last tick (`dtp_start` /
     /// `dtp_end`, `sprint_begin` / `sprint_end`).
     pub last_dive: bool,
@@ -400,7 +374,6 @@ pub(crate) struct Player {
     /// rides that entity (Nuketown's game-over rocket shot).
     pub camera: Option<u32>,
     pub camera_on: bool,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
     /// bo2mp: a bot (`addtestclient`), and while its client has not come
     /// yet, when it was made.
     pub test_client: bool,
@@ -410,6 +383,12 @@ pub(crate) struct Player {
     /// (the shock file's `bg_shock_movement`; 1 when none).
     pub shock: Option<(String, i32)>,
     pub shock_factor: f32,
+    /// His body model (`setmodel`; not drawn in third person yet): Mob's
+    /// Afterlife copies it onto the body he leaves behind.
+    pub model: String,
+    /// `startpoisoning` / `stoppoisoning`: BO2's player-state poisoned flag
+    /// (TranZit's Denizen grab and the fog's gas; the client draws it).
+    pub poisoned: bool,
 }
 
 impl Player {
@@ -425,26 +404,25 @@ impl Player {
             last_weapon: 0,
             last_wstate: 0,
             last_clip: 0,
+            last_attack: false,
+            shield_raised: None,
+            jet: Default::default(),
+            force_throw: false,
             last_dive: false,
             last_sprint: false,
             stats: Default::default(),
             hud_fields: Vec::new(),
+            score_fields: Vec::new(),
             camera: None,
             camera_on: false,
             test_client: false,
             pending_since: None,
             shock: None,
             shock_factor: 1.0,
+            model: String::new(),
+            poisoned: false,
         }
     }
-=======
-    /// His body model (`setmodel`; not drawn in third person yet): Mob's
-    /// Afterlife copies it onto the body he leaves behind.
-    pub model: String,
-    /// `startpoisoning` / `stoppoisoning`: BO2's player-state poisoned flag
-    /// (TranZit's Denizen grab and the fog's gas; the client draws it).
-    pub poisoned: bool,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
 }
 
 /// Engine state for the scripts.
@@ -483,7 +461,6 @@ pub(crate) struct Zm {
     pub clips: std::collections::HashMap<String, Arc<xmodel_runtime::AnimClip>>,
     pub strings: std::collections::HashMap<String, String>,
     pub sound_aliases: BTreeSet<String>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
     /// bo2mp: the shellshocks the scripts started (and precached), in order (the index
     /// the player state carries is the position + 1).
     pub shock_names: Vec<String>,
@@ -515,12 +492,8 @@ pub(crate) struct Zm {
     pub item_pickups: Vec<crate::ItemPickupRecord>,
     pub game_end_time: i32,
     pub map_center: [f32; 3],
-=======
-    /// Props that break in stages, by lower-case name.
-    pub destructibles: std::collections::HashMap<String, Arc<xmodel_runtime::T5DestructibleDef>>,
     /// Barrier types by lower-case name.
     pub zbarrier_defs: std::collections::HashMap<String, Arc<T6ZBarrierDef>>,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
     /// Script HUD elements (Game Over, Max Ammo...).
     pub huds: hud::Huds,
     /// Flying limbs and when they go.
@@ -538,13 +511,9 @@ pub(crate) struct Zm {
     pub debris_paths_cut: bool,
     /// What each player's HUD was last sent (round, hint, offhand,
     /// action slots).
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
-    pub hud_sent: BTreeMap<u32, (String, String, String, String)>,
+    pub hud_sent: BTreeMap<u32, (String, String, String, String, String)>,
     /// bo2mp: mp/statstable.csv's items, read once.
     pub items: loadout::ItemCache,
-=======
-    pub hud_sent: BTreeMap<u32, (String, String, String, String, String)>,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
     /// bo2zm M4: each player's d-pad slots (`setactionslot(slot, "weapon",
     /// name)`): (slot, weapon or kind).
     pub action_slots: BTreeMap<u32, Vec<(i32, String)>>,
@@ -566,7 +535,6 @@ pub(crate) struct Zm {
     pub use_held: BTreeSet<u32>,
     /// The hint of the use trigger each player faces.
     pub hints: BTreeMap<u32, String>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
     /// bo2mp: the destructible definitions by lower-case name.
     pub destructibles: std::collections::HashMap<String, Arc<xmodel_runtime::T5DestructibleDef>>,
     /// bo2mp: a round restart the scripts asked for (`map_restart`), run at
@@ -587,7 +555,6 @@ pub(crate) struct Zm {
     pub map_natives_applied: BTreeMap<u32, map_natives::Applied>,
     /// bo2mp: the summary of `map_natives` was logged.
     pub map_natives_reported: bool,
-=======
     /// The map's moving props (washing lines, shutters, wires, dust devils).
     pub fxprops: fxanims::FxProps,
     /// Mob's wolf heads (the client script's half of feeding them).
@@ -604,7 +571,6 @@ pub(crate) struct Zm {
     pub shots: Vec<u32>,
     /// Where tracked shots went off this tick (their `projectile_impact`).
     pub detonations: Vec<(crate::ProjectileId, [f32; 3])>,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
 }
 
 /// Entity numbers: players are their client number; the rest start here.
@@ -703,7 +669,7 @@ pub(crate) fn expected_players() -> i32 {
 }
 
 pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
+    cheats::reset();
     let mp = mp::is_mp(&inst.map);
     // bo2mp: Black Ops II's weapon switch rules (the instaswap) for this
     // match, multiplayer and zombies alike.
@@ -716,13 +682,6 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
     if mp {
         objects.extend(mp::engine_scripts()?);
     }
-=======
-    cheats::reset();
-    let mut objects = Vec::with_capacity(inst.objects.len());
-    for bytes in &inst.objects {
-        objects.push(ScriptObject::parse(bytes)?);
-    }
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
     let mut strings = Strings::default();
     // bo2mp: Black Ops II's linker binds a bare call to the engine's own
     // function when the engine has one, before the script's or its
@@ -756,13 +715,9 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
     natives_game::bind(&mut vm);
     natives_ent::bind(&mut vm);
     natives_player::bind(&mut vm);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
     if !mp {
         globallogic::bind(&mut vm);
     }
-=======
-    globallogic::bind(&mut vm);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
     // Sounds and effects replace the quiet stubs bound above.
     natives_fx::bind(&mut vm);
     natives_ai::bind(&mut vm);
@@ -778,11 +733,9 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
     limits::bind(&mut vm);
     stats::bind(&mut vm);
     hud::bind(&mut vm);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
     if mp {
         influencers::bind(&mut vm);
         natives_mp::bind(&mut vm);
-        stats::bind(&mut vm);
         bots::bind(&mut vm);
         killstreaks::bind(&mut vm);
         loadout::bind(&mut vm);
@@ -791,8 +744,6 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
         // bo2mp lane F: the body's animation natives (the death path).
         playeranim::bind(&mut vm);
     }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
     // IW4L_T6_TRACE=name,name: log those builtins' calls (debugging).
     if let Ok(names) = std::env::var("IW4L_T6_TRACE") {
         vm.trace_builtins(&names, 5000);
@@ -806,7 +757,6 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
         set_field: Some(fields::set),
         unbound: Some(unbound),
     };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
     // bo2mp: a multiplayer match: 18 players (a full lobby), no online
     // services, ranked play off (a local match, as Combat Training).
     // BO2MP_BOTS=<friends>,<enemies>[,<difficulty 0-3>]: bots, as BO2's
@@ -905,19 +855,10 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
             vm.dvars.entry(k.to_owned()).or_insert_with(|| v.to_owned());
         }
     }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
     for (k, v) in [
         ("mapname", inst.map.as_str()),
         ("g_gametype", inst.gametype.as_str()),
         ("ui_gametype", inst.gametype.as_str()),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
-        ("ui_zm_gamemodegroup", "zsurvival"),
-        ("ui_zm_mapstartlocation", location(&inst.map)),
-        ("zm_gamemodegroup", "zsurvival"),
-        ("sv_maxclients", if mp { "18" } else { "4" }),
-        ("party_maxplayers", if mp { "18" } else { "4" }),
-=======
         ("ui_zm_gamemodegroup", zm_gamemodegroup(&inst.gametype)),
         (
             "ui_zm_mapstartlocation",
@@ -928,9 +869,8 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
             },
         ),
         ("zm_gamemodegroup", zm_gamemodegroup(&inst.gametype)),
-        ("sv_maxclients", "4"),
-        ("party_maxplayers", "4"),
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
+        ("sv_maxclients", if mp { "18" } else { "4" }),
+        ("party_maxplayers", if mp { "18" } else { "4" }),
         ("onlinegame", "0"),
         ("systemlink", "0"),
         ("splitscreen", "0"),
@@ -1082,7 +1022,6 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
             .map(|(k, v)| (k.to_ascii_uppercase(), v))
             .collect(),
         sound_aliases: inst.sound_aliases,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
         mp,
         ranked_match: mp && stats::ranked(),
         bot_difficulty,
@@ -1102,19 +1041,11 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
                 })
                 .collect(),
         ),
-=======
-        destructibles: inst
-            .destructibles
-            .into_iter()
-            .map(|d| (d.name.to_ascii_lowercase(), d))
-            .collect(),
         zbarrier_defs: inst
             .zbarrier_defs
             .into_iter()
             .map(|d| (d.name.to_ascii_lowercase(), Arc::new(d)))
             .collect(),
-        tables: Arc::new(inst.tables),
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
         next_entnum: FIRST_ENTNUM,
         nav: nav::Nav::new(nodes).with_baked(baked),
         node_of: node_objs.iter().enumerate().map(|(i, o)| (*o, i as u32)).collect(),
@@ -1128,13 +1059,9 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
             .collect(),
         ..Default::default()
     });
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
     killstreaks::install(world, inst.vehicles);
     world.insert_resource(T6Runtime { vm, omni: crate::step::omni_movement_setting() });
     world.insert_resource(playeranim::Bodies::new(inst.playeranim));
-=======
-    world.insert_resource(T6Runtime { vm, omni: crate::step::omni_movement_setting() });
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
     world.insert_resource(PendingEntities(inst.entities));
     Ok(())
 }
@@ -1214,7 +1141,6 @@ fn location(map: &str) -> &'static str {
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
 /// bo2mp: Black Ops II's killcam (`_killcam.gsc`) puts a dead player in
 /// spectator with the fields the engine replays from: whom to watch
 /// (`spectatorclient`), the entity that killed (`killcamentity`), how far
@@ -1276,8 +1202,6 @@ pub(crate) fn take_bot_leaves(world: &mut World) -> Vec<u32> {
         .unwrap_or_default()
 }
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
 /// Run `f` with the VM out of the world.
 pub(crate) fn with_vm<R>(
     world: &mut World,
@@ -1302,14 +1226,10 @@ pub(crate) fn menu_response(world: &mut World, client: u32, menu: &str, response
             return;
         };
         let (m, r) = (vm.string(menu), vm.string(response));
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
-        diag::info!(Sim, "bo2zm t6 menuresponse from {client}: {menu} {response}");
-=======
         diag::info!(
             Sim,
             "bo2zm t6 menuresponse from {client}: {menu} {response}"
         );
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
         vm.notify_str(world, p, "menuresponse", &[m, r]);
     })
     .is_some()
@@ -1340,9 +1260,16 @@ pub(crate) fn start(world: &mut World) {
         // The engine's calls, in order. Functions no script calls are the
         // engine's (measured: zm_nuked::gamemode_callback_setup registers
         // the map's game modes, which the game type's start needs;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
-        // _zm::post_main; codecallback_finalizeinitialization). bo2mp: a
-        // multiplayer map starts its game type, the map, then the match.
+        // _zm::post_main; codecallback_finalizeinitialization). A map main
+        // that calls _zm::post_main itself (Buried) gets it once: twice ran
+        // init_custom_ai_type twice (two Leroys, doubled spawn functions).
+        let post_main_scripted = !mp_map
+            && vm
+                .program
+                .find(&vm.strings, "maps/mp/zombies/_zm", "post_main")
+                .is_some_and(|fi| vm.program.script_refers_to(&format!("maps/mp/{map}"), fi));
+        // bo2mp: a multiplayer map starts its game type, the map, then the
+        // match.
         let calls: Vec<(String, &str, bool)> = if mp_map {
             // The map's two factions first (bodies, arms, voices per team:
             // game["set_player_model"]): no script starts their teamset;
@@ -1401,34 +1328,9 @@ pub(crate) fn start(world: &mut World) {
             calls.push(("bo2mp/debug".to_owned(), "main", false));
         }
         for (script, func, required) in calls {
-=======
-        // _zm::post_main; codecallback_finalizeinitialization). A map main
-        // that calls _zm::post_main itself (Buried) gets it once: twice ran
-        // init_custom_ai_type twice (two Leroys, doubled spawn functions).
-        let post_main_scripted = vm
-            .program
-            .find(&vm.strings, "maps/mp/zombies/_zm", "post_main")
-            .is_some_and(|fi| vm.program.script_refers_to(&format!("maps/mp/{map}"), fi));
-        for (script, func, required) in [
-            (format!("maps/mp/{map}"), "gamemode_callback_setup", false),
-            (format!("maps/mp/gametypes_zm/{gametype}"), "main", true),
-            (format!("maps/mp/{map}"), "main", true),
-            ("maps/mp/zombies/_zm".to_owned(), "post_main", false),
-            (
-                "maps/mp/gametypes_zm/_callbacksetup".to_owned(),
-                "codecallback_startgametype",
-                true,
-            ),
-            (
-                "maps/mp/gametypes_zm/_callbacksetup".to_owned(),
-                "codecallback_finalizeinitialization",
-                false,
-            ),
-        ] {
             if func == "post_main" && post_main_scripted {
                 continue;
             }
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
             if vm
                 .spawn_named(world, &script, func, level.clone(), vec![])
                 .is_none()
@@ -1450,17 +1352,13 @@ pub(crate) fn start(world: &mut World) {
             vm.thread_count()
         );
     });
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
     let mut zm = world.resource_mut::<Zm>();
     zm.started = true;
     zm.map_entities = texts;
     if mp_map {
         map_natives::report_spawns(world, &gametype);
     }
-=======
-    world.resource_mut::<Zm>().started = true;
     bo1_maps::start(world, &map);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
     report(world);
 }
 
@@ -1550,6 +1448,7 @@ fn restart(world: &mut World, tick: crate::Tick, persist: bool) {
         now_ms: old.now_ms,
         next_thread_dump: old.next_thread_dump,
         destructibles: old.destructibles,
+        zbarrier_defs: old.zbarrier_defs,
         map_natives_applied: old.map_natives_applied,
         map_natives_reported: old.map_natives_reported,
         next_entnum: FIRST_ENTNUM,
@@ -1711,20 +1610,10 @@ fn start_hang_tracer() {
 }
 
 fn timed(name: &'static str, world: &mut World, f: impl FnOnce(&mut World)) {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
+    phase(name);
     let t0 = std::time::Instant::now();
     f(world);
     prof_add(name, t0);
-=======
-    phase(name);
-    if prof_on() {
-        let t0 = std::time::Instant::now();
-        f(world);
-        prof_add(name, t0);
-    } else {
-        f(world);
-    }
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
 }
 
 fn advance_inner(world: &mut World) {
@@ -1747,7 +1636,8 @@ fn advance_inner(world: &mut World) {
     let now = i64::from(tick.0) * i64::from(crate::MATCH_TICK_MS);
     bo1_maps::advance(world, now);
     world.resource_mut::<Zm>().now_ms = now;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
+    start_hang_tracer();
+    TICKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     timed("players", world, |world| {
         // (Its parts timed too: "p." in the profile line.)
         timed("p.sync", world, players::sync);
@@ -1757,6 +1647,8 @@ fn advance_inner(world: &mut World) {
         if world.resource::<Zm>().mp {
             timed("p.anim", world, playeranim::advance);
         }
+        // bo2zm: the riot shield's plant.
+        timed("p.shield", world, riotshield::deploy_events);
         timed("p.moves", world, players::movement_events);
         if !world.resource::<Zm>().debris_paths_cut {
             brushes::cut_debris_paths(world);
@@ -1765,6 +1657,9 @@ fn advance_inner(world: &mut World) {
     timed("bots", world, |world| {
         // The test player's buttons go in before the triggers read them.
         autoplay::drive(world, now);
+        // bo2zm: the solo cheat menu's picks.
+        cheats::apply(world);
+        cheats::hold(world);
         // bo2mp: the bots' commands too.
         if world.resource::<Zm>().mp {
             bots::drive(world, now);
@@ -1777,33 +1672,120 @@ fn advance_inner(world: &mut World) {
         timed("streaks", world, killstreaks::advance);
     }
     timed("tests", world, |world| autoplay_tests(world, now));
+    // bo2zm: Die Rise's map parts (every map; they return at once elsewhere).
+    timed("highrise", world, |world| highrise::tick(world, now));
+    timed("weapons", world, |world| {
+        darts::advance(world, now);
+        darts::log(world, now);
+        grenades::advance(world, now);
+        // limits first: its IW4L_T6_PRESS holds are test aids too.
+        limits::tick(world);
+        // After the test aids: their held fire spins it too.
+        jetgun::tick(world, crate::MATCH_TICK_MS as f32);
+        offhand::tick(world);
+    });
     // Each timed apart: a stall names the one.
     timed("vehicles", world, |world| vehicles::advance(world, crate::MATCH_TICK_MS as f32 / 1000.0));
-    timed("movers", world, |world| movers::advance(world, now));
+    timed("movers", world, |world| {
+        movers::advance(world, now);
+        riders::advance(world);
+        turrets::advance(world);
+        let moved = {
+            let mut zm = world.resource_mut::<Zm>();
+            let zm = &mut *zm;
+            let ents = &zm.ents;
+            zm.nav
+                .follow_movers(|n| ents.get(&n).map(|e| (e.origin, e.angles)))
+        };
+        // Their script `origin` too (Die Rise's escape pod links its door
+        // nodes to the nodes near node.origin once it has crashed).
+        if !moved.is_empty() {
+            let objs: Vec<(ObjRef, [f32; 3])> = {
+                let zm = world.resource::<Zm>();
+                moved
+                    .iter()
+                    .filter_map(|&(n, p)| zm.node_objs.get(n as usize).map(|&o| (o, p)))
+                    .collect()
+            };
+            with_vm(world, |vm, _| {
+                let f = vm.intern("origin");
+                for (o, p) in objs {
+                    vm.set_raw_field(o, f, Value::Vec3(p));
+                }
+            });
+        }
+    });
     timed("zbarriers", world, |world| zbarrier::advance(world, now));
     timed("wallbuys", world, |world| wallbuys::advance(world, now));
     if world.resource::<Zm>().mp {
         timed("items", world, items::settle);
     }
-=======
-    start_hang_tracer();
-    TICKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    phase("test aids");
-    players::sync(world);
-    players::weapon_events(world);
-    riotshield::deploy_events(world);
-    players::movement_events(world);
-    if !world.resource::<Zm>().debris_paths_cut {
-        brushes::cut_debris_paths(world);
+    timed("triggers", world, triggers::dispatch);
+    // Death barriers: the map's trigger_hurt volumes and the fall kill plane.
+    timed("barriers", world, |world| hurt::advance(world, now));
+    timed("hud", world, |world| {
+        publish_hud(world);
+        hud::publish(world);
+        // bo2mp lane C: his multiplayer screen's values.
+        if world.resource::<Zm>().mp {
+            natives_mp::publish_screen(world);
+            stats::save(world, false);
+        }
+    });
+    timed("scripts", world, |world| {
+        with_vm(world, |vm, world| {
+            if vm.time_ms < now {
+                vm.time_ms = now;
+            }
+            natives_game::deliver_timers(vm, world, now);
+            vm.run_due(world);
+        });
+    });
+    timed("actors", world, |world| actors::think(world, now));
+    phase("gibs");
+    // Limbs that have lain long enough go.
+    let gone: Vec<u32> = {
+        let mut zm = world.resource_mut::<Zm>();
+        let (old, keep): (Vec<(u32, i64)>, Vec<(u32, i64)>) =
+            zm.gibs.iter().partition(|(_, t)| *t <= now);
+        zm.gibs = keep;
+        old.into_iter().map(|(n, _)| n).collect()
+    };
+    for n in gone {
+        let obj = world
+            .resource_mut::<Zm>()
+            .ents
+            .remove(&n)
+            .and_then(|e| e.obj);
+        if let Some(o) = obj {
+            with_vm(world, |vm, world| vm.free_object(world, o));
+        }
     }
-    // The test player's buttons go in before the triggers read them.
-    autoplay::drive(world, now);
-    cheats::apply(world);
-    cheats::hold(world);
+    timed("presence", world, |world| {
+        presence::sync(world, now);
+        destructible::flush(world);
+        fxanims::advance(world, now);
+        prison_wolves::advance(world, now);
+        audio_triggers::advance(world, now);
+        brushes::sync(world, now);
+        map_natives::sync(world, now);
+        players::follow_sync(world);
+        publish_melee_targets(world);
+    });
+    timed("loops+fx", world, |world| {
+        presence::publish_loops(world);
+        clientfields::advance(world, now);
+    });
+    phase("report");
+    report(world);
+    phase("idle");
+}
+
+/// The test runs' hooks (each does nothing unless its test is on).
+fn autoplay_tests(world: &mut World, now: i64) {
     autoplay::buy_test(world, now);
     autoplay::open_all_test(world, now);
     autoplay::census_test(world, now);
-    highrise::tick(world, now);
     autoplay::roam_test(world, now);
     autoplay::glide_test(world, now);
     autoplay::only_spawn_test(world);
@@ -1862,140 +1844,6 @@ fn advance_inner(world: &mut World) {
     tomb_craft::craft_test(world, now);
     tomb_staffs::staff_puzzle_test(world, now);
     tomb_tank::tank_test(world, now);
-    darts::advance(world, now);
-    darts::log(world, now);
-    grenades::advance(world, now);
-    // limits first: its IW4L_T6_PRESS holds are test aids too.
-    limits::tick(world);
-    // After the test aids: their held fire spins it too.
-    jetgun::tick(world, crate::MATCH_TICK_MS as f32);
-    offhand::tick(world);
-    phase("vehicles+movers");
-    vehicles::advance(world, crate::MATCH_TICK_MS as f32 / 1000.0);
-    movers::advance(world, now);
-    riders::advance(world);
-    turrets::advance(world);
-    let moved = {
-        let mut zm = world.resource_mut::<Zm>();
-        let zm = &mut *zm;
-        let ents = &zm.ents;
-        zm.nav
-            .follow_movers(|n| ents.get(&n).map(|e| (e.origin, e.angles)))
-    };
-    // Their script `origin` too (Die Rise's escape pod links its door
-    // nodes to the nodes near node.origin once it has crashed).
-    if !moved.is_empty() {
-        let objs: Vec<(ObjRef, [f32; 3])> = {
-            let zm = world.resource::<Zm>();
-            moved
-                .iter()
-                .filter_map(|&(n, p)| zm.node_objs.get(n as usize).map(|&o| (o, p)))
-                .collect()
-        };
-        with_vm(world, |vm, _| {
-            let f = vm.intern("origin");
-            for (o, p) in objs {
-                vm.set_raw_field(o, f, Value::Vec3(p));
-            }
-        });
-    }
-    zbarrier::advance(world, now);
-    wallbuys::advance(world, now);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
-    timed("triggers", world, triggers::dispatch);
-    // Death barriers: the map's trigger_hurt volumes and the fall kill plane.
-    timed("barriers", world, |world| hurt::advance(world, now));
-    timed("hud", world, |world| {
-        publish_hud(world);
-        hud::publish(world);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
-        // bo2mp lane C: his multiplayer screen's values.
-        if world.resource::<Zm>().mp {
-            natives_mp::publish_screen(world);
-            stats::save(world, false);
-        }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
-    });
-    timed("scripts", world, |world| {
-        with_vm(world, |vm, world| {
-            if vm.time_ms < now {
-                vm.time_ms = now;
-            }
-            natives_game::deliver_timers(vm, world, now);
-            vm.run_due(world);
-        });
-    });
-    timed("actors", world, |world| actors::think(world, now));
-    phase("gibs");
-    // Limbs that have lain long enough go.
-    let gone: Vec<u32> = {
-        let mut zm = world.resource_mut::<Zm>();
-        let (old, keep): (Vec<(u32, i64)>, Vec<(u32, i64)>) =
-            zm.gibs.iter().partition(|(_, t)| *t <= now);
-        zm.gibs = keep;
-        old.into_iter().map(|(n, _)| n).collect()
-    };
-    for n in gone {
-        let obj = world
-            .resource_mut::<Zm>()
-            .ents
-            .remove(&n)
-            .and_then(|e| e.obj);
-        if let Some(o) = obj {
-            with_vm(world, |vm, world| vm.free_object(world, o));
-        }
-    }
-    timed("presence", world, |world| {
-        presence::sync(world, now);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
-        destructible::flush(world);
-        brushes::sync(world, now);
-        map_natives::sync(world, now);
-=======
-        fxanims::advance(world, now);
-        prison_wolves::advance(world, now);
-        audio_triggers::advance(world, now);
-        brushes::sync(world, now);
-        players::follow_sync(world);
-        publish_melee_targets(world);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
-    });
-    timed("loops+fx", world, |world| {
-        presence::publish_loops(world);
-        clientfields::advance(world, now);
-    });
-    phase("report");
-    report(world);
-    phase("idle");
-}
-
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
-/// The test runs' hooks (each does nothing unless its test is on).
-fn autoplay_tests(world: &mut World, now: i64) {
-    autoplay::buy_test(world, now);
-    autoplay::open_all_test(world, now);
-    autoplay::census_test(world, now);
-    autoplay::roam_test(world, now);
-    autoplay::glide_test(world, now);
-    autoplay::only_spawn_test(world);
-    autoplay::box_test(world, now);
-    autoplay::box_move_test(world, now);
-    autoplay::dual_wield_test(world, now);
-    autoplay::game_over_test(world, now);
-    autoplay::down_test(world, now);
-    autoplay::door_test(world, now);
-    autoplay::walk_test(world, now);
-    autoplay::floor_map(world, now);
-    autoplay::kite_test(world, now);
-    autoplay::face_test(world);
-    autoplay::zombie_block_test(world, now);
-    autoplay::solid_walk_test(world, now);
-    autoplay::perk_test(world, now);
-    autoplay::pap_test(world, now);
-    autoplay::powerup_test(world, now);
-    autoplay::fx_test(world, now);
-    autoplay::look_test(world);
 }
 
 /// bo2mp: he steers a scorestreak from where he stands (a vehicle he
@@ -2034,8 +1882,11 @@ pub(crate) fn location_pick(world: &mut World, client: u32, picked: [u8; 3], con
 pub(crate) fn give_killstreak(world: &mut World, client: u32, menu_name: &str) -> bool {
     if !world.get_resource::<Zm>().is_some_and(|z| z.mp) {
         return false;
-=======
-/// A client dvar for one player's client (its HUD, its music).
+    }
+    killstreaks::give(world, client, menu_name);
+    true
+}
+
 /// bo2zm: the living zombies near each player (`n x y z;...`: entity
 /// number and feet, nearest first, at most 24 within 2000 units), for his
 /// client's knife lunge (BO2 lunges at a zombie in reach and stabs; IW4's
@@ -2069,12 +1920,10 @@ fn publish_melee_targets(world: &mut World) {
                 .join(";")
         };
         set_client_dvar(world, n, "bo2zm_zombies", &list);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
     }
-    killstreaks::give(world, client, menu_name);
-    true
 }
 
+/// A client dvar for one player's client (its HUD, its music).
 pub(crate) fn set_client_dvar(world: &mut World, client: u32, key: &str, value: &str) {
     let mut f = frame(world);
     if f.client_meta(crate::world::ClientId(client)).is_none() {
@@ -2121,9 +1970,6 @@ fn report(world: &mut World) {
             }
         }
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
-    // IW4L_T6_EVAL=level.a.b,...: those values every 5 s (debugging).
-=======
     // IW4L_T6_ROUND_JUMP=<n>[@<secs>]: 10 s in (or then), set
     // level.round_number to n (a test aid for things that only start in a
     // round-1 game, like the Nuketown transmission and blue eyes; or that
@@ -2204,7 +2050,6 @@ fn report(world: &mut World) {
         }
     }
     // IW4L_T6_EVAL=level.a.b,...: those values every 5 s (debugging; roots level, anim, player).
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
     if let Ok(paths) = std::env::var("IW4L_T6_EVAL") {
         let now = world.resource::<Zm>().now_ms;
         if now % 5000 < i64::from(crate::MATCH_TICK_MS) {
@@ -2346,44 +2191,12 @@ fn unbound(vm: &mut Vm<World>, world: &mut World, id: u32, _self: &Value, args: 
     Value::Undefined
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
-/// Black Ops II's hit locations, in the order its models' bones name them
-/// (part classification) and its weapons' location multipliers run: one
-/// more than the IW4 list (torso_mid), so the IW4 names would be off from
-/// torso_mid on. (t6mp's own table.)
-pub(crate) const T6_HITLOC_NAMES: [&str; 21] = [
-    "none",
-    "helmet",
-    "head",
-    "neck",
-    "torso_upper",
-    "torso_mid",
-    "torso_lower",
-    "right_arm_upper",
-    "left_arm_upper",
-    "right_arm_lower",
-    "left_arm_lower",
-    "right_hand",
-    "left_hand",
-    "right_leg_upper",
-    "left_leg_upper",
-    "right_leg_lower",
-    "left_leg_lower",
-    "right_foot",
-    "left_foot",
-    "gun",
-    "riotshield",
-];
-
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
 /// bo2zm M3: engine damage on a player (fall, explosion, ...) goes to
 /// the BO2 scripts' CodeCallback_PlayerDamage; false when they don't run.
 pub(crate) fn player_hit(world: &mut World, hit: &crate::script_player::Hit) -> bool {
     if !world.contains_resource::<T6Runtime>() {
         return false;
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
     // A bullet or a knife the riot shield stopped: BO2's scripts know the
     // hit location as "riotshield".
     let hitloc = if hit.hitloc == crate::bullet_collision::HITLOC_SHIELD {
@@ -2421,13 +2234,6 @@ pub(crate) fn player_hit(world: &mut World, hit: &crate::script_player::Hit) -> 
             hit.means
         );
     }
-=======
-    let hitloc = weapon_iw4::HITLOC_NAMES
-        .get(usize::from(hit.hitloc))
-        .copied()
-        .unwrap_or("none");
-    let weapon = weapon_text(world, hit.weapon);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
     with_vm(world, |vm, world| {
         let attacker = hit
             .attacker
@@ -2445,14 +2251,10 @@ pub(crate) fn player_hit(world: &mut World, hit: &crate::script_player::Hit) -> 
             hit.victim.0,
             attacker.clone(),
             attacker,
-            hit.amount,
+            amount,
             hit.flags,
             hit.means,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
             &wname,
-=======
-            &weapon,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
             hit.point,
             hit.dir,
             hitloc,
@@ -2584,7 +2386,6 @@ pub(crate) fn entity_hit(world: &mut World, hit: &crate::script::EntityHit) -> b
         .actors
         .get(&n)
         .is_some_and(|a| a.alive);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
     if !alive {
         // bo2mp: a map's breakable (a Nuketown mannequin, a car) takes a
         // blast or a knife by the piece's own scale.
@@ -2624,11 +2425,11 @@ pub(crate) fn entity_hit(world: &mut World, hit: &crate::script::EntityHit) -> b
                 hit.weapon,
             );
         }
-=======
+        return true;
+    }
     // BO2's G_DamageActor takes no damage below 1 (a Paralyzer shot: its
     // script does the harm), so no callback and no "damage".
-    if !alive || hit.amount <= 0 {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
+    if hit.amount <= 0 {
         return true;
     }
     // The struck bone's hit location.
@@ -2647,12 +2448,6 @@ pub(crate) fn entity_hit(world: &mut World, hit: &crate::script::EntityHit) -> b
     // blast (a grenade at the feet takes the legs: a crawler).
     let blast = part.is_none() && hit.flags & 1 != 0;
     let part = part.unwrap_or(4);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
-    let hitloc = T6_HITLOC_NAMES
-        .get(usize::from(part))
-        .copied()
-        .unwrap_or("none");
-=======
     let hitloc = if blast {
         "none"
     } else {
@@ -2666,7 +2461,6 @@ pub(crate) fn entity_hit(world: &mut World, hit: &crate::script::EntityHit) -> b
     } else {
         hit.point
     };
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
     // The weapon's location multiplier (not for a knife).
     let melee = hit.means == "MOD_MELEE";
     let scale = if melee {
@@ -2798,11 +2592,7 @@ pub(crate) fn name_players(vm: &mut Vm<World>, world: &mut World, args: &[Value]
 /// The grenades and mines a player carries, as the HUD shows them (BO2's
 /// offhand icons, one per grenade): `name:count` by `;`, lethal first.
 fn offhand_counts(world: &mut World, c: u32) -> String {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
     const OFFHANDS: [&str; 16] = [
-=======
-    const OFFHANDS: [&str; 4] = [
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
         "frag_grenade_zm",
         "sticky_grenade_zm",
         "cymbal_monkey_zm",
@@ -2828,11 +2618,7 @@ fn offhand_counts(world: &mut World, c: u32) -> String {
     for want in OFFHANDS {
         for &w in &held {
             let name = crate::script_player::weapon_name(&f, w);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
             if name == want || name.trim_end_matches("_mp") == want {
-=======
-            if name.trim_end_matches("_mp") == want {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
                 let (clip, stock) = (
                     crate::script_player::ammo_clip(&f, id, w),
                     crate::script_player::ammo_stock(&f, id, w),
@@ -2888,21 +2674,16 @@ fn scoreboard_rows(world: &mut World) -> String {
     rows.join(";")
 }
 
-/// Each player's HUD values the scripts own go out as client dvars: the
-/// round (`bo2zm_round`), the hint of the use trigger he faces
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
-/// (`bo2zm_hint`) and his grenades (`bo2zm_offhand`); sent when they
-/// change.
 /// A bot (`addtestclient`) has no screen: the server builds it no HUD
 /// (BO2 sends a test client none).
 pub(crate) fn is_bot(world: &World, c: u32) -> bool {
     world.resource::<Zm>().players.get(&c).is_some_and(|p| p.test_client)
 }
 
-=======
+/// Each player's HUD values the scripts own go out as client dvars: the
+/// round (`bo2zm_round`), the hint of the use trigger he faces
 /// (`bo2zm_hint`), his grenades (`bo2zm_offhand`) and the scoreboard
 /// (`bo2zm_scoreboard`); sent when they change.
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
 fn publish_hud(world: &mut World) {
     let round = with_vm(world, |vm, _| {
         let f = vm.intern("round_number");
@@ -2933,7 +2714,6 @@ fn publish_hud(world: &mut World) {
             .resource::<Zm>()
             .action_slots
             .get(&c)
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
             .map(|v| v.iter().map(|(n, w)| format!("{n}:{w}")).collect::<Vec<_>>().join(";"))
             .unwrap_or_default();
         // bo2mp: the scorestreak column: his picks (once) and his momentum.
@@ -2968,23 +2748,9 @@ fn publish_hud(world: &mut World) {
             }
         }
         let sent = world.resource::<Zm>().hud_sent.get(&c).cloned();
-        if sent
-            .as_ref()
-            .is_some_and(|(r, h, o, a)| *r == round && *h == hint && *o == offhand && *a == slots)
-        {
-=======
-            .map(|v| {
-                v.iter()
-                    .map(|(n, w)| format!("{n}:{w}"))
-                    .collect::<Vec<_>>()
-                    .join(";")
-            })
-            .unwrap_or_default();
-        let sent = world.resource::<Zm>().hud_sent.get(&c).cloned();
         if sent.as_ref().is_some_and(|(r, h, o, a, b)| {
             *r == round && *h == hint && *o == offhand && *a == slots && *b == board
         }) {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
             continue;
         }
         let mut f = frame(world);
@@ -2994,11 +2760,7 @@ fn publish_hud(world: &mut World) {
         if std::env::var_os("IW4L_T6_HINTLOG").is_some() {
             diag::info!(
                 Sim,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
-                "bo2zm t6 hud out for {c}: round {round:?} hint {hint:?} offhand {offhand:?}"
-=======
                 "bo2zm t6 hud out for {c}: round {round:?} hint {hint:?} offhand {offhand:?} scoreboard {board:?}"
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
             );
         }
         let dvars = &mut f.client_meta_mut(crate::world::ClientId(c)).client_dvars;
@@ -3018,11 +2780,7 @@ fn publish_hud(world: &mut World) {
         world
             .resource_mut::<Zm>()
             .hud_sent
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
-            .insert(c, (round.clone(), hint, offhand, slots));
-=======
             .insert(c, (round.clone(), hint, offhand, slots, board.clone()));
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
     }
 }
 
@@ -3225,7 +2983,6 @@ pub(crate) fn resolve_weapon(world: &mut World, name: &str) -> Result<(u32, Opti
         return Ok((0, None));
     }
     let f = frame(world);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
     let usable = |w: u32| w != 0 && (f.combat_facts_for(w).is_some() || f.weapon_is_melee_only(w));
     let Some((base, atts)) = name.split_once('+') else {
         return crate::script_player::weapon_named(&f, &format!("{name}_mp"))
@@ -3281,22 +3038,6 @@ pub(crate) fn resolve_weapon(world: &mut World, name: &str) -> Result<(u32, Opti
     }
 }
 
-/// A weapon's script name: Zombies' `m1911_zm` (the engine's `_mp`
-/// dropped); multiplayer's own names end in `_mp` (`mp7_mp`, `radar_mp`),
-/// as BO2's scripts compare them.
-=======
-    let by = |n: &str| {
-        crate::script_player::weapon_named(&f, &format!("{n}_mp"))
-            .or_else(|_| crate::script_player::weapon_named(&f, n))
-    };
-    // `base+attachment` (Pack-a-Punch gives `tar21_upgraded_zm+reflex`):
-    // attachments are not weapons of their own here yet, so the base weapon.
-    by(name).or_else(|e| match name.split_once('+') {
-        Some((base, _)) => by(base),
-        None => Err(e),
-    })
-}
-
 /// A weapon's world model as everyone else sees it (on a wall, in the
 /// box): the gun, the parts Black Ops II hangs on it (magazine, scope,
 /// rocket: its `attachWorldModel`s) and the tags it hides, lower case.
@@ -3329,18 +3070,16 @@ pub(crate) fn weapon_look(world: &mut World, w: u32) -> Option<WeaponLook> {
     })
 }
 
-/// A weapon's script name (`_mp` dropped).
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
+/// A weapon's script name: Zombies' `m1911_zm` (the engine's `_mp`
+/// dropped); multiplayer's own names end in `_mp` (`mp7_mp`, `radar_mp`),
+/// as BO2's scripts compare them.
 pub(crate) fn weapon_text(world: &mut World, w: u32) -> String {
     let mp = world.get_resource::<Zm>().is_some_and(|z| z.mp);
     let f = frame(world);
     let n = crate::script_player::weapon_name(&f, w);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/mod.rs
     if mp {
         return n;
     }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/mod.rs
     n.strip_suffix("_mp").map_or(n.clone(), str::to_owned)
 }
 

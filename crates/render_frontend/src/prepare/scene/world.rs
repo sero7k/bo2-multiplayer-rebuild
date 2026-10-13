@@ -279,13 +279,9 @@ pub struct WorldScene {
     /// bo2zm: see `asset_world::WorldDraw::t6_fog_banks`; the table as
     /// loaded (`t6_lights` may carry another bank's fog) and the bank shown
     /// (0 = the map's own).
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/prepare/scene/world.rs
-    pub t6_fog_banks: Vec<(u32, [[f32; 16]; 2])>,
-=======
     pub t6_fog_banks: Vec<asset_world::T6FogVolume>,
     /// bo2zm: see `asset_world::WorldDraw::t6_fog_modifiers`.
     pub t6_fog_modifiers: Vec<asset_world::T6FogModifier>,
->>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/prepare/scene/world.rs
     pub t6_lights_loaded: std::sync::Arc<Vec<[f32; 16]>>,
     /// bo2zm: see `asset_world::WorldDraw::t6_flicker`.
     pub t6_flicker: Vec<asset_world::T6Flicker>,

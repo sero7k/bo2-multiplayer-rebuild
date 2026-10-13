@@ -88,15 +88,11 @@ fn str_find(a: &[Value], find: bool) -> Res<Vec<Value>> {
     let pat = string(a, 1, name)?;
     let len = src.len() as i64;
     let init = arg(a, 2).as_num().map_or(1, |n| n as i64);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/stdlib.rs
-    let init = if init < 0 { (len + init + 1).max(1) } else { init.max(1) };
-=======
     let init = if init < 0 {
         (len + init + 1).max(1)
     } else {
         init.max(1)
     };
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/stdlib.rs
     if init - 1 > len {
         return Ok(vec![Value::Nil]);
     }
@@ -434,11 +430,6 @@ pub fn open(vm: &mut Vm) {
         let src = string(&a, 0, "gsub")?;
         let pat = string(&a, 1, "gsub")?;
         let repl = arg(&a, 2);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/stdlib.rs
-        let max_n = arg(&a, 3).as_num().map_or(usize::MAX, |n| n.max(0.0) as usize);
-        let (sb, pb) = (src.as_bytes(), pat.as_bytes());
-        let (anchor, p0) = if pb.first() == Some(&b'^') { (true, 1) } else { (false, 0) };
-=======
         let max_n = arg(&a, 3)
             .as_num()
             .map_or(usize::MAX, |n| n.max(0.0) as usize);
@@ -448,7 +439,6 @@ pub fn open(vm: &mut Vm) {
         } else {
             (false, 0)
         };
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/stdlib.rs
         let mut m = crate::pattern::Matcher::new(sb, pb);
         let mut out: Vec<u8> = Vec::with_capacity(sb.len());
         let (mut at, mut n) = (0usize, 0usize);
@@ -475,17 +465,12 @@ pub fn open(vm: &mut Vm) {
                                 } else if d.is_ascii_digit() {
                                     let k = usize::from(d - b'1');
                                     match caps.get(k).copied() {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/stdlib.rs
-                                        Some(Capture::Span(x, y)) => out.extend_from_slice(&sb[x..y]),
-                                        Some(Capture::Position(p)) => out.extend_from_slice(p.to_string().as_bytes()),
-=======
                                         Some(Capture::Span(x, y)) => {
                                             out.extend_from_slice(&sb[x..y])
                                         }
                                         Some(Capture::Position(p)) => {
                                             out.extend_from_slice(p.to_string().as_bytes())
                                         }
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/stdlib.rs
                                         None => return Err(LuaError::new("invalid capture index")),
                                     }
                                 } else {
@@ -503,41 +488,17 @@ pub fn open(vm: &mut Vm) {
                         None
                     }
                     Value::Table(t) => {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/stdlib.rs
                         let key = captures_of(&src, &caps).into_iter().next().unwrap_or(Value::Nil);
                         Some(vm.index(&Value::Table(t.clone()), &key)?)
                     }
                     f @ (Value::Func(_) | Value::Native(_)) => {
                         Some(vm.call(f.clone(), captures_of(&src, &caps))?.into_iter().next().unwrap_or(Value::Nil))
-=======
-                        let key = captures_of(&src, &caps)
-                            .into_iter()
-                            .next()
-                            .unwrap_or(Value::Nil);
-                        Some(vm.index(&Value::Table(t.clone()), &key)?)
-                    }
-                    f @ (Value::Func(_) | Value::Native(_)) => Some(
-                        vm.call(f.clone(), captures_of(&src, &caps))?
-                            .into_iter()
-                            .next()
-                            .unwrap_or(Value::Nil),
-                    ),
-                    _ => {
-                        return Err(LuaError::new(
-                            "bad argument #3 to 'gsub' (string/function/table expected)",
-                        ));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/stdlib.rs
                     }
                     _ => return Err(LuaError::new("bad argument #3 to 'gsub' (string/function/table expected)")),
                 };
                 match value {
                     None => {}
                     Some(Value::Nil | Value::Bool(false)) => out.extend_from_slice(whole),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/stdlib.rs
-                    Some(v @ (Value::Str(_) | Value::Num(_))) => out.extend_from_slice(v.to_string().as_bytes()),
-                    Some(v) => {
-                        return Err(LuaError::new(format!("invalid replacement value (a {})", v.type_name())));
-=======
                     Some(v @ (Value::Str(_) | Value::Num(_))) => {
                         out.extend_from_slice(v.to_string().as_bytes())
                     }
@@ -546,7 +507,6 @@ pub fn open(vm: &mut Vm) {
                             "invalid replacement value (a {})",
                             v.type_name()
                         )));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/stdlib.rs
                     }
                 }
                 if e > at {
@@ -568,14 +528,10 @@ pub fn open(vm: &mut Vm) {
             }
         }
         out.extend_from_slice(&sb[at.min(sb.len())..]);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/stdlib.rs
-        Ok(vec![Value::str(&String::from_utf8_lossy(&out)), Value::Num(n as f32)])
-=======
         Ok(vec![
             Value::str(&String::from_utf8_lossy(&out)),
             Value::Num(n as f32),
         ])
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/stdlib.rs
     });
     let string_table = s.clone();
     g.borrow_mut().set_str("string", Value::Table(s));
@@ -757,7 +713,11 @@ pub fn open(vm: &mut Vm) {
     m.borrow_mut()
         .set_str("pi", Value::Num(std::f32::consts::PI));
     m.borrow_mut().set_str("huge", Value::Num(f32::INFINITY));
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/stdlib.rs
+    // modf(x): its whole part and its fraction (both with x's sign).
+    set(vm, &m, "modf", |_, a| {
+        let x = num(&a, 0, "modf")?;
+        Ok(vec![Value::Num(x.trunc()), Value::Num(x.fract())])
+    });
     g.borrow_mut().set_str("math", Value::Table(m));
 
     // ---- os (bo2mp: the clock; BO2's menus seed math.random with
@@ -771,12 +731,4 @@ pub fn open(vm: &mut Vm) {
     let start = std::time::Instant::now();
     set(vm, &o, "clock", move |_, _| Ok(vec![Value::Num(start.elapsed().as_secs_f32())]));
     g.borrow_mut().set_str("os", Value::Table(o));
-=======
-    // modf(x): its whole part and its fraction (both with x's sign).
-    set(vm, &m, "modf", |_, a| {
-        let x = num(&a, 0, "modf")?;
-        Ok(vec![Value::Num(x.trunc()), Value::Num(x.fract())])
-    });
-    g.borrow_mut().set_str("math", Value::Table(m));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/stdlib.rs
 }

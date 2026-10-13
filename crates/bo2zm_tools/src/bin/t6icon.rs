@@ -2,16 +2,12 @@
 //! `t6icon <material>...` looks each material up in Nuketown's zones
 //! (common_zm, zm_nuked, patch_zm) and prints its colour map's image: size,
 //! levels, and whether its pixels sit in an image pack or in the zone.
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6icon.rs
 //! `T6ICON_ZONES=common_mp,ui_mp` looks in those zones instead;
 //! `T6ICON_PNG=<dir>` also writes each pack image's top level there as
 //! `<image>.png` (RGBA), and its material's constants are printed.
 //! `T6ICON_DIR=<zone folder>` reads another install.
-=======
-//! `T6ICON_ZONES=zm_highrise,zm_highrise_patch` looks in those zones instead.
 //! A name that is a model prints its LOD0 surfaces: material, vertex count
 //! and the texcoord range (half2 @20 of each 32-byte vertex).
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6icon.rs
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -33,7 +29,6 @@ fn main() -> ExitCode {
         }
     };
     let zones: Vec<String> = std::env::var("T6ICON_ZONES").map_or_else(
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6icon.rs
         |_| ["common_zm", "zm_nuked", "patch_zm"].map(str::to_owned).to_vec(),
         |z| z.split(',').map(str::to_owned).collect(),
     );
@@ -65,15 +60,6 @@ fn main() -> ExitCode {
         }
         return ExitCode::SUCCESS;
     }
-=======
-        |_| {
-            ["common_zm", "zm_nuked", "patch_zm"]
-                .map(String::from)
-                .to_vec()
-        },
-        |v| v.split(',').map(String::from).collect(),
-    );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6icon.rs
     for zone in &zones {
         let capture = match capture_zone(&dir.join(format!("{zone}.ff"))) {
             Ok(c) => c,
@@ -124,7 +110,6 @@ fn main() -> ExitCode {
                 .technique_set
                 .and_then(|k| capture.technique_sets.get(k.index))
                 .map_or("", |t| t.name.as_str());
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6icon.rs
             println!("{zone} {} technique {techniques} constants {:?}", m.name, m.constants);
             // T6ICON_STATES=1: the draw state of every technique slot the material has.
             if std::env::var_os("T6ICON_STATES").is_some() {
@@ -134,27 +119,18 @@ fn main() -> ExitCode {
                     }
                 }
             }
-=======
-            println!("{zone} {} technique {techniques}", m.name);
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6icon.rs
             for t in &m.textures {
                 let Some(img) = t.image.and_then(|k| capture.images.get(k.index)) else {
                     continue;
                 };
                 let source = match packs.locate(img) {
                     Some(ImageSource::Pack(i, entry)) => {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6icon.rs
-                        if let Some(dir) = &png_dir
-                            && let Ok(bytes) = packs.packs[i].read(entry)
-                            && let Ok(iwi) = ipak_t6::parse_iwi(&bytes)
-                        {
-                            write_png(dir, &img.name, &iwi);
-                        }
-                        format!("pack {i}")
-=======
                         // What the pack hands over: the decoded size and format.
                         let iwi = packs.packs[i].read(entry).ok().and_then(|b| {
                             ipak_t6::parse_iwi(&b).ok().map(|w| {
+                                if let Some(dir) = &png_dir {
+                                    write_png(dir, &img.name, &w);
+                                }
                                 // Distinct 8-byte blocks in the top level: a blank
                                 // or placeholder level has a handful.
                                 let top = w.level(0);
@@ -173,7 +149,6 @@ fn main() -> ExitCode {
                             })
                         });
                         format!("pack {i} ({})", iwi.as_deref().unwrap_or("unreadable"))
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6icon.rs
                     }
                     Some(ImageSource::Embedded) => {
                         let e = img.embedded.as_ref().unwrap();
@@ -188,11 +163,7 @@ fn main() -> ExitCode {
                     None => "nowhere".to_owned(),
                 };
                 println!(
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6icon.rs
                     "  slot {:08x} semantic {} image {} (hash {:08x}, of name {:08x}) {}x{} levels {} streamed {} -> {source}",
-=======
-                    "  slot {:08x} semantic {} image {} {}x{} levels {} streamed {} -> {source}",
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6icon.rs
                     t.name_hash,
                     t.semantic,
                     img.name,
@@ -209,7 +180,6 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6icon.rs
 /// An image's top level as an RGBA PNG (BC1/BC2/BC3 and RGBA8 only).
 fn write_png(dir: &str, name: &str, iwi: &ipak_t6::IwiImage<'_>) {
     use ipak_t6::IwiFormat as F;
@@ -258,7 +228,9 @@ fn write_png(dir: &str, name: &str, iwi: &ipak_t6::IwiImage<'_>) {
             let _ = wr.write_image_data(&rgba);
         }
         println!("  wrote {} ({:?})", path.display(), iwi.format);
-=======
+    }
+}
+
 /// An IEEE half float.
 fn f16_to_f32(h: u16) -> f32 {
     let sign = if h & 0x8000 != 0 { -1.0 } else { 1.0 };
@@ -268,6 +240,5 @@ fn f16_to_f32(h: u16) -> f32 {
         0 => sign * frac * 2f32.powi(-24),
         31 => sign * f32::INFINITY,
         _ => sign * (1.0 + frac / 1024.0) * 2f32.powi(exp - 15),
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6icon.rs
     }
 }

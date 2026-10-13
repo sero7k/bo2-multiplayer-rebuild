@@ -212,15 +212,11 @@ pub fn parse(bytes: &[u8]) -> Result<Chunk, Error> {
     if bytes.get(..12) != Some(&HEADER[..]) {
         return Err(Error::Header);
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lib.rs
-    let mut r = Reader { b: bytes, o: 14, next: 0 };
-=======
     let mut r = Reader {
         b: bytes,
         o: 14,
         next: 0,
     };
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lib.rs
     let n = r.u32()? as usize;
     let mut types = Vec::with_capacity(n.min(64));
     for _ in 0..n {
@@ -371,15 +367,11 @@ pub fn disassemble_one(p: &Proto, out: &mut String) {
         p.stack,
         p.consts.len()
     );
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lib.rs
-    let k = |i: usize| p.consts.get(i).map_or_else(|| "?".to_owned(), ToString::to_string);
-=======
     let k = |i: usize| {
         p.consts
             .get(i)
             .map_or_else(|| "?".to_owned(), ToString::to_string)
     };
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lib.rs
     let rk = |i: u16| {
         if i >= 256 {
             k(usize::from(i - 256))
@@ -397,16 +389,6 @@ pub fn disassemble_one(p: &Proto, out: &mut String) {
             "SELF" => format!("r{a} = r{b}:{}", rk(c)),
             "GETTABLE" | "GETTABLE_S" | "GETTABLE_N" => format!("r{a} = r{b}[{}]", rk(c)),
             "SETTABLE" | "SETTABLE_S" | "SETTABLE_N" => format!("r{a}[r{b}] = {}", rk(c)),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lib.rs
-            "SETTABLE_BK" | "SETTABLE_S_BK" | "SETTABLE_N_BK" => format!("r{a}[{}] = {}", k(usize::from(b)), rk(c)),
-            "EQ" | "LT" | "LE" => format!("r{b} vs {}", rk(c)),
-            "EQ_BK" | "LT_BK" | "LE_BK" => format!("{} vs {}", k(usize::from(b)), rk(c)),
-            "JMP" | "FORPREP" | "FORLOOP" => format!("-> {}", i as i64 + 1 + i64::from(d.sbx)),
-            "CALL" | "CALL_I" | "CALL_C" | "CALL_M" | "CALL_I_R1" => format!("r{a}({} args) -> {}", i32::from(b) - 1, i32::from(c) - 1),
-            _ => String::new(),
-        };
-        let _ = write!(out, "  {i:4} {:<14} {:3} {:3} {:3}", op_name(d.op), d.a, d.b, d.c);
-=======
             "SETTABLE_BK" | "SETTABLE_S_BK" | "SETTABLE_N_BK" => {
                 format!("r{a}[{}] = {}", k(usize::from(b)), rk(c))
             }
@@ -444,7 +426,6 @@ pub fn disassemble_one(p: &Proto, out: &mut String) {
             d.b,
             d.c
         );
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lib.rs
         if !note.is_empty() {
             let _ = write!(out, "  ; {note}");
         }

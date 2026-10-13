@@ -215,17 +215,6 @@ fn entity_field(vm: &mut Vm<World>, world: &mut World, ent: &Value, name: &str, 
                 t += 300;
             }
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/clientfields.rs
-        // createzombieeyes / deletezombieeyes.
-        "zombie_has_eyes" => queue(
-            world,
-            n,
-            0,
-            Step::Bolt {
-                fx: EYE_GLOW,
-                tag: "j_eyeball_le",
-                stop: value == 0,
-=======
         // Mob: pose_dead_body (zm_prison_weap_quest.csc) keeps the body
         // for the wolf head that eats it.
         "make_client_clone" if value != 0 => super::prison_wolves::clone_body(world, n),
@@ -249,7 +238,6 @@ fn entity_field(vm: &mut Vm<World>, world: &mut World, ent: &Value, name: &str, 
             Step::At {
                 fx: GUTS_EXPLOSION,
                 offset: [0.0, 0.0, SPINE_LOWER],
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/clientfields.rs
             },
         ),
         // createzombieeyes / deletezombieeyes with level._override_eye_fx:

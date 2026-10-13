@@ -257,17 +257,14 @@ pub struct WeaponSelect {
 
     pub last_primary: u32,
     pub mapped_index: u32,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/client/runtime.rs
     /// bo2mp: Black Ops II's switchingToInventory: the inventory weapon was
     /// asked for and the player does not hold it yet.
     pub switching_to_inventory: bool,
-=======
 
     /// The last primary he held (BO2's `weaponLatestPrimary`).
     pub latest_primary: u32,
     /// The weapon he holds had nothing left in its clip or stock.
     pub held_empty: bool,
->>>>>>> /tmp/claude-0/zmhead/crates/net/src/client/runtime.rs
 }
 
 pub fn follow_held_weapon_select(
@@ -1110,7 +1107,6 @@ pub fn sample_client_input(
             input_iw4::set_ads(&mut actions.client, false);
         }
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/client/runtime.rs
     // bo2mp: Hybrid Optic: Hold Breath while aiming switches to the gun's
     // other optic (its alternate weapon, which stays aimed).
     // One tap, one switch: the press flag outlives a frame, so the switch
@@ -1148,8 +1144,6 @@ pub fn sample_client_input(
             }
         }
     }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/net/src/client/runtime.rs
     let cycles = std::mem::take(&mut actions.client.weapon_cycles);
     // bo2mp: the switch-weapon key (`+weapnext_inventory`, wheel up) is also
     // BO2's change seat button, on the press.
@@ -1190,7 +1184,6 @@ pub fn sample_client_input(
             look.kick_pending[axis] -= step as f32 / input_iw4::ANGLE2SHORT;
         }
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/client/runtime.rs
     // bo2mp: melee on a Variable Zoom scope changes the zoom, no knife.
     if look.melee_is_zoom {
         let melee = &mut actions.client.kb.melee;
@@ -1201,8 +1194,6 @@ pub fn sample_client_input(
             *melee = input_iw4::Kbutton::default();
         }
     }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/net/src/client/runtime.rs
     let mut cmd = build_usercmd(&mut actions, &look, 0);
     if cmd.buttons & playerstate_iw4::buttons::USE_RELOAD != 0
         && ps.is_some_and(|ps| ps.cursor_hint == 0)
@@ -1367,24 +1358,14 @@ fn melee_charge_target(
     // wins.
     let mut consider = |origin: [f32; 3]| {
         let delta = [
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/client/runtime.rs
-            other.origin[0] - ps.origin[0],
-            other.origin[1] - ps.origin[1],
-            other.origin[2] - ps.origin[2],
-=======
             origin[0] - ps.origin[0],
             origin[1] - ps.origin[1],
             origin[2] - ps.origin[2],
->>>>>>> /tmp/claude-0/zmhead/crates/net/src/client/runtime.rs
         ];
         if dot(delta, delta) > AIM_AUTOMELEE_RANGE * AIM_AUTOMELEE_RANGE {
             return;
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/client/runtime.rs
-        let center = [other.origin[0], other.origin[1], other.origin[2] + 36.0];
-=======
         let center = [origin[0], origin[1], origin[2] + 36.0];
->>>>>>> /tmp/claude-0/zmhead/crates/net/src/client/runtime.rs
         let to = [center[0] - eye[0], center[1] - eye[1], center[2] - eye[2]];
         let depth = dot(to, forward);
         if depth <= 1.0 {
@@ -1428,21 +1409,23 @@ fn melee_charge_target(
     }
     let (_, delta) = best?;
     let dist = dot(delta, delta).sqrt();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/net/src/client/runtime.rs
+    // bo2zm: in Zombies a target in reach always gets the stab (BO2 slashes
+    // only at nothing); one already inside melee range is lunged at just
+    // past it, a step the zombie's own body stops.
+    let zombies = snapshot.meta.script_dvars(local).string("bo2zm_zombies").is_some();
+    if zombies {
+        let dist = dist.max(movement_iw4::MELEE_CHARGE_PLAYER_MELEE_RANGE_DEFAULT + 1.0);
+        return Some((
+            math_iw4::vec_to_yaw(delta[0], delta[1]),
+            dist.min(255.0) as u8,
+        ));
+    }
+    // bo2mp: multiplayer keeps BO2's own rule: a target already inside
+    // melee range is not lunged at.
     if dist <= movement_iw4::MELEE_CHARGE_PLAYER_MELEE_RANGE_DEFAULT {
         return None;
     }
     Some((math_iw4::vec_to_yaw(delta[0], delta[1]), dist as u8))
-=======
-    // bo2zm: a target in reach always gets the stab (BO2 slashes only at
-    // nothing); one already inside melee range is lunged at just past it,
-    // a step the zombie's own body stops.
-    let dist = dist.max(movement_iw4::MELEE_CHARGE_PLAYER_MELEE_RANGE_DEFAULT + 1.0);
-    Some((
-        math_iw4::vec_to_yaw(delta[0], delta[1]),
-        dist.min(255.0) as u8,
-    ))
->>>>>>> /tmp/claude-0/zmhead/crates/net/src/client/runtime.rs
 }
 
 /// `yaw` is counterclockwise from map up.

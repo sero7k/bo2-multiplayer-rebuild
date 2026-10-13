@@ -138,13 +138,10 @@ pub(crate) fn update_iris(
     mut gaps: ResMut<HudPresentationGaps>,
     mut fill: ResMut<IrisLetterboxFill>,
     aim: Res<ViewweaponAim>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hud/src/iris.rs
     (t6_icons, mut t6_overlays): (
         Option<Res<assets::T6HudIcons>>,
         Local<Vec<(String, Handle<Image>)>>,
     ),
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/hud/src/iris.rs
     mut overlay: Query<
         (&mut Node, &mut ImageNode, &AdsIrisOverlay),
         (With<AdsIrisOverlay>, Without<AdsIrisLetterbox>),
@@ -231,23 +228,10 @@ pub(crate) fn update_iris(
         hide_letterbox(&mut letterbox);
         return;
     }
-    let Some(image_name) = weapons.0.overlay_image_of(viewmodel_index) else {
-        gaps.raise(GapCause::AdsOverlayNamesNoImage {
-            material: weapons
-                .0
-                .overlay_material_of(viewmodel_index)
-                .map(str::to_owned),
-        });
-        hide_overlay(&mut overlay);
-        hide_letterbox(&mut letterbox);
-        return;
-    };
-
     let weapon_ns = weapons
         .0
         .namespace_of(viewmodel_index)
         .unwrap_or(crate::images::HUD_CHROME_NAMESPACE);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hud/src/iris.rs
     let looked_up = if weapon_ns == asset_core::AssetNamespace::T6 {
         // bo2mp: a Black Ops II gun's scope picture is its overlay
         // material's colour map (`scope_overlay_svu` ->
@@ -289,16 +273,6 @@ pub(crate) fn update_iris(
             hide_letterbox(&mut letterbox);
             return;
         }
-=======
-    let Some(handle) = hud_images.get(weapon_ns, image_name, &mut images) else {
-        gaps.raise(GapCause::AdsOverlayImageMissing {
-            name: image_name.to_owned(),
-            miss: hud_images.miss_reason(),
-        });
-        hide_overlay(&mut overlay);
-        hide_letterbox(&mut letterbox);
-        return;
->>>>>>> /tmp/claude-0/zmhead/crates/hud/src/iris.rs
     };
     let image_name = image_name.as_str();
 
@@ -361,14 +335,10 @@ pub(crate) fn update_iris(
         f32::from(fill.rgba[2]) / 255.0,
         alpha,
     );
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hud/src/iris.rs
     let Some(image) = images.get(&handle) else {
         hide_letterbox(&mut letterbox);
         return;
     };
-=======
-    let image = images.get(&handle).expect("overlay image was loaded");
->>>>>>> /tmp/claude-0/zmhead/crates/hud/src/iris.rs
     let quad = layout.quads[0];
     // Back the outer texture texel and its linear-filter footprint with the frame fill.
     let frame_x = (quad.w * factor * 1.5 / image.width() as f32).ceil();
@@ -441,7 +411,6 @@ fn fill_for_overlay(
     fill.rgba = Some(rgba);
     Some(SampledFill { handle, rgba })
 }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hud/src/iris.rs
 
 /// bo2mp: a Black Ops II scope picture as a HUD image, kept on the CPU as
 /// well (the black surround is sampled from its pixels).
@@ -465,5 +434,3 @@ fn t6_overlay_handle(
     cache.push((key, handle.clone()));
     Some(handle)
 }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/hud/src/iris.rs

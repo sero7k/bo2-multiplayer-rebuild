@@ -288,15 +288,12 @@ pub(crate) fn finish_damage(
     if !bo2 {
         ps.damage_count = ps.damage_count.saturating_add(1);
         ps.damage_event = ps.damage_event.wrapping_add(1);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/script_player.rs
         // The HUD's damage direction: the hit's travel as a byte angle
         // (256 = a full turn), as Black Ops II sends it.
         if let Some(d) = dir.filter(|d| d[0] != 0.0 || d[1] != 0.0) {
             let yaw = math_iw4::vec_to_yaw(d[0], d[1]);
             ps.damage_yaw = ((yaw * 256.0 / 360.0) as u32) & 255;
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/script_player.rs
     }
     if ps.health > 0 {
         return Finish::Hurt;

@@ -704,6 +704,8 @@ impl Builder<'_> {
         let bone_names: Vec<String> = m.bone_names.iter().map(|&s| self.string(s)).collect();
         Some((
             asset_t6::XModelRef {
+                lighting_origin_offset: [0.0; 3],
+                lighting_origin_range: 0.0,
                 name: m.name.clone(),
                 numsurfs: m.numsurfs,
                 materials: m
@@ -890,6 +892,7 @@ impl Builder<'_> {
             bytes(a.indices).iter().map(|&b| u16::from(b)).collect()
         };
         Some(asset_t6::XAnimRef {
+                delta_quat: Vec::new(),
             name: a.name.trim_start_matches(',').to_owned(),
             numframes: a.numframes,
             framerate: a.framerate,

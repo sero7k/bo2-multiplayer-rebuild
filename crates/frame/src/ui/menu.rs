@@ -75,7 +75,6 @@ pub struct LuiMenus {
 #[derive(Resource, Clone, Copy, Default, Debug, PartialEq)]
 pub struct WorldBlur(pub f32);
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/frame/src/ui/menu.rs
 /// bo2mp: how many full-screen black dims an in-match menu has up over the
 /// world (the pause menu's, then a popup's on top). BO2 blends them in the
 /// target's gamma space; ours blend in linear light, which crushes the dark
@@ -90,7 +89,6 @@ pub struct WorldDim(pub f32);
 /// so what the HUD draws above the menus goes with them.
 #[derive(Resource, Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct MenuDims(pub u32);
-=======
 /// bo2zm: the full-screen filter a Black Ops II script turns on (its
 /// visionset manager's overlay; Mob's Afterlife is `zm_afterlife_filter`,
 /// drawn with `generic_filter_afterlife_alcatraz`): the filter's material
@@ -100,7 +98,6 @@ pub struct ScriptScreenFilter {
     pub material: Option<String>,
     pub amount: f32,
 }
->>>>>>> /tmp/claude-0/zmhead/crates/frame/src/ui/menu.rs
 
 /// bo2zm M4: a solo game paused by its pause menu: the server does not
 /// tick (as Black Ops II pauses a solo Zombies game).

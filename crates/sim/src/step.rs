@@ -402,7 +402,6 @@ fn run_players_system(ecs: &mut World) {
                     }),
                 feel,
             );
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
             // bo2mp: the Hybrid Optic's swap key is the sprint key; tapping it while aimed
             // must not drop ADS (it only swaps the sight).
             context.ads_intent.sprint_hold_ads = facts.is_some_and(|f| f.optic_switch);
@@ -416,11 +415,6 @@ fn run_players_system(ecs: &mut World) {
             crate::script_player::constrain_cmd(&mut world, *id, &mut cmd, feel.zombies);
             // bo2mp: a scorestreak switch the scripts would refuse never starts.
             crate::t6::gate_streak_switch(world.ecs(), id.0, &mut cmd);
-=======
-            crate::script::player_commands(world.ecs(), id.0, cmd.buttons, old_buttons);
-            let mut cmd = *cmd;
-            crate::script_player::constrain_cmd(&mut world, *id, &mut cmd, feel.zombies);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
             crate::script::select_location(world.ecs(), id.0, &mut cmd, old_buttons);
             if world
                 .client_meta(*id)
@@ -435,11 +429,8 @@ fn run_players_system(ecs: &mut World) {
             // bo2zm: the keys as sent, before the move holds any back.
             let sent_move = [cmd.forwardmove, cmd.rightmove];
             context.old_move = world.old_cmd_move(*id).unwrap_or([0, 0]);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
-=======
             // bo2zm: a brush hidden from this player does not stop him (BO2's
             // query_should_pass_gentity); it stops the others.
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
             let linked_brushes: Vec<LinkedBrushCollisionBrush> = world
                 .entity_collision_capabilities()
                 .iter()
@@ -499,8 +490,6 @@ fn run_players_system(ecs: &mut World) {
                 if ps.shellshock_time.wrapping_add(ps.shellshock_duration) < level_time {
                     ps.pm_flags &= !playerstate_iw4::pm_flags::SHELLSHOCKED;
                 }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
-=======
                 // bo2zm: a spot a hair inside a brush (Ascension's lift top is 0.1 above its
                 // spawn spots) leaves him unable to move; lift him the smallest step that clears.
                 let stuck_at = ps.origin;
@@ -510,7 +499,6 @@ fn run_players_system(ecs: &mut World) {
                 if ps.origin != stuck_at {
                     unstick_log(&backend, stuck_at, ps.origin);
                 }
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
                 // bo2zm: BO2 sets the walk speed every frame (move-faster +7%).
                 if let Some(speed) = movement_iw4::player_speed(ps, feel) {
                     ps.speed = speed;
@@ -2455,13 +2443,7 @@ fn clip_move_to_players(
 /// the game ran BO2's, and a dive jumped back on every correction.
 static HOST_FEEL: std::sync::Mutex<Option<movement_iw4::Bo2Feel>> = std::sync::Mutex::new(None);
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
 /// bo2zm: the Black Ops II movement rules, on in every game. Values the scripts set win over the defaults. `predicting` = this
-=======
-/// bo2zm: the Black Ops II movement rules, on in a Black Ops II game.
-/// `BO2_FEEL=mw2` turns them off (the old MW2 movement) for side-by-side
-/// clips. Values the scripts set win over the defaults. `predicting` = this
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
 /// is the local player's guess, not the game itself; `sent` = the rules the
 /// game sent in its last snapshot.
 fn bo2_feel(
@@ -2470,7 +2452,6 @@ fn bo2_feel(
     sent: Option<movement_iw4::Bo2Feel>,
 ) -> movement_iw4::Bo2Feel {
     // The Black Ops II scripts' own dvars (setdvar); none = no T6 game.
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
     // bo2mp: no Black Ops II scripts running: Black Ops II's own defaults
     // all the same (MW2's rules never apply).
     let defaults = || bo2_feel_with(&std::collections::HashMap::<String, String>::new(), omni_movement_setting());
@@ -2487,21 +2468,6 @@ fn bo2_feel(
             *f = Some(feel);
         }
         return feel;
-=======
-    let Some(t6) = ecs.get_resource::<crate::t6::T6Runtime>() else {
-        if predicting {
-            // The game's own rules first: a second PC has no scripts (it
-            // guessed with MW2's), and a game hosted here before may have
-            // left its rules behind.
-            return sent
-                .or_else(|| HOST_FEEL.lock().ok().and_then(|f| *f))
-                .unwrap_or(movement_iw4::Bo2Feel::IW4);
-        }
-        if let Ok(mut f) = HOST_FEEL.lock() {
-            *f = None;
-        }
-        return movement_iw4::Bo2Feel::IW4;
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
     };
     let feel = bo2_feel_from(t6);
     if !predicting && let Ok(mut f) = HOST_FEEL.lock() {
@@ -2510,7 +2476,6 @@ fn bo2_feel(
     feel
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
 /// bo2mp: the MW2 rule set is gone (`BO2_FEEL=mw2` no longer exists):
 /// every game plays by Black Ops II's.
 pub(crate) fn bo2_feel_mw2() -> bool {
@@ -2522,19 +2487,6 @@ pub(crate) fn bo2_feel_mw2() -> bool {
 static OMNI_SETTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// bo2zm: the "Omni Movement" setting; the next game started here reads it.
-=======
-/// bo2zm: `BO2_FEEL=mw2`: the old MW2 rules in a Black Ops II game.
-pub(crate) fn bo2_feel_mw2() -> bool {
-    static MW2: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *MW2.get_or_init(|| std::env::var("BO2_FEEL").is_ok_and(|v| v.eq_ignore_ascii_case("mw2")))
-}
-
-/// bo2zm: his Controls setting "Omni Movement" (a tester 10-10: off by
-/// default, an option in the Controls menu for whoever wants it).
-static OMNI_SETTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// bo2zm: his "Omni Movement" setting; the next game started here reads it.
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
 pub fn set_omni_movement(on: bool) {
     OMNI_SETTING.store(on, std::sync::atomic::Ordering::Relaxed);
 }
@@ -2544,7 +2496,6 @@ pub(crate) fn omni_movement_setting() -> bool {
     OMNI_SETTING.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
 /// A dvar's number by its name in any case (the lower-case key the VM
 /// stores first, then the name as written).
 fn dvar_number<S: std::hash::BuildHasher>(
@@ -2575,22 +2526,6 @@ fn bo2_feel_with<S: std::hash::BuildHasher>(
     // default.
     let number = |name: &str, default: f32| dvar_number(dvars, name).unwrap_or(default);
     let zombies = dvars
-=======
-fn bo2_feel_from(t6: &crate::t6::T6Runtime) -> movement_iw4::Bo2Feel {
-    if bo2_feel_mw2() {
-        return movement_iw4::Bo2Feel::IW4;
-    }
-    let number = |name: &str, default: f32| {
-        t6.vm
-            .dvars
-            .get(name)
-            .and_then(|v| v.trim().parse::<f32>().ok())
-            .unwrap_or(default)
-    };
-    let zombies = t6
-        .vm
-        .dvars
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
         .get("mapname")
         .is_some_and(|m| m.starts_with("zm_"));
     movement_iw4::Bo2Feel {
@@ -2625,15 +2560,9 @@ fn bo2_feel_from(t6: &crate::t6::T6Runtime) -> movement_iw4::Bo2Feel {
         ducked_sprint_cycle_scale: 1.0,
         dtp_cycle_scale: 1.0,
         // BO2 sprints forward only (forwardmove above
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
         // player_sprintForwardMinimum); off by default, the
         // Controls menu's "Omni Movement" turns it on (read at game start).
         omni,
-=======
-        // player_sprintForwardMinimum); a tester 10-10: off by default, his
-        // Controls menu's "Omni Movement" turns it on (read at game start).
-        omni: t6.omni,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs
         // Low climbs keep the gun in hand (defaults until real BO2 is read).
         mantle_weapon_height: number("mantle_weapon_height", 39.0),
         mantle_weapon_anim_height: number("mantle_weapon_anim_height", 32.0),
@@ -2836,7 +2765,6 @@ mod fall_damage_tests {
         assert_eq!(fall_damage(250, 150), 165);
     }
 }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/step.rs
 
 #[cfg(test)]
 mod body_clip_tests {
@@ -2930,5 +2858,3 @@ mod dvar_case_tests {
         assert_eq!(dvar_number(&dvars, "bg_gravity"), Some(600.0));
     }
 }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/step.rs

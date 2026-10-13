@@ -85,11 +85,7 @@ pub(crate) fn update(
     let entity = crate::backend::spawn_loop(
         &mut commands,
         handle,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/audio/src/zm_music.rs
-        Volume::Linear(volume),
-=======
         Volume::Linear(volume * crate::bus_gain::music()),
->>>>>>> /tmp/claude-0/zmhead/crates/audio/src/zm_music.rs
         epoch.0,
         AudioScope::Match,
     );

@@ -95,11 +95,7 @@ impl Movers {
             if rot {
                 m.rot = None;
             }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/movers.rs
-            if m.pos.is_none() && m.rot.is_none() && m.gravity.is_none() {
-=======
             if m.pos.is_none() && m.rot.is_none() && m.gravity.is_none() && m.vibe.is_none() {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/movers.rs
                 self.list.remove(&n);
             }
         }
@@ -219,9 +215,6 @@ pub(crate) fn advance(world: &mut World, now: i64) {
                     done.push((n, "rotatedone"));
                 }
             }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/movers.rs
-            if m.pos.is_none() && m.rot.is_none() && m.gravity.is_none() {
-=======
             if let Some(v) = &m.vibe {
                 let t = now - v.start_ms;
                 if t >= v.dur_ms {
@@ -234,7 +227,6 @@ pub(crate) fn advance(world: &mut World, now: i64) {
                 }
             }
             if m.pos.is_none() && m.rot.is_none() && m.gravity.is_none() && m.vibe.is_none() {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/movers.rs
                 finished.push(n);
             }
         }

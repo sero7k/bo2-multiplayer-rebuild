@@ -351,12 +351,9 @@ fn main() {
                         for f in 0..a.numframes {
                             let t = f32::from(f) / a.framerate.max(1.0);
                             let s = clip.sample_track(track, t);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6bones.rs
                             if let Some(v) = s.and_then(|s| s.translation) {
                                 println!("  {bone} frame {f:2}: trans ({:.3} {:.3} {:.3})", v[0], v[1], v[2]);
                             }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6bones.rs
                             if let Some(q) = s.and_then(|s| s.rotation) {
                                 let [x, y, z, w] = [q[0], q[1], q[2], q[3]];
                                 // The bone's axes in its parent's space; each

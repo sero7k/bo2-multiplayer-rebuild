@@ -30,15 +30,12 @@ pub use asset_graph::{
 pub use fastfile_iw4::GlyphCapture;
 pub use gltf_export::{GltfExportSummary, export_prepared_world_gltf};
 pub use iwd::{IwdSoundIndex, NamespaceSoundIwd, NamespaceTree, NamespaceTrees};
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lib.rs
 pub use lane::{check_iw4_map, CommonCensus, LANE_GAPS, LaneGap, LoadedWorld, ZoneLane, lane};
 // bo2mp lane C: the multiplayer front end (no map).
 pub use lane::t6_frontend::{T6Frontend, load_t6_frontend, load_t6_zm_pictures, plain_rgba8};
-=======
-pub use lane::{
-    CommonCensus, LANE_GAPS, LaneGap, LoadedWorld, T6Frontend, ZoneLane, lane, load_t6_frontend,
-};
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lib.rs
+// bo2zm M4: the Zombies front end (no map), a Resource kept for the run;
+// renamed here so it sits beside the multiplayer front end.
+pub use lane::{T6Frontend as T6ZmFrontend, load_t6_frontend as load_t6_zm_frontend};
 pub use lane_capability::{LaneStatus, PreparedCapability, lane_status};
 pub use lighting_iw4::MODEL_LIGHTING_TILE_BYTES;
 pub use loading_screen::{LoadingPreviewSource, LoadingScreen};
@@ -52,12 +49,8 @@ pub use prepared::{
     MapFacts, MatchMaterials, MatchType10SoundHints, PreparedBodies, PreparedBodyClips,
     PreparedDestructibleDeath, PreparedFpvMeshes, PreparedGaps, PreparedLocalizedStrings,
     PreparedMap, PreparedProjectileMeshes, PreparedWeapons, PreparedWorldWeapons, PreparedXAnims,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/lib.rs
-    PreparedXModelWalkCensus, SessionCompass, T6HudFont, T6HudFonts, T6HudIcons, T6Ui,
-=======
     PreparedXModelWalkCensus, SessionCompass, T6HudFont, T6HudFonts, T6HudIcons, T6ScreenFilter,
     T6ScreenFilters, T6Ui,
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/lib.rs
 };
 pub use session_load::{
     check_guest_guns, MatchLoadOutcome, MatchMaterialSeed, PreparedMatch, PreparedWorld, ShellCommon,

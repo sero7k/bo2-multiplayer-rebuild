@@ -16,24 +16,21 @@
 struct T6Lighting {
     // xyz: direction to the sun; w: exposure scale.
     sun_dir_exposure: vec4<f32>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
     // rgb: sun colour.
-=======
-    // rgb: sun colour; w: the vision's saturation.
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
     sun_color: vec4<f32>,
     // The sky's rotation (x, y, z of skyBoxRotation) and brightness (w,
     // negative when z flips).
     sky: vec4<f32>,
-    // The sky's skyColorParm x (above 0: the cube is rgb / a, else rgb^2)
-    // and w (the share of the fog it takes).
+    // bo2zm: the sky's skyColorParm x (above 0: the cube is rgb / a, else
+    // rgb^2) and w (the share of the fog it takes).
     sky_parms: vec4<f32>,
-    // The vision's colour grade (see bo2_final): tone band slopes and
+    // bo2zm: the vision's colour grade (see bo2_final): tone band slopes and
     // offsets, the red, green and blue rows of the shadow, mid and highlight
     // matrices, then gamma, saturation (luma weights, amount) and blend.
+    // Identity on a multiplayer map (its grade is bo2_bloom's final pass).
     grade: array<vec4<f32>, 14>,
-    // The world's colour tables drawn (see world_lut): the first rows of
-    // tables A and B, A's weight, and 1 when the map has them.
+    // bo2zm: the world's colour tables drawn (see world_lut): the first rows
+    // of tables A and B, A's weight, and 1 when the map has them.
     lut: vec4<f32>,
 }
 // The map's primary lights, four vec4 each: origin and type (1 sun, 2 spot,
@@ -55,7 +52,6 @@ struct T6DynLights {
     v: array<vec4<f32>, 32>,
 }
 @group(2) @binding(4) var<uniform> t6_dyn: T6DynLights;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
 // bo2mp: Black Ops II's sun shadow partitions (near, far), read with a
 // compare sampler: each one's clip-from-world, then (on, near texel, far
 // texel, depth range), sizes in world units.
@@ -67,11 +63,10 @@ struct SunShadow {
 @group(2) @binding(5) var sun_shadow_map: texture_depth_2d_array;
 @group(2) @binding(6) var sun_shadow_sampler: sampler_comparison;
 @group(2) @binding(7) var<uniform> sun_shadow: SunShadow;
-=======
-// The world's colour tables (`GfxWorld::lutMaterial`).
-@group(2) @binding(5) var t6_lut: texture_2d<f32>;
-@group(2) @binding(6) var t6_lut_sampler: sampler;
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
+// bo2zm: the world's colour tables (`GfxWorld::lutMaterial`; a 1x1 white
+// texel without them).
+@group(2) @binding(8) var t6_lut: texture_2d<f32>;
+@group(2) @binding(9) var t6_lut_sampler: sampler;
 
 // bo2zm: Black Ops II's lit shaders add such lights ("glights", the lmap
 // pixel shaders' combined_glight path) as colour * saturate(1 - d /
@@ -248,29 +243,25 @@ fn raw_texel(c: vec3<f32>) -> vec3<f32> {
 
 // bo2zm: Black Ops II's final image, after its surface shaders: the game's
 // resolve rolls highlights off above 0.75 (hdr_bloom_apply: 0.75 + 0.25 *
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
 // (1 - 2^(-5.77 * (x - 0.75)))), here, so the 8-bit frame keeps them. The
-// final pass (bo2_bloom) undoes it, adds bloom, rolls off again and looks
-// the frame up in the map's colour table (its vision file and lut image).
+// final pass (bo2_bloom) undoes it, adds bloom, rolls off again and, on a
+// multiplayer map, looks the frame up in the map's colour table (its vision
+// file and lut image). bo2zm: on a Zombies map the world's colour tables and
+// the vision's grade (scripts switch visions) are applied here instead.
 fn bo2_final(encoded: vec3<f32>) -> vec3<f32> {
-    let rolled = 0.75 + 0.25 * (1.0 - exp2(-5.77078 * (encoded - 0.75)));
-    return max(select(encoded, rolled, encoded > vec3(0.75)), vec3(0.0));
-=======
-// (1 - 2^(-5.77 * (x - 0.75)))), then its colour table (built by
-// hdr_create_lut2dv from the map's vision) grades it: three tone bands by
-// the display value's luma, smoothstepped and summing to 1, weight a shadow,
-// a mid and a highlight matrix on the linear colour; then the vision's gamma
-// (vc_FGM), its desaturation with the Rec. 709 weights (vc_FSM; Nuketown
-// 0.8535, Origins 0.9082) and how much of it is kept (vc_FBM). Bloom is not
-// drawn.
-fn bo2_final(encoded: vec3<f32>, l: T6Lighting) -> vec3<f32> {
-    return bo2_grade(world_lut(t6_lut, t6_lut_sampler, bo2_rolloff(encoded), l.lut), l);
+    return bo2_finish(bo2_rolloff(encoded), t6, t6_lut, t6_lut_sampler);
 }
 
 // bo2zm: the highlights' roll-off above 0.75 (gamma-encoded).
 fn bo2_rolloff(encoded: vec3<f32>) -> vec3<f32> {
     let rolled = 0.75 + 0.25 * (1.0 - exp2(-5.77078 * (encoded - 0.75)));
-    return select(encoded, rolled, encoded > vec3(0.75));
+    return max(select(encoded, rolled, encoded > vec3(0.75)), vec3(0.0));
+}
+
+// bo2zm: a rolled-off colour through the world's colour table and the
+// vision's grade (both identity on a multiplayer map).
+fn bo2_finish(rolled: vec3<f32>, l: T6Lighting, lut: texture_2d<f32>, s: sampler) -> vec3<f32> {
+    return bo2_grade(world_lut(lut, s, rolled, l.lut), l);
 }
 
 // bo2zm: the world's colour table, looked up before the vision grade (the
@@ -320,17 +311,13 @@ fn bo2_grade(x: vec3<f32>, l: T6Lighting) -> vec3<f32> {
     let luma = dot(graded, g[12].xyz);
     let toned = vec3(luma) + g[12].w * (graded - vec3(luma));
     return sqrt(saturate(lin + g[13].xyz * (toned - lin)));
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
 }
 
 // bo2zm: what every lit and unlit Black Ops II shader writes: the colour
 // times the exposure (`hdrControl0.x`), square-rooted; the colour target
 // holds gamma-encoded values. Then the game's final image steps.
 fn bo2_out(colour: vec3<f32>) -> vec3<f32> {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
     return bo2_final(sqrt(max(colour * t6.sun_dir_exposure.w, vec3(0.0))));
-=======
-    return bo2_final(sqrt(max(colour * t6.sun_dir_exposure.w, vec3(0.0))), t6);
 }
 
 // bo2zm A7: what an additive draw adds: the final image of its colour less
@@ -338,18 +325,17 @@ fn bo2_out(colour: vec3<f32>) -> vec3<f32> {
 // its own, each additive quad added the grade's black (Nuketown's shadow
 // matrix biases, about 3/8/16 of 255) over its whole square: pale-blue
 // rectangles round the fires and the light shafts.
-fn bo2_added(encoded: vec3<f32>, l: T6Lighting) -> vec3<f32> {
-    return max(bo2_final(encoded, l) - bo2_final(vec3(0.0), l), vec3(0.0));
+fn bo2_added(encoded: vec3<f32>) -> vec3<f32> {
+    return max(bo2_final(encoded) - bo2_final(vec3(0.0)), vec3(0.0));
 }
 
 // bo2zm: an unlit surface's output (additive ones add no black, above).
 fn unlit_out(colour: vec3<f32>) -> vec3<f32> {
 #ifdef ADD
-    return bo2_added(sqrt(max(colour * t6.sun_dir_exposure.w, vec3(0.0))), t6);
+    return bo2_added(sqrt(max(colour * t6.sun_dir_exposure.w, vec3(0.0))));
 #else
     return bo2_out(colour);
 #endif
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
 }
 
 // bo2zm: the map's fog as the game's shaders apply it (vertex shaders of
@@ -398,7 +384,6 @@ fn fog_apply(
     if (a.w < 0.5) {
         return colour;
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
     let f = fog_at(p, a, c, s, e, q);
     return mix(colour, f.tint, f.fog * f.opacity);
 }
@@ -418,20 +403,12 @@ fn fog_at(
     e: vec4<f32>,
     q: vec4<f32>,
 ) -> FogAt {
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
     let eye = view.world_position;
     let d = distance(p, eye);
     let mean = fog_mean(eye.z, p.z, c.w, e.w) * fog_ln2(e.w);
     let fog = 1.0 - min(exp2(-(mean * d - a.x) / max(a.y, 1.0)), 1.0);
     let t = saturate(q.y * dot(e.xyz, (p - eye) / max(d, 0.0001)) + q.x);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
     return FogAt(mix(c.rgb, s.rgb, t), fog, mix(a.z, s.w, t));
-=======
-    let tint = mix(c.rgb, s.rgb, t);
-    let opacity = mix(a.z, s.w, t);
-    return mix(colour, tint, fog * opacity);
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
 }
 
 // bo2zm: the fog as Black Ops II's effect vertex shaders hand it on: the
@@ -467,6 +444,19 @@ fn bo2_fog(colour: vec3<f32>, p: vec3<f32>) -> vec3<f32> {
         t6_lights.v[1031u],
         t6_lights.v[1024u],
     );
+}
+
+// bo2zm: an unlit surface's fog. Additive ones fade toward black by the
+// fog's keep factor (going toward the fog colour would add it over the
+// whole surface: Tranzit's 4000-unit fire glow cards lit the town's skyline
+// and the power station's window in bright rectangles); the rest go toward
+// the fog colour.
+fn unlit_fog(colour: vec3<f32>, p: vec3<f32>) -> vec3<f32> {
+#ifdef ADD
+    return colour * sqrt(effect_fog(p).w);
+#else
+    return bo2_fog(colour, p);
+#endif
 }
 
 // bo2zm: the direct light of primary light `index` at `p` with normal `n`,
@@ -577,11 +567,7 @@ fn fragment_textured(in: VertexOut) -> @location(0) vec4<f32> {
 #else
     let c = texel * in.color.rgb;
     return vec4(
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
-        bo2_out(bo2_fog(c * c * f32(#{UNLIT_SCALE}), in.world_position)),
-=======
         unlit_out(unlit_fog(c * c * f32(#{UNLIT_SCALE}), in.world_position)),
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
         albedo.a * in.color.a,
     );
 #endif
@@ -593,7 +579,6 @@ fn fragment_textured(in: VertexOut) -> @location(0) vec4<f32> {
 #endif
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
 #ifdef FLOW
 // bo2mp: Black Ops II's emissive flow (`cod7emissiveflow`, the molten
 // lava; its lit technique, fxc disassembly). The specular map holds its
@@ -665,20 +650,7 @@ fn bo2_flow(
     let fglow = fr2.rgb * fc6.rgb * fnv + fr2.rgb * fc7.rgb;
     return flit + fglow;
 }
-=======
-// bo2zm: an unlit surface's fog. Additive ones fade toward black by the
-// fog's keep factor (going toward the fog colour would add it over the
-// whole surface: Tranzit's 4000-unit fire glow cards lit the town's skyline
-// and the power station's window in bright rectangles); the rest go toward
-// the fog colour.
-fn unlit_fog(colour: vec3<f32>, p: vec3<f32>) -> vec3<f32> {
-#ifdef ADD
-    return colour * sqrt(effect_fog(p).w);
-#else
-    return bo2_fog(colour, p);
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
 #endif
-}
 
 // bo2zm: Black Ops II's lit world colour, as its lightmap shaders compute it
 // (pimp_shader_lmap_*, read from the game's own shader code): the colour
@@ -702,13 +674,7 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
     // Layered materials: the vertex colour is the layer weights (green
     // layer 1, blue layer 2), not a tint. As the game's layer shaders: a
     // blend layer mixes in by its alpha times its weight, a multiply layer
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
     // scales by 1 + weight * (layer - 1); all on raw texels, then squared.
-=======
-    // scales by 1 + weight * (layer - 1), a tested layer replaces the colour
-    // where alpha times weight >= 0.5, an add layer adds layer * alpha *
-    // weight; all on raw texels, then squared.
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
     var c = texel;
 #ifdef LAYERS
 #ifdef LAYER1_BLEND
@@ -719,14 +685,6 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
     let m1 = raw_texel(textureSample(colour_map1, colour_sampler, in.layer_uv.xy).rgb);
     c = c * (1.0 + in.color.g * (m1 - 1.0));
 #endif
-#ifdef LAYER1_TESTED
-    let t1 = textureSample(colour_map1, colour_sampler, in.layer_uv.xy);
-    c = select(c, raw_texel(t1.rgb), t1.a * in.color.g >= 0.5);
-#endif
-#ifdef LAYER1_ADD
-    let a1 = textureSample(colour_map1, colour_sampler, in.layer_uv.xy);
-    c = c + raw_texel(a1.rgb) * a1.a * in.color.g;
-#endif
 #ifdef LAYER2_BLEND
     let l2 = textureSample(colour_map2, colour_sampler, in.layer_uv.zw);
     c = mix(c, raw_texel(l2.rgb), l2.a * in.color.b);
@@ -735,7 +693,6 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
     let m2 = raw_texel(textureSample(colour_map2, colour_sampler, in.layer_uv.zw).rgb);
     c = c * (1.0 + in.color.b * (m2 - 1.0));
 #endif
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
     // bo2mp: a test layer (`t1c1`, the `lit_sm_*_t1c1n1` pixel shader):
     // the layer replaces the colour where its alpha times its weight is at
     // least one half (its normal map is not drawn).
@@ -748,11 +705,6 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
 #ifdef LAYER1_ADD
     let a1 = textureSample(colour_map1, colour_sampler, in.layer_uv.xy);
     c = c + raw_texel(a1.rgb) * a1.a * in.color.g;
-=======
-#ifdef LAYER2_TESTED
-    let t2 = textureSample(colour_map2, colour_sampler, in.layer_uv.zw);
-    c = select(c, raw_texel(t2.rgb), t2.a * in.color.b >= 0.5);
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
 #endif
 #ifdef LAYER2_ADD
     let a2 = textureSample(colour_map2, colour_sampler, in.layer_uv.zw);
@@ -832,7 +784,6 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
     let directional = page1.rgb / (page1.a + 0.000001);
     let dir = page2.rgb * 2.0 - 1.0;
 #ifdef SHINE
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
 #ifdef FLOW
     // bo2mp: Black Ops II's emissive flow (`bo2_flow`).
     return vec4(
@@ -916,8 +867,6 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
     let wout = wsolid + wadd / max(wa, 0.05);
     return vec4(bo2_out(bo2_fog(wout, in.world_position)), wa);
 #endif
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
     // bo2zm: Black Ops II's lit world shader (`wpc_lit_sm_r0c0n0s0`, its
     // sun-shadow technique, from the fxc disassembly), with the lightmap's
     // baked sun visibility (page 2 alpha) for its shadow map.
@@ -1220,11 +1169,7 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
 #ifdef EFFECT_ADD
     // Additive ones take no fog (it would add the fog colour over the whole
     // quad); the blend scales the colour by the alpha.
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
-    return vec4(bo2_final(texel * tint), a);
-=======
-    return vec4(bo2_added(texel * tint, t6), a);
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
+    return vec4(bo2_added(texel * tint), a);
 #else
 #ifdef EFFECT_MULTIPLY
     return vec4(mix(vec3(1.0), texel * tint, a), a);
@@ -1232,11 +1177,7 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
     // Blended ones go toward the effect fog by its keep factor.
     let fx_fog = effect_fog(in.world_position);
     let fx = mix(fx_fog.rgb, texel * tint, fx_fog.w);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
     return vec4(bo2_final(fx), a);
-=======
-    return vec4(bo2_final(fx, t6), a);
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
 #endif
 #endif
 #else
@@ -1258,9 +1199,6 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
         discard;
     }
     return vec4(
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
-        bo2_out(bo2_fog(c * c * f32(#{UNLIT_SCALE}), in.world_position)),
-=======
         unlit_out(unlit_fog(texel * texel * in.primary.x, in.world_position)),
         sheet_a,
     );
@@ -1276,7 +1214,6 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
     }
     return vec4(
         unlit_out(unlit_fog(c * c * f32(#{UNLIT_SCALE}), in.world_position)),
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
         albedo.a * in.color.a,
     );
 #endif
@@ -1286,7 +1223,6 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
     // again, so divide it out here.
     let exposure = max(t6.sun_dir_exposure.w, 0.000001);
     var light = in.light.rgb / exposure;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
 #ifdef FOLIAGE
     // bo2mp: Black Ops II's foliage (`mc_treecanopy`, fxc disassembly): the
     // vertex colour's rgb picks the wind variant and its alpha scales the
@@ -1294,9 +1230,8 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
     light *= in.color.a;
     let tinted = texel;
 #else
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
     let tinted = texel * in.color.rgb;
+#endif
     var base = tinted * tinted;
     if (in.light.w > 0.0) {
         light = in.color.rgb * in.color.rgb * 32.0;
@@ -1318,7 +1253,6 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
     let tg = dp2perp * duv1.x + dp1perp * duv2.x;
     let bt = dp2perp * duv1.y + dp1perp * duv2.y;
     let frame = inverseSqrt(max(max(dot(tg, tg), dot(bt, bt)), 1e-20));
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
 #ifdef FLOW
     // bo2mp: a lava prop (`mc_cod7emissiveflow`), as the world's.
     return vec4(bo2_out(bo2_flow(in.uv, in.color, vn, tg * frame, bt * frame, in.world_position)), 1.0);
@@ -1392,8 +1326,6 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
     glight += dyn_lights(in.world_position, vn);
     return vec4(bo2_out(bo2_fog(gcol * gcol * glight, in.world_position)), 1.0);
 #endif
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
     let nm = textureSample(normal_map, colour_sampler, in.uv).xy * 4.015748 - 2.015748;
     let n = normalize(nm.x * tg * frame + nm.y * bt * frame + vn);
     let spec_tex = textureSample(specular_map, colour_sampler, in.uv);
@@ -1459,22 +1391,19 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
 // (reverse-Z: depth 0, drawn only where nothing else is), sampling the
 // sky's cube map by view direction as the game's skycubemaphdr shader does
 // (world x, y, z; rgb / a), times its brightness, then the BO2 output (times
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
 // the exposure, square-rooted). bo2mp: its fog as that shader applies it:
 // the pixel shader works the fog out again and multiplies it by the vertex
 // shader's fog times opacity, so the sky fogs by fog^2 * opacity. Its
 // skyColorMultiplier (GfxWorld::skyDynIntensity, factors 1 on both
 // Nuketowns) and colour matrix (identity) change nothing.
-=======
-// the exposure, square-rooted). Its fog is not applied.
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
 @group(1) @binding(3) var sky_map: texture_cube<f32>;
 @group(1) @binding(4) var sky_sampler: sampler;
 @group(1) @binding(5) var<uniform> sky_t6: T6Lighting;
 // bo2zm: the light table again, for the sky fog (slots 256, 257).
 @group(1) @binding(6) var<uniform> sky_lights: T6Lights;
-@group(1) @binding(10) var sky_lut: texture_2d<f32>;
-@group(1) @binding(11) var sky_lut_sampler: sampler;
+// bo2zm: the world's colour tables, for the sky's final colour.
+@group(1) @binding(12) var sky_lut: texture_2d<f32>;
+@group(1) @binding(13) var sky_lut_sampler: sampler;
 
 struct SkyOut {
     @builtin(position) clip_position: vec4<f32>,
@@ -1501,40 +1430,25 @@ fn fragment_sky(in: SkyOut) -> @location(0) vec4<f32> {
     let z = select(dir.z, -dir.z, r.w < 0.0);
     let lookup = vec3(dir.x * r.y + dir.y * r.z, dir.x * r.x + dir.y * r.y, z);
     let texel = textureSample(sky_map, sky_sampler, lookup);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
-    let sky = texel.rgb / (texel.a + 0.000001) * abs(r.w);
-    // The game puts the sky 2e7 units out and fogs it there (scaled by its
-    // skyColorParm w, 1 on Nuketown).
-    var fogged = sky;
-    if (sky_lights.v[124u].w >= 0.5) {
-        let f = fog_at(
-            view.world_position + dir * 20000000.0,
-            sky_lights.v[124u],
-            sky_lights.v[125u],
-            sky_lights.v[126u],
-            sky_lights.v[127u],
-            sky_lights.v[120u],
-        );
-        fogged = mix(sky, f.tint, f.fog * f.fog * f.opacity);
-    }
-    return vec4(bo2_final(sqrt(max(fogged * sky_t6.sun_dir_exposure.w, vec3(0.0)))), 1.0);
-=======
+    // bo2zm: its skyColorParm x picks how the cube is stored (above 0: rgb /
+    // a, else rgb^2).
     let parms = sky_t6.sky_parms;
     let decoded = select(texel.rgb * texel.rgb, texel.rgb / (texel.a + 0.000001), parms.x > 0.0);
     let sky = decoded * abs(r.w);
     // The game puts the sky 2e7 units out and fogs it there, taking only
     // its skyColorParm w of the fog (1 on most maps, Buried 0.16).
-    let full = fog_apply(
-        sky,
-        view.world_position + dir * 20000000.0,
-        sky_lights.v[1028u],
-        sky_lights.v[1029u],
-        sky_lights.v[1030u],
-        sky_lights.v[1031u],
-        sky_lights.v[1024u],
-    );
-    let fogged = mix(sky, full, parms.y);
+    var fogged = sky;
+    if (sky_lights.v[1028u].w >= 0.5) {
+        let f = fog_at(
+            view.world_position + dir * 20000000.0,
+            sky_lights.v[1028u],
+            sky_lights.v[1029u],
+            sky_lights.v[1030u],
+            sky_lights.v[1031u],
+            sky_lights.v[1024u],
+        );
+        fogged = mix(sky, f.tint, f.fog * f.fog * f.opacity * parms.y);
+    }
     let sky_x = bo2_rolloff(sqrt(max(fogged * sky_t6.sun_dir_exposure.w, vec3(0.0))));
-    return vec4(bo2_grade(world_lut(sky_lut, sky_lut_sampler, sky_x, sky_t6.lut), sky_t6), 1.0);
->>>>>>> /tmp/claude-0/zmhead/crates/render_gpu/src/drawsurf/geometry_diagnostic.wgsl
+    return vec4(bo2_finish(sky_x, sky_t6, sky_lut, sky_lut_sampler), 1.0);
 }

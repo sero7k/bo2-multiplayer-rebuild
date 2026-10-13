@@ -29,12 +29,7 @@ fn main() -> ExitCode {
         .find(|a| !a.starts_with("--"))
         .cloned()
         .unwrap_or_else(|| DEFAULT_BO2.to_owned());
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
     let want = |flag: &str| args.iter().any(|a| a == flag) || !args.iter().any(|a| a.starts_with("--"));
-=======
-    let want =
-        |flag: &str| args.iter().any(|a| a == flag) || !args.iter().any(|a| a.starts_with("--"));
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
     let root = PathBuf::from(root);
     let mut captures = Vec::new();
     // T6M2_ZONES=a,b: other zones (e.g. the campaign's `common`).
@@ -89,7 +84,6 @@ fn main() -> ExitCode {
             }
         }
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
     // T6M2_NOTES=a,b: the notetracks of every animation whose name starts
     // with one of the prefixes.
     if let Ok(prefixes) = std::env::var("T6M2_NOTES") {
@@ -100,8 +94,6 @@ fn main() -> ExitCode {
             println!("notes {n}: {:?}", anims[n].notifies);
         }
     }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
     if want("--weapons") {
         weapons_report(&captures, &models, &anims, &fx);
     }
@@ -136,7 +128,6 @@ fn weapons_report(
     for (name, w) in &weapons {
         let gun = w.gun_models.first().cloned().unwrap_or_default();
         let hand = w.def_model(d::handXModel).to_owned();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
         // T6M2_SOUNDS=a,b: the named weapons' sound fields.
         if std::env::var("T6M2_SOUNDS").is_ok_and(|v| v.split(',').any(|x| x == name)) {
             for (field, off) in [
@@ -148,26 +139,6 @@ fn weapons_report(
             ] {
                 println!("sound {name}.{field} = '{}'", w.def_string(off));
             }
-=======
-        // T6M2_FIRE=1: each weapon's fire timing, with its first-shots (intro) fire; the spin fields are
-        // engine defaults on every gun.
-        if std::env::var_os("T6M2_FIRE").is_some() {
-            println!(
-                "fire {name}: introFire {} x{} fireType {} fireTime {} lastFireTime {} fireDelay {} spinUp {} spinDown {} spinRate {} holdFire {} burstDelay {} rechamber {}",
-                w.def_i32(d::iIntroFireTime),
-                w.def_i32(d::iIntroFireLength),
-                w.def_i32(d::fireType),
-                w.def_i32(d::iFireTime),
-                w.def_i32(d::iLastFireTime),
-                w.def_i32(d::iFireDelay),
-                w.def_i32(d::iSpinUpTime),
-                w.def_i32(d::iSpinDownTime),
-                w.def_f32(d::spinRate),
-                w.def_i32(d::iHoldFireTime),
-                w.def_i32(d::iBurstDelayTime),
-                w.def_i32(d::iRechamberTime),
-            );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
         }
         // T6M2_FIRE=1: each weapon's fire timing, with its first-shots (intro) fire; the spin fields are
         // engine defaults on every gun.
@@ -213,26 +184,8 @@ fn weapons_report(
             );
         }
         if std::env::var("T6M2_WEAPON").is_ok_and(|want| want == *name) {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
             println!("weapon {name} models {:?} tracer {:?} hide tags {:?} attach view models {:?} camo {:?} camo ptr {:#x}", w.models, w.def_tracer(d::tracerType), w.hide_tags, w.attach_view_models, w.camo, w.def_i32(d::weaponCamo));
             println!("   gun models {:?} world models {:?} anims idle {:?} strings {:?}", w.gun_models, w.world_models, w.xanims.get(1), w.strings);
-=======
-            println!(
-                "weapon {name} models {:?} tracer {:?} hide tags {:?} attach view models {:?} camo {:?} camo ptr {:#x}",
-                w.models,
-                w.def_tracer(d::tracerType),
-                w.hide_tags,
-                w.attach_view_models,
-                w.camo,
-                w.def_i32(d::weaponCamo)
-            );
-            println!(
-                "   gun models {:?} world models {:?} anims idle {:?} strings {:?}",
-                w.gun_models,
-                w.world_models,
-                w.xanims.get(1),
-                w.strings
-            );
             let tiers: Vec<(i32, f32)> = (0..6)
                 .map(|i| {
                     (
@@ -266,7 +219,6 @@ fn weapons_report(
                 w.def_i32(d::iFireTime),
                 w.var_i32(fastfile_t6::layout::WeaponVariantDef::iClipSize)
             );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
             for (i, a) in w.xanims.iter().enumerate().filter(|(_, a)| !a.is_empty()) {
                 println!("   anim {i:#04x} {a}");
             }
@@ -294,42 +246,19 @@ fn weapons_report(
                 w.def_u8(d::bKeepRolling),
                 w.def_u8(d::bForceBounce),
                 w.def_u8(d::bNoCrumpleMissile),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
                 models.get(proj).map(|(_, m)| (m.mins, m.maxs, m.radius, m.contents)),
-=======
-                models
-                    .get(proj)
-                    .map(|(_, m)| (m.mins, m.maxs, m.radius, m.contents)),
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
                 w.def_model(d::worldClipModel),
                 w.parallel_bounce,
                 w.perpendicular_bounce,
             );
             for (slot, a) in w.xanims.iter().enumerate() {
                 if !a.is_empty() {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
                     let notes = anims.get(a.as_str()).or_else(|| anims.get(a.to_ascii_lowercase().as_str())).map(|x| x.notifies.clone()).unwrap_or_default();
-=======
-                    let notes = anims
-                        .get(a.as_str())
-                        .or_else(|| anims.get(a.to_ascii_lowercase().as_str()))
-                        .map(|x| x.notifies.clone())
-                        .unwrap_or_default();
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
                     println!("   anim slot {slot:#04x}: {a} notes {notes:?}");
                 }
             }
             println!("   notetrack sound map {:?}", w.notetrack_sounds);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
             println!("   strings {:?}", w.strings.iter().filter(|(_, s)| !s.is_empty()).collect::<Vec<_>>());
-=======
-            println!(
-                "   strings {:?}",
-                w.strings
-                    .iter()
-                    .filter(|(_, s)| !s.is_empty())
-                    .collect::<Vec<_>>()
-            );
         }
         // T6M2_AMMO=1: one line per weapon of its ammo and fire rules.
         if std::env::var_os("T6M2_AMMO").is_some() {
@@ -349,7 +278,6 @@ fn weapons_report(
                 w.def_i32(d::damage),
                 w.def_i32(d::iMeleeDamage),
             );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
         }
         // T6M2_AIM=1: one line per weapon of what aims, throws and sounds it.
         if std::env::var_os("T6M2_AIM").is_some() {
@@ -357,7 +285,6 @@ fn weapons_report(
             println!(
                 "aim {name}: impactType {} hip min {}/{}/{} max {}/{}/{} decay {} fire_add {} turn_add {} move_add {} | ads {} | hip view kick p[{}, {}] y[{}, {}] min {} | ads view kick p[{}, {}] y[{}, {}] min {} | hip gun kick p[{}, {}] | ads gun kick p[{}, {}] | ads scatter [{}, {}] | hip scatter [{}, {}] playerSpread {} aiSpread {} stackFireSpread {} reticleSidePos {} fireTime {} | flash ofs view {:?} world {:?} altTag {} | proj speed {} up {} rel up {} fwd {} parent {} | melee snd swipe '{}' player '{}' hit '{}' miss '{}' | tracer {:?}",
                 w.def_i32(d::impactType),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
                 f(d::fHipSpreadStandMin), f(d::fHipSpreadDuckedMin), f(d::fHipSpreadProneMin),
                 f(d::hipSpreadStandMax), f(d::hipSpreadDuckedMax), f(d::hipSpreadProneMax),
                 f(d::fHipSpreadDecayRate), f(d::fHipSpreadFireAdd), f(d::fHipSpreadTurnAdd), f(d::fHipSpreadMoveAdd),
@@ -371,54 +298,6 @@ fn weapons_report(
                 w.def_i32(d::iProjectileSpeed), w.def_i32(d::iProjectileSpeedUp), w.def_i32(d::iProjectileSpeedRelativeUp),
                 w.def_i32(d::iProjectileSpeedForward), f(d::fProjectileTakeParentVelocity),
                 w.def_string(d::meleeSwipeSound), w.def_string(d::meleeSwipeSoundPlayer), w.def_string(d::meleeHitSound), w.def_string(d::meleeMissSound),
-=======
-                f(d::fHipSpreadStandMin),
-                f(d::fHipSpreadDuckedMin),
-                f(d::fHipSpreadProneMin),
-                f(d::hipSpreadStandMax),
-                f(d::hipSpreadDuckedMax),
-                f(d::hipSpreadProneMax),
-                f(d::fHipSpreadDecayRate),
-                f(d::fHipSpreadFireAdd),
-                f(d::fHipSpreadTurnAdd),
-                f(d::fHipSpreadMoveAdd),
-                f(d::fAdsSpread),
-                f(d::fHipViewKickPitchMin),
-                f(d::fHipViewKickPitchMax),
-                f(d::fHipViewKickYawMin),
-                f(d::fHipViewKickYawMax),
-                f(d::fHipViewKickMinMagnitude),
-                f(d::fAdsViewKickPitchMin),
-                f(d::fAdsViewKickPitchMax),
-                f(d::fAdsViewKickYawMin),
-                f(d::fAdsViewKickYawMax),
-                f(d::fAdsViewKickMinMagnitude),
-                f(d::fHipGunKickPitchMin),
-                f(d::fHipGunKickPitchMax),
-                f(d::fAdsGunKickPitchMin),
-                f(d::fAdsGunKickPitchMax),
-                f(d::fAdsViewScatterMin),
-                f(d::fAdsViewScatterMax),
-                f(d::fHipViewScatterMin),
-                f(d::fHipViewScatterMax),
-                f(d::playerSpread),
-                f(d::aiSpread),
-                f(d::stackFireSpread),
-                f(d::fHipReticleSidePos),
-                w.def_i32(d::iFireTime),
-                w.def_vec3(d::vViewFlashOffset),
-                w.def_vec3(d::vWorldFlashOffset),
-                w.def_u8(d::bUseAltTagFlash),
-                w.def_i32(d::iProjectileSpeed),
-                w.def_i32(d::iProjectileSpeedUp),
-                w.def_i32(d::iProjectileSpeedRelativeUp),
-                w.def_i32(d::iProjectileSpeedForward),
-                f(d::fProjectileTakeParentVelocity),
-                w.def_string(d::meleeSwipeSound),
-                w.def_string(d::meleeSwipeSoundPlayer),
-                w.def_string(d::meleeHitSound),
-                w.def_string(d::meleeMissSound),
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
                 w.def_tracer(d::tracerType),
             );
         }
@@ -481,15 +360,7 @@ fn weapons_report(
             }
         }
         if m.base_mat.len() != m.bone_names.len() {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
             bad.push(format!("{name}: base_mat {} != bones {}", m.base_mat.len(), m.bone_names.len()));
-=======
-            bad.push(format!(
-                "{name}: base_mat {} != bones {}",
-                m.base_mat.len(),
-                m.bone_names.len()
-            ));
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
         }
     }
     println!("skinned models checked: {checked}, problems: {}", bad.len());
@@ -502,25 +373,11 @@ fn weapons_report(
     for a in anims.values() {
         if a.names.len() != usize::from(a.bone_count[9]) {
             empty += 1;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
         } else if !a.data_short.is_empty() || !a.data_byte.is_empty() || !a.random_data_short.is_empty() {
             with_data += 1;
         }
     }
     println!("anims: {} total, {with_data} with data, {empty} with name/count mismatch", anims.len());
-=======
-        } else if !a.data_short.is_empty()
-            || !a.data_byte.is_empty()
-            || !a.random_data_short.is_empty()
-        {
-            with_data += 1;
-        }
-    }
-    println!(
-        "anims: {} total, {with_data} with data, {empty} with name/count mismatch",
-        anims.len()
-    );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
 }
 
 fn fx_report(captures: &[asset_t6::ZoneCapture], fx: &HashMap<String, &asset_t6::FxEffectRef>) {
@@ -547,31 +404,14 @@ fn fx_report(captures: &[asset_t6::ZoneCapture], fx: &HashMap<String, &asset_t6:
                 };
                 *visual_kinds.entry(k).or_default() += 1;
             }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
             for child in [&el.effect_on_impact, &el.effect_on_death, &el.effect_emitted] {
-=======
-            for child in [
-                &el.effect_on_impact,
-                &el.effect_on_death,
-                &el.effect_emitted,
-            ] {
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
                 if !child.is_empty() && !fx.contains_key(child) {
                     *missing_children.entry(child.clone()).or_insert(0) += 1;
                 }
             }
         }
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
     println!("\n== fx: {} effects; elem types {:?}; visuals {:?}", fx.len(), types, visual_kinds);
-=======
-    println!(
-        "\n== fx: {} effects; elem types {:?}; visuals {:?}",
-        fx.len(),
-        types,
-        visual_kinds
-    );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
     // T6M2_FLAGS=1: per element flag bit, how many elements carry it (by
     // element type) and a few of their effects.
     if std::env::var_os("T6M2_FLAGS").is_some() {
@@ -693,14 +533,7 @@ fn fx_report(captures: &[asset_t6::ZoneCapture], fx: &HashMap<String, &asset_t6:
             println!(
                 "zone {}: {} camos loaded, {} kept",
                 c.zone,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
                 c.loads.get(&fastfile_t6::AssetType::WeaponCamo).copied().unwrap_or(0),
-=======
-                c.loads
-                    .get(&fastfile_t6::AssetType::WeaponCamo)
-                    .copied()
-                    .unwrap_or(0),
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
                 c.weapon_camos.len()
             );
             for camo in c.weapon_camos.iter().filter(|x| x.name.contains(&want)) {
@@ -714,25 +547,11 @@ fn fx_report(captures: &[asset_t6::ZoneCapture], fx: &HashMap<String, &asset_t6:
                     camo.material_sets.len()
                 );
                 for (i, set) in camo.sets.iter().enumerate() {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
                     println!("   set {i}: solid '{}' pattern '{}' offset {:?} scale {}", set.solid, set.pattern, set.offset, set.scale);
                 }
                 for (i, list) in camo.material_sets.iter().enumerate() {
                     for m in list {
                         println!("   materials {i}: flags {:#x} {:?} -> {:?} consts {:?}", m.replace_flags, m.base, m.camo, m.consts);
-=======
-                    println!(
-                        "   set {i}: solid '{}' pattern '{}' offset {:?} scale {}",
-                        set.solid, set.pattern, set.offset, set.scale
-                    );
-                }
-                for (i, list) in camo.material_sets.iter().enumerate() {
-                    for m in list {
-                        println!(
-                            "   materials {i}: flags {:#x} {:?} -> {:?} consts {:?}",
-                            m.replace_flags, m.base, m.camo, m.consts
-                        );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
                     }
                 }
                 let users: Vec<&str> = captures
@@ -753,7 +572,6 @@ fn fx_report(captures: &[asset_t6::ZoneCapture], fx: &HashMap<String, &asset_t6:
         names.sort();
         for name in names {
             let e = fx[name];
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
             println!("effect {name}: flags {:#x} elems {} (looping {} oneshot {} emission {}) loop life {}",
                 e.flags, e.elems.len(), e.looping_count, e.one_shot_count, e.emission_count, e.msec_looping_life);
             for (i, el) in e.elems.iter().enumerate() {
@@ -762,33 +580,6 @@ fn fx_report(captures: &[asset_t6::ZoneCapture], fx: &HashMap<String, &asset_t6:
                     el.elem_type(), el.i32_at(d::flags), el.i32_at(d::spawn), el.i32_at(d::spawn + 4),
                     el.i32_at(d::lifeSpanMsec), el.i32_at(d::lifeSpanMsec + 4), b(d::visualCount), b(d::lightingFrac), b(d::sortOrder),
                     el.raw.get(d::atlas..d::atlas + 8), el.visuals);
-=======
-            println!(
-                "effect {name}: flags {:#x} elems {} (looping {} oneshot {} emission {}) loop life {}",
-                e.flags,
-                e.elems.len(),
-                e.looping_count,
-                e.one_shot_count,
-                e.emission_count,
-                e.msec_looping_life
-            );
-            for (i, el) in e.elems.iter().enumerate() {
-                let b = |o: usize| el.raw.get(o).copied().unwrap_or(0);
-                println!(
-                    "  elem {i}: type {} flags {:#010x} spawn [{}, {}] life [{}, {}] vis {} lighting {} sort {} atlas {:?} visuals {:?}",
-                    el.elem_type(),
-                    el.i32_at(d::flags),
-                    el.i32_at(d::spawn),
-                    el.i32_at(d::spawn + 4),
-                    el.i32_at(d::lifeSpanMsec),
-                    el.i32_at(d::lifeSpanMsec + 4),
-                    b(d::visualCount),
-                    b(d::lightingFrac),
-                    b(d::sortOrder),
-                    el.raw.get(d::atlas..d::atlas + 8),
-                    el.visuals
-                );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
                 let vel_n = b(d::velIntervalCount);
                 println!("     spawn range [{}, {}] fade in range [{}, {}] fade out range [{}, {}] spawn frustum cull radius {}",
                     el.f32_at(d::spawnRange), el.f32_at(d::spawnRange + 4),
@@ -824,7 +615,6 @@ fn fx_report(captures: &[asset_t6::ZoneCapture], fx: &HashMap<String, &asset_t6:
                     el.f32_at(d::spawnOffsetHeight),
                     el.f32_at(d::spawnOffsetHeight + 4)
                 );
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
                 println!("     gravity [{}, {}] wind {} vel intervals {} vis intervals {} u (cloud density) [{}, {}] / [{:#x}, {:#x}] spawn origin {:?} offset radius [{}, {}]",
                     el.f32_at(d::gravity), el.f32_at(d::gravity + 4), el.f32_at(d::windInfluence), vel_n, b(d::visStateIntervalCount),
                     el.f32_at(d::u), el.f32_at(d::u + 4), el.i32_at(d::u), el.i32_at(d::u + 4),
@@ -834,36 +624,10 @@ fn fx_report(captures: &[asset_t6::ZoneCapture], fx: &HashMap<String, &asset_t6:
                     std::array::from_fn(|i| {
                         let o = k * 96 + at + i * 4;
                         el.vel_samples.get(o..o + 4).map_or(f32::NAN, |b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-=======
-                println!(
-                    "     gravity [{}, {}] wind {} vel intervals {} vis intervals {} u (cloud density) [{}, {}] / [{:#x}, {:#x}] spawn origin {:?} offset radius [{}, {}]",
-                    el.f32_at(d::gravity),
-                    el.f32_at(d::gravity + 4),
-                    el.f32_at(d::windInfluence),
-                    vel_n,
-                    b(d::visStateIntervalCount),
-                    el.f32_at(d::u),
-                    el.f32_at(d::u + 4),
-                    el.i32_at(d::u),
-                    el.i32_at(d::u + 4),
-                    (0..6)
-                        .map(|k| el.f32_at(d::spawnOrigin + k * 4))
-                        .collect::<Vec<_>>(),
-                    el.f32_at(d::spawnOffsetRadius),
-                    el.f32_at(d::spawnOffsetRadius + 4)
-                );
-                let vf = |k: usize, at: usize| -> [f32; 6] {
-                    std::array::from_fn(|i| {
-                        let o = k * 96 + at + i * 4;
-                        el.vel_samples
-                            .get(o..o + 4)
-                            .map_or(f32::NAN, |b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
                     })
                 };
                 let vis = |k: usize, at: usize| -> f32 {
                     let o = k * 48 + at;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
                     el.vis_samples.get(o..o + 4).map_or(f32::NAN, |b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
                 };
                 let vis_n = usize::from(b(d::visStateIntervalCount));
@@ -888,73 +652,6 @@ fn fx_report(captures: &[asset_t6::ZoneCapture], fx: &HashMap<String, &asset_t6:
                     vf(0, 0), vf(0, 24), vf(0, 48), vf(0, 72));
                 println!("     vel last sample: local vel {:?} delta {:?} world vel {:?} delta {:?}",
                     vf(last, 0), vf(last, 24), vf(last, 48), vf(last, 72));
-=======
-                    el.vis_samples
-                        .get(o..o + 4)
-                        .map_or(f32::NAN, |b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-                };
-                let vis_n = usize::from(b(d::visStateIntervalCount));
-                let rgba = |k: usize, at: usize| -> Vec<u8> {
-                    el.vis_samples
-                        .get(k * 48 + at..k * 48 + at + 4)
-                        .map_or(Vec::new(), |b| b.to_vec())
-                };
-                println!(
-                    "     vis colour first {:?} (+{:?}) last {:?} (+{:?})",
-                    rgba(0, 0),
-                    rgba(0, 24),
-                    rgba(vis_n, 0),
-                    rgba(vis_n, 24)
-                );
-                if std::env::var_os("T6M2_VIS_RAW").is_some() {
-                    for k in 0..=vis_n {
-                        let raw: Vec<String> = (0..12)
-                            .map(|i| {
-                                let o = k * 48 + i * 4;
-                                el.vis_samples.get(o..o + 4).map_or("-".to_owned(), |b| {
-                                    format!(
-                                        "{:02x}{:02x}{:02x}{:02x}/{:.3}",
-                                        b[0],
-                                        b[1],
-                                        b[2],
-                                        b[3],
-                                        f32::from_le_bytes([b[0], b[1], b[2], b[3]])
-                                    )
-                                })
-                            })
-                            .collect();
-                        println!("       vis[{k}] {}", raw.join(" "));
-                    }
-                }
-                println!(
-                    "     vis first: size {} (+{}) x {} (+{}) scale {} (+{}); last: size {} (+{}) x {} scale {}",
-                    vis(0, 12),
-                    vis(0, 36),
-                    vis(0, 16),
-                    vis(0, 40),
-                    vis(0, 20),
-                    vis(0, 44),
-                    vis(vis_n, 12),
-                    vis(vis_n, 36),
-                    vis(vis_n, 16),
-                    vis(vis_n, 20)
-                );
-                let last = usize::from(vel_n);
-                println!(
-                    "     vel first sample: local vel {:?} delta {:?} world vel {:?} delta {:?}",
-                    vf(0, 0),
-                    vf(0, 24),
-                    vf(0, 48),
-                    vf(0, 72)
-                );
-                println!(
-                    "     vel last sample: local vel {:?} delta {:?} world vel {:?} delta {:?}",
-                    vf(last, 0),
-                    vf(last, 24),
-                    vf(last, 48),
-                    vf(last, 72)
-                );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
                 for v in &el.visuals {
                     let names: Vec<&String> = match v {
                         asset_t6::FxVisualRef::Material(m) => vec![m],
@@ -964,7 +661,6 @@ fn fx_report(captures: &[asset_t6::ZoneCapture], fx: &HashMap<String, &asset_t6:
                     for m in names {
                         for c in captures {
                             if let Some(mat) = c.materials.iter().find(|x| x.name == *m) {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
                                 let ts = mat.technique_set.map_or("-".to_owned(), |t| c.technique_sets[t.index].name.clone());
                                 let texs: Vec<String> = mat.textures.iter().map(|t| {
                                     let img = t.image.map(|k| &c.images[k.index]);
@@ -975,58 +671,6 @@ fn fx_report(captures: &[asset_t6::ZoneCapture], fx: &HashMap<String, &asset_t6:
                                 }).collect();
                                 let state = mat.state_bits.first().map(|b| asset_t6::DrawState::decode(*b));
                                 println!("     material {m} ({}) techset {ts} textures {texs:?} consts {:?} state0 {:?}", c.zone, mat.constants.iter().map(|k| (&k.1, k.2)).collect::<Vec<_>>(), state);
-=======
-                                let ts = mat.technique_set.map_or("-".to_owned(), |t| {
-                                    c.technique_sets[t.index].name.clone()
-                                });
-                                let texs: Vec<String> = mat
-                                    .textures
-                                    .iter()
-                                    .map(|t| {
-                                        let img = t.image.map(|k| &c.images[k.index]);
-                                        let home = img
-                                            .and_then(|i| i.name.strip_prefix(','))
-                                            .map(|real| {
-                                                captures
-                                                    .iter()
-                                                    .find_map(|cc| {
-                                                        cc.images
-                                                            .iter()
-                                                            .find(|x| x.name == real)
-                                                            .map(|x| {
-                                                                format!(
-                                                                    " [home {} {}x{}]",
-                                                                    cc.zone, x.width, x.height
-                                                                )
-                                                            })
-                                                    })
-                                                    .unwrap_or_else(|| " [NO HOME]".to_owned())
-                                            })
-                                            .unwrap_or_default();
-                                        format!(
-                                            "{:#010x}:{}{home}",
-                                            t.name_hash,
-                                            img.map_or("-".to_owned(), |i| format!(
-                                                "{} {}x{}",
-                                                i.name, i.width, i.height
-                                            ))
-                                        )
-                                    })
-                                    .collect();
-                                let state = mat
-                                    .state_bits
-                                    .first()
-                                    .map(|b| asset_t6::DrawState::decode(*b));
-                                println!(
-                                    "     material {m} ({}) techset {ts} textures {texs:?} consts {:?} state0 {:?}",
-                                    c.zone,
-                                    mat.constants
-                                        .iter()
-                                        .map(|k| (&k.1, k.2))
-                                        .collect::<Vec<_>>(),
-                                    state
-                                );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
                                 break;
                             }
                         }
@@ -1035,7 +679,6 @@ fn fx_report(captures: &[asset_t6::ZoneCapture], fx: &HashMap<String, &asset_t6:
             }
         }
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
     println!("fx children not found: {} {:?}", missing_children.len(), missing_children.keys().take(10).collect::<Vec<_>>());
     for c in captures {
         for t in &c.impact_tables {
@@ -1044,46 +687,6 @@ fn fx_report(captures: &[asset_t6::ZoneCapture], fx: &HashMap<String, &asset_t6:
             println!("impact table {} ({}): {} rows, {found}/{named} effects found", t.name, c.zone, t.rows.len());
             for (i, r) in t.rows.iter().enumerate().take(3) {
                 println!("  row {i}: concrete='{}' metal='{}' flesh0='{}'", r.0[5], r.0[13], r.1[0]);
-=======
-    println!(
-        "fx children not found: {} {:?}",
-        missing_children.len(),
-        missing_children.keys().take(10).collect::<Vec<_>>()
-    );
-    for c in captures {
-        for t in &c.impact_tables {
-            let named = t
-                .rows
-                .iter()
-                .map(|r| {
-                    r.0.iter()
-                        .chain(r.1.iter())
-                        .filter(|n| !n.is_empty())
-                        .count()
-                })
-                .sum::<usize>();
-            let found = t
-                .rows
-                .iter()
-                .map(|r| {
-                    r.0.iter()
-                        .chain(r.1.iter())
-                        .filter(|n| !n.is_empty() && fx.contains_key(n.as_str()))
-                        .count()
-                })
-                .sum::<usize>();
-            println!(
-                "impact table {} ({}): {} rows, {found}/{named} effects found",
-                t.name,
-                c.zone,
-                t.rows.len()
-            );
-            for (i, r) in t.rows.iter().enumerate().take(3) {
-                println!(
-                    "  row {i}: concrete='{}' metal='{}' flesh0='{}'",
-                    r.0[5], r.0[13], r.1[0]
-                );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
             }
             // T6M2_IMPACT=1: every row, every surface.
             if std::env::var_os("T6M2_IMPACT").is_some() {
@@ -1097,7 +700,6 @@ fn fx_report(captures: &[asset_t6::ZoneCapture], fx: &HashMap<String, &asset_t6:
             }
         }
         for t in &c.tracers {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
             println!("tracer {} ({}): mat='{}' type={} every={} speed={} len={} width={} screw={}/{} fade={}/{} repeat={} colours={:?}", t.name, c.zone, t.material, t.ty, t.draw_interval, t.speed, t.beam_length, t.beam_width, t.screw_radius, t.screw_dist, t.fade_time, t.fade_scale, t.tex_repeat_rate, t.colors);
             for cc in captures {
                 if let Some(mat) = cc.materials.iter().find(|x| x.name == t.material) {
@@ -1105,58 +707,12 @@ fn fx_report(captures: &[asset_t6::ZoneCapture], fx: &HashMap<String, &asset_t6:
                     let texs: Vec<String> = mat.textures.iter().map(|x| format!("{:#010x}:{}", x.name_hash, x.image.map_or("-".to_owned(), |k| { let i = &cc.images[k.index]; format!("{} {}x{} hash {:#010x} parts {} part_hash {:#010x} embedded {:?}", i.name, i.width, i.height, i.name_hash, i.streamed_parts, i.part_hash, i.embedded.as_ref().map(|e| (e.dxgi_format, e.data.len()))) }))).collect();
                     let state = mat.state_bits.first().map(|b| asset_t6::DrawState::decode(*b));
                     println!("   material {} ({}) techset {ts} textures {texs:?} consts {:?} state0 {:?}", t.material, cc.zone, mat.constants.iter().map(|k| (&k.1, k.2)).collect::<Vec<_>>(), state);
-=======
-            println!(
-                "tracer {} ({}): mat='{}' type={} every={} speed={} len={} width={} screw={}/{} fade={}/{} repeat={} colours={:?}",
-                t.name,
-                c.zone,
-                t.material,
-                t.ty,
-                t.draw_interval,
-                t.speed,
-                t.beam_length,
-                t.beam_width,
-                t.screw_radius,
-                t.screw_dist,
-                t.fade_time,
-                t.fade_scale,
-                t.tex_repeat_rate,
-                t.colors
-            );
-            for cc in captures {
-                if let Some(mat) = cc.materials.iter().find(|x| x.name == t.material) {
-                    let ts = mat
-                        .technique_set
-                        .map_or("-".to_owned(), |k| cc.technique_sets[k.index].name.clone());
-                    let texs: Vec<String> = mat.textures.iter().map(|x| format!("{:#010x}:{}", x.name_hash, x.image.map_or("-".to_owned(), |k| { let i = &cc.images[k.index]; format!("{} {}x{} hash {:#010x} parts {} part_hash {:#010x} embedded {:?}", i.name, i.width, i.height, i.name_hash, i.streamed_parts, i.part_hash, i.embedded.as_ref().map(|e| (e.dxgi_format, e.data.len()))) }))).collect();
-                    let state = mat
-                        .state_bits
-                        .first()
-                        .map(|b| asset_t6::DrawState::decode(*b));
-                    println!(
-                        "   material {} ({}) techset {ts} textures {texs:?} consts {:?} state0 {:?}",
-                        t.material,
-                        cc.zone,
-                        mat.constants
-                            .iter()
-                            .map(|k| (&k.1, k.2))
-                            .collect::<Vec<_>>(),
-                        state
-                    );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
                     break;
                 }
             }
         }
         for t in &c.footstep_fx_tables {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
             println!("footstep fx table {} ({}): dirt='{}' concrete='{}'", t.name, c.zone, t.fx[6], t.fx[5]);
-=======
-            println!(
-                "footstep fx table {} ({}): dirt='{}' concrete='{}'",
-                t.name, c.zone, t.fx[6], t.fx[5]
-            );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
         }
     }
 }
@@ -1170,27 +726,10 @@ fn sound_report(root: &Path, captures: &[asset_t6::ZoneCapture], decode: bool) {
         let mut names: Vec<PathBuf> = read.filter_map(|e| e.ok().map(|e| e.path())).collect();
         names.sort();
         for path in names {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_owned();
             let wanted = ["zmb_nuked", "zmb_common", "zmb_patch", "zmb_code_post_gfx", "cmn_root"]
                 .iter()
                 .any(|p| name.starts_with(p))
-=======
-            let name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_owned();
-            let wanted = [
-                "zmb_nuked",
-                "zmb_common",
-                "zmb_patch",
-                "zmb_code_post_gfx",
-                "cmn_root",
-            ]
-            .iter()
-            .any(|p| name.starts_with(p))
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
                 && (name.contains(".all.") || name.contains(".english."));
             if !wanted {
                 continue;
@@ -1206,14 +745,7 @@ fn sound_report(root: &Path, captures: &[asset_t6::ZoneCapture], decode: bool) {
             }
         }
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
     println!("\n== sound: {files} bank files, {} entries indexed", index.len());
-=======
-    println!(
-        "\n== sound: {files} bank files, {} entries indexed",
-        index.len()
-    );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
     let mut total = 0;
     let mut entries = 0;
     let mut resolved = 0;
@@ -1227,43 +759,18 @@ fn sound_report(root: &Path, captures: &[asset_t6::ZoneCapture], decode: bool) {
                     if e.asset_id == 0 || index.contains_key(&e.asset_id) {
                         resolved += 1;
                     } else if unresolved_names.len() < 12 {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
                         unresolved_names.push(format!("{} -> {} ({:#x})", e.name, e.asset_file, e.asset_id));
-=======
-                        unresolved_names.push(format!(
-                            "{} -> {} ({:#x})",
-                            e.name, e.asset_file, e.asset_id
-                        ));
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
                     }
                 }
             }
             println!("bank {} ({}): {} aliases", b.name, c.zone, b.aliases.len());
         }
         if let Some(g) = &c.snd_globals {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
             println!("driver globals {} ({}): {} curves, {} groups; curve 0 = {} {:?}", g.name, c.zone, g.curves.len(), g.groups.len(),
                 g.curves.first().map_or("", |c| c.name.as_str()), g.curves.first().map(|c| c.points));
         }
         for t in &c.footstep_tables {
             println!("footstep table {} ({}): dirt ids {:?}", t.name, c.zone, t.aliases[6]);
-=======
-            println!(
-                "driver globals {} ({}): {} curves, {} groups; curve 0 = {} {:?}",
-                g.name,
-                c.zone,
-                g.curves.len(),
-                g.groups.len(),
-                g.curves.first().map_or("", |c| c.name.as_str()),
-                g.curves.first().map(|c| c.points)
-            );
-        }
-        for t in &c.footstep_tables {
-            println!(
-                "footstep table {} ({}): dirt ids {:?}",
-                t.name, c.zone, t.aliases[6]
-            );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
             if std::env::var_os("T6M2_FOOTSTEPS").is_some() && t.name == "default_1st_person" {
                 let names: std::collections::HashMap<u32, &str> = captures
                     .iter()
@@ -1274,15 +781,7 @@ fn sound_report(root: &Path, captures: &[asset_t6::ZoneCapture], decode: bool) {
                 for (surf, row) in t.aliases.iter().enumerate() {
                     let row: Vec<String> = row
                         .iter()
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
                         .map(|id| names.get(id).map_or(format!("{id:#x}"), |n| (*n).to_owned()))
-=======
-                        .map(|id| {
-                            names
-                                .get(id)
-                                .map_or(format!("{id:#x}"), |n| (*n).to_owned())
-                        })
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
                         .collect();
                     println!("   surf {surf:>2}: {}", row.join(" | "));
                 }
@@ -1332,14 +831,7 @@ fn sound_report(root: &Path, captures: &[asset_t6::ZoneCapture], decode: bool) {
                         e.map(|e| e.flags),
                         e.map_or("", |e| e.asset_file.as_str()),
                         e.map_or("", |e| e.secondary.as_str()),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
                         a.entries.iter().map(|e| format!("{:#x}", e.asset_id)).collect::<Vec<_>>()
-=======
-                        a.entries
-                            .iter()
-                            .map(|e| format!("{:#x}", e.asset_id))
-                            .collect::<Vec<_>>()
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
                     );
                     if std::env::var_os("T6M2_FIND_BANK").is_some() {
                         for e in &a.entries {
@@ -1353,7 +845,6 @@ fn sound_report(root: &Path, captures: &[asset_t6::ZoneCapture], decode: bool) {
                                     }
                                 }
                             }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
                             println!("   variant {:#010x} {} -> {:?}", e.asset_id, e.asset_file, homes);
                         }
                     }
@@ -1362,22 +853,6 @@ fn sound_report(root: &Path, captures: &[asset_t6::ZoneCapture], decode: bool) {
         }
     }
     println!("aliases {total}, variants {entries}, file resolved {resolved}, unresolved {}", entries - resolved);
-=======
-                            println!(
-                                "   variant {:#010x} {} -> {:?}",
-                                e.asset_id, e.asset_file, homes
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-    println!(
-        "aliases {total}, variants {entries}, file resolved {resolved}, unresolved {}",
-        entries - resolved
-    );
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
     for n in &unresolved_names {
         println!("  unresolved: {n}");
     }
@@ -1388,18 +863,8 @@ fn sound_report(root: &Path, captures: &[asset_t6::ZoneCapture], decode: bool) {
         let mut frames = 0u64;
         let started = std::time::Instant::now();
         for (path, e) in index.values() {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6m2.rs
             let Ok(bank) = sab_t6::BankFile::open(path) else { continue };
             let Ok(data) = bank.read(e) else { failed += 1; continue };
-=======
-            let Ok(bank) = sab_t6::BankFile::open(path) else {
-                continue;
-            };
-            let Ok(data) = bank.read(e) else {
-                failed += 1;
-                continue;
-            };
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6m2.rs
             match e.format {
                 sab_t6::SoundFormat::Flac => match sab_t6::decode_flac(&data) {
                     Ok(stream) => {

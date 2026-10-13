@@ -466,13 +466,6 @@ pub(crate) fn spawn_world(
             Some(exposure) => {
                 diag::info!(
                     World,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/prepare/scene/spawn.rs
-                    "drawsurf T5 sunParse exposure: READY {exposure:.4} volumes={}",
-                    scene.t5_exposure_volume_count
-                );
-                commands
-                    .insert_resource(crate::assemble::drawsurf::MapT5SunParseExposure { exposure });
-=======
                     "drawsurf T5 sunParse exposure: READY {exposure:.4} volumes={} vision saturation={:?}",
                     scene.t5_exposure_volume_count,
                     scene.t6_vision_saturation
@@ -481,7 +474,6 @@ pub(crate) fn spawn_world(
                     exposure,
                     saturation: scene.t6_vision_saturation.unwrap_or(0.853516),
                 });
->>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/prepare/scene/spawn.rs
             }
             None => {
                 commands.remove_resource::<crate::assemble::drawsurf::MapT5SunParseExposure>();

@@ -104,7 +104,6 @@ impl State {
     /// Between two states; pictures, fonts and text switch at the end, the
     /// anchors at the start (the edges carry the motion).
     fn mix(&self, to: &State, t: f32) -> State {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
         // bo2mp: an edge pair animated to a negative width (the XP bar's
         // gain, `before + gained - 2` at no gain) ends with no width, not
         // a flipped 2-unit sliver (BO2 draws none: no orange tick).
@@ -113,8 +112,6 @@ impl State {
             to.right = to.left;
         }
         let to = &to;
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         State {
             left: lerp(self.left, to.left, t),
             top: lerp(self.top, to.top, t),
@@ -134,15 +131,11 @@ impl State {
             top_anchor: to.top_anchor,
             right_anchor: to.right_anchor,
             bottom_anchor: to.bottom_anchor,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-            material: if t >= 1.0 { to.material.clone() } else { self.material.clone() },
-=======
             material: if t >= 1.0 {
                 to.material.clone()
             } else {
                 self.material.clone()
             },
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
             font: to.font.clone(),
             alignment: to.alignment,
             text: to.text.clone(),
@@ -193,17 +186,6 @@ impl State {
         if let Some(v) = num("blue") {
             self.blue = v;
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-        // A state's `alphaMultiplier` is its alpha by another name: BO2's
-        // card carousels are made with `alpha = 0` and shown by a
-        // `fade_in` state of `alphaMultiplier = 1` alone (and hidden by
-        // `fade_out`'s `alpha = 0`); no script sets the two apart.
-        if let Some(v) = num("alphaMultiplier") {
-            self.alpha = v;
-        }
-        if let Some(v) = num("alpha") {
-            self.alpha = v;
-=======
         // The real engine keeps one fade value: a state carrying only
         // `alphaMultiplier` (fade_in = {alphaMultiplier = 1}) brings back an
         // element made at alpha 0, so both keys set the same alpha here.
@@ -211,7 +193,6 @@ impl State {
             (Some(a), Some(m)) => self.alpha = a * m,
             (Some(v), None) | (None, Some(v)) => self.alpha = v,
             (None, None) => {}
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         }
         if let Some(v) = num("zRot") {
             self.z_rot = v;
@@ -219,12 +200,9 @@ impl State {
         if let Some(v) = num("scale") {
             self.scale = v;
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
         if let Some(v) = num("zoom") {
             self.zoom = v;
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         match t.get_str("material") {
             Value::Str(s) => self.material = Some(s.to_string()),
             Value::User(u) => self.material = material_name(&u),
@@ -233,15 +211,10 @@ impl State {
         // A font is a name or (`CoD.fonts.Condensed`) a RegisterFont handle.
         match t.get_str("font") {
             Value::Str(s) => self.font = Some(s.to_string()),
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-            Value::User(u) if u.kind == "font" => {
-                self.font = u.data.borrow().downcast_ref::<String>().cloned()
-=======
             Value::User(f) if f.kind == "font" => {
                 if let Some(name) = f.data.borrow().downcast_ref::<String>() {
                     self.font = Some(name.clone());
                 }
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
             }
             _ => {}
         }
@@ -259,7 +232,6 @@ pub type Rect = [f32; 4];
 
 /// Where an element's edges fall inside its parent's rectangle.
 pub fn place(s: &State, parent: Rect) -> Rect {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
     let axis = |lo_anchor: bool, hi_anchor: bool, lo: f32, hi: f32, p0: f32, p1: f32| -> (f32, f32) {
         let mid = (p0 + p1) * 0.5;
         match (lo_anchor, hi_anchor) {
@@ -271,41 +243,6 @@ pub fn place(s: &State, parent: Rect) -> Rect {
     };
     let (x0, x1) = axis(s.left_anchor, s.right_anchor, s.left, s.right, parent[0], parent[2]);
     let (y0, y1) = axis(s.top_anchor, s.bottom_anchor, s.top, s.bottom, parent[1], parent[3]);
-=======
-    let axis =
-        |lo_anchor: bool, hi_anchor: bool, lo: f32, hi: f32, p0: f32, p1: f32| -> (f32, f32) {
-            let mid = (p0 + p1) * 0.5;
-            match (lo_anchor, hi_anchor) {
-                (true, true) => (p0 + lo, p1 + hi),
-                (true, false) => (p0 + lo, p0 + hi),
-                (false, true) => (p1 + lo, p1 + hi),
-                (false, false) => (mid + lo, mid + hi),
-            }
-        };
-    let (x0, x1) = axis(
-        s.left_anchor,
-        s.right_anchor,
-        s.left,
-        s.right,
-        parent[0],
-        parent[2],
-    );
-    let (y0, y1) = axis(
-        s.top_anchor,
-        s.bottom_anchor,
-        s.top,
-        s.bottom,
-        parent[1],
-        parent[3],
-    );
-    // setScale: the element (and so its children) grown about its centre
-    // (the map zooms in with it).
-    if (s.scale - 1.0).abs() > 1e-4 {
-        let (cx, cy) = ((x0 + x1) * 0.5, (y0 + y1) * 0.5);
-        let (hw, hh) = ((x1 - x0) * 0.5 * s.scale, (y1 - y0) * 0.5 * s.scale);
-        return [cx - hw, cy - hh, cx + hw, cy + hh];
-    }
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
     [x0, y0, x1, y1]
 }
 
@@ -354,15 +291,12 @@ pub struct Element {
     pending: Option<State>,
     states: HashMap<String, TableRef>,
     pub use_stencil: bool,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
     /// `setBlur(true)`: what is drawn under the element shows blurred (a
     /// front-end menu over another, CoD.Menu's updateBlur).
     pub blur: bool,
     /// bo2mp: drawn as the covered main menu behind Options / the Quit
     /// prompt (blurred and dimmed by the renderer).
     pub behind: bool,
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
     /// A list's gap between its children (`setSpacing`).
     pub spacing: f32,
     /// Where the last layout put it (`getRect`, the mouse's hit test). Under
@@ -371,15 +305,9 @@ pub struct Element {
     pub last_rect: Option<Rect>,
     /// Holds the menu focus (`setFocus`, `isInFocus`).
     pub focused: bool,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
     /// A dashes bar's (count, lit, change) and units from one dash to the next
     /// (`setupDashes`).
     pub dashes: (i32, i32, i32),
-=======
-    /// A dashes bar's (count, lit) and units from one dash to the next
-    /// (`setupDashes`).
-    pub dashes: (i32, i32),
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
     pub dash_pitch: f32,
     /// `setupTiles(n)`: a picture repeated across its width in tiles n units
     /// wide (BO2's dot grid backdrop: an 8-wide picture at 8); 0 = not tiled.
@@ -393,8 +321,6 @@ pub struct Element {
     /// A streamed picture (`setupUIStreamedImage`): its scripts wait for
     /// `streamed_image_ready` after each picture they set.
     pub streamed: bool,
-    /// It blurs what is behind it (`setBlur`).
-    pub blur: bool,
     /// The element's own field table (its metatable's `__newindex`).
     pub fields: TableRef,
     /// A streamed image (`setupUIStreamedImage`): how long it waits for its
@@ -426,17 +352,9 @@ pub fn element(v: &Value) -> Option<Rc<UserData>> {
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
 pub(crate) fn with<R>(u: &UserData, f: impl FnOnce(&mut Element) -> R) -> R {
     let mut data = u.data.borrow_mut();
     let e = data.downcast_mut::<Element>().expect("LUIElement userdata holds an Element");
-=======
-fn with<R>(u: &UserData, f: impl FnOnce(&mut Element) -> R) -> R {
-    let mut data = u.data.borrow_mut();
-    let e = data
-        .downcast_mut::<Element>()
-        .expect("LUIElement userdata holds an Element");
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
     f(e)
 }
 
@@ -457,7 +375,6 @@ pub struct Lui {
     containers: Vec<Weak<UserData>>,
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
 /// bo2mp: menus covered by another menu are not drawn (BO2's front end
 /// opens each screen over the last and marks the last `occludedBy`).
 static HIDE_OCCLUDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -465,6 +382,23 @@ static HIDE_OCCLUDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 /// bo2mp: draw (false, the default) or hide (true) covered menus.
 pub fn set_hide_occluded(on: bool) {
     HIDE_OCCLUDED.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// bo2zm merge: Black Ops II's multiplayer menus run (its front end or
+/// HUD), not Zombies'. Where the two forks' LUI and engine answers differ,
+/// the multiplayer one holds then and the Zombies one otherwise.
+static MULTIPLAYER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// bo2zm merge: mark the multiplayer menus as running (`mp::install`, before
+/// CoD's base loads) or not (a Zombies front end or HUD).
+pub fn set_multiplayer(on: bool) {
+    MULTIPLAYER.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// bo2zm merge: the multiplayer menus run (`set_multiplayer`, or the
+/// multiplayer front end's `set_hide_occluded(true)` from `mp::after_base`).
+pub(crate) fn mp_front_end() -> bool {
+    MULTIPLAYER.load(std::sync::atomic::Ordering::Relaxed) || HIDE_OCCLUDED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 thread_local! {
@@ -497,7 +431,8 @@ thread_local! {
         Value::str("darkenElement"),
         Value::str("bo1Hidden"),
     ];
-=======
+}
+
 thread_local! {
     static LUI: RefCell<Option<Rc<RefCell<Lui>>>> = const { RefCell::new(None) };
 }
@@ -537,7 +472,6 @@ pub fn chain_of(root: &Rc<UserData>, id: usize) -> Vec<(usize, String, Option<Re
 /// An element's engine id (debugging).
 pub fn with_id(u: &Rc<UserData>) -> usize {
     with(u, |e| e.id)
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
 }
 const OCCLUDED_BY: usize = 0;
 const MENU_NAME: usize = 1;
@@ -546,7 +480,6 @@ const DARKEN: usize = 2;
 /// `host::hide_for_bo1_hud`): never drawn.
 const BO1_HIDDEN: usize = 3;
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
 /// One of the walk's fields (`WALK_KEYS`) of an element's field table.
 fn walk_field(t: &TableRef, k: usize) -> Value {
     WALK_KEYS.with(|keys| t.borrow().get(&keys[k]))
@@ -566,26 +499,16 @@ fn is_behind_menu(u: &Rc<UserData>) -> bool {
         Value::User(o) if !std::ptr::eq(&**o, &**u) => with(o, |oe| !walk_field(&oe.fields, DARKEN).truthy() && oe.blur),
         _ => false,
     }
-=======
+}
+
 /// Streamed pictures set since the last call (each gets
 /// `streamed_image_ready`).
 pub fn take_streamed_ready() -> Vec<Rc<UserData>> {
     std::mem::take(&mut lui().borrow_mut().streamed_ready)
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
-}
-
-/// The element natives (`setLeftRight`, `removeElement`, ...), by name.
-pub fn natives() -> TableRef {
-    lui().borrow().natives.clone()
 }
 
 fn lui() -> Rc<RefCell<Lui>> {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
     LUI.with(|l| l.borrow().clone()).expect("LUI natives installed")
-=======
-    LUI.with(|l| l.borrow().clone())
-        .expect("LUI natives installed")
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
 }
 
 fn arg(a: &[Value], i: usize) -> Value {
@@ -606,14 +529,6 @@ fn ease(t: f64, ease_in: bool, ease_out: bool) -> f64 {
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-/// The state the setters change now: the open animation's end, or the
-/// shown state.
-fn edit(e: &mut Element, f: impl FnOnce(&mut State)) {
-    match e.pending.as_mut() {
-        Some(p) => f(p),
-        None => f(&mut e.state),
-=======
 /// The state the setters change now: the open animation's end, the
 /// running animation's end as well as the shown state (LUI writes the
 /// latest animation's target: Nuketown's map fades in when its picture is
@@ -626,7 +541,6 @@ fn edit(e: &mut Element, f: impl Fn(&mut State)) {
             f(&mut e.state);
         }
         (None, None) => f(&mut e.state),
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
     }
 }
 
@@ -649,17 +563,12 @@ pub fn construct(vm: &mut Vm, kind: &'static str) -> Value {
         (l.next_id, l.natives.clone())
     };
     let fields = Table::new_ref();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-    fields.borrow_mut().set_str("m_eventHandlers", Value::Table(Table::new_ref()));
-    fields.borrow_mut().set_str("m_animationStates", Value::Table(Table::new_ref()));
-=======
     fields
         .borrow_mut()
         .set_str("m_eventHandlers", Value::Table(Table::new_ref()));
     fields
         .borrow_mut()
         .set_str("m_animationStates", Value::Table(Table::new_ref()));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
     let meta = Table::new_ref();
     let f2 = fields.clone();
     let index = vm.native("LUIElement_index", move |vm, a| {
@@ -668,12 +577,6 @@ pub fn construct(vm: &mut Vm, kind: &'static str) -> Value {
         if !matches!(own, Value::Nil) {
             return Ok(vec![own]);
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-        Ok(vec![natives.borrow().get(&key)])
-    });
-    meta.borrow_mut().set_str("__index", index);
-    meta.borrow_mut().set_str("__newindex", Value::Table(fields.clone()));
-=======
         let native = natives.borrow().get(&key);
         // An engine widget setup we do not draw yet (`setupGlobe`, ...): a
         // do-nothing method, named in `missing_methods` (what to build next).
@@ -688,7 +591,6 @@ pub fn construct(vm: &mut Vm, kind: &'static str) -> Value {
     meta.borrow_mut().set_str("__index", index);
     meta.borrow_mut()
         .set_str("__newindex", Value::Table(fields.clone()));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
     let el = Element {
         id,
         parent: None,
@@ -699,26 +601,18 @@ pub fn construct(vm: &mut Vm, kind: &'static str) -> Value {
         pending: None,
         states: HashMap::new(),
         use_stencil: false,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
         blur: false,
         behind: false,
         spacing: 0.0,
         last_rect: None,
         focused: false,
         dashes: (0, 0, 0),
-=======
-        spacing: 0.0,
-        last_rect: None,
-        focused: false,
-        dashes: (0, 0),
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         dash_pitch: 8.0,
         tiles: 0.0,
         shader: [0.0; 4],
         kind,
         tight: false,
         streamed: false,
-        blur: false,
         fields,
         stream_timeout: None,
         stream_since: None,
@@ -774,7 +668,6 @@ fn place_by_priority(parent: &Rc<UserData>, child: &Rc<UserData>) {
     });
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
 /// bo2mp: a child the engine draws for an engine-made widget (the mini
 /// playercard): a rectangle `[l, t, r, b]` from the parent's top left.
 pub fn add_drawn_child(
@@ -826,12 +719,6 @@ pub fn font_of(u: &UserData) -> Option<String> {
 
 fn sibling_index(parent: &Rc<UserData>, sib: &Rc<UserData>) -> Option<usize> {
     with(parent, |e| e.children.iter().position(|c| Rc::ptr_eq(c, sib)))
-=======
-fn sibling_index(parent: &Rc<UserData>, sib: &Rc<UserData>) -> Option<usize> {
-    with(parent, |e| {
-        e.children.iter().position(|c| Rc::ptr_eq(c, sib))
-    })
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
 }
 
 /// Advance every running animation to `now_ms`; returns the elements whose
@@ -845,7 +732,6 @@ pub fn tick(now_ms: f64) -> Vec<(Rc<UserData>, String, bool, f64)> {
     l.borrow_mut().now_ms = now_ms;
     let roots = l.borrow().roots.clone();
     let mut done = Vec::new();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
     // bo2mp: animations that end on one frame go to the scripts by end time,
     // then in the order they began: a UITimer is a plain animation (luitimer.lua
     // animates to "default" for its interval), so a scroll's rows, begun before
@@ -854,26 +740,22 @@ pub fn tick(now_ms: f64) -> Vec<(Rc<UserData>, String, bool, f64)> {
     // list to the new category before that timer adds the row below it. Tree
     // order sent the timer first, so the bottom row showed the category before
     // the old one (SMG twice on the shotguns screen).
-=======
-    // Tree order (parents first, children first to last): two animations
-    // ending in the same frame report in the order the game's UI does
-    // (leaving Custom Games, the map's ends before the globe's, which
-    // resets the map's "to the corner" mark the map's handler reads).
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
+    // bo2zm: outside the multiplayer front end, tree order (parents first,
+    // children first to last): two animations ending in the same frame
+    // report in the order the game's UI does (leaving Custom Games, the
+    // map's ends before the globe's, which resets the map's "to the corner"
+    // mark the map's handler reads).
+    let by_end_time = mp_front_end();
     let mut stack: Vec<_> = roots.into_iter().rev().collect();
     while let Some(u) = stack.pop() {
         let ended = with(&u, |e| {
             stack.extend(e.children.iter().rev().cloned());
             let a = e.anim.as_ref()?;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-            let t = if a.duration_ms <= 0.0 { 1.0 } else { (now_ms - a.start_ms) / a.duration_ms };
-=======
             let t = if a.duration_ms <= 0.0 {
                 1.0
             } else {
                 (now_ms - a.start_ms) / a.duration_ms
             };
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
             let k = ease(t, a.ease_in, a.ease_out) as f32;
             e.state = a.from.mix(&a.to, if t >= 1.0 { 1.0 } else { k });
             if t >= 1.0 {
@@ -888,7 +770,9 @@ pub fn tick(now_ms: f64) -> Vec<(Rc<UserData>, String, bool, f64)> {
             done.push((at, (u.clone(), name, false, late)));
         }
     }
-    done.sort_by(|x, y| x.0 .0.total_cmp(&y.0 .0).then(x.0 .1.cmp(&y.0 .1)));
+    if by_end_time {
+        done.sort_by(|x, y| x.0 .0.total_cmp(&y.0 .0).then(x.0 .1.cmp(&y.0 .1)));
+    }
     let mut done: Vec<_> = done.into_iter().map(|d| d.1).collect();
     let mut l = l.borrow_mut();
     done.extend(l.finished.drain(..).map(|(u, n, i)| (u, n, i, 0.0)));
@@ -897,16 +781,25 @@ pub fn tick(now_ms: f64) -> Vec<(Rc<UserData>, String, bool, f64)> {
 
 /// Every element in drawing order (parents before children, children by
 /// priority), with its rectangle and its alpha including its parents'.
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-pub fn layout(root: &Rc<UserData>, rect: Rect) -> Vec<(Rc<UserData>, Rect, f32)> {
-    layout_clipped(root, rect).into_iter().map(|(u, r, a, _)| (u, r, a)).collect()
+pub fn layout(
+    root: &Rc<UserData>,
+    rect: Rect,
+    measure: &dyn Fn(&str, &str, f32) -> f32,
+) -> Vec<(Rc<UserData>, Rect, f32)> {
+    layout_clipped(root, rect, measure).into_iter().map(|(u, r, a, _)| (u, r, a)).collect()
 }
 
 /// bo2mp: `layout` with each element's clip too: the rectangle of its
 /// nearest ancestor that `setUseStencil`s (LUI's stencil clips the children
 /// to that element's box; BO2's scorestreak and class tiles keep their
 /// big pictures inside the tile this way), intersected with the clips above.
-pub fn layout_clipped(root: &Rc<UserData>, rect: Rect) -> Vec<(Rc<UserData>, Rect, f32, Option<Rect>)> {
+/// bo2zm: `measure` (text, font, height) -> width sizes a tight text's slot
+/// in a horizontal list.
+pub fn layout_clipped(
+    root: &Rc<UserData>,
+    rect: Rect,
+    measure: &dyn Fn(&str, &str, f32) -> f32,
+) -> Vec<(Rc<UserData>, Rect, f32, Option<Rect>)> {
     let mut out = Vec::new();
     // `slot`: a list's child is placed along the list's axis by the list
     // (vertical?, start, end); across it by its own anchors. `xf`: where
@@ -915,30 +808,7 @@ pub fn layout_clipped(root: &Rc<UserData>, rect: Rect) -> Vec<(Rc<UserData>, Rec
     // bo2mp: the covered main menu stays drawn, blurred and dimmed by the
     // renderer (`Drawn::behind`), under Options and the Quit prompt: BO2
     // shows it so. Its children inherit the mark.
-=======
-pub fn layout(
-    root: &Rc<UserData>,
-    rect: Rect,
-    measure: &dyn Fn(&str, &str, f32) -> f32,
-) -> Vec<(Rc<UserData>, Rect, f32)> {
-    layout_clipped(root, rect, measure)
-        .into_iter()
-        .map(|(u, r, a, _)| (u, r, a))
-        .collect()
-}
-
-/// `layout`, with each element's clip: the box of its nearest ancestors
-/// that clip their children (`setUseStencil`), intersected; None = none.
-pub fn layout_clipped(
-    root: &Rc<UserData>,
-    rect: Rect,
-    measure: &dyn Fn(&str, &str, f32) -> f32,
-) -> Vec<(Rc<UserData>, Rect, f32, Option<Rect>)> {
-    let mut out = Vec::new();
-    // `slot`: a list's child is placed along the list's axis by the list
-    // (vertical?, start, end); across it by its own anchors.
     #[allow(clippy::too_many_arguments)]
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
     fn walk(
         u: &Rc<UserData>,
         parent: Rect,
@@ -950,19 +820,24 @@ pub fn layout_clipped(
         measure: &dyn Fn(&str, &str, f32) -> f32,
         out: &mut Vec<(Rc<UserData>, Rect, f32, Option<Rect>)>,
     ) {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
+        // bo2zm: a 3D window's element and all inside it go onto a model in
+        // the world, never the screen.
+        if with(u, |e| e.state.ui3d_window.is_some()) {
+            return;
+        }
         let on = is_behind_menu(u);
         if on {
             BEHIND.with(|b| b.set(b.get() + 1));
         }
         let (toward, rot) = (TOWARD.get(), ROT.get());
-        walk_in(u, parent, alpha, slot, xf, mid, clip, out);
+        walk_in(u, parent, alpha, slot, xf, mid, clip, measure, out);
         TOWARD.set(toward);
         ROT.set(rot);
         if on {
             BEHIND.with(|b| b.set(b.get() - 1));
         }
     }
+    #[allow(clippy::too_many_arguments)]
     fn walk_in(
         u: &Rc<UserData>,
         parent: Rect,
@@ -971,6 +846,7 @@ pub fn layout_clipped(
         xf: (f32, f32, f32),
         mid: (f32, f32),
         clip: Option<Rect>,
+        measure: &dyn Fn(&str, &str, f32) -> f32,
         out: &mut Vec<(Rc<UserData>, Rect, f32, Option<Rect>)>,
     ) {
         let (r, a, mut kids, list, xf, shown, stencil) = with(u, |e| {
@@ -990,21 +866,12 @@ pub fn layout_clipped(
                 },
                 _ => (parent, alpha),
             };
-=======
-        // A 3D window's element and all inside it go onto a model in the
-        // world, never the screen.
-        if with(u, |e| e.state.ui3d_window.is_some()) {
-            return;
-        }
-        let (r, a, mut kids, list, stencil) = with(u, |e| {
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
             let mut r = place(&e.state, parent);
             match slot {
                 Some((true, y0, y1)) => (r[1], r[3]) = (y0, y1),
                 Some((false, x0, x1)) => (r[0], r[2]) = (x0, x1),
                 None => {}
             }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
             let s = e.state.scale;
             let (cx, cy) = ((r[0] + r[2]) * 0.5, (r[1] + r[3]) * 0.5);
             let xf = (xf.0 * s, xf.0 * cx * (1.0 - s) + xf.1, xf.0 * cy * (1.0 - s) + xf.2);
@@ -1062,16 +929,11 @@ pub fn layout_clipped(
                 a
             };
             e.last_rect = Some(shown);
-=======
-            let a = alpha * e.state.alpha * e.state.alpha_multiplier;
-            e.last_rect = Some(r);
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
             let list = match e.kind {
                 "vlist" => Some((true, e.spacing, e.state.alignment)),
                 "hlist" => Some((false, e.spacing, e.state.alignment)),
                 _ => None,
             };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
             (r, a, e.children.clone(), list, xf, shown, e.use_stencil)
         });
         out.push((u.clone(), shown, a, clip));
@@ -1082,26 +944,13 @@ pub fn layout_clipped(
         if a <= 0.0 {
             return;
         }
+        // A stencil clips its children to its own box.
         let clip = if stencil {
             let b = [shown[0].min(shown[2]), shown[1].min(shown[3]), shown[0].max(shown[2]), shown[1].max(shown[3])];
             Some(match clip {
                 Some(c) => [b[0].max(c[0]), b[1].max(c[1]), b[2].min(c[2]), b[3].min(c[3])],
                 None => b,
             })
-=======
-            (r, a, e.children.clone(), list, e.use_stencil)
-        });
-        out.push((u.clone(), r, a, clip));
-        // A stencil clips its children to its own box.
-        let clip = if stencil {
-            let c = clip.unwrap_or([f32::MIN, f32::MIN, f32::MAX, f32::MAX]);
-            Some([
-                c[0].max(r[0].min(r[2])),
-                c[1].max(r[1].min(r[3])),
-                c[2].min(r[0].max(r[2])),
-                c[3].min(r[1].max(r[3])),
-            ])
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         } else {
             clip
         };
@@ -1114,19 +963,11 @@ pub fn layout_clipped(
         kids.sort_by(|x, y| {
             let px = with(x, |e| e.priority);
             let py = with(y, |e| e.priority);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
             px.partial_cmp(&py).unwrap_or(std::cmp::Ordering::Equal).then_with(|| is_dim(y).cmp(&is_dim(x)))
         });
         let Some((vertical, spacing, align)) = list else {
             for k in &kids {
-                walk(k, r, a, None, xf, mid, clip, out);
-=======
-            px.partial_cmp(&py).unwrap_or(std::cmp::Ordering::Equal)
-        });
-        let Some((vertical, spacing, align)) = list else {
-            for k in &kids {
-                walk(k, r, a, None, clip, measure, out);
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
+                walk(k, r, a, None, xf, mid, clip, measure, out);
             }
             return;
         };
@@ -1150,27 +991,21 @@ pub fn layout_clipped(
                 })
             })
             .collect();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
         // bo2mp: a zero-size child of a vertical list (Options' two empty
         // spacer elements) takes no size and no spacing: BO2's SETTINGS
-        // starts at the list's top.
-        let skip = |sz: f32| vertical && sz == 0.0;
+        // starts at the list's top. bo2zm: outside the multiplayer front end
+        // a child with no size along either axis takes no room and no
+        // spacing (ButtonList's two key-repeat helpers).
+        let mp = mp_front_end();
+        let skip = |sz: f32| if mp { vertical && sz == 0.0 } else { sz <= 0.0 };
         let count = sizes.iter().filter(|s| !skip(**s)).count();
         let total = sizes.iter().sum::<f32>() + spacing * count.saturating_sub(1) as f32;
-=======
-        // A child with no size along the axis takes no room and no spacing
-        // (ButtonList's two key-repeat helpers: BO2's Options menu starts
-        // Settings at the list's top, not two spacings down).
-        let placed = sizes.iter().filter(|s| **s > 0.0).count();
-        let total = sizes.iter().sum::<f32>() + spacing * placed.saturating_sub(1) as f32;
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         let (lo, hi) = if vertical { (r[1], r[3]) } else { (r[0], r[2]) };
         let mut at = match align {
             2 | 5 => (lo + hi) * 0.5 - total * 0.5,
             3 | 6 => hi - total,
             _ => lo,
         };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
         // A right-aligned row runs from its right edge: its first child is
         // the rightmost (BO2's right button prompts - "R Remove  C
         // Personalize Weapon", C added first - and its tab headers).
@@ -1179,47 +1014,35 @@ pub fn layout_clipped(
             order.reverse();
         }
         for (k, size) in order.iter().map(|(k, s)| (k, *s)) {
-            walk(k, r, a, Some((vertical, at, at + size)), xf, mid, clip, out);
+            walk(k, r, a, Some((vertical, at, at + size)), xf, mid, clip, measure, out);
             if !skip(size) {
-=======
-        for (k, size) in kids.iter().zip(sizes) {
-            walk(k, r, a, Some((vertical, at, at + size)), clip, measure, out);
-            if size > 0.0 {
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
                 at += size + spacing;
             }
         }
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-    walk(root, rect, 1.0, None, (1.0, 0.0, 0.0), ((rect[0] + rect[2]) * 0.5, (rect[1] + rect[3]) * 0.5), None, &mut out);
+    walk(
+        root,
+        rect,
+        1.0,
+        None,
+        (1.0, 0.0, 0.0),
+        ((rect[0] + rect[2]) * 0.5, (rect[1] + rect[3]) * 0.5),
+        None,
+        measure,
+        &mut out,
+    );
     out
 }
 
 fn reg(vm: &mut Vm, t: &TableRef, name: &'static str, f: impl Fn(&mut Vm, Vec<Value>) -> Res<Vec<Value>> + 'static) {
-=======
-    walk(root, rect, 1.0, None, None, measure, &mut out);
-    out
-}
-
-fn reg(
-    vm: &mut Vm,
-    t: &TableRef,
-    name: &'static str,
-    f: impl Fn(&mut Vm, Vec<Value>) -> Res<Vec<Value>> + 'static,
-) {
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
     // T6LUA_TRACE=1 prints every element call (debugging aid).
     let trace = std::env::var_os("T6LUA_TRACE").is_some();
     let v = vm.native(name, move |vm, a| {
         if trace {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-            let id = a.first().and_then(element).map_or_else(|| "-".to_owned(), |u| with(&u, |e| e.id.to_string()));
-=======
             let id = a
                 .first()
                 .and_then(element)
                 .map_or_else(|| "-".to_owned(), |u| with(&u, |e| e.id.to_string()));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
             let rest: Vec<String> = a.iter().skip(1).map(|v| format!("{v:?}")).collect();
             println!("  call #{id} {name}({})", rest.join(", "));
         }
@@ -1228,7 +1051,6 @@ fn reg(
     t.borrow_mut().set_str(name, v);
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
 /// bo2mp: one more element native (`self:<name>(...)`) beside `install`'s,
 /// for a game's own widgets. Call after `install`, before elements exist.
 pub fn add_native(vm: &mut Vm, name: &'static str, f: impl Fn(&mut Vm, Vec<Value>) -> Res<Vec<Value>> + 'static) {
@@ -1251,8 +1073,6 @@ pub fn add_kind_native(vm: &mut Vm, name: &'static str, kind: &'static str) {
     });
 }
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
 /// Install `ConstructLUIElement`, `RegisterMaterial` and the element
 /// natives into the VM.
 #[allow(clippy::too_many_lines)]
@@ -1274,14 +1094,10 @@ pub fn install(vm: &mut Vm) {
     reg(vm, n, "setLeftRight", |_, a| {
         let u = this(&a, "setLeftRight")?;
         let (la, ra) = (arg(&a, 1).truthy(), arg(&a, 2).truthy());
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-        let (l, r) = (arg(&a, 3).as_num().unwrap_or(0.0), arg(&a, 4).as_num().unwrap_or(0.0));
-=======
         let (l, r) = (
             arg(&a, 3).as_num().unwrap_or(0.0),
             arg(&a, 4).as_num().unwrap_or(0.0),
         );
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         with(&u, |e| {
             edit(e, |s| {
                 s.left_anchor = la;
@@ -1295,14 +1111,10 @@ pub fn install(vm: &mut Vm) {
     reg(vm, n, "setTopBottom", |_, a| {
         let u = this(&a, "setTopBottom")?;
         let (ta, ba) = (arg(&a, 1).truthy(), arg(&a, 2).truthy());
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-        let (t, b) = (arg(&a, 3).as_num().unwrap_or(0.0), arg(&a, 4).as_num().unwrap_or(0.0));
-=======
         let (t, b) = (
             arg(&a, 3).as_num().unwrap_or(0.0),
             arg(&a, 4).as_num().unwrap_or(0.0),
         );
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         with(&u, |e| {
             edit(e, |s| {
                 s.top_anchor = ta;
@@ -1358,24 +1170,16 @@ pub fn install(vm: &mut Vm) {
             Value::Str(s) => Some(s.to_string()),
             _ => None,
         };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
         let now = lui().borrow().now_ms;
         with(&u, |e| {
-            // A streamed image streams each new image in.
+            // A streamed image streams each new image in (its
+            // `streamed_image_ready` comes from `stream_events`; our
+            // pictures are resident, so on the next frame).
             if e.stream_timeout.is_some() {
                 e.stream_since = Some(now);
             }
-            edit(e, |s| s.material = m);
-=======
-        let streamed = with(&u, |e| {
             edit(e, |s| s.material = m.clone());
-            e.streamed
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         });
-        // Our pictures are resident: a streamed one is ready at once.
-        if streamed {
-            lui().borrow_mut().streamed_ready.push(u);
-        }
         Ok(vec![])
     });
     for name in ["setText", "setTextInC"] {
@@ -1385,11 +1189,7 @@ pub fn install(vm: &mut Vm) {
                 Value::Nil => None,
                 v => Some(vm.tostring(&v)?),
             };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-            with(&u, |e| edit(e, |s| s.text = t));
-=======
             with(&u, |e| edit(e, |s| s.text = t.clone()));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
             Ok(vec![])
         });
     }
@@ -1400,25 +1200,17 @@ pub fn install(vm: &mut Vm) {
             Value::User(f) => f.data.borrow().downcast_ref::<String>().cloned(),
             _ => None,
         };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-        with(&u, |e| edit(e, |s| s.font = f));
-=======
         with(&u, |e| edit(e, |s| s.font = f.clone()));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         Ok(vec![])
     });
     reg(vm, n, "setAlignment", |_, a| {
         let u = this(&a, "setAlignment")?;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
         // bo2mp: setAlignment(nil) (the Barracks League block's text
         // helper passes the missing LUI.UIElement.Left) reads left in BO2.
         let v = match arg(&a, 1) {
             Value::Nil => 1,
             x => x.as_num().unwrap_or(0.0) as i32,
         };
-=======
-        let v = arg(&a, 1).as_num().unwrap_or(0.0) as i32;
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         with(&u, |e| edit(e, |s| s.alignment = v));
         Ok(vec![])
     });
@@ -1449,7 +1241,14 @@ pub fn install(vm: &mut Vm) {
         let u = this(&a, "setShaderVector")?;
         let i = arg(&a, 1).as_num().map_or(0, |n| n as usize).min(3);
         let v: [f32; 4] = std::array::from_fn(|k| arg(&a, k + 2).as_num().unwrap_or(0.0));
-        with(&u, |e| edit(e, |s| s.shader[i] = v));
+        with(&u, |e| {
+            edit(e, |s| s.shader[i] = v);
+            // bo2mp: vector 0 also kept on the element (the multiplayer
+            // globe's reveal: `Element::shader`).
+            if i == 0 {
+                e.shader = v;
+            }
+        });
         Ok(vec![])
     });
     for (name, i) in [
@@ -1482,46 +1281,30 @@ pub fn install(vm: &mut Vm) {
     ] {
         reg(vm, n, name, |_, _| Ok(vec![]));
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-    reg(vm, n, "setShaderVector", |_, a| {
-        let u = this(&a, "setShaderVector")?;
-        if arg(&a, 1).as_num().unwrap_or(-1.0) == 0.0 {
-            let v = |i: usize| arg(&a, i).as_num().unwrap_or(0.0) as f32;
-            with(&u, |e| e.shader = [v(2), v(3), v(4), v(5)]);
-        }
-        Ok(vec![])
-    });
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
     // setupDashes(count, filled, ...): a slider's bar, `count` dashes of
     // which `filled` are lit (the engine draws it).
     reg(vm, n, "setupDashes", |_, a| {
         let u = this(&a, "setupDashes")?;
         let count = arg(&a, 1).as_num().unwrap_or(0.0) as i32;
         let filled = arg(&a, 2).as_num().unwrap_or(0.0) as i32;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-        // (count, lit, change, pitch): 20 dashes 8 units apart make the
-        // slider's 160-unit bar. The third is an attachment's change: that
+        // bo2mp: (count, lit, change, pitch): 20 dashes 8 units apart make
+        // the slider's 160-unit bar. The third is an attachment's change: that
         // many dashes better (positive) or worse (negative) than `filled`,
         // drawn in the green or red pip.
-        let change = arg(&a, 3).as_num().unwrap_or(0.0) as i32;
-        let pitch = arg(&a, 4).as_num().unwrap_or(8.0);
+        // bo2zm: outside the multiplayer front end the Zombies fork's reading
+        // holds: (count, lit, gap, dash width), the pitch gap + width.
+        let (change, pitch) = if mp_front_end() {
+            (arg(&a, 3).as_num().unwrap_or(0.0) as i32, arg(&a, 4).as_num().unwrap_or(8.0))
+        } else {
+            (0, arg(&a, 3).as_num().unwrap_or(0.0) + arg(&a, 4).as_num().unwrap_or(8.0))
+        };
         with(&u, |e| {
             e.kind = "dashes";
             e.dashes = (count.max(0), filled.clamp(0, count.max(0)), change);
-=======
-        // (count, lit, gap, dash width): 20 dashes 8 units apart make the
-        // slider's 160-unit bar.
-        let pitch = arg(&a, 3).as_num().unwrap_or(0.0) + arg(&a, 4).as_num().unwrap_or(8.0);
-        with(&u, |e| {
-            e.kind = "dashes";
-            e.dashes = (count.max(0), filled.clamp(0, count.max(0)));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
             e.dash_pitch = pitch.max(1.0);
         });
         Ok(vec![])
     });
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
     // setupTiles(n): the picture repeats across its width in tiles n units wide.
     reg(vm, n, "setupTiles", |_, a| {
         let u = this(&a, "setupTiles")?;
@@ -1529,7 +1312,9 @@ pub fn install(vm: &mut Vm) {
         with(&u, |e| {
             e.kind = "image";
             e.tiles = t.max(0.0);
-=======
+        });
+        Ok(vec![])
+    });
     // setupVoiceMeter(count): Settings' Level Indicator, `count` square
     // dashes 14 apart lit by how loud the microphone is (none here: no
     // voice chat, so all unlit, as the real one sits with no one talking).
@@ -1538,9 +1323,8 @@ pub fn install(vm: &mut Vm) {
         let count = arg(&a, 1).as_num().unwrap_or(20.0) as i32;
         with(&u, |e| {
             e.kind = "meter";
-            e.dashes = (count.max(0), 0);
+            e.dashes = (count.max(0), 0, 0);
             e.dash_pitch = 14.0;
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         });
         Ok(vec![])
     });
@@ -1596,7 +1380,6 @@ pub fn install(vm: &mut Vm) {
         }
         Ok(vec![])
     });
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
     // How far the running animation is (0 to 1); 1 when none runs.
     reg(vm, n, "getAnimationFraction", |_, a| {
         let u = this(&a, "getAnimationFraction")?;
@@ -1607,8 +1390,6 @@ pub fn install(vm: &mut Vm) {
         });
         Ok(vec![Value::Num(f as _)])
     });
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
     reg(vm, n, "animateToState", |_, a| {
         let u = this(&a, "animateToState")?;
         let name = arg(&a, 1).as_str().unwrap_or("").to_owned();
@@ -1616,15 +1397,6 @@ pub fn install(vm: &mut Vm) {
         let (ei, eo) = (arg(&a, 3).truthy(), arg(&a, 4).truthy());
         let now = lui().borrow().now_ms;
         with(&u, |e| {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-            let Some(t) = e.states.get(&name).cloned() else { return };
-            let mut to = e.state.clone();
-            to.apply_table(&t.borrow());
-            // A list's state names its spacing too (CoD.Menu's button
-            // prompt bars: `spacing = 10`).
-            if let Some(sp) = t.borrow().get_str("spacing").as_num() {
-                e.spacing = sp;
-=======
             let Some(t) = e.states.get(&name).cloned() else {
                 return;
             };
@@ -1634,7 +1406,6 @@ pub fn install(vm: &mut Vm) {
             // SetTabSpacing registers {spacing = 20}).
             if let Some(v) = t.borrow().get_str("spacing").as_num() {
                 e.spacing = v;
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
             }
             e.pending = None;
             if ms <= 0.0 {
@@ -1655,18 +1426,15 @@ pub fn install(vm: &mut Vm) {
         });
         Ok(vec![])
     });
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-    reg(vm, n, "completeAnimation", |_, a| {
-=======
     // completeAnimation: the running animation jumps to its end (the
     // values written since beginAnimation included), and, as LUI does it,
     // its `transition_complete_<name>` runs now, before the script's next
     // line, marked `interrupted`: a looping handler stops there (the menu
     // button's pulse_high/pulse_low loop ends when it loses focus; without
     // the mark every button once passed over kept pulsing grey), and the
-    // globe's handlers skip it before its next move starts.
+    // globe's handlers skip it before its next move starts. bo2mp: in the
+    // multiplayer front end it ends with the next tick, not interrupted.
     reg(vm, n, "completeAnimation", |vm, a| {
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         let u = this(&a, "completeAnimation")?;
         let name = with(&u, |e| {
             let pending = e.pending.take();
@@ -1675,9 +1443,10 @@ pub fn install(vm: &mut Vm) {
             Some(a.name)
         });
         if let Some(name) = name {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-            lui().borrow_mut().finished.push((u, name, false));
-=======
+            if mp_front_end() {
+                lui().borrow_mut().finished.push((u, name, false));
+                return Ok(vec![]);
+            }
             let target = Value::User(u);
             let t = Table::new_ref();
             t.borrow_mut()
@@ -1689,7 +1458,6 @@ pub fn install(vm: &mut Vm) {
             if !matches!(pe, Value::Nil) {
                 vm.call(pe, vec![target, Value::Table(t)])?;
             }
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         }
         Ok(vec![])
     });
@@ -1726,12 +1494,8 @@ pub fn install(vm: &mut Vm) {
     reg(vm, n, "removeElement", |_, a| {
         let p = this(&a, "removeElement")?;
         if let Some(c) = element(&arg(&a, 1)) {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-            let mine = with(&c, |e| e.parent.as_ref().and_then(Weak::upgrade)).is_some_and(|q| Rc::ptr_eq(&q, &p));
-=======
             let mine = with(&c, |e| e.parent.as_ref().and_then(Weak::upgrade))
                 .is_some_and(|q| Rc::ptr_eq(&q, &p));
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
             if mine {
                 with(&c, |e| e.parent = None);
                 with(&p, |e| e.children.retain(|x| !Rc::ptr_eq(x, &c)));
@@ -1749,17 +1513,6 @@ pub fn install(vm: &mut Vm) {
     });
     reg(vm, n, "getParent", |_, a| {
         let u = this(&a, "getParent")?;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-        Ok(vec![with(&u, |e| e.parent.as_ref().and_then(Weak::upgrade)).map_or(Value::Nil, Value::User)])
-    });
-    reg(vm, n, "getFirstChild", |_, a| {
-        let u = this(&a, "getFirstChild")?;
-        Ok(vec![with(&u, |e| e.children.first().cloned()).map_or(Value::Nil, Value::User)])
-    });
-    reg(vm, n, "getLastChild", |_, a| {
-        let u = this(&a, "getLastChild")?;
-        Ok(vec![with(&u, |e| e.children.last().cloned()).map_or(Value::Nil, Value::User)])
-=======
         Ok(vec![
             with(&u, |e| e.parent.as_ref().and_then(Weak::upgrade)).map_or(Value::Nil, Value::User),
         ])
@@ -1775,7 +1528,6 @@ pub fn install(vm: &mut Vm) {
         Ok(vec![
             with(&u, |e| e.children.last().cloned()).map_or(Value::Nil, Value::User),
         ])
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
     });
     reg(vm, n, "getNumChildren", |_, a| {
         let u = this(&a, "getNumChildren")?;
@@ -1831,7 +1583,6 @@ pub fn install(vm: &mut Vm) {
         ("setupGlobe", "globe"),
         ("setupUIText", "text"),
         ("setupUITextUncached", "text"),
-        ("setupUITightText", "text"),
         ("setupUIHorizontalList", "hlist"),
         ("setupUIVerticalList", "vlist"),
         ("setupGameTimer", "timer"),
@@ -1845,9 +1596,7 @@ pub fn install(vm: &mut Vm) {
         ("setupObjectiveProgress", "progress"),
         ("setupHUDShaker", "element"),
         ("setupVoipImage", "voip"),
-        ("setupVoiceMeter", "voip"),
         ("setupCinematicSubtitles", "subtitles"),
-        ("setupTiles", "image"),
         ("setupEdgePointer", "pointer"),
         ("setupHorizontalCompass", "compass"),
         ("setupPlayerHealthEKG", "element"),
@@ -1865,7 +1614,6 @@ pub fn install(vm: &mut Vm) {
     ] {
         reg(vm, n, name, move |_, a| {
             let u = this(&a, name)?;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
             with(&u, |e| {
                 e.kind = kind;
                 // A player's emblem is the engine's picture; with none to
@@ -1882,24 +1630,19 @@ pub fn install(vm: &mut Vm) {
                     (e.state.red, e.state.green, e.state.blue) = (0.431, 0.584, 0.055);
                 }
             });
-=======
-            with(&u, |e| e.kind = kind);
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
             Ok(vec![])
         });
     }
     // setupVoipImage(clientNum): the engine's speaker beside a player's
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-    // name; no one talks here: its not-talking speaker (`nottalkingicon`).
-=======
-    // name: the plain grey speaker (`voice_quiet`), as nobody talks here.
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
+    // name; no one talks here: its not-talking speaker (bo2mp: the
+    // multiplayer front end's `nottalkingicon`; bo2zm: elsewhere the plain
+    // grey speaker, `voice_quiet`).
     reg(vm, n, "setupVoipImage", |_, a| {
         let u = this(&a, "setupVoipImage")?;
         with(&u, |e| {
             e.kind = "image";
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-            e.state.material = Some("nottalkingicon".to_owned());
+            let quiet = if mp_front_end() { "nottalkingicon" } else { "voice_quiet" };
+            edit(e, |s| s.material = Some(quiet.to_owned()));
         });
         Ok(vec![])
     });
@@ -1913,6 +1656,7 @@ pub fn install(vm: &mut Vm) {
         let now = lui().borrow().now_ms;
         with(&u, |e| {
             e.kind = "image";
+            e.streamed = true;
             e.stream_timeout = Some(timeout);
             e.stream_since = Some(now);
         });
@@ -1960,22 +1704,7 @@ pub fn install(vm: &mut Vm) {
         with(&u, |e| {
             e.kind = "element";
             e.edge_pointer = None;
-=======
-            edit(e, |s| s.material = Some("voice_quiet".to_owned()));
         });
-        Ok(vec![])
-    });
-    reg(vm, n, "setupUIStreamedImage", |_, a| {
-        let u = this(&a, "setupUIStreamedImage")?;
-        let has_picture = with(&u, |e| {
-            e.kind = "image";
-            e.streamed = true;
-            e.pending.as_ref().unwrap_or(&e.state).material.is_some()
-        });
-        // The picture set before it (the map screen sets it first) is ready.
-        if has_picture {
-            lui().borrow_mut().streamed_ready.push(u);
-        }
         Ok(vec![])
     });
     reg(vm, n, "setupUITightText", |_, a| {
@@ -1983,7 +1712,6 @@ pub fn install(vm: &mut Vm) {
         with(&u, |e| {
             e.kind = "text";
             e.tight = true;
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         });
         Ok(vec![])
     });
@@ -1992,13 +1720,8 @@ pub fn install(vm: &mut Vm) {
     // popup over its menu).
     reg(vm, n, "setBlur", |_, a| {
         let u = this(&a, "setBlur")?;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
         let v = arg(&a, 1).truthy();
         with(&u, |e| e.blur = v);
-=======
-        let on = arg(&a, 1).truthy();
-        with(&u, |e| e.blur = on);
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         Ok(vec![])
     });
     // Engine settings on widgets not drawn yet (no effect here).
@@ -2013,13 +1736,7 @@ pub fn install(vm: &mut Vm) {
         reg(vm, n, name, |_, _| Ok(vec![]));
     }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
     let construct_fn = vm.native("ConstructLUIElement", |vm, _| Ok(vec![construct(vm, "element")]));
-=======
-    let construct_fn = vm.native("ConstructLUIElement", |vm, _| {
-        Ok(vec![construct(vm, "element")])
-    });
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
     vm.set_global("ConstructLUIElement", construct_fn);
     let register_material = vm.native("RegisterMaterial", |_, a| {
         let name = arg(&a, 0).as_str().unwrap_or("").to_owned();
@@ -2047,7 +1764,6 @@ pub fn install(vm: &mut Vm) {
     vm.set_global("hpairs", pairs);
     // ProjectRootCoordinate(rootName, x, y): the engine's mouse position in a
     // root's units (the host sends it in root units already).
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
     let project = vm.native("ProjectRootCoordinate", |_, a| Ok(vec![arg(&a, 1), arg(&a, 2)]));
     vm.set_global("ProjectRootCoordinate", project);
 }
@@ -2084,14 +1800,6 @@ pub fn stream_events(now_ms: f64) -> Vec<(Rc<UserData>, &'static str)> {
     out
 }
 
-=======
-    let project = vm.native("ProjectRootCoordinate", |_, a| {
-        Ok(vec![arg(&a, 1), arg(&a, 2)])
-    });
-    vm.set_global("ProjectRootCoordinate", project);
-}
-
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
 /// Start the animations whose end the setters have written since their
 /// `beginAnimation` (called once per frame before `tick`).
 pub fn commit_pending() {
@@ -2175,9 +1883,6 @@ mod tests {
     #[test]
     fn anchors_place_edges() {
         let parent = [0.0, 0.0, 100.0, 50.0];
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-        let mut s = State { left_anchor: true, right_anchor: true, left: 10.0, right: -10.0, ..State::default() };
-=======
         let mut s = State {
             left_anchor: true,
             right_anchor: true,
@@ -2185,7 +1890,6 @@ mod tests {
             right: -10.0,
             ..State::default()
         };
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         assert_eq!(place(&s, parent)[0..1], [10.0]);
         assert_eq!(place(&s, parent)[2], 90.0);
         s.right_anchor = false;
@@ -2222,19 +1926,11 @@ mod tests {
             });
             add_child(&list, &c, None);
         }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-        let laid = layout(&list, [0.0, 0.0, 100.0, 100.0]);
-        let tops: Vec<(f32, f32)> = laid.iter().skip(1).map(|(_, r, _)| (r[1], r[3])).collect();
-        assert_eq!(tops, vec![(0.0, 30.0), (32.0, 62.0)]);
-        with(&list, |e| e.state.alignment = 5);
-        let laid = layout(&list, [0.0, 0.0, 100.0, 100.0]);
-=======
         let laid = layout(&list, [0.0, 0.0, 100.0, 100.0], &|_, _, _| 0.0);
         let tops: Vec<(f32, f32)> = laid.iter().skip(1).map(|(_, r, _)| (r[1], r[3])).collect();
         assert_eq!(tops, vec![(0.0, 30.0), (32.0, 62.0)]);
         with(&list, |e| e.state.alignment = 5);
         let laid = layout(&list, [0.0, 0.0, 100.0, 100.0], &|_, _, _| 0.0);
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         assert_eq!(laid[1].1[1], 19.0);
     }
 }
@@ -2280,10 +1976,6 @@ pub fn tree(u: &Rc<UserData>, depth: usize, out: &mut Vec<String>) {
                 e.kind,
                 if e.focused { " FOCUS" } else { "" },
                 if off.truthy() { " input-off" } else { "" },
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
-                if matches!(owner, Value::Nil) { String::new() } else { format!(" owner={owner}") },
-                if matches!(name, Value::Nil) { String::new() } else { name.to_string() },
-=======
                 if matches!(owner, Value::Nil) {
                     String::new()
                 } else {
@@ -2294,7 +1986,6 @@ pub fn tree(u: &Rc<UserData>, depth: usize, out: &mut Vec<String>) {
                 } else {
                     name.to_string()
                 },
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
                 indent = depth * 2
             ),
             e.children.clone(),
@@ -2355,15 +2046,7 @@ pub fn menu_report(u: &Rc<UserData>) -> Vec<String> {
 pub fn child_ids(u: &Rc<UserData>) -> Vec<String> {
     let kids = with(u, |e| e.children.clone());
     kids.iter()
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/hks_t6/src/lui.rs
         .filter_map(|k| with(k, |e| e.fields.borrow().get_str("id").as_str().map(str::to_owned)))
-=======
-        .filter_map(|k| {
-            with(k, |e| {
-                e.fields.borrow().get_str("id").as_str().map(str::to_owned)
-            })
-        })
->>>>>>> /tmp/claude-0/zmhead/crates/hks_t6/src/lui.rs
         .collect()
 }
 

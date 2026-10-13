@@ -30,20 +30,16 @@ pub struct GameSettings {
     pub vsync: bool,
     pub fov: f32,
     pub master_volume: f32,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/frame/src/settings.rs
     /// The music director's level (menu, lobby and match music), under
-    /// `master_volume`.
+    /// `master_volume` (Black Ops II's Sound > Music slider).
     pub music_volume: f32,
     /// Low ambient music during a match (the music director's match playlist).
     pub match_music: bool,
-=======
-    /// bo2zm: Black Ops II's Sound sliders, each over the master: music,
+    /// bo2zm: Black Ops II's other Sound sliders, each over the master:
     /// effects, voices, cinematics (0..1).
-    pub music_volume: f32,
     pub sfx_volume: f32,
     pub voice_volume: f32,
     pub cinematic_volume: f32,
->>>>>>> /tmp/claude-0/zmhead/crates/frame/src/settings.rs
     pub brightness: f32,
     pub shadows: bool,
     pub depth_of_field: bool,
@@ -70,7 +66,6 @@ pub struct GameSettings {
     /// bo2zm: Controls > Move > "Omni Movement": sprint in any direction.
     /// Not Black Ops II's (it sprints forward only), so off by default.
     pub omni_movement: bool,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/frame/src/settings.rs
     /// bo2mp: Graphics > "Player Models": on another game's map, its own
     /// soldiers and animations (true), or Black Ops II's characters.
     pub map_game_bodies: bool,
@@ -79,7 +74,6 @@ pub struct GameSettings {
     pub friend_code: u32,
     /// bo2mp: the friend codes he added.
     pub friends: Vec<u32>,
-=======
 
     /// bo2zm: more of Black Ops II's Settings rows: mature content (heads
     /// and limbs come off), how many corpses stay (3, 5, 10, 16), the fps
@@ -94,7 +88,6 @@ pub struct GameSettings {
     pub aa_samples: u8,
     pub tex_filter: u8,
     pub tex_quality: i8,
->>>>>>> /tmp/claude-0/zmhead/crates/frame/src/settings.rs
 
     pub revision: u64,
 }
@@ -107,15 +100,11 @@ impl Default for GameSettings {
             vsync: true,
             fov: Self::FOV_DEFAULT,
             master_volume: 1.0,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/frame/src/settings.rs
             music_volume: Self::MUSIC_VOLUME_DEFAULT,
             match_music: true,
-=======
-            music_volume: 1.0,
             sfx_volume: 1.0,
             voice_volume: 1.0,
             cinematic_volume: 1.0,
->>>>>>> /tmp/claude-0/zmhead/crates/frame/src/settings.rs
             brightness: 0.0,
             shadows: true,
             depth_of_field: true,
@@ -135,12 +124,10 @@ impl Default for GameSettings {
             pad_deadzone_left: 0.12,
             pad_deadzone_right: 0.12,
             bo2_fast: false,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/frame/src/settings.rs
             omni_movement: false,
             map_game_bodies: true,
             friend_code: 0,
             friends: Vec::new(),
-=======
             mature: true,
             corpses: 16,
             draw_fps: false,
@@ -149,8 +136,6 @@ impl Default for GameSettings {
             aa_samples: 1,
             tex_filter: 2,
             tex_quality: -1,
-            omni_movement: false,
->>>>>>> /tmp/claude-0/zmhead/crates/frame/src/settings.rs
             revision: 0,
         }
     }
@@ -212,22 +197,14 @@ impl GameSettings {
             0.0
         };
         self.master_volume = self.master_volume.clamp(0.0, 1.0);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/frame/src/settings.rs
         self.music_volume = if self.music_volume.is_finite() {
             self.music_volume.clamp(0.0, 1.0)
         } else {
             Self::MUSIC_VOLUME_DEFAULT
         };
-=======
-        for v in [
-            &mut self.music_volume,
-            &mut self.sfx_volume,
-            &mut self.voice_volume,
-            &mut self.cinematic_volume,
-        ] {
+        for v in [&mut self.sfx_volume, &mut self.voice_volume, &mut self.cinematic_volume] {
             *v = if v.is_finite() { v.clamp(0.0, 1.0) } else { 1.0 };
         }
->>>>>>> /tmp/claude-0/zmhead/crates/frame/src/settings.rs
         self.sensitivity = self.sensitivity.clamp(0.1, 30.0);
         if self.pad_layout != Self::PAD_LAYOUT_CUSTOM {
             self.pad_layout = self.pad_layout.min(4);
@@ -279,7 +256,6 @@ impl GameSettings {
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/frame/src/settings.rs
 #[cfg(test)]
 mod friend_tests {
     use super::GameSettings;
@@ -296,7 +272,7 @@ mod friend_tests {
         assert_eq!(bad.friend_code, 0);
     }
 }
-=======
+
 impl GameSettings {
     /// The name he plays under (lobby, scoreboard, the game's own
     /// messages): a name his settings give (the family launcher's
@@ -342,4 +318,3 @@ pub fn steam_name() -> Option<String> {
     })
     .clone()
 }
->>>>>>> /tmp/claude-0/zmhead/crates/frame/src/settings.rs

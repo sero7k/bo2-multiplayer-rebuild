@@ -9,15 +9,11 @@ pub mod settings;
 pub mod ui;
 
 pub use class_presets::{ClassPreset, pick_showcase, showcase_classes};
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/frame/src/lib.rs
-pub use pad::{ActivePad, InputDevices, PromptStyle, TestControllerRumble};
-=======
 pub use pad::{
     ActivePad, BO2_XBOX_GLYPHS, InputDevices, PromptStyle, TestControllerRumble, bo2_frontend,
     bo2_cycle_glyph, bo2_game, bo2_pad_glyph, bo2_zm_choice, bo2_zm_start, set_bo2_frontend, set_bo2_game,
     set_bo2_zm_start,
 };
->>>>>>> /tmp/claude-0/zmhead/crates/frame/src/lib.rs
 pub use retire::Retiring;
 pub use schedule::{
     AUTHORITY_TOC, AuthorityBookkeeping, AuthorityEdge, AuthoritySet, CLIENT_TOC,
@@ -28,11 +24,7 @@ pub use schedule::{
     configure_client_sets, configure_render_sets, configure_worker_cmd_sets, worker_cmd_name,
 };
 pub use script_entity_notify::{AbortKillcam, BeginKillcam, KillcamEnded, SpawnedPlayer};
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/frame/src/lib.rs
 pub use script_notify::{EndBoardShown, ExitLevelCalled, register_script_notify};
-=======
-pub use script_notify::{ExitLevelCalled, register_script_notify};
->>>>>>> /tmp/claude-0/zmhead/crates/frame/src/lib.rs
 pub use session::{
     AdmissionKey, AppScreen, BotNavigationReady, CacWeaponOffer, ClassSelectHandoff, HasWorld,
     Headless, HostClassLoadouts, HostClassSlot, HudInputView, LaunchIdentity, LaunchReport,
@@ -42,13 +34,7 @@ pub use session::{
 };
 pub use settings::{DisplayResolution, GameSettings};
 pub use ui::{
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/frame/src/lib.rs
-    GamePaused, HostMatchRules, LuiMenus, MenuDims, MenuMusicScreen, WorldBlur, WorldDim, UiBindRequest, UiBindingCapture, UiExecCommand,
-    UiMenuDvars, UiMenuKey, UiMenuRequest, UiPartyState, UiPlayMusic, UiPlaySound, UiStopMusic,
-    register_ui_contracts,
-=======
-    GamePaused, HostMatchRules, LuiMenus, UiBindRequest, UiBindingCapture, UiExecCommand,
-    ScriptScreenFilter, UiMenuDvars, UiMenuKey, UiMenuRequest, UiPartyState, UiPlayMusic,
-    UiPlaySound, UiStopMusic, WorldBlur, register_ui_contracts,
->>>>>>> /tmp/claude-0/zmhead/crates/frame/src/lib.rs
+    GamePaused, HostMatchRules, LuiMenus, MenuDims, MenuMusicScreen, ScriptScreenFilter, WorldBlur, WorldDim,
+    UiBindRequest, UiBindingCapture, UiExecCommand, UiMenuDvars, UiMenuKey, UiMenuRequest, UiPartyState,
+    UiPlayMusic, UiPlaySound, UiStopMusic, register_ui_contracts,
 };

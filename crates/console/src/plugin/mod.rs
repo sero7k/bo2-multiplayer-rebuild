@@ -281,11 +281,7 @@ struct PhysicalInputState {
     look_ready: bool,
     mouse_activity: f32,
     mouse_activity_start: f32,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/console/src/plugin/mod.rs
-    prompts: Option<(bool, frame::PromptStyle)>,
-=======
     prompts: Option<(bool, frame::PromptStyle, bool)>,
->>>>>>> /tmp/claude-0/zmhead/crates/console/src/plugin/mod.rs
 }
 
 fn publish_client_action_input(
@@ -327,16 +323,12 @@ fn publish_client_action_input(
         out.pad_autoaim = None;
         devices.aiming_with_pad = false;
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/console/src/plugin/mod.rs
-    out.pad_aim_assist = 0;
-=======
     // bo2zm: Black Ops II's aim assist on a pad (IW4 on PC has none).
     out.pad_aim_assist = if devices.aiming_with_pad && pad.is_some() && frame::bo2_game() {
         2
     } else {
         0
     };
->>>>>>> /tmp/claude-0/zmhead/crates/console/src/plugin/mod.rs
     out.pad_move = [0.0; 2];
     out.pad_look = [0.0; 2];
     out.pad_look_delta = [0.0; 2];
@@ -445,16 +437,11 @@ fn publish_client_action_input(
             if key_num >= input_iw4::KEY_COUNT || physical.blocked.contains(&button) {
                 continue;
             }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/console/src/plugin/mod.rs
-            // bo2zm: a scripted test run takes no physical keys or buttons.
-            if inputs.just_pressed(button) && !crate::startup::scripted_run() {
-=======
             // bo2zm: a scripted test run takes no physical keys or buttons
             // (only the ones its own `key` command holds down).
             let scripted_key = matches!(button, BindButton::Key(code)
                 if scripted_keys.0.iter().any(|(held, _, _)| *held == code));
             if inputs.just_pressed(button) && (!crate::startup::scripted_run() || scripted_key) {
->>>>>>> /tmp/claude-0/zmhead/crates/console/src/plugin/mod.rs
                 key_event(&mut out.client, key_num, true, now, frame);
             }
             if !inputs.pressed(button) && out.client.keys[key_num].down != 0 {
@@ -536,11 +523,7 @@ fn publish_client_action_input(
         devices.pad_prompts = false;
         physical.mouse_activity = 0.0;
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/console/src/plugin/mod.rs
-    let prompts = (devices.pad_prompts, devices.style);
-=======
     let prompts = (devices.pad_prompts, devices.style, frame::bo2_game());
->>>>>>> /tmp/claude-0/zmhead/crates/console/src/plugin/mod.rs
     if physical.prompts == Some(prompts) && !binds.is_changed() {
         return;
     }
@@ -556,16 +539,12 @@ fn publish_client_action_input(
     hud_input.action_slot_keys = [None, None, None, None];
     for (button, id) in labels {
         let label = match button {
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/console/src/plugin/mod.rs
-            BindButton::Pad(button) => button.prompt(devices.style).to_owned(),
-=======
             // bo2zm: in a Black Ops II game, BO2's button pictures.
             BindButton::Pad(button) => frame::bo2_game()
                 .then(|| frame::bo2_pad_glyph(button.bo2_name(), devices.style))
                 .flatten()
                 .unwrap_or_else(|| button.prompt(devices.style))
                 .to_owned(),
->>>>>>> /tmp/claude-0/zmhead/crates/console/src/plugin/mod.rs
             _ => crate::binds::display_button(button).to_uppercase(),
         };
         if let Some(command) = binds.binding_name(button) {

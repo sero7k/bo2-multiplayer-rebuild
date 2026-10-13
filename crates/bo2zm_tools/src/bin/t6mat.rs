@@ -24,11 +24,7 @@ fn half_f32(bits: u16) -> f32 {
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6mat.rs
 /// `R_HashString`: case-folded, xor with 33 times the running hash.
-=======
-/// The string hash: case-folded, xor with 33 times the running hash.
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6mat.rs
 fn hash(name: &str) -> u32 {
     name.bytes()
         .fold(0u32, |h, c| u32::from(c | 0x20) ^ h.wrapping_mul(33))
@@ -685,9 +681,7 @@ fn run(path: &Path) -> Result<(), String> {
     );
     println!("sun: {:?}", world.sun);
     println!("exposure volumes: {:?}", world.exposure_volumes);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6mat.rs
     println!("init world sun exposure: {}", world.init_sun_exposure);
-=======
     if std::env::var("T6MAT_EXPOSURE").is_ok() {
         let f: Vec<f32> = world.init_sun_raw.iter().map(|w| f32::from_bits(*w)).collect();
         println!("init world sun: words {:x?}", world.init_sun_raw);
@@ -704,7 +698,6 @@ fn run(path: &Path) -> Result<(), String> {
             println!("exposure plane {i}: {p:?}");
         }
     }
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6mat.rs
     if let Some(g) = &world.light_grid {
         println!(
             "light grid: mins {:?} maxs {:?} offset {} row axis {} col axis {} rows {} raw {} entries {} colours {} sun light {}",
@@ -1263,13 +1256,10 @@ fn run(path: &Path) -> Result<(), String> {
                 .collect::<Vec<_>>()
         );
     }
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6mat.rs
     println!(
         "sky dyn intensity {:?}; lut volumes {:?}",
         world.sky_dyn_intensity, world.lut_volumes
     );
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6mat.rs
     if let Some(k) = world.lut_material {
         let m = &capture.materials[k.index];
         let ts = m.technique_set.map_or("(none)".to_owned(), |t| {
@@ -1337,13 +1327,9 @@ fn run(path: &Path) -> Result<(), String> {
             let Some(k) = sm.model else { continue };
             let m = &capture.xmodels[k.index];
             let want = std::env::var("T6MAT_TREES").unwrap_or_default();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/bo2zm_tools/src/bin/t6mat.rs
             // `T6MAT_TREES=*`: every placed model.
             if want == "*"
                 || (want.len() > 1 && m.name.contains(&want))
-=======
-            if (want.len() > 1 && m.name.contains(&want))
->>>>>>> /tmp/claude-0/zmhead/crates/bo2zm_tools/src/bin/t6mat.rs
                 || (want.len() <= 1
                     && (m.name.contains("tree")
                         || m.name.contains("foliage")

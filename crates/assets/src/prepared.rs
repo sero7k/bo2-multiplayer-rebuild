@@ -56,7 +56,6 @@ pub struct MapFacts {
     pub t6_hud_fonts: T6HudFonts,
     /// bo2zm M4: Black Ops II's own UI scripts and what they read.
     pub t6_ui: T6Ui,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/prepared.rs
     /// bo2mp: the third-person player animation script and its anim types
     /// (every client poses other players with it).
     pub t6_playeranim: Option<(String, String)>,
@@ -65,14 +64,12 @@ pub struct MapFacts {
     /// bo2mp: each player animation's move speed (units/s, from its root
     /// motion): a legs animation plays at the player's speed over this.
     pub t6_anim_speeds: Vec<(String, f32)>,
-=======
     /// bo2zm: Black Ops II's bullet penetration depths
     /// (`info/bullet_penetration_mp` in patch_zm), how far a bullet goes
     /// through each surface (flesh: 32 small, 64 medium, 112 large).
     pub t6_pen_table: Option<weapon_iw4::PenetrationDepthTable>,
     /// bo2zm: the full-screen filters the map's scripts turn on.
     pub t6_screen_filters: T6ScreenFilters,
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/prepared.rs
 }
 
 /// bo2zm: Black Ops II's HUD fonts: the English `fonts/720/*` bitmap fonts,
@@ -111,30 +108,19 @@ pub struct T6Ui {
     pub strings: std::sync::Arc<Vec<(String, String)>>,
     /// (name, columns, rows, cells row-major).
     pub tables: std::sync::Arc<Vec<(String, usize, usize, Vec<String>)>>,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/prepared.rs
     /// bo2mp: the zones' config files (`default_private.cfg`, ...) by
     /// name, for the menus' `exec <file>`.
     pub configs: std::sync::Arc<Vec<(String, String)>>,
-=======
     /// bo2zm M4: the game settings' defaults (`gametype_setting <name>
     /// <value>` in zm_gamesettings_default.cfg, then _zstandard.cfg): what
     /// Custom Games shows before he changes anything.
     pub game_settings: std::sync::Arc<Vec<(String, f32)>>,
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/prepared.rs
 }
 
 impl PartialEq for T6Ui {
     fn eq(&self, other: &Self) -> bool {
         self.scripts.len() == other.scripts.len()
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/assets/src/prepared.rs
             && self.scripts.iter().zip(&other.scripts).all(|(a, b)| a.0 == b.0 && a.1.len() == b.1.len())
-=======
-            && self
-                .scripts
-                .iter()
-                .zip(&other.scripts)
-                .all(|(a, b)| a.0 == b.0 && a.1.len() == b.1.len())
->>>>>>> /tmp/claude-0/zmhead/crates/assets/src/prepared.rs
             && self.strings.len() == other.strings.len()
             && self.tables.len() == other.tables.len()
     }

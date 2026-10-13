@@ -324,13 +324,8 @@ fn t6_body_facts(w: &asset_t6::WeaponRef) -> WeaponBodyFacts {
         idle_prone_factor: w.def_f32(d::fIdleProneFactor),
     };
     f.penetrate_type = w.def_i32(d::penetrateTWeaponAttachmentype);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog_t6.rs
     // bo2mp: a Black Ops II gun has no penetration multiplier of its own;
     // the depth table is used as is (only the FMJ perk scales it).
-=======
-    // bo2zm: T6 has no per-weapon penetration scale; the table's depths
-    // are the whole story.
->>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog_t6.rs
     f.penetrate_multiplier = 1.0;
     f.rifle_bullet = w.def_u8(d::bRifleBullet) != 0;
     let var_vec3 = |off: usize| [w.var_f32(off), w.var_f32(off + 4), w.var_f32(off + 8)];
@@ -764,7 +759,6 @@ impl WeaponCatalog {
     }
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/asset_game/src/weapon_catalog_t6.rs
 /// bo2mp: Black Ops II's sight attachments, by attachment name: the ones a
 /// gun is given as its own catalog weapon (`mp7_mp+reflex`), so its sight
 /// model, hidden iron sights, ADS animations, zoom and scope overlay are the
@@ -1019,8 +1013,6 @@ impl WeaponCatalog {
     }
 }
 
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/asset_game/src/weapon_catalog_t6.rs
 #[cfg(test)]
 mod tests {
     use super::*;

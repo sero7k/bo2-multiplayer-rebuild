@@ -137,16 +137,12 @@ pub(crate) fn register_combat_fx_systems(app: &mut App) {
         )
         .add_systems(
             Update,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
-            (drain_bullet_hit_fx, drain_pellet_fx, present_tracker_light)
-=======
             (
                 drain_bullet_hit_fx,
                 drain_pellet_fx,
                 present_tracker_light,
                 present_ghost_hands_fx,
             )
->>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
                 .chain()
                 .after(render_anim::occupancy::fpv_present::publish_fpv_dobj_pose)
                 .after(frame::WorkerCmdSet::SkinModel)
@@ -1004,14 +1000,9 @@ fn t6_fx_material(runtime: &MaterialGeneration, asset_id: usize) -> bool {
         .is_some_and(|m| m.t6_draw.is_some())
 }
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
-/// bo2zm test aid: `IW4L_T6_FX_ONLY=a,b` draws only effect materials whose
-/// name contains one of them; `IW4L_T6_FX_SKIP=a,b` hides those.
-=======
 /// bo2zm: the effect materials not drawn (the superflares, below); test aid:
 /// `IW4L_T6_FX_ONLY=a,b` draws only effect materials whose name contains one
 /// of them; `IW4L_T6_FX_SKIP=a,b` hides those.
->>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
 fn t6_fx_filtered_out(runtime: &MaterialGeneration, asset_id: usize) -> bool {
     static FILTER: std::sync::OnceLock<(Vec<String>, Vec<String>)> = std::sync::OnceLock::new();
     let (only, skip) = FILTER.get_or_init(|| {
@@ -1148,15 +1139,12 @@ fn commit_fx_transaction(
     let mut iw_models: Vec<fx::FxModelInstance> = Vec::with_capacity(out.models.len());
     for m in &out.models {
         let entry = fx_model_catalog.and_then(|catalog| catalog.get_at(m.model_index));
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
         // bo2mp: Black Ops II's `fx_decal_*` models are decal volumes (a
         // box BO2 projects blood onto the body inside it); drawn as a model
         // the box shows as a black block on the body. Not drawn.
         if entry.is_some_and(|e| e.skel.name.starts_with("fx_decal")) {
             continue;
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
         let t6 = entry.is_some_and(|e| {
             (0..e.skel.surface_materials.len()).any(|s| {
                 e.material_index(s)
@@ -3172,21 +3160,12 @@ fn fire_weapon(
     combat.last_tracer_name = combat_fx.and_then(|fx| fx.tracer_hint.clone());
     combat.last_weapon_tracer_edge = combat_fx.map(|fx| fx.tracer.edge_kind().to_owned());
     combat.last_weapon_flash_edge =
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
         combat_fx.map(|fx| fx.flash_edge(own_gun).edge_kind().to_owned());
     let muzzle_name = combat_fx.and_then(|fx| fx.flash_present(own_gun));
     // bo2zm fix list 3: on the player's own gun, a far-view flash plays its
     // first-person copy (`asset_game::T6_FIRST_PERSON_FLASH_SCALE`).
     let first_person_name = muzzle_name
         .filter(|_| own_gun)
-=======
-        combat_fx.map(|fx| fx.flash_edge(player_view).edge_kind().to_owned());
-    let muzzle_name = combat_fx.and_then(|fx| fx.flash_present(player_view));
-    // bo2zm fix list 3: on the player's own gun, a far-view flash plays its
-    // first-person copy (`asset_game::T6_FIRST_PERSON_FLASH_SCALE`).
-    let first_person_name = muzzle_name
-        .filter(|_| player_view)
->>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
         .map(|n| (n.namespace, asset_game::t6_first_person_flash_name(n.name)))
         .filter(|(ns, name)| {
             catalog
@@ -3220,7 +3199,6 @@ fn fire_weapon(
         let mut muzzle_played = cursor.muzzle_played;
         let mut muzzle_gap = cursor.muzzle_gap;
 
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
         // bo2mp: a gun on no player (a scorestreak's helicopter or turret)
         // has no flash bolt here: its flash plays where the server says its
         // muzzle is, turned along the shot.
@@ -3228,8 +3206,6 @@ fn fire_weapon(
             && identities
                 .get(fire.entity)
                 .is_ok_and(|identity| identity.client().is_none());
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
         if try_play_weapon_fx_bolted(
             &mut host.0,
             &catalog.0,
@@ -3240,7 +3216,6 @@ fn fire_weapon(
             fx_world.view().as_ref().map(|s| s as &dyn FxScene),
         ) {
             cursor.muzzle_bolted = cursor.muzzle_bolted.saturating_add(1);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
         } else if !(gun_on_no_player
             && try_play_weapon_fx_at_origin(
                 &mut host.0,
@@ -3253,9 +3228,6 @@ fn fire_weapon(
                 fx_world.view().as_ref().map(|s| s as &dyn FxScene),
             ))
         {
-=======
-        } else {
->>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
             muzzle_gap = muzzle_gap.saturating_add(1);
         }
         if muzzle_played > cursor.muzzle_played {
@@ -3292,11 +3264,7 @@ fn fire_weapon(
         let weapon = fire.event.payload.weapon;
         audio::select_cg_fire_alias(
             last_shot,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
             own_gun,
-=======
-            player_view,
->>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
             weapons
                 .0
                 .weapon_sound_alias(weapon, asset_game::WeaponSoundSlot::Fire, &bank.0),
@@ -3312,11 +3280,7 @@ fn fire_weapon(
                 &bank.0,
             ),
         )
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
         .map(|alias| (alias, own_gun))
-=======
-        .map(|alias| (alias, player_view))
->>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
     });
     if let (Some((alias, player_view)), Some(sounds)) = (alias, sounds.as_deref_mut()) {
         combat.last_fire_alias = Some(alias.to_owned());
@@ -4191,11 +4155,7 @@ fn melee_blood(
         &mut host.0,
         &catalog.0,
         &mut elem_infos.0,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/render_frontend/src/adapters/fx/system.rs
-        Some(asset_game::FxName::engine("impacts/flesh_hit_knife")),
-=======
         Some(knife_blood),
->>>>>>> /tmp/claude-0/zmhead/crates/render_frontend/src/adapters/fx/system.rs
         target,
         &mut played,
         fx_world.view().as_ref().map(|s| s as &dyn FxScene),

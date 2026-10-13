@@ -12,8 +12,6 @@ use crate::world::ClientId;
 
 type R = Result<Value, String>;
 
-const CALLBACKS: &str = "maps/mp/gametypes_zm/_callbacksetup";
-
 /// An actor's body (radius, height) for the route checks; a zombie's for
 /// anything else.
 fn body_size(vm: &Vm<World>, world: &World, v: &Value) -> (f32, f32) {
@@ -100,11 +98,7 @@ pub(crate) fn player_damage(
     let cb = super::mp::callbacks(world);
     vm.spawn_named(
         world,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
         &cb,
-=======
-        CALLBACKS,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
         "codecallback_playerdamage",
         Value::Object(obj),
         args,
@@ -844,7 +838,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             return Ok(Value::Undefined);
         };
         let dmg_s = vm.intern("meleedamage");
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
         let mut dmg = vm.raw_field(obj, dmg_s).as_int().unwrap_or(60);
         // bo2mp: a K9 Unit dog bites with its own weapon (`aiweapon`,
         // dog_bite_mp): named in the hit, and its melee damage.
@@ -864,9 +857,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         {
             dmg = f.melee_damage;
         }
-=======
-        let dmg = vm.raw_field(obj, dmg_s).as_int().unwrap_or(60);
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
         let dir = gsc_t6::math::normalize(d);
         player_damage(
             vm,
@@ -1037,7 +1027,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let dir = arg(a, 7).as_vec3();
         let bo2 = !crate::step::bo2_feel_mw2();
         let finish = crate::script_player::finish_damage(&mut frame(world), id, amount, dir, bo2);
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
         // bo2mp: in multiplayer a lethal hit kills: the engine's death (body,
         // the client dead), then BO2's own CodeCallback_PlayerKilled (kill
         // feed, score, killcam, respawn).
@@ -1083,8 +1072,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             );
             return Ok(Value::Undefined);
         }
-=======
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
         if finish != crate::script_player::Finish::Hurt {
             // Zombies: a lethal hit puts the player into last stand (the
             // scripts decide what follows).
@@ -1110,11 +1097,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             let cb = super::mp::callbacks(world);
             vm.spawn_named(
                 world,
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
                 &cb,
-=======
-                CALLBACKS,
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
                 "codecallback_playerlaststand",
                 Value::Object(obj),
                 args,
@@ -1122,10 +1105,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         }
         Ok(Value::Undefined)
     });
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
-    // `gib(type, limb tags)`: each limb's own model (its character's
-    // gibspawnN at gibspawntagN) flies off and falls, gone after a while.
-=======
     // `gib(type, pieces)`: pieces are the scripts' piece numbers
     // (`level._zombie_gib_piece_index_*`: 0 all limbs, 1 right arm, 2 left
     // arm, 3 right leg, 4 left leg, 5 head, 6 guts, 7 hat). Each piece's
@@ -1133,26 +1112,15 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     // falls, gone after a while, with the client scripts' blood
     // (clientscripts/mp/zombies/_zm.csc on_gib_event: do_gib_fx on a limb,
     // do_headshot_gib_fx on the head).
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
     m!("gib", |vm, world, s, a| {
         let n = actor_n(vm, world, s)?;
         let Some(obj) = s.as_obj() else {
             return Ok(Value::Undefined);
         };
         let up = vm.to_text(arg(a, 0)) == "up";
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
-        let tags: Vec<String> = match arg(a, 1) {
-            Value::Array(arr) => arr
-                .snapshot()
-                .values_in_order()
-                .map(|v| vm.to_text(v).to_ascii_lowercase())
-                .collect(),
-            v => vec![vm.to_text(v).to_ascii_lowercase()],
-=======
         let asked: Vec<Value> = match arg(a, 1) {
             Value::Array(arr) => arr.snapshot().values_in_order().cloned().collect(),
             v => vec![v.clone()],
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
         };
         let mut wanted: Vec<u32> = Vec::new();
         for v in &asked {
@@ -1175,11 +1143,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         wanted.sort_unstable();
         wanted.dedup();
         let mut pieces = Vec::new();
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
-        for i in 1..=8 {
-=======
         for i in wanted {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
             let tag = {
                 let f = vm.intern(&format!("gibspawntag{i}"));
                 vm.raw_field(obj, f)
@@ -1188,15 +1152,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                 let f = vm.intern(&format!("gibspawn{i}"));
                 vm.raw_field(obj, f)
             };
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
-            if tag.is_undefined() || model.is_undefined() {
-                continue;
-            }
-            let tag = vm.to_text(&tag).to_ascii_lowercase();
-            if tags.contains(&tag) {
-                pieces.push(vm.to_text(&model));
-            }
-=======
             let tag = if tag.is_undefined() {
                 String::new()
             } else {
@@ -1208,7 +1163,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                 vm.to_text(&model)
             };
             pieces.push((i, model, tag));
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
         }
         let (origin, yaw) = {
             let zm = world.resource::<Zm>();
@@ -1217,13 +1171,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                 .map_or(([0.0; 3], 0.0), |e| (e.origin, e.angles[1]))
         };
         let now = world.resource::<Zm>().now_ms;
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
-        for (k, model) in pieces.into_iter().enumerate() {
-            let side = if k % 2 == 0 { 90.0 } else { -90.0 };
-            let (dx, dy) = (yaw + side).to_radians().sin_cos();
-            let from = [origin[0], origin[1], origin[2] + 45.0];
-            let vel = if up {
-=======
         for (k, (piece, model, tag)) in pieces.into_iter().enumerate() {
             let head = piece == 5 || piece == 7;
             if piece == 5 {
@@ -1275,7 +1222,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                 // do_hat_gib: up and a little to the side.
                 [dy * 40.0, dx * 40.0, 300.0]
             } else if up {
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
                 [dy * 60.0, dx * 60.0, 420.0]
             } else {
                 [dy * 140.0, dx * 140.0, 160.0]
@@ -1315,13 +1261,10 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         radius_damage(vm, world, a);
         Ok(Value::Undefined)
     });
-<<<<<<< /home/claude/bo2-multiplayer-rebuild/crates/sim/src/t6/natives_ai.rs
     // bo2mp: `ent radiusdamage(...)` (the Demolition bomb's blast): the
     // same, the entity being the blast's source.
-=======
     // `self radiusdamage(...)`: the same blast from an entity (Town's burning
     // zombies burst when they die and singe players close by).
->>>>>>> /tmp/claude-0/zmhead/crates/sim/src/t6/natives_ai.rs
     vm.bind("radiusdamage", true, |vm, world, _, a| {
         radius_damage(vm, world, a);
         Ok(Value::Undefined)
