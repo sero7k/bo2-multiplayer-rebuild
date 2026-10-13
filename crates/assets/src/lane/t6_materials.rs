@@ -165,6 +165,9 @@ pub(crate) fn gpu_image(iwi: &ipak_t6::IwiImage<'_>) -> Result<Image, String> {
 /// (`SpecularAndGloss`, 0x8c297e80: a weapon camo's specular colour and
 /// gloss, which BO2's camo shader reads where the lit one reads its
 /// specular map: Pack-a-Punch's blue and gold sheen.)
+pub(crate) const NORMAL_MAP_HASH: u32 = 0x59d3_0d0f;
+pub(crate) const SPECULAR_MAP_HASH: u32 = 0x34ec_ccb3;
+
 const SHINE_MAPS: [(u32, u8); 3] = [
     (0x59d3_0d0f, TS_NORMAL_MAP),
     (0x34ec_ccb3, TS_SPECULAR_MAP),

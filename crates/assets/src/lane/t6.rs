@@ -571,7 +571,7 @@ fn art_fog(capture: &asset_t6::ZoneCapture, path: &Path, map: &str) -> Option<as
 /// bo2mp: the map's final colour: its vision file (`vision/<map>.vision`)
 /// and band 0 of its colour table (`GfxWorld::lutMaterial`'s image), built
 /// into the table BO2's `hdr_create_lut2dv` makes (`asset_world::t6_grade`).
-fn t6_grade(
+pub(crate) fn t6_grade(
     capture: &asset_t6::ZoneCapture,
     world: &asset_t6::WorldRef,
     packs: Option<&asset_t6::PackSet>,
@@ -678,6 +678,15 @@ fn t6_light_table(capture: &asset_t6::ZoneCapture, fog: Option<T6Fog>) -> Vec<[f
     table[FOG_SLOT] = fog_row;
     table[SUN_FOG_SLOT] = sun_row;
     table
+}
+
+/// bo2mp: a Black Ops II world's own fog as the light table's rows 30 and
+/// 31 (another game's map in its look, `bo2_look`).
+pub(crate) fn world_fog_rows(world: &asset_t6::WorldRef) -> Option<[[f32; 16]; 2]> {
+    world
+        .init_fog
+        .filter(|f| f.half_dist > 0.0 && f.fog_opacity > 0.0)
+        .map(|f| fog_rows(T6Fog::World(f)))
 }
 
 /// The light table's two fog rows for a fog (slots 30 and 31, as
@@ -1364,7 +1373,10 @@ pub(crate) fn attach_t6_rules(
     // Black Ops II's final pass), else its colours as they are. The
     // scripts' `visionsetnaked <map>` after `mpIntro` (greyscale) comes back
     // to that, not to the grey (nor to a Black Ops II map's grade before it).
-    if asset_world::install_film_map_grade(loaded.world.film_vision.as_ref()) {
+    if let Some(grade) = super::bo2_look::take_pending_grade() {
+        asset_world::install_t6_grade(Some(grade));
+        loaded.report.push(format!("bo2 rules grade: {map} graded as its Black Ops II model map"));
+    } else if asset_world::install_film_map_grade(loaded.world.film_vision.as_ref()) {
         loaded.report.push(format!("bo2 rules grade: {map} graded by its own game's film vision"));
     } else {
         loaded.report.push(format!("bo2 rules grade: {map} has no Black Ops II vision; drawn ungraded after mpIntro"));

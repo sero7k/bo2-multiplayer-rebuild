@@ -599,12 +599,53 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
     if (t6.sun_color.a > 1.5) {
         let x = page0.a * 4.08 - 2.08;
         let y = page1.a * 4.064516 - 2.064516;
-        let f = saturate(inverseSqrt(1.0 + x * x + y * y));
-        let n_iw3 = normalize(in.normal);
-        let sun_iw3 = t6.sun_color.rgb * page2.a * saturate(dot(n_iw3, t6.sun_dir_exposure.xyz))
-            * sun_shadow_at(in.world_position);
+        var f = saturate(inverseSqrt(1.0 + x * x + y * y));
+        var n_iw3 = normalize(in.normal);
+#ifdef SHINE
+        // bo2mp: a surface given a Black Ops II material (`bo2_look`): its
+        // normal map (BO2's encoding) bends both the baked dominant light
+        // (tangent space (x, y, 1)) and the sun, and its specular map adds
+        // BO2's sun highlight and probe reflection, as the BO2 lit shader.
+        let nm3 = textureSample(normal_map, colour_sampler, in.uv).xy * 4.015748 - 2.015748;
+        f = saturate(dot(normalize(vec3(nm3, 1.0)), normalize(vec3(x, y, 1.0))));
+        n_iw3 = normalize(nm3.x * in.tangent + nm3.y * in.binormal + n_iw3);
+#endif
+        let sun_vis = page2.a * sun_shadow_at(in.world_position);
+        let sun_iw3 = t6.sun_color.rgb * sun_vis * saturate(dot(n_iw3, t6.sun_dir_exposure.xyz));
         let lg = page0.rgb + page1.rgb * f + sun_iw3;
-        let lit_iw3 = base * (lg * lg + dyn_lights(in.world_position, n_iw3));
+        var lit_iw3 = base * (lg * lg + dyn_lights(in.world_position, n_iw3));
+#ifdef SHINE
+        let st3 = textureSample(specular_map, colour_sampler, in.uv);
+        let sr3 = raw_texel(st3.rgb);
+        let spec3 = sr3 * sr3;
+        let gloss3 = st3.a;
+        let v3 = normalize(in.world_position - view.world_position);
+        let l3 = t6.sun_dir_exposure.xyz;
+        let h3 = normalize(l3 - v3);
+        let ndotl3 = saturate(dot(n_iw3, l3));
+        let ndoth3 = saturate(dot(n_iw3, h3));
+        let ldoth3 = saturate(dot(h3, l3));
+        let power3 = exp2(gloss3 * 13.0);
+        let lobe3 = exp2(log2(max(ndoth3, 0.000001)) * power3) * (power3 * 0.125 + 0.25);
+        let k3 = saturate(gloss3 + 0.545);
+        let vis3 = ndotl3 / (ldoth3 * ldoth3 * k3 - k3 + 1.01);
+        let fres3 = spec3 + (1.0 - spec3) * exp2(-10.0 * ldoth3);
+        let sun_lin = t6.sun_color.rgb * sun_vis;
+        lit_iw3 += fres3 * lobe3 * vis3 * sun_lin * sun_lin;
+        // The reflection: the model map's probe (`bo2_look` picks one for
+        // every surface), lit as the light here.
+        let ndotv3 = saturate(dot(n_iw3, -v3));
+        let fk3 = gloss3 * vec4(1.041667, 0.475, 0.018229, 0.25) + vec4(0.0, 0.0, -0.015625, 0.75);
+        var ff3 = min(exp2(-9.28 * ndotv3), fk3.y);
+        ff3 = fk3.x * ff3 + fk3.z;
+        let ew3 = saturate(spec3 * (fk3.w - ff3) + ff3);
+        let r3 = v3 - 2.0 * dot(v3, n_iw3) * n_iw3;
+        let env3 = textureSampleLevel(probe_cubes, probe_sampler, r3, i32(in.probe), 4.0 - 4.0 * gloss3);
+        let env3_rgb = env3.rgb / (env3.a + 0.000001);
+        let here3 = lg * lg;
+        let probe3 = max(dot(here3, vec3(0.299, 0.587, 0.114)), 0.0001);
+        lit_iw3 += ew3 * env3_rgb * clamp(probe3, 0.0, 2.0);
+#endif
         return vec4(bo2_out(bo2_fog(lit_iw3, in.world_position)), albedo.a);
     }
     let ambient = page0.rgb / (page0.a + 0.000001);

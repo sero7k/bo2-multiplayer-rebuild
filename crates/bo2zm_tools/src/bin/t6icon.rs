@@ -5,6 +5,7 @@
 //! `T6ICON_ZONES=common_mp,ui_mp` looks in those zones instead;
 //! `T6ICON_PNG=<dir>` also writes each pack image's top level there as
 //! `<image>.png` (RGBA), and its material's constants are printed.
+//! `T6ICON_DIR=<zone folder>` reads another install.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -15,7 +16,9 @@ const ZONES: &str = r"C:\Program Files (x86)\Steam\steamapps\common\Call of Duty
 
 fn main() -> ExitCode {
     let names: Vec<String> = std::env::args().skip(1).collect();
-    let dir = Path::new(ZONES);
+    // `T6ICON_DIR`: the zone folder (default: Steam's).
+    let dir_env = std::env::var("T6ICON_DIR").unwrap_or_else(|_| ZONES.to_owned());
+    let dir = Path::new(&dir_env);
     let packs = match PackSet::open_dir(dir) {
         Ok(p) => p,
         Err(e) => {

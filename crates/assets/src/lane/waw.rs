@@ -77,7 +77,7 @@ pub(crate) fn load_t4_world(path: &Path, progress: &LoadProgress, material_seed:
         World,
         "bo2mp t4: {} loaded: {}",
         path.display(),
-        loaded.report.iter().filter(|l| l.starts_with("t4 ") || l.starts_with("world mesh")).cloned().collect::<Vec<_>>().join("; ")
+        loaded.report.iter().filter(|l| l.starts_with("t4 ") || l.starts_with("world mesh") || l.starts_with("bo2 look")).cloned().collect::<Vec<_>>().join("; ")
     );
     loaded
 }

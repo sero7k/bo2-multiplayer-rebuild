@@ -18,7 +18,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use asset_core::{AssetEdge, AssetNamespace, AssetRef, T6Draw, ZoneOwner};
-use asset_material::{AuthoredImage, AuthoredMaterial, MaterialCatalog, MaterialTextureBinding, TS_COLOR_MAP};
+use asset_material::{AuthoredImage, AuthoredMaterial, MaterialCatalog, MaterialTextureBinding, TS_COLOR_MAP, TS_NORMAL_MAP, TS_SPECULAR_MAP};
 use asset_transport::progress::{LoadProgress, StageId};
 use asset_world::WorldDrawPolicy;
 use bevy::asset::RenderAssetUsages;
@@ -119,8 +119,13 @@ fn link_world_materials(
     catalog: &mut MaterialCatalog,
     owner: &str,
     report: &mut Vec<String>,
+    look: Option<&super::bo2_look::Look>,
 ) -> Vec<Option<usize>> {
     let owner = ZoneOwner::intern(owner);
+    // bo2mp: Black Ops II pictures linked for swapped surfaces (colour,
+    // normal, specular slots), by World at War colour image.
+    let mut swapped: HashMap<&'static str, [Option<usize>; 3]> = HashMap::new();
+    let mut swap_count = 0usize;
     let mut by_material: HashMap<usize, Option<usize>> = HashMap::new();
     let mut images: HashMap<String, Option<usize>> = HashMap::new();
     let (mut decoded, mut grey, mut missing) = (0usize, 0usize, Vec::new());
@@ -150,7 +155,56 @@ fn link_world_materials(
             .textures
             .iter()
             .find(|t| t.semantic == iw3::zone::TextureSemantic::Color && t.image.is_some());
-        if let Some(texture) = colour
+        let swap = colour
+            .and_then(|t| t.image)
+            .and_then(|i| zone.image(i))
+            .and_then(|image| look.and_then(|l| l.swaps.get_key_value(image.name.as_str())));
+        if let Some((&key, swap)) = swap
+            && let Some(texture) = colour
+        {
+            let slots = *swapped.entry(key).or_insert_with(|| {
+                let link = |catalog: &mut MaterialCatalog, img: &Arc<Image>, part: &str, semantic: u8, srgb: bool| {
+                    let size = img.texture_descriptor.size;
+                    catalog.link_image(AuthoredImage {
+                        namespace: AssetNamespace::T6,
+                        name: AssetRef::Real(format!("bo2look:{}:{part}", swap.material)),
+                        map_type: 0,
+                        semantic,
+                        category: 0,
+                        use_srgb_reads: srgb,
+                        width: size.width as u16,
+                        height: size.height as u16,
+                        depth: 1,
+                        level_count: img.texture_descriptor.mip_level_count as u8,
+                        format: 0,
+                        payload: Arc::new(Vec::new()),
+                        decoded: Some(Arc::clone(img)),
+                        common_owned: false,
+                        decoded_variant: None,
+                        decoded_by: None,
+                        pending_decode: None,
+                    })
+                };
+                [
+                    Some(link(catalog, &swap.colour, "c", TS_COLOR_MAP, true)),
+                    swap.normal.as_ref().map(|i| link(catalog, i, "n", TS_NORMAL_MAP, false)),
+                    swap.specular.as_ref().map(|i| link(catalog, i, "s", TS_SPECULAR_MAP, true)),
+                ]
+            });
+            swap_count += 1;
+            for (slot, semantic) in slots.into_iter().zip([TS_COLOR_MAP, TS_NORMAL_MAP, TS_SPECULAR_MAP]) {
+                if slot.is_some() {
+                    textures.push(MaterialTextureBinding {
+                        name_hash: texture.name_hash,
+                        name_start: 0,
+                        name_end: 0,
+                        sampler_state: texture.sampler_state,
+                        semantic,
+                        image: slot,
+                    });
+                }
+            }
+        } else if let Some(texture) = colour
             && let Some(image) = texture.image.and_then(|i| zone.image(i))
         {
             let slot = *images.entry(image.name.clone()).or_insert_with(|| {
@@ -232,6 +286,10 @@ fn link_world_materials(
             String::new()
         } else {
             format!(" (first: {})", missing.iter().take(5).cloned().collect::<Vec<_>>().join(", "))
+        } + &if swap_count > 0 {
+            format!("; {swap_count} drawn with Black Ops II materials")
+        } else {
+            String::new()
         }
     ));
     out
@@ -422,6 +480,7 @@ pub(crate) fn build_legacy_world(
 ) -> LoadedWorld {
     let tag = game.tag;
     let title = game.title;
+    super::bo2_look::set_pending_grade(None);
     report.push(format!(
         "{tag} zone: {} of {} assets{}",
         zone.stats.top_level_parsed,
@@ -492,8 +551,13 @@ pub(crate) fn build_legacy_world(
     let main = asset_transport::game_root_for_zone(path).ok().map(|root| root.join("main"));
     let mut materials = material_seed;
     materials.set_capture_ns(AssetNamespace::T6);
+    // bo2mp: a World at War map in a Black Ops II map's look (`bo2_look`).
+    let look = (tag == "t4")
+        .then(|| super::bo2_look::recipe(&map))
+        .flatten()
+        .and_then(|recipe| super::bo2_look::load(recipe, &mut report));
     let surface_materials =
-        link_world_materials(tag, zone, world, main.as_deref(), &mut materials, &map, &mut report);
+        link_world_materials(tag, zone, world, main.as_deref(), &mut materials, &map, &mut report, look.as_ref());
     stage.done();
 
     // The map's film vision (`vision/<map>.vision` in the game's IWDs): its
@@ -526,12 +590,27 @@ pub(crate) fn build_legacy_world(
     let (pitch, yaw) = (sun.angles[0].to_radians(), sun.angles[1].to_radians());
     // Toward the sun: the sun's angles as a forward vector (pitch down).
     let dir = [pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), -pitch.sin()];
-    let colour = [
+    let mut colour = [
         sun.sun_color[0] * sun.sun_light,
         sun.sun_color[1] * sun.sun_light,
         sun.sun_color[2] * sun.sun_light,
         1.0,
     ];
+    // bo2mp: in a Black Ops II map's look, its sun's hue at this sun's
+    // strength (the baked light stays this map's).
+    if let Some(model_sun) = look.as_ref().and_then(|l| l.capture.world.as_ref()).and_then(|w| w.sun) {
+        let strength = (colour[0] + colour[1] + colour[2]) / 3.0;
+        // (Its linear colour's ratios, square-rooted: this map lights in
+        // gamma space.)
+        let hue = model_sun.color.map(|c| c.max(0.0).sqrt());
+        let mean = (hue[0] + hue[1] + hue[2]) / 3.0;
+        if mean > 1e-4 {
+            for k in 0..3 {
+                colour[k] = strength * hue[k] / mean;
+            }
+            report.push(format!("bo2 look: sun hue {:?} from the model map", hue));
+        }
+    }
     let lighting = asset_world::T6WorldLighting {
         sun: asset_world::WorldSunLight { direction: dir, diffuse: colour, specular: colour },
         exposure_scale: 1.0,
@@ -591,6 +670,43 @@ pub(crate) fn build_legacy_world(
                     draw.t6_lights = legacy_fog_table(f);
                 }
                 None => report.push(format!("{tag} fog: none ({art} sets none)")),
+            }
+            // bo2mp: the model map's fog, probes and grade (`bo2_look`).
+            if let Some(look) = &look
+                && let Some(model) = look.capture.world.as_ref()
+            {
+                if let Some(rows) = super::t6::world_fog_rows(model) {
+                    draw.t6_lights.resize(32, [0.0; 16]);
+                    draw.t6_lights[30] = rows[0];
+                    draw.t6_lights[31] = rows[1];
+                    report.push("bo2 look: fog from the model map".to_owned());
+                }
+                if let Some(line) =
+                    super::t6_materials::link_reflection_probes(&mut materials, &look.capture, model, look.model)
+                {
+                    draw.t6_probes = model.reflection_probes.iter().map(|p| p.lighting_sh).collect();
+                    // Every surface reflects the model map's brightest real
+                    // probe (this map has none of its own in that form).
+                    let best = model
+                        .reflection_probes
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, p)| {
+                            p.image
+                                .and_then(|k| look.capture.images.get(k.index))
+                                .is_some_and(|img| img.embedded.as_ref().is_some_and(|e| matches!(e.dxgi_format, 77 | 78)))
+                        })
+                        .max_by(|a, b| {
+                            let l = |p: &asset_t6::ReflectionProbeRef| p.lighting_sh[0][0] + p.lighting_sh[0][1] + p.lighting_sh[0][2];
+                            l(a.1).total_cmp(&l(b.1))
+                        })
+                        .map_or(0, |(i, _)| i as u8);
+                    draw.surface_reflection_probes.iter_mut().for_each(|p| *p = best);
+                    report.push(format!("bo2 look: {line}; surfaces reflect probe {best}"));
+                }
+                let (grade, line) = super::t6::t6_grade(&look.capture, model, Some(&look.packs), look.model);
+                report.push(format!("bo2 look: {line}"));
+                super::bo2_look::set_pending_grade(grade);
             }
             report.push(format!(
                 "world mesh: {} vertices, {} triangles, {} surfaces ({title}, fallback draw with colour maps{})",
