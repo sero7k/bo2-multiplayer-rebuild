@@ -9,7 +9,8 @@ the match; the server forwards packets and answers where friends are.
 | Where | How | Friends need |
 |---|---|---|
 | **This PC** (port-forward) | `host-online.cmd` in the project folder. It makes the certificates once (`online\certs`) and serves on UDP 4433. Forward UDP 4433 on the router to this PC for friends outside the house. | your public IP, and `online\certs\ca.pem` |
-| **A VPS** (no port-forward) | on the VPS itself, one command: `curl -fsSL https://raw.githubusercontent.com/sero7k/bo2-multiplayer-rebuild/main/scripts/install-master-vps.sh \| sudo bash` (Debian, Ubuntu, Fedora, Rocky, Alma; run it again to update). It prints the `online.cfg` lines and the `ca.pem` to hand out. From a Linux machine with the clone instead: `cargo xtask master install root@IP` ([`MASTER.md`](MASTER.md)) | the VPS IP, and its `ca.pem` |
+| **A Windows VPS** (no port-forward) | copy `online\vps-kit` (made by `run-bo2.cmd`: `iw4l-master.exe` and its installer) to the VPS over Remote Desktop, then right-click `install.cmd` > Run as administrator. It starts with Windows, restarts if it stops, opens UDP 4433 in Windows Firewall, and prints the `online.cfg` lines and the `ca.pem` to hand out. Copy a newer `iw4l-master.exe` and run it again to update; `install.cmd -Uninstall` removes it. | the VPS IP, and its `ca.pem` |
+| **A Linux VPS** (no port-forward) | on the VPS itself, one command: `curl -fsSL https://raw.githubusercontent.com/sero7k/bo2-multiplayer-rebuild/main/scripts/install-master-vps.sh \| sudo bash` (Debian, Ubuntu, Fedora, Rocky, Alma; run it again to update). It prints the `online.cfg` lines and the `ca.pem` to hand out. From a Linux machine with the clone instead: `cargo xtask master install root@IP` ([`MASTER.md`](MASTER.md)) | the VPS IP, and its `ca.pem` |
 | **A friend's PC** | they run `host-online.cmd` | their IP, and their `ca.pem` |
 
 "P2P" in practice is the first row: one player's PC is the server for
