@@ -174,16 +174,10 @@ pub(crate) fn picks(s: &Shell, book: &ClassBook) -> (Vec<String>, Vec<Pick>) {
     if slot.ends_with("camo") {
         let mut v = vec![Pick { value: 0, name: "NONE".to_owned(), desc: "The gun as it comes.".to_owned(), image: String::new(), cost: 0, locked: false, level: 1 }];
         for (n, name, image) in camo_choices(book, c.get(weapon_of(slot))).unwrap_or_default() {
-            let gun = c.get(weapon_of(slot));
-            let base = gun >= bo2_profile::guest::FIRST_INDEX || book.camo(n).is_none_or(|k| k.drawn);
             v.push(Pick {
                 value: n,
                 name,
-                desc: if base {
-                    "Worn on the gun in matches, first and third person.".to_owned()
-                } else {
-                    "Worn on the gun in matches, first and third person (a DLC camo shows once its pack is read).".to_owned()
-                },
+                desc: "Worn on the gun in matches, first and third person.".to_owned(),
                 image,
                 cost: 0,
                 locked: false,
