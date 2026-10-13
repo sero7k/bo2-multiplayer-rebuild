@@ -132,8 +132,10 @@ pub fn t6_sky_slot(catalog: &crate::assemble::drawsurf::RuntimeMaterialCatalog) 
     catalog
         .materials
         .iter()
-        .find(|m| m.t6_draw.is_some_and(|d| d.blend == asset_core::T6Blend::Sky))
-        .and_then(|m| m.texture_semantic(asset_material::TS_COLOR_MAP))
+        .filter(|m| m.t6_draw.is_some_and(|d| d.blend == asset_core::T6Blend::Sky))
+        // (The first that has a picture: a sky material without one must
+        // not hide the one that has.)
+        .find_map(|m| m.texture_semantic(asset_material::TS_COLOR_MAP))
         .map(|id| id.0)
 }
 

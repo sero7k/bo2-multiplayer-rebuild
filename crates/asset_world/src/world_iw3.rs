@@ -429,7 +429,7 @@ fn append_tree_brushes(clip: &ClipMap, root: i32, out: &mut Vec<u16>) -> Result<
 
 /// The world's collision triangle trees: every root of the AABB forest (a
 /// node no other node lists as a child) but the brush models' own.
-fn legacy_aabb_roots(clip: &ClipMap) -> Vec<u16> {
+pub fn legacy_aabb_roots(clip: &ClipMap) -> Vec<u16> {
     let nodes: Vec<clipmap_iw4::ClipAabbNode> = clip
         .aabb_trees
         .iter()
@@ -552,7 +552,11 @@ pub fn build_iw3_clip_collision(clip: &ClipMap) -> Result<ClipCollision, ClipCol
     // own range is empty (`coll_aabb_count` 0): its terrain and patches hang
     // off the collision BSP's leaves, which are not read, so the models'
     // ranges alone would leave the world's floors out of every trace.
-    std::sync::Arc::make_mut(&mut out.mesh).aabb_roots = legacy_aabb_roots(clip);
+    {
+        let mesh = std::sync::Arc::make_mut(&mut out.mesh);
+        let roots = legacy_aabb_roots(clip);
+        mesh.aabb_roots = top_tree_over_roots(&mut mesh.aabb_trees, roots);
+    }
     for (i, m) in clip.cmodels.iter().enumerate() {
         // The world model (0) takes its range below, once the brush models
         // have claimed theirs.
@@ -581,12 +585,194 @@ pub fn build_iw3_clip_collision(clip: &ClipMap) -> Result<ClipCollision, ClipCol
         m.first_brush = first_brush;
         m.num_brushes = num_brushes;
     }
-    // The collision BSP is not read: one node whose both sides are one leaf
-    // holding the world's brushes (its triangles come from the AABB forest,
-    // `aabb_roots`, as the leaf lists none).
-    out.nodes = vec![ClipBspNode { plane: [0.0, 0.0, 1.0, -1.0e9], children: [-1, -1] }];
-    out.leaves = vec![ClipBspLeaf { first_brush, num_brushes, first_coll_aabb_index: 0, coll_aabb_count: 0 }];
+    // The collision BSP is not read; in its place a k-d tree over the world's
+    // brushes (axial planes, each leaf listing the brushes whose bounds reach
+    // into it), so a trace tests the brushes along its path, not all of them
+    // (one leaf of every world brush made each trace on a CoD4 or World at
+    // War map test thousands: bodies, bots and bullets all paid it). Its
+    // triangles still come from the AABB forest, `aabb_roots`, as the leaves
+    // list none.
+    let bounds: Vec<([f32; 3], [f32; 3])> = world
+        .iter()
+        .map(|&b| brush_bounds(&out.brushes[usize::from(b)]))
+        .collect();
+    let (nodes, leaves) = build_brush_kd_tree(&world, &bounds, &mut out.leafbrushes)?;
+    out.nodes = nodes;
+    out.leaves = leaves;
     Ok(out)
+}
+
+/// Roots per group in the tree over the triangle forest.
+const ROOT_GROUP: usize = 8;
+
+/// bo2mp: a tree over the triangle forest's roots, so a trace opens the
+/// boxes along its path, not every root (1,000 to 1,900 on a World at War
+/// map, each tested by every trace). The roots are copied (children are
+/// absolute indices, so a copy is the same tree) in an order that keeps
+/// neighbours together, then grouped under boxes of eight, level by level,
+/// to one top. Few roots, or a forest too large to index, stay as they are.
+fn top_tree_over_roots(nodes: &mut Vec<clipmap_iw4::ClipAabbNode>, roots: Vec<u16>) -> Vec<u16> {
+    if roots.len() <= ROOT_GROUP * 4 {
+        return roots;
+    }
+    // Copies plus parents (about a seventh more) must stay indexable by u16.
+    let extra = roots.len() + roots.len() / (ROOT_GROUP - 1) + ROOT_GROUP;
+    if nodes.len() + extra >= usize::from(u16::MAX) {
+        return roots;
+    }
+    let mut lo = [f32::MAX; 3];
+    let mut hi = [f32::MIN; 3];
+    for &r in &roots {
+        let n = &nodes[usize::from(r)];
+        for k in 0..3 {
+            lo[k] = lo[k].min(n.origin[k]);
+            hi[k] = hi[k].max(n.origin[k]);
+        }
+    }
+    // Morton order of the roots' centres (ten bits an axis).
+    let spread = |mut v: u32| {
+        v &= 0x3ff;
+        v = (v | (v << 16)) & 0x0300_00ff;
+        v = (v | (v << 8)) & 0x0300_f00f;
+        v = (v | (v << 4)) & 0x030c_30c3;
+        (v | (v << 2)) & 0x0924_9249
+    };
+    let key = |n: &clipmap_iw4::ClipAabbNode| {
+        let q = |k: usize| (((n.origin[k] - lo[k]) / (hi[k] - lo[k]).max(1.0)) * 1023.0) as u32;
+        spread(q(0)) | (spread(q(1)) << 1) | (spread(q(2)) << 2)
+    };
+    let mut order = roots;
+    order.sort_by_key(|&r| key(&nodes[usize::from(r)]));
+    let mut level: std::ops::Range<usize> = nodes.len()..nodes.len() + order.len();
+    for &r in &order {
+        let copy = nodes[usize::from(r)];
+        nodes.push(copy);
+    }
+    while level.len() > 1 {
+        let start = nodes.len();
+        let mut at = level.start;
+        while at < level.end {
+            let end = (at + ROOT_GROUP).min(level.end);
+            let mut mn = [f32::MAX; 3];
+            let mut mx = [f32::MIN; 3];
+            for c in &nodes[at..end] {
+                for k in 0..3 {
+                    mn[k] = mn[k].min(c.origin[k] - c.half_size[k]);
+                    mx[k] = mx[k].max(c.origin[k] + c.half_size[k]);
+                }
+            }
+            nodes.push(clipmap_iw4::ClipAabbNode {
+                origin: [(mn[0] + mx[0]) * 0.5, (mn[1] + mx[1]) * 0.5, (mn[2] + mx[2]) * 0.5],
+                half_size: [(mx[0] - mn[0]) * 0.5, (mx[1] - mn[1]) * 0.5, (mx[2] - mn[2]) * 0.5],
+                material_index: 0,
+                child_count: (end - at) as u16,
+                u: at as i32,
+            });
+            at = end;
+        }
+        level = start..nodes.len();
+    }
+    vec![level.start as u16]
+}
+
+/// A brush's bounds: its first six planes are its axial sides.
+fn brush_bounds(b: &ClipBrush) -> ([f32; 3], [f32; 3]) {
+    let p = &b.planes;
+    if p.len() < 6 {
+        return ([f32::MIN; 3], [f32::MAX; 3]);
+    }
+    ([-p[1][3], -p[3][3], -p[5][3]], [p[0][3], p[2][3], p[4][3]])
+}
+
+/// Brushes per leaf before a split is tried, and the deepest split.
+const KD_LEAF_BRUSHES: usize = 12;
+const KD_MAX_DEPTH: usize = 28;
+
+/// A k-d tree over `ids` (their `bounds`, by position): nodes as the trace
+/// walks them (child `!leaf` for a leaf, node 0 the root), each leaf's
+/// brushes appended to `leafbrushes`.
+fn build_brush_kd_tree(
+    ids: &[u16],
+    bounds: &[([f32; 3], [f32; 3])],
+    leafbrushes: &mut Vec<u16>,
+) -> Result<(Vec<ClipBspNode>, Vec<ClipBspLeaf>), ClipCollisionError> {
+    let mut nodes: Vec<ClipBspNode> = Vec::new();
+    let mut leaves: Vec<ClipBspLeaf> = Vec::new();
+    let all: Vec<usize> = (0..ids.len()).collect();
+    let mut lo = [f32::MAX; 3];
+    let mut hi = [f32::MIN; 3];
+    for (mn, mx) in bounds {
+        for k in 0..3 {
+            lo[k] = lo[k].min(mn[k]);
+            hi[k] = hi[k].max(mx[k]);
+        }
+    }
+    fn make_leaf(
+        set: &[usize],
+        ids: &[u16],
+        leafbrushes: &mut Vec<u16>,
+        leaves: &mut Vec<ClipBspLeaf>,
+    ) -> Result<i32, ClipCollisionError> {
+        let first = leafbrushes.len();
+        leafbrushes.extend(set.iter().map(|&i| ids[i]));
+        let (first_brush, num_brushes) = leafbrush_range(first, leafbrushes.len())?;
+        leaves.push(ClipBspLeaf { first_brush, num_brushes, first_coll_aabb_index: 0, coll_aabb_count: 0 });
+        Ok(!((leaves.len() - 1) as i32))
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn build(
+        set: Vec<usize>,
+        lo: [f32; 3],
+        hi: [f32; 3],
+        depth: usize,
+        ids: &[u16],
+        bounds: &[([f32; 3], [f32; 3])],
+        nodes: &mut Vec<ClipBspNode>,
+        leaves: &mut Vec<ClipBspLeaf>,
+        leafbrushes: &mut Vec<u16>,
+    ) -> Result<i32, ClipCollisionError> {
+        if set.len() <= KD_LEAF_BRUSHES || depth >= KD_MAX_DEPTH {
+            return make_leaf(&set, ids, leafbrushes, leaves);
+        }
+        // The region's longest side, split at the median of the brushes'
+        // centres along it (kept inside the region).
+        let axis = (0..3).max_by(|&a, &b| (hi[a] - lo[a]).total_cmp(&(hi[b] - lo[b]))).unwrap_or(0);
+        let mut centres: Vec<f32> = set.iter().map(|&i| (bounds[i].0[axis] + bounds[i].1[axis]) * 0.5).collect();
+        let mid = centres.len() / 2;
+        centres.select_nth_unstable_by(mid, |a, b| a.total_cmp(b));
+        let split = centres[mid].clamp(lo[axis], hi[axis]);
+        let (mut front, mut back) = (Vec::new(), Vec::new());
+        for &i in &set {
+            if bounds[i].1[axis] >= split {
+                front.push(i);
+            }
+            if bounds[i].0[axis] <= split {
+                back.push(i);
+            }
+        }
+        // A split that sends (nearly) everything both ways helps nothing.
+        if front.len() + back.len() > set.len() * 3 / 2 || front.len() == set.len() || back.len() == set.len() {
+            return make_leaf(&set, ids, leafbrushes, leaves);
+        }
+        let at = nodes.len();
+        let mut normal = [0.0f32; 3];
+        normal[axis] = 1.0;
+        nodes.push(ClipBspNode { plane: [normal[0], normal[1], normal[2], split], children: [0, 0] });
+        let mut front_lo = lo;
+        front_lo[axis] = split;
+        let mut back_hi = hi;
+        back_hi[axis] = split;
+        let f = build(front, front_lo, hi, depth + 1, ids, bounds, nodes, leaves, leafbrushes)?;
+        let b = build(back, lo, back_hi, depth + 1, ids, bounds, nodes, leaves, leafbrushes)?;
+        nodes[at].children = [f, b];
+        Ok(at as i32)
+    }
+    let root = build(all, lo, hi, 0, ids, bounds, &mut nodes, &mut leaves, leafbrushes)?;
+    if root < 0 {
+        // One leaf: a node whose both sides are it (the walk starts at a node).
+        nodes.push(ClipBspNode { plane: [0.0, 0.0, 1.0, -1.0e9], children: [root, root] });
+    }
+    Ok((nodes, leaves))
 }
 
 /// The brushes of `brush_count` that no brush model lists in
@@ -771,10 +957,67 @@ mod tests {
         let leaf = built.leaves[0];
         let world = &built.leafbrushes[leaf.first_brush as usize..][..usize::from(leaf.num_brushes)];
         assert_eq!(world, &[0]);
-        assert_eq!((built.cmodels[0].first_brush, built.cmodels[0].num_brushes), (leaf.first_brush, leaf.num_brushes));
+        let m0 = built.cmodels[0];
+        assert_eq!(&built.leafbrushes[m0.first_brush as usize..][..usize::from(m0.num_brushes)], world);
         let model = built.cmodels[1];
         assert_eq!(&built.leafbrushes[model.first_brush as usize..][..usize::from(model.num_brushes)], &[1]);
         assert_eq!(built.mesh.aabb_roots, vec![0]);
+    }
+
+    #[test]
+    fn the_brush_tree_finds_what_one_leaf_of_every_brush_found() {
+        // A grid of 400 small boxes; traces through, along and into them hit
+        // the same as testing every box (one leaf of them all).
+        let mut ids = Vec::new();
+        let mut bounds = Vec::new();
+        for i in 0..400u16 {
+            let (x, y) = (f32::from(i % 20) * 64.0, f32::from(i / 20) * 64.0);
+            ids.push(i);
+            bounds.push(([x, y, 0.0], [x + 32.0, y + 32.0, 32.0]));
+        }
+        let brushes: Vec<ClipBrush> = bounds
+            .iter()
+            .map(|(mn, mx)| ClipBrush {
+                planes: vec![
+                    [1.0, 0.0, 0.0, mx[0]],
+                    [-1.0, 0.0, 0.0, -mn[0]],
+                    [0.0, 1.0, 0.0, mx[1]],
+                    [0.0, -1.0, 0.0, -mn[1]],
+                    [0.0, 0.0, 1.0, mx[2]],
+                    [0.0, 0.0, -1.0, -mn[2]],
+                ],
+                contents: 1,
+                plane_surface_flags: vec![0; 6],
+                glass_encoded: 0,
+            })
+            .collect();
+        let mut leafbrushes = Vec::new();
+        let (nodes, leaves) = build_brush_kd_tree(&ids, &bounds, &mut leafbrushes).unwrap();
+        assert!(leaves.len() > 20, "{} leaves", leaves.len());
+        let mut flat_lb = ids.clone();
+        flat_lb.extend_from_slice(&leafbrushes);
+        let tree = ClipCollision { brushes: brushes.clone(), nodes, leaves, leafbrushes, ..ClipCollision::default() };
+        let one = ClipCollision {
+            brushes,
+            nodes: vec![ClipBspNode { plane: [0.0, 0.0, 1.0, -1.0e9], children: [-1, -1] }],
+            leaves: vec![ClipBspLeaf { first_brush: 0, num_brushes: 400, first_coll_aabb_index: 0, coll_aabb_count: 0 }],
+            leafbrushes: ids,
+            ..ClipCollision::default()
+        };
+        let mut n = 0;
+        for k in 0..60 {
+            let t = k as f32;
+            let start = [-50.0 + t * 7.0, -40.0 + t * 13.0, 16.0 + (t * 0.7).sin() * 30.0];
+            let end = [1300.0 - t * 11.0, 1250.0 - t * 5.0, 10.0];
+            for half in [0.0, 4.0, 15.0] {
+                let a = tree.sweep_box(start, end, [-half; 3], [half; 3], 1);
+                let b = one.sweep_box(start, end, [-half; 3], [half; 3], 1);
+                assert!((a.fraction - b.fraction).abs() < 1e-5, "{start:?} {half}: {} vs {}", a.fraction, b.fraction);
+                assert_eq!(a.startsolid, b.startsolid);
+                n += usize::from(b.fraction < 1.0);
+            }
+        }
+        assert!(n > 100, "only {n} hits");
     }
 
     #[test]

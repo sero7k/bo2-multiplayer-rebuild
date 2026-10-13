@@ -130,11 +130,6 @@ fn link_world_materials(
     let mut images: HashMap<String, Option<usize>> = HashMap::new();
     let (mut decoded, mut grey, mut missing) = (0usize, 0usize, Vec::new());
     let mut out = Vec::with_capacity(world.surfaces.len());
-    let sky_materials: std::collections::HashSet<_> = world
-        .sky_start_surfs
-        .iter()
-        .filter_map(|&i| world.surfaces.get(usize::try_from(i).ok()?)?.material)
-        .collect();
     let mut sky_line = None;
     for surf in &world.surfaces {
         let Some(mid) = surf.material else {
@@ -156,11 +151,7 @@ fn link_world_materials(
             .map_or("", |t| t.name.as_str());
         let state = TECHNIQUES.iter().find_map(|&t| material.state_bits_for(t));
         let mut draw = T6Draw::from_technique_set(technique_set, material.sort_key, state);
-        // bo2mp: the sky surfaces' material (`skyStartSurfs`) is the sky:
-        // drawn by the Black Ops II sky pass from its cube picture.
-        if sky_materials.contains(&mid) {
-            draw.blend = asset_core::T6Blend::Sky;
-        }
+
         let mut textures = Vec::new();
         let colour = material
             .textures
@@ -351,6 +342,12 @@ fn link_world_materials(
         }
     ));
     report.push(sky_line.unwrap_or_else(|| format!("{tag} sky: none ({} sky surfaces)", world.sky_start_surfs.len())));
+    if let Some(img) = world.sky_image.and_then(|i| zone.image(i)) {
+        report.push(format!(
+            "{tag} sky image: {} {:?} {}x{}x{} ({} sky surfaces)",
+            img.name, img.map_type, img.width, img.height, img.depth, world.sky_start_surfs.len()
+        ));
+    }
     out
 }
 
@@ -562,9 +559,10 @@ pub(crate) fn build_legacy_world(
             let origins: Vec<[f32; 3]> = spawns.iter().map(|s| s.origin).collect();
             let census = asset_world::world_iw3::spawn_ground_census(&clip, &origins);
             report.push(format!(
-                "{tag} clip: {} brushes ({} the world's), {} mesh tris in {} trees, {} models; {census}",
+                "{tag} clip: {} brushes ({} the world's, in {} tree leaves), {} mesh tris in {} trees, {} models; {census}",
                 clip.brushes.len(),
-                clip.leaves.first().map_or(0, |l| l.num_brushes),
+                clip.cmodels.first().map_or(0, |m| m.num_brushes),
+                clip.leaves.len(),
                 clip.mesh.tri_indices.len() / 3,
                 clip.mesh.aabb_roots.len(),
                 clip.cmodels.len()
