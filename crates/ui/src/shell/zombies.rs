@@ -318,6 +318,15 @@ static STATE: Mutex<Option<ZmState>> = Mutex::new(None);
 static CHILD: Mutex<Option<(std::process::Child, std::time::Instant, PathBuf)>> = Mutex::new(None);
 /// The preview: a stand-in install, nothing is started.
 static PREVIEW: AtomicBool = AtomicBool::new(false);
+/// bo2 merge: the `map` command START left for `zombies_exec`.
+static PENDING_MAP: Mutex<Option<String>> = Mutex::new(None);
+
+/// bo2 merge: START's `map` command, run by the console.
+pub(crate) fn zombies_exec(mut exec: MessageWriter<frame::UiExecCommand>) {
+    if let Some(text) = PENDING_MAP.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
+        exec.write(frame::UiExecCommand { text });
+    }
+}
 
 fn with<R>(f: impl FnOnce(&mut ZmState) -> R) -> R {
     let mut g = STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -385,7 +394,21 @@ fn default_exe() -> Option<PathBuf> {
     Some(project.join("zombies").join("play").join(if cfg!(windows) { "iw4l.exe" } else { "iw4l" }))
 }
 
+/// bo2 merge: Zombies plays in this game (one build since the merge);
+/// `BO2MP_ZOMBIES_EXTERNAL=1` starts the separate Zombies program instead.
+fn in_process() -> bool {
+    std::env::var("BO2MP_ZOMBIES_EXTERNAL").map_or(true, |v| v.trim() == "0" || v.trim().is_empty())
+}
+
 fn find_install() -> Result<Install, String> {
+    if in_process() {
+        // This game, its play folder, and its own Zombies Declassified
+        // folders (`IW4L_T6_EXTRA` in its .env).
+        let exe = std::env::current_exe().unwrap_or_default();
+        let dir = std::env::current_dir().unwrap_or_default();
+        let extra = asset_transport::t6_extra::extra_roots().to_vec();
+        return Ok(Install { exe, dir, extra, shots: None });
+    }
     let set = std::env::var("BO2MP_ZOMBIES_EXE").ok().map(|v| unquote(&v).to_owned()).filter(|v| !v.is_empty());
     let exe = match set.clone().map(PathBuf::from).or_else(default_exe) {
         Some(p) => p,
@@ -413,13 +436,29 @@ pub(crate) fn start(shell: &Shell) -> Result<(), String> {
     let install = state().install.unwrap_or_else(|| Err("The Zombies game was not found.".to_owned()))?;
     let (m, z) = chosen(shell);
     if m.bo1 && install.extra.is_empty() {
-        return Err(format!("{} needs the Zombies Declassified map pack (IW4L_T6_EXTRA in the Zombies game's .env).", m.title));
+        return Err(format!("{} needs the Zombies Declassified map pack (IW4L_T6_EXTRA in the game's .env, set by run-bo2.cmd when it finds the pack).", m.title));
     }
     let round = ROUNDS[shell.zm_round.min(ROUNDS.len() - 1)];
     let spec = launch_spec(m, shell.zm_start, round);
     let line = game_line(m, z);
     if PREVIEW.load(Ordering::Relaxed) {
         with(|s| s.running = Some(line));
+        return Ok(());
+    }
+    if in_process() {
+        // As Zombies' own front end starts a game: its start and mode
+        // picked, the starting round, then `map t6:<zone>` here.
+        let zone = spec.args.get(1).cloned().unwrap_or_default();
+        let map = zone.strip_prefix("t6:").unwrap_or(&zone).to_owned();
+        if let Some((_, v)) = spec.env.iter().find(|(k, _)| k == "IW4L_T6_START")
+            && let Some((loc, mode)) = v.split_once(':')
+        {
+            frame::set_bo2_zm_start(&map, loc, mode);
+        }
+        sim::set_t6_party_size(0);
+        sim::set_t6_game_settings(if round > 1 { vec![("startround".to_owned(), round as i32)] } else { Vec::new() });
+        diag::info!(Ui, "bo2mp zombies: starting {line} here ({zone}, round {round})");
+        *PENDING_MAP.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("map {zone}"));
         return Ok(());
     }
     let mut cmd = std::process::Command::new(&install.exe);

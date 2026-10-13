@@ -1225,6 +1225,7 @@ pub(crate) fn register_shell(app: &mut App) {
                 ingame::ingame_view,
                 ingame::tag_hits,
                 zombies::zombies_watch,
+                zombies::zombies_exec,
             )
                 .chain()
                 .in_set(ClientSet::Ui),
