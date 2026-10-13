@@ -2021,7 +2021,25 @@ pub fn install(host: &mut Host) -> Mp {
     host.bind("Engine", "SetClassItem", move |_, a| {
         let m = st(&m);
         let mut m = m.borrow_mut();
-        let key = m.class_key(num(&a, 1), &arg(&a, 2).to_string());
+        let slot = arg(&a, 2).to_string().to_ascii_lowercase();
+        let key = m.class_key(num(&a, 1), &slot);
+        let old = m.stat(&key).as_num().map_or(0, |n| n as i32);
+        let new = arg(&a, 3).as_num().map_or(0, |n| n as i32);
+        // bo2mp: BO2's own menu scripts put a class's gun back to the
+        // default when they meet an item they do not know (another game's
+        // gun, numbered past Black Ops II's table); Create-a-Class (the
+        // shell) is what changes a class, so those writes are refused.
+        if old != new
+            && old >= bo2_profile::guest::FIRST_INDEX
+            && !slot.ends_with("count")
+            && (slot == "primary" || slot == "secondary" || slot.contains("attachment") || slot.ends_with("camo"))
+        {
+            m.stat_log.push(format!("classes: kept {key} = {old} (another game's gun); the menu scripts asked for {new}"));
+            return Ok(vec![]);
+        }
+        if old != new {
+            m.stat_log.push(format!("classes: menu scripts set {key} {old} -> {new}"));
+        }
         m.set_stat(key, &arg(&a, 3));
         Ok(vec![])
     });
