@@ -260,10 +260,21 @@ pub(crate) fn save(world: &mut World, force: bool) {
         if p.changed.is_empty() {
             continue;
         }
-        let changed: Vec<(String, StatValue)> = std::mem::take(&mut p.changed)
+        // bo2mp: his classes are Create-a-Class's (the front end's): a
+        // match never writes them back (a class the match read at its
+        // start must not undo one he made since).
+        let (classes, rest): (Vec<String>, Vec<String>) =
+            std::mem::take(&mut p.changed).into_iter().partition(|path| path.contains(".customclass"));
+        if !classes.is_empty() {
+            diag::info!(Sim, "bo2mp stats: player {client}'s class stats left out of the save: {}", classes.join(", "));
+        }
+        let changed: Vec<(String, StatValue)> = rest
             .into_iter()
             .filter_map(|path| p.profile.stat(&path).cloned().map(|v| (path, v)))
             .collect();
+        if changed.is_empty() {
+            continue;
+        }
         let client = *client;
         let done: bo2_profile::SaveDone = Box::new(move |file, result| match result {
             Ok(()) => diag::info!(Sim, "bo2mp stats: player {client}'s saved to {}", file.display()),

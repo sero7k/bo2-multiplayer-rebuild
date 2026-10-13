@@ -77,13 +77,28 @@ pub(crate) fn restore_after_match(
     }
 }
 
+/// The custom classes' primaries in a stats file's text (`0:900 1:42 ...`).
+fn class_primaries(text: &str) -> String {
+    let stats = bo2_profile::Profile::stats_from_text(text);
+    (0..5)
+        .map(|n| {
+            let v = stats
+                .get(&format!("custommatchcacloadouts.customclass.{n}.primary"))
+                .and_then(bo2_profile::StatValue::as_num)
+                .map_or("-".to_owned(), |v| (v as i32).to_string());
+            format!("{n}:{v}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Before CoD's base loads: BO2's multiplayer answers, his saved stats.
 pub(crate) fn install(host: &mut Host, front: &Bo2mpFrontend) -> Mp {
     let mp = hks_t6::mp::install(host);
     match bo2_profile::read_stats_text(&front.stats_path) {
         Ok(text) => {
             mp.borrow_mut().load_text(&text);
-            diag::info!(Ui, "bo2mp front end: stats from {}", front.stats_path.display());
+            diag::info!(Ui, "bo2mp front end: stats from {} ({})", front.stats_path.display(), class_primaries(&text));
         }
         Err(_) => diag::info!(Ui, "bo2mp front end: no stats file yet ({})", front.stats_path.display()),
     }
@@ -376,7 +391,19 @@ pub(crate) fn tick(
             Ok(()) => diag::info!(Ui, "bo2mp front end: stats saved to {}", file.display()),
             Err(e) => diag::warn!(Ui, "bo2mp front end: stats not saved ({}): {e}", file.display()),
         });
-        let all = bo2_profile::SaveJob::Whole(mp.borrow().profile.stats.clone());
+        let all = mp.borrow().profile.stats.clone();
+        // (Which guns his custom classes hold, as saved: a class that comes
+        // back changed shows where.)
+        let primaries = (0..5)
+            .map(|n| {
+                all.get(&format!("custommatchcacloadouts.customclass.{n}.primary"))
+                    .and_then(bo2_profile::StatValue::as_num)
+                    .map_or("-".to_owned(), |v| (v as i32).to_string())
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        diag::info!(Ui, "bo2mp front end: saving classes' primaries {primaries}");
+        let all = bo2_profile::SaveJob::Whole(all);
         bo2_profile::save_in_background(&front.stats_path, all, Some(done));
     }
     // ZOMBIES: our Nuketown Zombies, swapped in as START MATCH swaps a map.

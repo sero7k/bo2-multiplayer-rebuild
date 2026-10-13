@@ -105,11 +105,18 @@ fn parse_streaks(list: &str, momentum: i32) -> Vec<Streak> {
     let mut picks: Vec<(String, i32, Option<bool>)> = list
         .split(';')
         .filter_map(|e| {
-            let mut p = e.split(':');
-            let icon = p.next()?.trim();
-            let cost: i32 = p.next()?.trim().parse().ok()?;
-            let held = p.next().map(|h| h.trim() == "1");
-            (!icon.is_empty() && cost > 0).then(|| (icon.to_owned(), cost, held))
+            // (An icon may carry its game, `iw4:specialty_nuke`: the cost
+            // and held flag are read from the end.)
+            let p: Vec<&str> = e.split(':').map(str::trim).collect();
+            let n = p.len();
+            let (icon, cost, held) = if n >= 3 && p[n - 2].parse::<i32>().is_ok() && matches!(p[n - 1], "0" | "1") {
+                (p[..n - 2].join(":"), p[n - 2].parse::<i32>().ok()?, Some(p[n - 1] == "1"))
+            } else if n >= 2 {
+                (p[..n - 1].join(":"), p[n - 1].parse::<i32>().ok()?, None)
+            } else {
+                return None;
+            };
+            (!icon.is_empty() && cost > 0).then_some((icon, cost, held))
         })
         .collect();
     picks.sort_by_key(|p| std::cmp::Reverse(p.1));
@@ -1691,6 +1698,14 @@ mod tests {
         // A negative or bad momentum reads 0.
         let s = parse_streaks("a:425:0", -40);
         assert_eq!(next_part(&s[0]), 0.0);
+    }
+
+    #[test]
+    fn a_game_tagged_streak_icon_parses() {
+        let s = parse_streaks("ks_a:425:0;iw4:specialty_nuke:99999:1", 0);
+        assert_eq!(s[0].icon, "iw4:specialty_nuke");
+        assert_eq!(s[0].state, StreakState::Ready);
+        assert_eq!(s[1].icon, "ks_a");
     }
 
     #[test]

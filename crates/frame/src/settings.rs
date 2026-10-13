@@ -125,7 +125,7 @@ impl Default for GameSettings {
             pad_deadzone_right: 0.12,
             bo2_fast: false,
             omni_movement: false,
-            map_game_bodies: true,
+            map_game_bodies: false,
             friend_code: 0,
             friends: Vec::new(),
             mature: true,

@@ -97,7 +97,7 @@ pub fn set_map_game(game: Option<asset_core::AssetNamespace>) {
 
 /// bo2mp: Graphics > Player Models: another game's map shows its own
 /// soldiers (true) or Black Ops II's characters.
-static MAP_GAME_BODIES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+static MAP_GAME_BODIES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn set_map_game_bodies(on: bool) {
     MAP_GAME_BODIES.store(on, std::sync::atomic::Ordering::Relaxed);
