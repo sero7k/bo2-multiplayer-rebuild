@@ -313,6 +313,7 @@ dependencies = [
  "fastfile_iw4",
  "fastfile_iw5",
  "fastfile_iw6",
+ "fastfile_s1",
  "fastfile_t5",
  "sab_t6",
  "t4",
