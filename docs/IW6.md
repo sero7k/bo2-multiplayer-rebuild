@@ -194,7 +194,7 @@ anchors), `surface_check`, `gun_*`, `image_dump`, `type_runs`.
 | common_core_mp | 3034/3034 | yes (0xaaacf50) | 0 unresolved; 739 sound lists at the scan's offsets |
 | common_mp | 8777/8777 | yes (0x22c505a) | 0 unresolved; 6296 lists; 972 name anchors ok, 0 off |
 | patch_common_core_mp, patch_common_mp, ui_mp, code_pre_gfx_mp, mp_prisonbreak_load, patch_mp_prisonbreak | all | yes | |
-| mp_prisonbreak | 1736/1741 | - | ReverbPreset { name; float[16] } (72) read; FxWorld read 0x40 bytes short (glass sound slots unsettled), so the technique sets after it drift; stops at GfxWorld |
+| mp_prisonbreak | 1741/1741 | yes (0x7bf5160) | 0 unresolved; FxWorld, GfxWorld, MapEnts, GlassWorld, ClipMap read |
 | code_post_gfx_mp, techsets_mp_prisonbreak | partial | no | technique sets with shader programs drift (not needed for guns) |
 
 Layouts settled on retail data (beyond x64-zt):
@@ -274,7 +274,12 @@ ranges (FLAC).
 
 1. Ghosts attachments on the guns (attachment assets: view/world models,
    reticles, stat changes) instead of the base gun for every variant.
-2. **A map**: `mp_prisonbreak.ff` (+ `_load`, `_path`, `techsets_...`,
+2. **A map**: done reading (walk exact). Retail `FxGlassDef` keeps the
+   physics preset where x64-zt has the material. `GfxWorld`, `MapEnts`,
+   `GlassWorld` and `clipMap_t` (640 bytes, `alignas(128)`, offsets in
+   `walk/world.rs::cm`) follow x64-zt's writers unchanged. Next: build the
+   world draw and collision from `GfxWorldRec` / `ClipMapRec`.
+   Old notes: `mp_prisonbreak.ff` (+ `_load`, `_path`, `techsets_...`,
    `patch_...`): ReverbPreset now reads (72 bytes: name, 16 floats), and
    FxWorld follows x64-zt's writer but ends 0x40 bytes early on retail data.
    The first glass def's damaged/destroyed/destroyedQuiet sound slots hold

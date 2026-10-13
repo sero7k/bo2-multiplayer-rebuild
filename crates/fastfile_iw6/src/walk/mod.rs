@@ -390,6 +390,12 @@ impl<'a> Walker<'a> {
     }
 
     /// The asset a reference to a pointer slot names.
+    /// Where a table asset's header was read (file offset).
+    pub(crate) fn header_of(&self, id: AssetId) -> Option<usize> {
+        let (&i, _) = self.cap.by_table.iter().find(|(_, v)| **v == id)?;
+        self.cap.starts.get(i).copied()
+    }
+
     pub(crate) fn resolve_slot(&self, ty: AssetType, virt: u64) -> Option<AssetId> {
         if let Some(id) = self.slots.get(&virt) {
             return Some(*id);
@@ -482,6 +488,10 @@ impl<'a> Walker<'a> {
             T::Weapon => weapon::weapon(self, h),
             T::ComWorld => world::com_world(self, h),
             T::FxWorld => world::fx_world(self, h),
+            T::GfxWorld => world::gfx_world(self, h),
+            T::MapEnts => world::map_ents(self, h),
+            T::GlassWorld => world::glass_world(self, h),
+            T::ClipMap => world::clip_map(self, h),
             T::MenuList => menu::menu_list(self, h),
             T::EquipmentSndTable => misc::equipment_snd_table(self, h),
             T::Font => misc::font(self, h),

@@ -298,6 +298,48 @@ pub struct ComWorldRec {
     pub primary_light_count: u32,
 }
 
+/// A `GfxWorld`: where its arrays are in the file (`None`: not inline).
+#[derive(Clone, Debug, Default)]
+pub struct GfxWorldRec {
+    pub name: String,
+    pub header: usize,
+    pub vertices: Option<usize>,
+    pub vertex_count: u32,
+    pub indices: Option<usize>,
+    pub index_count: u32,
+    pub surfaces: Option<usize>,
+    pub surface_count: u32,
+    pub surface_materials: Vec<Option<super::AssetId>>,
+    pub sorted_surfs: Option<usize>,
+    pub static_surface_count: u32,
+    pub smodels: Option<usize>,
+    pub smodel_count: u32,
+    pub smodel_models: Vec<Option<super::AssetId>>,
+    pub models: Option<usize>,
+    pub model_count: u32,
+    pub lightmaps: Vec<(Option<super::AssetId>, Option<super::AssetId>)>,
+    pub sky_images: Vec<Option<super::AssetId>>,
+}
+
+/// A `MapEnts`: the entity string and the spawn points' records.
+#[derive(Clone, Debug, Default)]
+pub struct MapEntsRec {
+    pub name: String,
+    pub entity_string: String,
+    pub spawns: Option<Span>,
+}
+
+/// A `clipMap_t`: its terrain triangles (brushes are not captured yet).
+#[derive(Clone, Debug, Default)]
+pub struct ClipMapRec {
+    pub name: String,
+    pub header: usize,
+    pub verts: Option<usize>,
+    pub vert_count: u32,
+    pub tri_indices: Option<usize>,
+    pub tri_count: u32,
+}
+
 #[derive(Default, Debug)]
 pub struct Capture {
     pub techsets: Vec<TechniqueSetRec>,
@@ -311,6 +353,9 @@ pub struct Capture {
     pub fx: Vec<FxRec>,
     pub raw_files: Vec<RawFileRec>,
     pub com_worlds: Vec<ComWorldRec>,
+    pub gfx_worlds: Vec<GfxWorldRec>,
+    pub map_ents: Vec<MapEntsRec>,
+    pub clip_maps: Vec<ClipMapRec>,
     /// Sound alias lists (exact reads of `sound.rs`'s shape); a shared
     /// loaded sound or sound file reads as the one it names.
     pub sounds: Vec<crate::sound::SoundAliasList>,
@@ -353,6 +398,9 @@ impl Capture {
             T::Fx => self.fx.get(i).map(|r| r.name.as_str()),
             T::RawFile => self.raw_files.get(i).map(|r| r.name.as_str()),
             T::ComWorld => self.com_worlds.get(i).map(|r| r.name.as_str()),
+            T::GfxWorld => self.gfx_worlds.get(i).map(|r| r.name.as_str()),
+            T::MapEnts => self.map_ents.get(i).map(|r| r.name.as_str()),
+            T::ClipMap => self.clip_maps.get(i).map(|r| r.name.as_str()),
             T::Sound => self.sounds.get(i).and_then(|r| r.name.text()),
             T::LoadedSound => self.loaded.get(i).and_then(|r| r.name.text()),
             _ => self.others.get(i).map(|r| r.name.as_str()),
@@ -374,6 +422,9 @@ impl Capture {
             AssetType::Fx => self.fx.len(),
             AssetType::RawFile => self.raw_files.len(),
             AssetType::ComWorld => self.com_worlds.len(),
+            AssetType::GfxWorld => self.gfx_worlds.len(),
+            AssetType::MapEnts => self.map_ents.len(),
+            AssetType::ClipMap => self.clip_maps.len(),
             AssetType::Sound => self.sounds.len(),
             AssetType::LoadedSound => self.loaded.len(),
             _ => {
