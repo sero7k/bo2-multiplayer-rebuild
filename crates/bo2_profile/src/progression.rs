@@ -197,7 +197,12 @@ pub fn rank_icon_with(bo2: Option<&Bo2RankIcons>, level: i32, prestige: i32) -> 
     let level = level.clamp(1, MAX_LEVEL);
     let first = |game: &'static str, n: i32| (game, icon_candidates(game, n).swap_remove(0));
     match prestige_icon(prestige) {
-        PrestigeIcon::Bo2Level => (BO2, bo2.map_or_else(String::new, |b| b.level(level).to_owned())),
+        // bo2mp: levels wear Modern Warfare 3's rank icons (its own
+        // pictures, read from its files), not Black Ops II's.
+        PrestigeIcon::Bo2Level => {
+            let _ = bo2;
+            ("iw5", mw3_level_icon(level).to_owned())
+        }
         PrestigeIcon::Bo1(n) => first("t5", n),
         PrestigeIcon::Mw2(n) => first("iw4", n),
         PrestigeIcon::Mw3(n) => first("iw5", n),
@@ -205,6 +210,32 @@ pub fn rank_icon_with(bo2: Option<&Bo2RankIcons>, level: i32, prestige: i32) -> 
             BO2,
             bo2.map(|b| b.master.clone()).filter(|m| !m.is_empty()).unwrap_or_else(|| "rank_prestige_master".to_owned()),
         ),
+    }
+}
+
+/// Modern Warfare 3's rank icon for a level: its ranks in order (Private
+/// to Commander, the order of its `rank_*1` materials), three levels a
+/// rank through the enlisted ranks, four through the officers, General
+/// from 70 and Commander at 80 and above (the extended levels).
+#[must_use]
+pub fn mw3_level_icon(level: i32) -> &'static str {
+    const ENLISTED: [&str; 11] = [
+        "rank_pvt1", "rank_pfc1", "rank_spc1", "rank_cpl1", "rank_sgt1", "rank_ssgt1", "rank_sfc1", "rank_msgt1",
+        "rank_1stsgt1", "rank_sgtmaj1", "rank_cmdsgtmaj1",
+    ];
+    const OFFICERS: [&str; 9] = [
+        "rank_2ndlt1", "rank_1stlt1", "rank_capt1", "rank_maj1", "rank_ltcol1", "rank_col1", "rank_bgen1",
+        "rank_majgen1", "rank_ltgen1",
+    ];
+    let level = level.max(1);
+    if level >= 80 {
+        "rank_comm1"
+    } else if level >= 70 {
+        "rank_gen1"
+    } else if level <= 33 {
+        ENLISTED[((level - 1) / 3) as usize]
+    } else {
+        OFFICERS[(((level - 34) / 4) as usize).min(OFFICERS.len() - 1)]
     }
 }
 
@@ -486,8 +517,12 @@ mod tests {
         assert_eq!(MAX_PRESTIGE, 46);
         let bo2 = Bo2RankIcons { levels: vec!["rank_pvt".into(), "rank_com".into()], master: "rank_master".into() };
         let at = |l, p| rank_icon_with(Some(&bo2), l, p);
-        assert_eq!(at(1, 0), ("t6", "rank_pvt".to_owned()));
-        assert_eq!(at(155, 0), ("t6", "rank_com".to_owned()));
+        // Levels wear Modern Warfare 3's rank icons.
+        assert_eq!(at(1, 0), ("iw5", "rank_pvt1".to_owned()));
+        assert_eq!(at(15, 0), ("iw5", "rank_sgt1".to_owned()));
+        assert_eq!(at(34, 0), ("iw5", "rank_2ndlt1".to_owned()));
+        assert_eq!(at(70, 0), ("iw5", "rank_gen1".to_owned()));
+        assert_eq!(at(155, 0), ("iw5", "rank_comm1".to_owned()));
         assert_eq!(at(1, 1), ("t5", "rank_prestige01".to_owned()));
         assert_eq!(at(1, 15), ("t5", "rank_prestige15".to_owned()));
         assert_eq!(at(1, 16), ("iw4", "rank_prestige1".to_owned()));
@@ -524,7 +559,8 @@ mod tests {
         let grid: Vec<Vec<String>> = cells.chunks(cols).map(<[String]>::to_vec).collect();
         let r = |id: &str| grid.iter().find(|r| r[0] == id).unwrap();
         assert_eq!(r("maxprestige")[1], "46");
-        assert_eq!(r("154")[1], "rank_54");
+        assert_eq!(r("154")[1], "iw5:rank_comm1");
+        assert_eq!(r("14")[1], "iw5:rank_sgt1");
         assert_eq!(r("3")[2], "t5:rank_prestige01");
         assert_eq!(r("3")[17], "iw4:rank_prestige1");
         assert_eq!(r("3")[47], "rank_prestige11");
