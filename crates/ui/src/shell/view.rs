@@ -1082,12 +1082,13 @@ pub(crate) fn shell_view(
     let tick = if pics.pending() { (time.elapsed_secs() * 2.0) as u64 } else { 0 };
     let book = super::classes::book().map_or(0, |b| std::sync::Arc::as_ptr(&b) as usize);
     let key = format!(
-        "{:?}|{:p}|{}|{online:?}|{area:?}|{pad}|{starting:?}|{tick}|{book}|{}|{:?}",
+        "{:?}|{:p}|{}|{online:?}|{area:?}|{pad}|{starting:?}|{tick}|{book}|{}|{:?}|{}",
         *shell,
         std::sync::Arc::as_ptr(&cat),
         pics.count(),
         super::options::snapshot().revision,
-        super::zombies::state()
+        super::zombies::state(),
+        super::online::generation()
     );
     if *drawn == key && !roots.is_empty() {
         return;
@@ -1129,6 +1130,7 @@ pub(crate) fn shell_view(
                 Screen::Options => options_view(c, &mut cx, &shell, &rows),
                 Screen::Barracks => barracks_view(c, &mut cx, &shell, &cat, &rows),
                 Screen::Friends => super::friends::view(c, &mut cx, &shell, &rows),
+                Screen::Lobbies => super::lobbies::view(c, &mut cx, &shell, &rows),
                 Screen::CardPick | Screen::EmblemPick => super::looks::view(c, &mut cx, &shell, &cat, &rows),
                 Screen::Classes | Screen::ClassEdit | Screen::ItemPick => {
                     if let Some(book) = super::classes::book() {

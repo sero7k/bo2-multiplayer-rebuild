@@ -319,6 +319,28 @@ fn step(
             s.screen = Screen::Friends;
             s.focus = 1;
         }),
+        ("12i_lobbies", |s, _| {
+            let a = |n: u8, name: &str, map: &str, mode: &str, players: u8, in_match: bool, missing: u8| net::MasterAdvert {
+                id: net::master_protocol::AdvertId([n; 16]),
+                name: name.to_owned(),
+                map: map.to_owned(),
+                mode: mode.to_owned(),
+                players,
+                max_players: 12,
+                locked: false,
+                in_match,
+                requires: Default::default(),
+                missing: net::master_protocol::ContentFlags(missing),
+            };
+            super::lobbies::preview(vec![
+                a(1, "egs's lobby", "t6:mp_nuketown_2020", "tdm", 5, false, 0),
+                a(2, "reaaL's lobby", "mp_rust", "dom", 2, false, 0),
+                a(3, "Jimbo's lobby", "t6:mp_raid", "sd", 10, true, 0),
+                a(4, "kane's lobby", "t4:mp_castle", "tdm", 4, false, net::CONTENT_T4),
+            ]);
+            s.screen = Screen::Lobbies;
+            s.focus = 0;
+        }),
         ("12a_options", |s, _| {
             s.screen = Screen::Options;
             s.page = 0;

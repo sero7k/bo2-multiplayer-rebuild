@@ -3,7 +3,23 @@
 //! front end is up). With no master server set (`IW4L_MASTER_ADDR`) the
 //! panel says he is playing offline.
 
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use bevy::prelude::*;
+
+/// The server's lobbies as last listed (FIND A LOBBY shows them).
+static ADVERTS: Mutex<Vec<net::MasterAdvert>> = Mutex::new(Vec::new());
+/// The list's generation: the shell redraws when it moves.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn adverts() -> Vec<net::MasterAdvert> {
+    ADVERTS.lock().map(|a| a.clone()).unwrap_or_default()
+}
+
+pub(crate) fn generation() -> u64 {
+    GENERATION.load(Ordering::Relaxed)
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) enum Status {
@@ -50,6 +66,11 @@ pub(crate) fn poll_online(
             }
             let snap = b.snapshot();
             super::friends::set_seen(snap.friends.clone());
+            if GENERATION.swap(snap.generation, Ordering::Relaxed) != snap.generation
+                && let Ok(mut a) = ADVERTS.lock()
+            {
+                *a = snap.adverts.clone();
+            }
             let in_lobbies: u32 = snap.adverts.iter().filter(|a| !a.in_match).map(|a| u32::from(a.players)).sum();
             let in_matches: u32 = snap.adverts.iter().filter(|a| a.in_match).map(|a| u32::from(a.players)).sum();
             let open = snap.adverts.iter().filter(|a| !a.locked && a.players < a.max_players).count() as u32;

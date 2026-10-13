@@ -27,6 +27,7 @@ pub(crate) mod classes;
 pub(crate) mod ingame;
 mod loading;
 mod friends;
+mod lobbies;
 mod looks;
 mod online;
 pub(crate) mod options;
@@ -68,6 +69,8 @@ pub(crate) enum Screen {
     EmblemPick,
     /// His friend code and his friends (`friends`).
     Friends,
+    /// The server's lobbies (`lobbies`).
+    Lobbies,
     /// Zombies: its lobby (map, start, starting round, START), its map
     /// picker (a page per game, `page`) and the map's starts and modes.
     Zombies,
@@ -150,6 +153,9 @@ pub(crate) enum Act {
     /// FRIENDS: type a code to add; a friend (by code).
     AddFriend,
     Friend(u32),
+    /// Multiplayer: FIND A LOBBY; a lobby on the server.
+    Lobbies,
+    Lobby(net::master_protocol::AdvertId),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -274,6 +280,7 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
             Row::new("CREATE A CLASS", "Build your loadouts.", Act::Classes),
             Row::new("BARRACKS", "Your combat record, calling card, emblem and prestige.", Act::Barracks),
             Row::new("OPTIONS", "Graphics, sound and controls.", Act::Options),
+            Row::new("FIND A LOBBY", "Join a lobby on the online server.", Act::Lobbies),
         ],
         Screen::Lobby => match s.tab {
             Tab::Lobby => vec![
@@ -310,6 +317,7 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
             .collect(),
         Screen::Classes | Screen::ClassEdit | Screen::ItemPick => classes::book().map(|b| cac::rows(s, &b)).unwrap_or_default(),
         Screen::Friends => friends::rows(s),
+        Screen::Lobbies => lobbies::rows(s),
         Screen::Options => {
             let mut r = options::rows(s.page, &options::snapshot());
             if let Some(t) = &s.typing
@@ -420,6 +428,10 @@ impl Shell {
                 self.go(Screen::Main);
                 self.focus = 3;
             }
+            Screen::Lobbies => {
+                self.go(Screen::Multiplayer);
+                self.focus = 4;
+            }
             Screen::Multiplayer => self.go(Screen::Main),
             Screen::Zombies => {
                 self.go(Screen::Main);
@@ -501,6 +513,8 @@ impl Shell {
             Act::Friends => self.go(Screen::Friends),
             Act::AddFriend => self.code_entry = Some(String::new()),
             Act::Friend(code) => self.note(&friends::friend_note(code), now),
+            Act::Lobbies => self.go(Screen::Lobbies),
+            Act::Lobby(id) => self.note(&lobbies::lobby_note(id), now),
             Act::Barracks if self.screen != Screen::Barracks => {
                 self.cac_from = self.screen;
                 self.go(Screen::Barracks);

@@ -46,8 +46,13 @@ pub(crate) fn queue_online_start(zone: String, mode: String) {
 
 /// FRIENDS: join this lobby.
 pub(crate) fn queue_join(advert: &net::master_protocol::Advert) {
+    queue_join_room(advert.id, advert.map.clone(), advert.mode.clone());
+}
+
+/// FRIENDS / FIND A LOBBY: join this room.
+pub(crate) fn queue_join_room(advert_id: net::master_protocol::AdvertId, map: String, mode: String) {
     if let Ok(mut j) = JOIN.lock() {
-        *j = Some(MasterMenuAction::Join { advert_id: advert.id, map: advert.map.clone(), mode: advert.mode.clone() });
+        *j = Some(MasterMenuAction::Join { advert_id, map, mode });
     }
 }
 

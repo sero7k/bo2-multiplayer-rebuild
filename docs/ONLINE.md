@@ -47,10 +47,12 @@ name=iw4l-prod               # the label its certificate carries (leave as is)
   refused, or no room within 15 s) the match starts on this PC offline.
 * **Join a friend:** FRIENDS, pick a friend who shows IN A LOBBY, press
   Enter. You load in when they press START.
+* **Join anyone:** MULTIPLAYER > FIND A LOBBY lists every lobby on the
+  server (open ones first); Enter joins an open one.
 * Every player needs the map's game installed (Black Ops II, Call of Duty 4,
   World at War, ...); the server only lets in players who have it.
 
 ## Not done yet
 
-A lobby browser in the Black Ops II front end (open lobbies of non-friends),
-and zombies through the server.
+Zombies through the server; a lobby screen showing who else is in the room
+while waiting for the host.
