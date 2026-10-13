@@ -780,7 +780,21 @@ pub(crate) fn build_legacy_world(
         lightmaps.len(),
         if lightmap_gaps.is_empty() { String::new() } else { format!(" ({})", lightmap_gaps.join("; ")) }
     ));
-    match asset_world::world_iw3::build_iw3_world_draw(world, &surface_materials, lightmaps, Some(lighting)) {
+    // The sky's surfaces (a sky technique: `wc_sky`): the sky pass draws
+    // behind them, the world does not draw them.
+    let sky_surfaces: Vec<bool> = world
+        .surfaces
+        .iter()
+        .map(|s| {
+            s.material
+                .and_then(|m| zone.material(m))
+                .and_then(|m| m.technique_set)
+                .and_then(|t| zone.technique_set(t))
+                .is_some_and(|t| t.name.trim_start_matches(',').split('_').any(|w| w.starts_with("sky")))
+        })
+        .collect();
+    report.push(format!("{tag} sky surfaces: {} (not drawn in the world)", sky_surfaces.iter().filter(|&&s| s).count()));
+    match asset_world::world_iw3::build_iw3_world_draw(world, &surface_materials, &sky_surfaces, lightmaps, Some(lighting)) {
         Ok(mut draw) => {
             // The createart fog (the zone's `maps/createart/<map>_art.gsc`).
             // (CoD4: maps/createart/<map>_art.gsc; WaW: maps/mp/createart/.)

@@ -31,8 +31,11 @@ use crate::world_t6::T6WorldLighting;
 use crate::{SurfaceCastsSunShadow, world_capture_from_casters};
 
 /// Which of the world's surfaces the game draws: the lit, decal and emissive
-/// ranges, not the sky's.
-pub fn iw3_drawn_surfaces(world: &GfxWorld) -> Vec<bool> {
+/// ranges, not the sky's. `sky`: per surface, its material is a sky's (the
+/// sky pass draws behind them; drawn in the world they are flat white
+/// openings). bo2mp: by material, not `skyStartSurfs`, which on World at War
+/// names other surfaces (Dome's: a wooden wall).
+pub fn iw3_drawn_surfaces(world: &GfxWorld, sky: &[bool]) -> Vec<bool> {
     let n = world.surfaces.len();
     let mut drawn = vec![false; n];
     for range in [&world.lit_surfs, &world.decal_surfs, &world.emissive_surfs] {
@@ -46,8 +49,8 @@ pub fn iw3_drawn_surfaces(world: &GfxWorld) -> Vec<bool> {
     if !drawn.iter().any(|&d| d) {
         drawn = vec![true; n];
     }
-    for &i in &world.sky_start_surfs {
-        if let Some(d) = usize::try_from(i).ok().and_then(|i| drawn.get_mut(i)) {
+    for (d, &s) in drawn.iter_mut().zip(sky) {
+        if s {
             *d = false;
         }
     }
@@ -57,6 +60,7 @@ pub fn iw3_drawn_surfaces(world: &GfxWorld) -> Vec<bool> {
 pub fn build_iw3_world_draw(
     world: &GfxWorld,
     surface_materials: &[Option<usize>],
+    sky_surfaces: &[bool],
     lightmaps: Vec<Option<WorldLightmap>>,
     lighting: Option<T6WorldLighting>,
 ) -> Result<WorldDraw, WorldMeshError> {
@@ -102,7 +106,7 @@ pub fn build_iw3_world_draw(
         lightmap_uvs.push(v.lmap_coord);
     }
 
-    let drawn = iw3_drawn_surfaces(world);
+    let drawn = iw3_drawn_surfaces(world, sky_surfaces);
     let n = world.surfaces.len();
     let mut packed_indices: Vec<u32> = Vec::new();
     let mut surface_index_ranges = Vec::with_capacity(n);

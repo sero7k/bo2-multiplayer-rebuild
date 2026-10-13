@@ -5,6 +5,14 @@ fn main() {
     let path = std::path::Path::new(&a[1]);
     let pats: Vec<String> = a[2..].iter().map(|p| p.to_ascii_lowercase()).collect();
     let z = t4::load_map(path).unwrap().zone;
+    // `ents <class>`: the map's entities of a classname, with their keys.
+    if a.get(2).map(String::as_str) == Some("ents") {
+        let text = z.map_ents().map(|m| m.entity_string.clone()).unwrap_or_default();
+        for e in iw3::ents::parse(&text).iter().filter(|e| e.classname().contains(a.get(3).map_or("", |s| s.as_str()))) {
+            println!("{:?}", e);
+        }
+        return;
+    }
     let hit = |n: &str| pats.iter().any(|p| n.to_ascii_lowercase().contains(p.as_str()));
     for asset in &z.assets {
         match asset {
