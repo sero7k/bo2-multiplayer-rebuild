@@ -51,7 +51,12 @@ pub(crate) fn validated_facts(
         impact_type: f.impact_type,
         shots_per_fire: f.shots_per_fire,
 
-        burst_cooldown_ms: fire_type.is_burst().then_some(200).unwrap_or(0),
+        // (Black Ops II's own `iBurstDelayTime` when the gun has one.)
+        burst_cooldown_ms: if fire_type.is_burst() {
+            if f.burst_delay_ms > 0 { f.burst_delay_ms } else { 200 }
+        } else {
+            0
+        },
 
         bolt_action: f.bolt_action,
         rechamber_time_ms: f.rechamber_time_ms,
@@ -71,6 +76,7 @@ pub(crate) fn validated_facts(
         inherits_perks: f.inherits_perks,
         sprint_raise_time_ms: f.sprint_raise_time_ms,
         sprint_drop_time_ms: f.sprint_drop_time_ms,
+        damage_points: f.damage_points,
         damage: f.damage,
         min_damage: f.min_damage,
         max_damage_range: f.max_damage_range,
@@ -288,4 +294,38 @@ pub fn equipment_from_registry(weapons: &WeaponRegistry) -> Vec<sim::EquipmentRu
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod bo2_tests {
+    use super::*;
+
+    fn gun() -> WeaponBodyFacts {
+        WeaponBodyFacts {
+            fire_type: 2,
+            fire_time_ms: 64,
+            damage: 40,
+            max_damage_range: 1000.0,
+            min_damage_range: 2000.0,
+            location_damage_mult: Some(LOCATION_DAMAGE_IDENTITY),
+            ..WeaponBodyFacts::default()
+        }
+    }
+
+    #[test]
+    fn a_burst_waits_its_own_burst_delay() {
+        let f = validated_facts(WeaponBodyFacts { burst_delay_ms: 112, ..gun() }, false, None).expect("facts");
+        assert_eq!(f.burst_cooldown_ms, 112);
+        let f = validated_facts(gun(), false, None).expect("facts");
+        assert_eq!(f.burst_cooldown_ms, 200);
+    }
+
+    #[test]
+    fn black_ops_ii_global_table_scales_a_limb_shot() {
+        let table = asset_game::bo2_lochit_table();
+        let baked = bake_location_damage(weapon_iw4::WEAPTYPE_BULLET, 0, table, Some(LOCATION_DAMAGE_IDENTITY));
+        let slot = |n| weapon_iw4::hitloc_slot(n).unwrap();
+        assert_eq!(baked[slot("left_leg_lower")], 0.5);
+        assert_eq!(baked[slot("torso_mid")], 0.9);
+    }
 }

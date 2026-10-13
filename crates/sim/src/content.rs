@@ -124,6 +124,10 @@ fn hash_combat(h: &mut Digest, combat: &[WeaponCombatFacts]) {
         h.i32(row.min_damage);
         h.f32(row.max_damage_range);
         h.f32(row.min_damage_range);
+        for point in row.damage_points {
+            h.f32(point[0]);
+            h.f32(point[1]);
+        }
         h.f32(row.hip_spread_stand_min);
         h.f32(row.hip_spread_ducked_min);
         h.f32(row.hip_spread_prone_min);

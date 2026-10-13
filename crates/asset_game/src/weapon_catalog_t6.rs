@@ -331,13 +331,17 @@ fn t6_body_facts(w: &asset_t6::WeaponRef) -> WeaponBodyFacts {
         _ => 2,
     };
     f.fire_type = remap_t6_fire_type(w.def_i32(d::fireType));
+    f.burst_delay_ms = w.def_i32(d::iBurstDelayTime);
     f.max_ammo = w.def_i32(d::iMaxAmmo);
     f.start_ammo = w.def_i32(d::iStartAmmo);
     f.ammo_count_clip_relative = w.def_u8(d::ammoCountClipRelative) != 0;
-    // T6 damage falls off over up to six ranges; the engine knows a near
-    // and a far value.
+    // T6 damage runs over up to six (range, damage) points
+    // (`damage_points`); the near and far values stay for the rest.
     let damage: Vec<i32> = (0..6).map(|i| w.def_i32(d::damage + i * 4)).collect();
     let ranges: Vec<f32> = (0..6).map(|i| w.def_f32(d::damageRange + i * 4)).collect();
+    for i in 0..6 {
+        f.damage_points[i] = [ranges[i], damage[i] as f32];
+    }
     f.damage = damage[0];
     f.max_damage_range = ranges[0];
     let last = (1..6).rev().find(|&i| ranges[i] > 0.0 && damage[i] > 0);

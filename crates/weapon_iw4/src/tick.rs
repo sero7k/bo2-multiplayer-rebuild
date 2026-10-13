@@ -99,6 +99,13 @@ pub struct CapturedCombatInput {
     pub no_partial_reload: bool,
     pub sprint_raise_time_ms: i32,
     pub sprint_drop_time_ms: i32,
+    /// bo2mp: Black Ops II's damage over range, up to six (range, damage)
+    /// points (`damageRange[]`, `damage[]`; a point with no range is
+    /// unused): damage runs straight between neighbouring points, the
+    /// first point's damage before it, the last's beyond it. Black Ops
+    /// II's guns step by putting two points one unit apart. Empty: the
+    /// near/far fields below.
+    pub damage_points: [[f32; 2]; 6],
     pub damage: i32,
     pub min_damage: i32,
     pub max_damage_range: f32,
@@ -266,6 +273,13 @@ pub struct WeaponCombatFacts {
     pub sprint_raise_time_ms: i32,
 
     pub sprint_drop_time_ms: i32,
+    /// bo2mp: Black Ops II's damage over range, up to six (range, damage)
+    /// points (`damageRange[]`, `damage[]`; a point with no range is
+    /// unused): damage runs straight between neighbouring points, the
+    /// first point's damage before it, the last's beyond it. Black Ops
+    /// II's guns step by putting two points one unit apart. Empty: the
+    /// near/far fields below.
+    pub damage_points: [[f32; 2]; 6],
     pub damage: i32,
     pub min_damage: i32,
     pub max_damage_range: f32,
@@ -396,6 +410,7 @@ impl WeaponCombatFacts {
             no_partial_reload: false,
             sprint_raise_time_ms: 0,
             sprint_drop_time_ms: 0,
+            damage_points: [[0.0; 2]; 6],
             damage: 0,
             min_damage: 0,
             max_damage_range: 0.0,
@@ -515,6 +530,7 @@ impl WeaponCombatFacts {
             inherits_perks: input.inherits_perks,
             sprint_raise_time_ms: input.sprint_raise_time_ms,
             sprint_drop_time_ms: input.sprint_drop_time_ms,
+            damage_points: input.damage_points,
             damage: input.damage,
             min_damage: input.min_damage,
             max_damage_range: input.max_damage_range,

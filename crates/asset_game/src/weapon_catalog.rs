@@ -327,6 +327,16 @@ pub struct WeaponBodyFacts {
     pub start_ammo: i32,
 
     pub ammo_count_clip_relative: bool,
+    /// bo2mp: Black Ops II's damage over range, up to six (range, damage)
+    /// points (`damageRange[]`, `damage[]`; a point with no range is
+    /// unused): damage runs straight between neighbouring points, the
+    /// first point's damage before it, the last's beyond it. Black Ops
+    /// II's guns step by putting two points one unit apart. Empty: the
+    /// near/far fields below.
+    pub damage_points: [[f32; 2]; 6],
+    /// bo2mp: Black Ops II's pause after a burst (`iBurstDelayTime`, ms);
+    /// 0: the engine's own (200 ms).
+    pub burst_delay_ms: i32,
     pub min_damage: i32,
     pub min_player_damage: i32,
     pub max_damage_range: f32,
@@ -1835,6 +1845,8 @@ impl WeaponCatalog {
                 parallel_bounce: geometry.parallel_bounce,
                 perpendicular_bounce: geometry.perpendicular_bounce,
                 location_damage_mult: geometry.location_damage_mult.map(|m| weapon_iw4::hitloc_iw_to_t6(&m)),
+                damage_points: [[0.0; 2]; 6],
+                burst_delay_ms: 0,
                 start_ammo: geometry.start_ammo,
                 ammo_count_clip_relative: false,
                 min_damage: geometry.min_damage,
