@@ -31,5 +31,5 @@ pub use loadout::{
 };
 pub use match_apply::{apply_prepared_match, install_script_model_id};
 pub use startup::{PendingConsoleLines, StartupCommands};
-pub use bo2mp_setup::Bo2mpMatchSetup;
+pub use bo2mp_setup::{Bo2mpMatchSetup, ui_name_for_zone};
 pub use plugin::SessionPlugin;

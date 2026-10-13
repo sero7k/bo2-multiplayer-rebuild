@@ -139,7 +139,7 @@ pub use transport::frame::{
 };
 pub use transport::loopback_live::{ListenLoopback, ReceivedTick};
 pub use transport::master::{
-    CONTENT_IW4, CONTENT_IW5, CONTENT_T5, CONTENT_T6, MasterAdvert, MasterBridge, MasterBridgeState,
+    CONTENT_IW3, CONTENT_IW4, CONTENT_IW5, CONTENT_T4, CONTENT_T5, CONTENT_T6, MasterAdvert, MasterBridge, MasterBridgeState,
     MasterBrowser, MasterBrowserSnapshot, MasterLaunchIntent, MasterLifecycleFact,
     MasterMatchOffer, MasterMatchStart, MasterMenuAction, PendingMasterMenuAction, SessionIdentity,
     TransportFault, content_inventory, content_names, content_required_by_map, set_friend_identity,

@@ -141,15 +141,27 @@ pub(crate) fn rows(shell: &Shell) -> Vec<Row> {
     out
 }
 
-/// What Enter on a friend says.
+/// What Enter on a friend does: join his lobby when it is open (with a
+/// server configured), and says so; else where he is.
 pub(crate) fn friend_note(code: u32) -> String {
     let (_, list) = state();
     let f = list.into_iter().find(|(c, _)| *c == code).and_then(|(_, f)| f);
+    if let Some(f) = f.as_ref().filter(|f| f.online)
+        && let Some(r) = f.room.as_ref()
+        && !r.in_match
+        && !r.locked
+        && r.players < r.max_players
+        && crate::online_match::online_available()
+    {
+        crate::online_match::queue_join(r);
+        let name = if f.name.is_empty() { GameSettings::friend_code_text(code) } else { f.name.clone() };
+        return format!("Joining {name}'s lobby on {}. You load in when they start the match.", map_title(&r.map));
+    }
     let name = f.as_ref().filter(|f| !f.name.is_empty()).map_or_else(|| GameSettings::friend_code_text(code), |f| f.name.clone());
     match f {
         Some(f) if f.online => match &f.room {
             Some(r) => format!(
-                "{name} is in a lobby on {} ({}). Joining friends' lobbies comes with online lobbies.",
+                "{name} is in a lobby on {} ({}) that is full, closed or playing.",
                 map_title(&r.map),
                 r.mode.to_uppercase()
             ),

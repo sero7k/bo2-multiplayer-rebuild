@@ -488,9 +488,16 @@ pub(crate) fn tick(
             disbanded: false,
         });
     }
+    let gametype = setup.gametype.clone();
     commands.insert_resource(setup);
     // The match's HUD is the game's own, not the front end.
     commands.remove_resource::<Bo2mpFrontend>();
+    // bo2mp online: with a server configured, the match goes through it (a
+    // room for friends to join; everyone loads from its offer).
+    if crate::online_match::online_available() {
+        crate::online_match::queue_online_start(zone.clone(), gametype);
+        return;
+    }
     match swap {
         Some(swap) => match swap.request_zone(zone.clone()) {
             Ok(id) => diag::info!(Ui, "bo2mp front end: starting `{zone}` (swap #{id})"),

@@ -352,7 +352,7 @@ fn run_menu(games: asset_transport::GamesRoot, artifacts: PathBuf) {
     };
     let mut app = App::new();
     let namespace_trees = NamespaceTrees::discover(&games);
-    let have = content_flags(&namespace_trees);
+    let have = content_flags(&namespace_trees, &games);
     let master_intent = if have.0 & net::CONTENT_IW4 == 0 {
         diag::warn!(
             Net,
@@ -488,7 +488,7 @@ fn run_frontend_t6mp(games: asset_transport::GamesRoot, artifacts: PathBuf) {
     let mut app = App::new();
     // The front end's online panel counts the players on the master server
     // (IW4L_MASTER_ADDR), when one is set.
-    let have = content_flags(&NamespaceTrees::discover(&games));
+    let have = content_flags(&NamespaceTrees::discover(&games), &games);
     app.insert_resource(net::MasterLaunchIntent::browser_from_env(have).unwrap_or_else(|error| {
         diag::warn!(Net, "front end online panel: no master server ({error})");
         net::MasterLaunchIntent::disabled()
@@ -648,7 +648,7 @@ fn run_map(
     });
     let loading_title = asset_transport::map_load_title(&zone_arg_lc, game);
     let namespace_trees = NamespaceTrees::discover(&games);
-    let have = content_flags(&namespace_trees);
+    let have = content_flags(&namespace_trees, &games);
     let requires = net::content_required_by_map(&zone_arg_lc)
         .unwrap_or_else(|error| fatal(&format!("master content: {error}")));
 
@@ -828,7 +828,7 @@ fn run_map(
     }
 }
 
-fn content_flags(trees: &NamespaceTrees) -> master_protocol::ContentFlags {
+fn content_flags(trees: &NamespaceTrees, games: &asset_transport::GamesRoot) -> master_protocol::ContentFlags {
     let mut flags = net::content_inventory(
         trees.get(asset_core::AssetNamespace::Iw4).is_some(),
         trees.get(asset_core::AssetNamespace::Iw5).is_some(),
@@ -837,6 +837,14 @@ fn content_flags(trees: &NamespaceTrees) -> master_protocol::ContentFlags {
     // bo2zm: Black Ops II.
     if trees.get(asset_core::AssetNamespace::T6).is_some() {
         flags.0 |= net::CONTENT_T6;
+    }
+    // bo2mp: Call of Duty 4 and World at War, when any of their maps is in.
+    for (game, _) in asset_transport::list_legacy_mp_maps(games) {
+        flags.0 |= match game.as_str() {
+            "iw3" => net::CONTENT_IW3,
+            "t4" => net::CONTENT_T4,
+            _ => 0,
+        };
     }
     flags
 }

@@ -43,6 +43,11 @@ pub const CONTENT_IW5: u8 = 1 << 1;
 pub const CONTENT_T5: u8 = 1 << 2;
 /// bo2zm: Black Ops II.
 pub const CONTENT_T6: u8 = 1 << 3;
+/// bo2mp: Call of Duty 4.
+pub const CONTENT_IW3: u8 = 1 << 4;
+/// bo2mp: World at War.
+pub const CONTENT_T4: u8 = 1 << 5;
+const CONTENT_KNOWN: u8 = CONTENT_IW4 | CONTENT_IW5 | CONTENT_T5 | CONTENT_T6 | CONTENT_IW3 | CONTENT_T4;
 
 pub const fn content_inventory(iw4: bool, iw5: bool, t5: bool) -> ContentFlags {
     ContentFlags(
@@ -61,6 +66,8 @@ pub fn content_required_by_map(map: &str) -> Result<ContentFlags> {
         "iw5" => CONTENT_IW5,
         "t5" => CONTENT_T5,
         "t6" => CONTENT_T6,
+        "iw3" => CONTENT_IW3,
+        "t4" => CONTENT_T4,
         other => return Err(format!("unknown content namespace `{other}` in map `{map}`").into()),
     }))
 }
@@ -79,7 +86,13 @@ pub fn content_names(flags: ContentFlags) -> String {
     if flags.0 & CONTENT_T6 != 0 {
         names.push("t6");
     }
-    if flags.0 & !(CONTENT_IW4 | CONTENT_IW5 | CONTENT_T5) != 0 {
+    if flags.0 & CONTENT_IW3 != 0 {
+        names.push("iw3");
+    }
+    if flags.0 & CONTENT_T4 != 0 {
+        names.push("t4");
+    }
+    if flags.0 & !CONTENT_KNOWN != 0 {
         names.push("unknown");
     }
     names.join(",")
@@ -3299,4 +3312,25 @@ fn refresh_relay_authority_hello(
         );
     }
     hub.hello.content = content;
+}
+
+#[cfg(test)]
+mod content_tests {
+    use super::*;
+
+    #[test]
+    fn every_game_maps_to_its_flag_and_name() {
+        for (map, flag, name) in [
+            ("mp_rust", CONTENT_IW4, "iw4"),
+            ("t6:mp_raid", CONTENT_T6, "t6"),
+            ("iw3:mp_crash", CONTENT_IW3, "iw3"),
+            ("t4:mp_castle", CONTENT_T4, "t4"),
+        ] {
+            let flags = content_required_by_map(map).unwrap();
+            assert_eq!(flags.0, flag);
+            assert_eq!(content_names(flags), name);
+        }
+        assert!(content_required_by_map("h1:mp_crash").is_err());
+        assert_eq!(content_names(ContentFlags(1 << 7)), "unknown");
+    }
 }

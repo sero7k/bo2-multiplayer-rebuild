@@ -52,3 +52,37 @@ pub fn foreign_map(ui_name: &str) -> Option<(String, String)> {
         .find(|(name, ..)| name.eq_ignore_ascii_case(ui_name))
         .map(|(_, game, stem)| (game.clone(), stem.clone()))
 }
+
+/// bo2mp online: the menus' name (`ui_mapname`) of the map a zone key
+/// loads (`t6:mp_la` -> `mp_la`; `iw4:mp_rust` -> its listed name, which
+/// is `mp_rust_iw4` when two games share the stem).
+pub fn ui_name_for_zone(zone: &str) -> String {
+    let (game, stem) = zone.split_once(':').unwrap_or(("t6", zone));
+    if game == "t6" {
+        return stem.to_owned();
+    }
+    FOREIGN_MAPS
+        .read()
+        .ok()
+        .and_then(|m| {
+            m.iter()
+                .find(|(_, g, s)| g.eq_ignore_ascii_case(game) && s.eq_ignore_ascii_case(stem))
+                .map(|(name, ..)| name.clone())
+        })
+        .unwrap_or_else(|| stem.to_owned())
+}
+
+#[cfg(test)]
+mod online_tests {
+    use super::*;
+
+    #[test]
+    fn zones_map_back_to_menu_names() {
+        register_foreign_maps(vec![("mp_dome_t4".to_owned(), "t4".to_owned(), "mp_dome".to_owned())]);
+        assert_eq!(ui_name_for_zone("t6:mp_la"), "mp_la");
+        assert_eq!(ui_name_for_zone("t4:mp_dome"), "mp_dome_t4");
+        assert_eq!(ui_name_for_zone("iw3:mp_bog"), "mp_bog");
+        let s = Bo2mpMatchSetup { map: ui_name_for_zone("t4:mp_dome"), ..Default::default() };
+        assert_eq!(s.zone(), "t4:mp_dome");
+    }
+}

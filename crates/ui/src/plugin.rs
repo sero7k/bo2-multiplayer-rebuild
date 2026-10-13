@@ -44,6 +44,7 @@ impl Plugin for UiPlugin {
         crate::hud_match::register_match_hud_systems(app);
         crate::hud_prematch::register_prematch_hud(app);
         crate::hud_outcome::register_outcome_hud(app);
+        crate::online_match::register_online_match(app);
         crate::hud_medals::register_medal_systems(app);
         crate::game_folders::register_game_folders(app);
         crate::shell::register_shell(app);

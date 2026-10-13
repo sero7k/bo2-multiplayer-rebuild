@@ -741,6 +741,7 @@ fn follow_master_match(
     mut swap: ResMut<SessionSwapRequest>,
     mut role: ResMut<RuntimeRole>,
     mut pending: Local<Option<(net::MasterMatchOffer, bool)>>,
+    bo2mp: Option<Res<crate::Bo2mpMatchSetup>>,
 ) {
     if let Some(offer) = offers.take() {
         *pending = Some((offer, false));
@@ -785,7 +786,13 @@ fn follow_master_match(
     if has_world.0 || loading || swap.pending.is_some() {
         return;
     }
-    let Some(mode) = sim::HostGameModeSelection::from_token(&offer.mode) else {
+    // bo2mp: under Black Ops II's rules the offer's mode is BO2's game type
+    // (conf, gun, oic, ...), which Infinity Ward's mode table does not know:
+    // the match takes its game type from `Bo2mpMatchSetup`, and the mode
+    // here is only the session's stand-in.
+    let mode = sim::HostGameModeSelection::from_token(&offer.mode)
+        .or_else(|| assets::t6_rules().then(|| sim::HostGameModeSelection::from_token("tdm")).flatten());
+    let Some(mode) = mode else {
         diag::warn!(Net, "master match mode refused: {}", offer.mode);
         *pending = None;
         return;
@@ -796,6 +803,20 @@ fn follow_master_match(
         RuntimeRole::Client
     };
     commands.insert_resource(mode);
+    // bo2mp: a player joining a Black Ops II match through the master: his
+    // match setup from the offer (the bots live on the host), so his game
+    // reads the map and game type as the host's does.
+    if !host && assets::t6_rules() {
+        let setup = crate::Bo2mpMatchSetup {
+            map: crate::ui_name_for_zone(&offer.map),
+            gametype: offer.mode.clone(),
+            ..Default::default()
+        };
+        if bo2mp.as_deref() != Some(&setup) {
+            diag::info!(Net, "bo2mp online: joining {:?}", setup);
+            commands.insert_resource(setup);
+        }
+    }
     match swap.request_zone(offer.map.clone()) {
         Ok(id) => {
             diag::info!(

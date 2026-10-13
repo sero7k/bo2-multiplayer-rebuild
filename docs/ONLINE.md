@@ -39,8 +39,18 @@ name=iw4l-prod               # the label its certificate carries (leave as is)
 * The server knows a code only while its player is connected or browsed in
   the last 45 seconds; nothing is stored on disk.
 
+## Hosting and joining
+
+* **Host:** set up a lobby as usual and press START. With a server in
+  `online.cfg`, the game opens a room on it and starts the match there; you
+  load the map with everyone in the room. If the server cannot host (down,
+  refused, or no room within 15 s) the match starts on this PC offline.
+* **Join a friend:** FRIENDS, pick a friend who shows IN A LOBBY, press
+  Enter. You load in when they press START.
+* Every player needs the map's game installed (Black Ops II, Call of Duty 4,
+  World at War, ...); the server only lets in players who have it.
+
 ## Not done yet
 
-Hosting and joining a lobby from the Black Ops II front end (and so joining
-a friend's lobby from FRIENDS) is the next step. The protocol, the server
-and the friends list it needs are in.
+A lobby browser in the Black Ops II front end (open lobbies of non-friends),
+and zombies through the server.
