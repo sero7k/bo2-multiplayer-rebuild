@@ -1040,6 +1040,53 @@ fn resolve_world_lights(
 }
 
 #[allow(clippy::too_many_arguments)]
+
+/// bo2mp: the other games' guns' camos as material swaps (see
+/// `asset_game::weapon_camo_models`): a camo model with the gun model's
+/// surfaces (vertex ranges and index count alike) gives, per surface whose
+/// material differs, (camo slot, gun's material) -> the camo's material.
+fn guest_camo_swaps(fpv: &FpvMeshBuild, world: &WorldWeaponBuild, report: &mut Vec<String>) {
+    use asset_core::weapon_camos::MaterialCamo;
+    let mut swaps: std::collections::HashMap<(u32, u32), MaterialCamo> = std::collections::HashMap::new();
+    let (mut guns, mut camos, mut refused) = (0usize, 0usize, 0usize);
+    let mut pair = |slot: u8, base: Option<(&asset_model::ModelSkel, &[asset_core::AssetEdge<asset_model::MaterialSpace>])>,
+                    camo: Option<(&asset_model::ModelSkel, &[asset_core::AssetEdge<asset_model::MaterialSpace>])>|
+     -> bool {
+        let (Some((bs, be)), Some((cs, ce))) = (base, camo) else { return false };
+        if bs.surface_vertex_ranges != cs.surface_vertex_ranges || bs.indices.len() != cs.indices.len() || be.len() != ce.len() {
+            return false;
+        }
+        let mut any = false;
+        for (b, c) in be.iter().zip(ce) {
+            if let (Some(b), Some(c)) = (b.bound_index(), c.bound_index())
+                && b != c
+            {
+                swaps.insert((u32::from(slot), b as u32), MaterialCamo { material: c as u32, tile: 1.0 });
+                any = true;
+            }
+        }
+        any
+    };
+    for (ns, gun, gun_world, list) in asset_game::weapon_camo_models::all() {
+        guns += 1;
+        let view_base = fpv.get(ns, &gun).map(|e| (&*e.skel, e.material_edges.as_slice()));
+        let world_base = gun_world.as_deref().and_then(|w| world.get(ns, w)).map(|e| (&*e.skel, e.material_edges.as_slice()));
+        for (slot, view, world_name) in list {
+            let v = view.as_deref().and_then(|n| fpv.get(ns, n)).map(|e| (&*e.skel, e.material_edges.as_slice()));
+            let w = world_name.as_deref().and_then(|n| world.get(ns, n)).map(|e| (&*e.skel, e.material_edges.as_slice()));
+            let a = pair(slot, view_base, v);
+            let b = pair(slot, world_base, w);
+            if a || b {
+                camos += 1;
+            } else {
+                refused += 1;
+            }
+        }
+    }
+    report.push(format!("guest camos: {camos} camos of {guns} guns as {} material swaps ({refused} not paired)", swaps.len()));
+    asset_core::weapon_camos::install_guest(swaps);
+}
+
 fn link_materials_after_absorb(
     materials: &asset_material::MaterialDefinitions,
     world: &mut PreparedWorld,
@@ -1111,6 +1158,10 @@ fn link_materials_after_absorb(
         graph.xmodel_fpv_materials.unresolved,
         graph.xmodel_fpv_materials.absent,
     ));
+    // bo2mp: Modern Warfare 2's and 3's camos: each camo model of a gun
+    // against the gun's own (the same shape), its differing materials as
+    // swaps for that camo slot.
+    guest_camo_swaps(fpv_meshes, world_weapons, report);
     report.push(format!(
         "Material stamp: iw4={} t5={} iw5={} (name-link identity; colliding T5 names are the later-zone row)",
         materials.namespace_count(asset_core::AssetNamespace::Iw4),

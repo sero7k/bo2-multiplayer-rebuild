@@ -41,6 +41,7 @@ pub(super) fn load_weapon(s: &mut ZoneStream<'_>, links: &mut dyn AssetLinkSink)
         sound_names,
         sz_xanims_right,
         sz_xanims_left,
+        camo_models,
     ) = match s.ptr_at(p, s.layout(4, 8))? {
         ZonePtr::Offset(q) => {
             s.note_offset(q);
@@ -54,10 +55,11 @@ pub(super) fn load_weapon(s: &mut ZoneStream<'_>, links: &mut dyn AssetLinkSink)
                 WeaponSoundNames::default(),
                 None,
                 None,
+                [[None; 16]; 2],
             )
         }
         _ if s.begin_body(p.at(s.layout(4, 8)))? => {
-            let (body, gun0, hand0, world0, proj0, rocket0, sounds, anim_r, anim_l) =
+            let (body, gun0, hand0, world0, proj0, rocket0, sounds, anim_r, anim_l, camos) =
                 load_weapon_def(s, links, ai_vs_ai_knots, ai_vs_player_knots)?;
             (
                 Some(body),
@@ -69,6 +71,7 @@ pub(super) fn load_weapon(s: &mut ZoneStream<'_>, links: &mut dyn AssetLinkSink)
                 sounds,
                 anim_r,
                 anim_l,
+                camos,
             )
         }
         _ => (
@@ -81,6 +84,7 @@ pub(super) fn load_weapon(s: &mut ZoneStream<'_>, links: &mut dyn AssetLinkSink)
             WeaponSoundNames::default(),
             None,
             None,
+            [[None; 16]; 2],
         ),
     };
 
@@ -385,6 +389,8 @@ pub(super) fn load_weapon(s: &mut ZoneStream<'_>, links: &mut dyn AssetLinkSink)
         proj_ignition_slot: authored_material_slot(s, weap_def, s.layout(0x46c, 1528))?,
         reticle_center_size: body_facts.reticle_center_size,
         gun_xmodel_name,
+        gun_xmodel_names: camo_models[0],
+        world_model_names: camo_models[1],
         hand_xmodel_name,
         world_model_name,
         projectile_model_name,
@@ -828,11 +834,13 @@ fn load_weapon_def(
     WeaponSoundNames,
     Option<Ptr>,
     Option<Ptr>,
+    [[Option<Ptr>; 16]; 2],
 )> {
     let p = s.alloc_load(4, s.layout(sz::WEAPON_DEF, 2192))?;
 
     follow_name(s, p, 0)?;
-    let gun0 = follow_xmodel_array(s, links, p, s.layout(4, 8))?;
+    let gun_all = follow_xmodel_array(s, links, p, s.layout(4, 8))?;
+    let gun0 = gun_all[0];
     let hand0 = follow_xmodel_ptr(s, links, p.at(s.layout(8, 16)))?;
     let sz_xanims_right = follow_string_array(s, p, s.layout(12, 24), sz::WEAPON_ANIM_COUNT)?;
     let sz_xanims_left = follow_string_array(s, p, s.layout(16, 32), sz::WEAPON_ANIM_COUNT)?;
@@ -909,7 +917,8 @@ fn load_weapon_def(
         asset_ptr_at(s, links, AssetType::Material, p.at(field))?;
     }
 
-    let world0 = follow_xmodel_array(s, links, p, s.layout(472, 736))?;
+    let world_all = follow_xmodel_array(s, links, p, s.layout(472, 736))?;
+    let world0 = world_all[0];
     asset_ptr_at(s, links, AssetType::XModel, p.at(s.layout(476, 744)))?;
     let rocket0 = follow_xmodel_ptr(s, links, p.at(s.layout(480, 752)))?;
     asset_ptr_at(s, links, AssetType::XModel, p.at(s.layout(484, 760)))?;
@@ -979,6 +988,7 @@ fn load_weapon_def(
         sound_names,
         sz_xanims_right,
         sz_xanims_left,
+        [gun_all, world_all],
     ))
 }
 
@@ -1052,60 +1062,66 @@ fn follow_string_array(
     }
 }
 
+/// bo2mp (from upstream IW4L): every one of the 16 models (slot 0 the
+/// gun, 1-15 its camos).
 fn follow_xmodel_array(
     s: &mut ZoneStream<'_>,
     links: &mut dyn AssetLinkSink,
     p: Ptr,
     field: usize,
-) -> Result<Option<Ptr>> {
+) -> Result<[Option<Ptr>; 16]> {
+    let mut names = [None; 16];
     match s.ptr_at(p, field)? {
-        ZonePtr::Null => Ok(None),
+        ZonePtr::Null => {}
         ZonePtr::Offset(q) => {
             s.note_offset(q);
             let arr = s.resolve_alias(q);
-
-            if let Some(name) = links.xmodel_name_ptr(arr) {
-                return Ok(Some(name));
-            }
-            Ok(match s.ptr_at(arr, 0)? {
-                ZonePtr::Offset(m) => {
-                    let body = s.resolve_alias(m);
-                    links
-                        .xmodel_name_ptr(body)
-                        .or_else(|| links.xmodel_name_ptr(m))
+            for (i, name) in names.iter_mut().enumerate() {
+                let slot = arr.at(i * s.pointer_bytes());
+                if i == 0
+                    && let Some(found) = links.xmodel_name_ptr(arr)
+                {
+                    *name = Some(found);
+                    continue;
                 }
-                _ => None,
-            })
+                *name = match s.ptr_at(slot, 0)? {
+                    ZonePtr::Offset(m) => {
+                        let body = s.resolve_alias(m);
+                        links
+                            .xmodel_name_ptr(body)
+                            .or_else(|| links.xmodel_name_ptr(m))
+                    }
+                    _ => None,
+                }
+                .or_else(|| links.xmodel_name_ptr(slot));
+            }
         }
         _ => {
             if !s.begin_body(p.at(field))? {
-                return Ok(None);
+                return Ok(names);
             }
             let arr = s.alloc_load(4, s.pointer_bytes() * 16)?;
-            let mut first_name = None;
-            for i in 0..16 {
+            for (i, name) in names.iter_mut().enumerate() {
                 let slot = arr.at(i * s.pointer_bytes());
                 let loaded = load_asset_at_observed(s, AssetType::XModel, slot, links)?;
-                if i == 0 {
-                    first_name = if loaded {
-                        s.xmodel().and_then(|g| g.name)
-                    } else {
-                        match s.ptr_at(slot, 0)? {
-                            ZonePtr::Offset(q) => {
-                                let body = s.resolve_alias(q);
-                                links
-                                    .xmodel_name_ptr(body)
-                                    .or_else(|| links.xmodel_name_ptr(q))
-                                    .or_else(|| links.xmodel_name_ptr(slot))
-                            }
-                            _ => None,
+                *name = if loaded {
+                    s.xmodel().and_then(|g| g.name)
+                } else {
+                    match s.ptr_at(slot, 0)? {
+                        ZonePtr::Offset(q) => {
+                            let body = s.resolve_alias(q);
+                            links
+                                .xmodel_name_ptr(body)
+                                .or_else(|| links.xmodel_name_ptr(q))
+                                .or_else(|| links.xmodel_name_ptr(slot))
                         }
-                    };
-                }
+                        _ => None,
+                    }
+                };
             }
-            Ok(first_name)
         }
     }
+    Ok(names)
 }
 
 fn follow_xmodel_ptr(

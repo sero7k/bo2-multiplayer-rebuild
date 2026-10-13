@@ -43,6 +43,26 @@ fn has_card(book: &ClassBook, c: &ClassView, part: &str) -> bool {
     (1..=3).any(|k| book.item(c.get(&format!("bonuscard{k}"))).is_some_and(|i| i.reference.contains(part)))
 }
 
+/// bo2mp: the camos a gun takes: Black Ops II's for its own guns, Modern
+/// Warfare 2's or 3's for theirs (their slot numbers, their menu swatches);
+/// (number, name, picture). None: no camos for this gun.
+fn camo_choices(book: &ClassBook, gun: i32) -> Option<Vec<(i32, String, String)>> {
+    use asset_game::weapon_camo_models::{MW2_CAMOS, MW3_CAMOS};
+    if gun <= 0 {
+        return None;
+    }
+    if gun < bo2_profile::guest::FIRST_INDEX {
+        return (!book.camos.is_empty()).then(|| book.camos.iter().map(|k| (k.index, k.name.to_uppercase(), k.image.clone())).collect());
+    }
+    let list: &[(u8, &str, &str)] = match bo2_profile::guest::game_for_index(gun)? {
+        "iw4" => &MW2_CAMOS,
+        "iw5" => &MW3_CAMOS,
+        _ => return None,
+    };
+    let game = bo2_profile::guest::game_for_index(gun)?;
+    Some(list.iter().map(|(n, name, pic)| (i32::from(*n), name.to_uppercase(), format!("{game}:{pic}"))).collect())
+}
+
 /// Whether the edit screen lists this slot for the class.
 fn shown(book: &ClassBook, c: &ClassView, slot: &str) -> bool {
     match slot {
@@ -52,9 +72,7 @@ fn shown(book: &ClassBook, c: &ClassView, slot: &str) -> bool {
         "specialty5" => has_card(book, c, "perk_2_greed"),
         "specialty6" => has_card(book, c, "perk_3_greed"),
         // bo2mp: Black Ops II's camos, on its own guns.
-        "primarycamo" | "secondarycamo" => {
-            !book.camos.is_empty() && book.item(c.get(weapon_of(slot))).is_some_and(|i| i.index < bo2_profile::guest::FIRST_INDEX)
-        }
+        "primarycamo" | "secondarycamo" => camo_choices(book, c.get(weapon_of(slot))).is_some(),
         s if s.starts_with("primaryattachment") => book.item(c.get("primary")).is_some_and(|i| !i.attachments.is_empty()),
         s if s.starts_with("secondaryattachment") => book.item(c.get("secondary")).is_some_and(|i| !i.attachments.is_empty()),
         _ => true,
@@ -75,7 +93,9 @@ fn weapon_of(slot: &str) -> &str {
 pub(crate) fn slot_value(book: &ClassBook, c: &ClassView, slot: &str) -> String {
     let v = c.get(slot);
     if slot.ends_with("camo") {
-        return book.camo(v).map_or_else(|| "NONE".to_owned(), |k| k.name.to_uppercase());
+        return camo_choices(book, c.get(weapon_of(slot)))
+            .and_then(|l| l.into_iter().find(|(n, ..)| *n == v))
+            .map_or_else(|| "NONE".to_owned(), |(_, name, _)| name);
     }
     if slot.contains("attachment") {
         let weapon = book.item(c.get(weapon_of(slot)));
@@ -153,16 +173,18 @@ pub(crate) fn picks(s: &Shell, book: &ClassBook) -> (Vec<String>, Vec<Pick>) {
     // bo2mp: Black Ops II's camos for the gun (Personalize Weapon's list).
     if slot.ends_with("camo") {
         let mut v = vec![Pick { value: 0, name: "NONE".to_owned(), desc: "The gun as it comes.".to_owned(), image: String::new(), cost: 0, locked: false, level: 1 }];
-        for k in &book.camos {
+        for (n, name, image) in camo_choices(book, c.get(weapon_of(slot))).unwrap_or_default() {
+            let gun = c.get(weapon_of(slot));
+            let base = gun >= bo2_profile::guest::FIRST_INDEX || book.camo(n).is_none_or(|k| k.drawn);
             v.push(Pick {
-                value: k.index,
-                name: k.name.to_uppercase(),
-                desc: if k.drawn {
+                value: n,
+                name,
+                desc: if base {
                     "Worn on the gun in matches, first and third person.".to_owned()
                 } else {
                     "Worn on the gun in matches, first and third person (a DLC camo shows once its pack is read).".to_owned()
                 },
-                image: k.image.clone(),
+                image,
                 cost: 0,
                 locked: false,
                 level: 1,
@@ -367,9 +389,11 @@ pub(crate) fn class_card(c: &mut Kids, cx: &mut Ctx, book: &ClassBook, class: &C
     };
     // (And the gun's camo after its attachments.)
     let with_camo = |weapon: &str, line: String| -> String {
-        match book.camo(class.get(&format!("{weapon}camo"))) {
-            Some(k) if line.is_empty() => k.name.to_uppercase(),
-            Some(k) => format!("{line}  ·  {}", k.name.to_uppercase()),
+        let n = class.get(&format!("{weapon}camo"));
+        let name = camo_choices(book, class.get(weapon)).and_then(|l| l.into_iter().find(|(k, ..)| *k == n)).map(|(_, name, _)| name);
+        match name {
+            Some(k) if line.is_empty() => k,
+            Some(k) => format!("{line}  ·  {k}"),
             None => line,
         }
     };

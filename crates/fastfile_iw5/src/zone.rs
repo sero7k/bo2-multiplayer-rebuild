@@ -350,6 +350,9 @@ pub struct WeaponGeometry {
     pub weap_def: Option<Ptr>,
 
     pub gun_xmodel_name: Option<Ptr>,
+    /// bo2mp: all 16 gun and world models (slot 0 the gun, 1-15 its camos).
+    pub gun_xmodel_names: [Option<Ptr>; crate::size::ATTACH_MODEL_COUNT],
+    pub world_model_names: [Option<Ptr>; crate::size::ATTACH_MODEL_COUNT],
 
     pub hand_xmodel_name: Option<Ptr>,
 

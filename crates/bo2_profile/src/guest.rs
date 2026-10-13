@@ -647,6 +647,12 @@ pub fn family_of_reference(reference: &str) -> String {
     family("t6", reference)
 }
 
+/// The game of the guest gun numbered `index` in the statstable (`iw4`).
+#[must_use]
+pub fn game_for_index(index: i32) -> Option<&'static str> {
+    all().enumerate().find(|(k, g)| stats_index(*k, g) == index).map(|(_, g)| g.game)
+}
+
 /// The reference of the guest gun numbered `index` in the statstable,
 /// listed or not (a class saved before a copy was left out).
 #[must_use]
@@ -790,8 +796,9 @@ mod tests {
     #[test]
     fn rows_only_for_available_games_and_once() {
         let _games = TEST_GAMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        set_available("t5", false);
-        set_available("iw4", false);
+        for game in GAMES {
+            set_available(game, false);
+        }
         let mut rows = vec![vec!["0".to_owned(); 19]];
         assert!(!extend_stats_rows(&mut rows));
         set_available("t5", true);

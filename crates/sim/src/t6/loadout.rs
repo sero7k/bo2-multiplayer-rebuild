@@ -345,7 +345,18 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     m!("calcweaponoptions", |vm, world, s, a| {
         let class = arg(a, 0).as_int().unwrap_or(0);
         let key = if arg(a, 1).as_int() == Some(1) { "secondarycamo" } else { "primarycamo" };
-        let camo = his(vm, world, s, key).map_or(0, |p| p.loadout_item(class, key));
+        let bot = entnum(vm, s).is_some_and(|n| world.resource::<Zm>().bots.contains_key(&n));
+        let chosen = his(vm, world, s, key).map_or(0, |p| p.loadout_item(class, key));
+        // bo2mp: a bot wears a camo on half his guns, one of the first eight
+        // (a camo in Black Ops II, Modern Warfare 2 and 3 alike), the same
+        // for his class and slot all match.
+        let camo = if bot && chosen == 0 {
+            let n = entnum(vm, s).unwrap_or(0) as i32;
+            let roll = (n * 7 + class * 3 + i32::from(key.starts_with('s')) * 5).rem_euclid(16);
+            if roll < 8 { roll + 1 } else { 0 }
+        } else {
+            chosen
+        };
         Ok(Value::Int(camo.clamp(0, 255)))
     });
     m!("getloadoutitem", |vm, world, s, a| {

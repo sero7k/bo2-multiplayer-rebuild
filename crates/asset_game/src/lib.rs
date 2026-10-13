@@ -14,6 +14,7 @@ use asset_world::decode_rawfile_text;
 pub mod arena;
 mod attachment_hide;
 mod cac_stats;
+pub mod weapon_camo_models; // bo2mp
 mod fpv_assembly;
 mod fx_catalog;
 mod fx_model_catalog;

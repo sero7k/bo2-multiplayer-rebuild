@@ -1464,6 +1464,15 @@ impl WeaponCatalog {
             .and_then(|ptr| stream.cstr(ptr).ok())
             .filter(|s| !s.is_empty())
             .map(str::to_owned);
+        // bo2mp: its camos' models (slots 1-15 beside the gun's).
+        if let Some(base) = &gun_xmodel {
+            let name_of = |ptr: Option<fastfile_iw4::Ptr>| ptr.and_then(|p| stream.cstr(p).ok()).filter(|s| !s.is_empty()).map(str::to_owned);
+            let camos: Vec<(u8, Option<String>, Option<String>)> = (1..16)
+                .map(|k| (k as u8, name_of(geometry.gun_xmodel_names[k]), name_of(geometry.world_model_names[k])))
+                .filter(|(_, v, w)| v.is_some() || w.is_some())
+                .collect();
+            crate::weapon_camo_models::note(asset_core::AssetNamespace::Iw4, base, name_of(geometry.world_model_name), camos);
+        }
         let hand_xmodel = geometry
             .hand_xmodel_name
             .and_then(|ptr| stream.cstr(ptr).ok())
@@ -2233,6 +2242,15 @@ impl WeaponCatalog {
             .and_then(|ptr| stream.cstr(ptr).ok())
             .filter(|s| !s.is_empty())
             .map(str::to_owned);
+        // bo2mp: its camos' models (slots 1-15 beside the gun's).
+        if let Some(base) = &gun_xmodel {
+            let name_of = |ptr: Option<fastfile_iw5::Ptr>| ptr.and_then(|p| leftover_cstr_iw5(stream, p)).filter(|s| !s.is_empty());
+            let camos: Vec<(u8, Option<String>, Option<String>)> = (1..16)
+                .map(|k| (k as u8, name_of(geometry.gun_xmodel_names[k]), name_of(geometry.world_model_names[k])))
+                .filter(|(_, v, w)| v.is_some() || w.is_some())
+                .collect();
+            crate::weapon_camo_models::note(asset_core::AssetNamespace::Iw5, base, name_of(geometry.world_model_name), camos);
+        }
         let hand_xmodel = geometry
             .hand_xmodel_name
             .and_then(|ptr| leftover_cstr_iw5(stream, ptr));

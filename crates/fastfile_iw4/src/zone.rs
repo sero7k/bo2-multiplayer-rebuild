@@ -926,6 +926,10 @@ pub struct WeaponGeometry {
     pub display_name: Option<Ptr>,
 
     pub gun_xmodel_name: Option<Ptr>,
+    /// bo2mp: all 16 gun models (slot 0 the gun, 1-15 its camos) and
+    /// world models.
+    pub gun_xmodel_names: [Option<Ptr>; 16],
+    pub world_model_names: [Option<Ptr>; 16],
 
     pub hand_xmodel_name: Option<Ptr>,
 

@@ -55,13 +55,25 @@ pub fn table() -> Option<Arc<CamoTable>> {
     TABLE.read().ok().and_then(|t| t.clone())
 }
 
+/// bo2mp: the other games' guns' camos (Modern Warfare 2's and 3's camo
+/// models as material swaps), by (camo slot, gun material); kept apart from
+/// Black Ops II's table, which each match load replaces.
+static GUEST: RwLock<Option<HashMap<(u32, u32), MaterialCamo>>> = RwLock::new(None);
+
+pub fn install_guest(swaps: HashMap<(u32, u32), MaterialCamo>) {
+    if let Ok(mut g) = GUEST.write() {
+        *g = (!swaps.is_empty()).then_some(swaps);
+    }
+}
+
 /// What `option` draws a gun's `material` with, if it changes it.
 #[must_use]
 pub fn swap(option: u32, material: u32) -> Option<MaterialCamo> {
     if option == 0 {
         return None;
     }
-    TABLE.read().ok()?.as_ref()?.swaps.get(&(option, material)).copied()
+    let own = TABLE.read().ok().and_then(|t| t.as_ref()?.swaps.get(&(option, material)).copied());
+    own.or_else(|| GUEST.read().ok()?.as_ref()?.get(&(option, material)).copied())
 }
 
 /// The pattern `option` lays on a gun's `material`, if it is camo-ready.
