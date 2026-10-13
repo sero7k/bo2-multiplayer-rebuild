@@ -1973,6 +1973,51 @@ fn f32_to_half(x: f32) -> u16 {
     sign | ((exp as u16) << 10) | ((mant >> 13) as u16)
 }
 
+/// bo2mp: Black Ops II's material camos for the match: per camo option
+/// (`mp/weaponoptions.csv`: index, "camo", name, 1 = swaps materials, its
+/// material set counted from 1), every gun's (camo-ready material, the
+/// camo's material, its tiling) from the guns' `WeaponCamo` material
+/// sets.
+fn mp_material_camos(captures: &[&ZoneCapture]) -> BTreeMap<u32, Vec<(String, String, f32)>> {
+    let mut out: BTreeMap<u32, Vec<(String, String, f32)>> = BTreeMap::new();
+    let Some(t) = captures
+        .iter()
+        .rev()
+        .flat_map(|c| c.string_tables.iter())
+        .find(|t| t.name.eq_ignore_ascii_case("mp/weaponoptions.csv"))
+    else {
+        return out;
+    };
+    let sets: Vec<(u32, usize)> = (0..t.rows)
+        .filter_map(|r| {
+            let cell = |k: usize| t.cells.get(r * t.columns + k).map_or("", String::as_str);
+            (cell(1) == "camo" && cell(3) == "1")
+                .then(|| Some((cell(0).parse::<u32>().ok()?, cell(4).parse::<usize>().ok()?)))
+                .flatten()
+        })
+        .filter(|(o, set)| *o > 0 && *set > 0)
+        .collect();
+    let camos: Vec<&asset_t6::WeaponCamoRef> = captures.iter().flat_map(|c| c.weapon_camos.iter()).collect();
+    for (option, set) in sets {
+        let list = out.entry(option).or_default();
+        for camo in &camos {
+            let Some(materials) = camo.material_sets.get(set - 1) else {
+                continue;
+            };
+            for m in materials {
+                let tile = if m.consts[0] > 0.0 { m.consts[0] } else { 1.0 };
+                for (b, c) in m.base.iter().zip(&m.camo) {
+                    if real(b) && real(c) && !list.iter().any(|(x, _, _)| x == b) {
+                        list.push((b.clone(), c.clone(), tile));
+                    }
+                }
+            }
+        }
+    }
+    out.retain(|_, l| !l.is_empty());
+    out
+}
+
 fn pap_camo(
     captures: &[&ZoneCapture],
     weapon_refs: &HashMap<String, &asset_t6::WeaponRef>,
@@ -2353,6 +2398,16 @@ pub(crate) fn load_t6_combat(
     // Materials the guns, arms and effects draw with, linked per zone.
     let homes = material_homes(&captures);
     let mut wanted = wanted_materials(&captures, &all_models, &homes);
+    // bo2mp: the material camos' materials (gold, diamond, ...), and the
+    // guns' camo-ready ones they replace.
+    let camo_plan = mp_material_camos(&captures);
+    for (base, camo, _) in camo_plan.values().flatten() {
+        for name in [base, camo] {
+            if let Some(&(ci, mi)) = homes.get(name.trim_start_matches(',')) {
+                wanted[ci].insert(mi);
+            }
+        }
+    }
     // The map's brush models with surfaces (doors), drawn as models.
     let map_ci = pre_caps.len();
     let brush_models = map_capture
@@ -2433,6 +2488,31 @@ pub(crate) fn load_t6_combat(
                 .map(|line| format!("{} ({}): {line}", "t6 combat", c.zone)),
         );
         local.push(linked.local);
+    }
+    // bo2mp: the camos by catalog material, for the draw.
+    {
+        let catalog_of = |name: &str| {
+            let &(ci, mi) = homes.get(name.trim_start_matches(','))?;
+            local.get(ci)?.get(&mi).map(|&i| i as u32)
+        };
+        let mut table = asset_core::weapon_camos::CamoTable::default();
+        for (&option, list) in &camo_plan {
+            for (base, camo, tile) in list {
+                if let (Some(b), Some(c)) = (catalog_of(base), catalog_of(camo)) {
+                    table.swaps.insert((option, b), asset_core::weapon_camos::MaterialCamo { material: c, tile: *tile });
+                }
+            }
+            if list.iter().any(|(b, c, _)| catalog_of(b).is_some() && catalog_of(c).is_some()) {
+                table.options.insert(option, String::new());
+            }
+        }
+        report.push(format!(
+            "t6 camos: {} material camos ({} gun materials swapped) of {} planned",
+            table.options.len(),
+            table.swaps.len(),
+            camo_plan.len()
+        ));
+        asset_core::weapon_camos::install((!table.swaps.is_empty()).then_some(table));
     }
 
     // A model surface's material, in the catalog: the capture's own row
@@ -3342,4 +3422,28 @@ fn brush_model_refs(world: &asset_t6::WorldRef) -> Vec<asset_t6::XModelRef> {
         });
     }
     out
+}
+
+#[cfg(test)]
+mod camo_plan_tests {
+    /// Black Ops II's material camos from its zones, when they are here
+    /// (`IW4L_TEST_T6_ZONES`: the folder holding common_mp.ff and patch_mp.ff).
+    #[test]
+    fn material_camos_from_bo2_zones() {
+        let Ok(dir) = std::env::var("IW4L_TEST_T6_ZONES") else { return };
+        let dir = std::path::Path::new(&dir);
+        let caps: Vec<asset_t6::ZoneCapture> = ["common_mp", "patch_mp"]
+            .iter()
+            .map(|z| asset_t6::capture_zone(&dir.join(format!("{z}.ff"))).unwrap())
+            .collect();
+        let refs: Vec<&asset_t6::ZoneCapture> = caps.iter().collect();
+        let plan = super::mp_material_camos(&refs);
+        // Gold (15), carbon fibre (10), diamond (16) and the DLC material camos.
+        for option in [10, 15, 16] {
+            assert!(plan.get(&option).is_some_and(|l| !l.is_empty()), "camo {option} missing: {:?}", plan.keys().collect::<Vec<_>>());
+        }
+        let gold = &plan[&15];
+        assert!(gold.iter().any(|(b, c, t)| b.contains("mp7") && c == "mc/mtl_weapon_camo_gold" && *t == 10.0), "{gold:?}");
+        println!("{} material camos: {:?}", plan.len(), plan.iter().map(|(o, l)| (o, l.len())).collect::<Vec<_>>());
+    }
 }

@@ -1021,6 +1021,13 @@ fn vertex_prop(in: PropVertexIn) -> PropOut {
     out.light = in.light;
     out.world_position = world.xyz;
     out.primary = in.primary;
+    // bo2mp: a weapon camo's surfaces (gold, diamond, ...) tile the camo's
+    // pictures across the gun: instance slot 22 holds 1000 + the tiling
+    // (its effect feather and unlit dimming are below 1000).
+    if (in.primary.z >= 1000.0) {
+        out.uv = in.uv * (in.primary.z - 1000.0);
+        out.primary.z = 0.0;
+    }
 #endif
     return out;
 }

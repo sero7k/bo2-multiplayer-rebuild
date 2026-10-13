@@ -280,6 +280,30 @@ fn register_update_marks(app: &mut App) {
     );
 }
 
+/// bo2mp: every player's weapon camos as the server sent them (his script
+/// value `bo2mp_camos`), and the camo on the gun in the local player's
+/// hands, for this frame's draws (`asset_core::weapon_camos`).
+fn track_weapon_camos(presented: Option<Res<PresentedSnapshot>>, local: Option<Res<LocalPresentClient>>) {
+    use asset_core::weapon_camos as camos;
+    let Some(snapshot) = presented.as_deref().and_then(PresentedSnapshot::snapshot) else {
+        return;
+    };
+    let mut all = HashMap::new();
+    for (id, meta) in &snapshot.meta.clients {
+        if let Some((_, text)) = meta.client_dvars.iter().find(|(k, _)| k == "bo2mp_camos") {
+            all.insert(id.0, camos::parse_worn(text));
+        }
+    }
+    let held = local.as_deref().and_then(|l| {
+        let (_, ps) = snapshot.players.iter().find(|(id, _)| *id == l.0)?;
+        let pairs = all.get(&l.0.0)?;
+        let weapon = ps.weapon as u32;
+        pairs.iter().find(|(w, _)| *w == weapon).map(|(_, o)| *o)
+    });
+    camos::set_viewmodel(held.unwrap_or(0));
+    camos::set_worn(all);
+}
+
 pub fn register_t6_body_systems(app: &mut App) {
     register_update_marks(app);
     crate::occupancy::t6_sounds::register_t6_sound_systems(app);
@@ -289,7 +313,8 @@ pub fn register_t6_body_systems(app: &mut App) {
         .add_systems(PostUpdate, mark_frame::<3>)
         .add_systems(Last, mark_frame::<4>);
     app.init_resource::<T6ItemShapes>()
-        .add_systems(Update, prepare_t6_bodies.before(collect_t6_bodies));
+        .add_systems(Update, prepare_t6_bodies.before(collect_t6_bodies))
+        .add_systems(Update, track_weapon_camos.before(collect_t6_bodies));
     app.init_resource::<T6BodyModels>()
         .init_resource::<T6BodyPoses>()
         .init_resource::<LocalCorpseRoot>()
@@ -2194,6 +2219,9 @@ fn collect_t6_bodies(
             if locals.first_drawn.insert((number, built.key.body.clone())) {
                 log_first_draw(number, client.0, meta.map_or(0, |m| m.client_state_team), corpse, parts, foreign.as_ref());
             }
+            // bo2mp: the camo on the gun in his hands (its parts are the
+            // last ones, from `right_gun` on).
+            let held_camo = asset_core::weapon_camos::worn(client.0, built.key.weapon);
             for (i, part) in parts.iter().enumerate() {
                 out.items.push(T6MissileModel {
                     skel: part.skel.clone(),
@@ -2202,6 +2230,7 @@ fn collect_t6_bodies(
                     origin,
                     light_at,
                     eye_luminance: None,
+                    camo: if built.right_gun.is_some_and(|g| i >= g) { held_camo } else { 0 },
                     // Its kept vertices, or this frame's (skinned below).
                     posed: if kept { built.skinned.get(i).cloned() } else { None },
                     hide: None,
@@ -2387,6 +2416,7 @@ fn collect_t6_bodies(
                 origin,
                 light_at,
                 eye_luminance: None,
+                camo: 0,
                 posed: Some(verts.clone()),
                 hide: None,
             });

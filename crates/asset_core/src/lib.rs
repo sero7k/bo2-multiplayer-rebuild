@@ -2,6 +2,7 @@ pub mod asset_key;
 pub mod ident;
 pub mod zone_game;
 pub mod t6_draw; // bo2zm
+pub mod weapon_camos; // bo2mp
 
 pub use asset_key::{AssetKey, AssetKeyError, AssetKind, AssetNamespace, MaterialKey};
 pub use ident::{

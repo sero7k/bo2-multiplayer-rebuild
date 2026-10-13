@@ -197,6 +197,8 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             p.melee_weapon = Some(name.clone());
         }
         script_player::give_weapon(&mut frame(world), id, w, false)?;
+        // bo2mp: its camo (the options `calcweaponoptions` made).
+        wear_camo(world, id, w, arg(a, 2).as_int().unwrap_or(0) & 0xff);
         // bo2zm: Black Ops II's engine puts a grenade it gives into its
         // offhand slot (frag/Semtex lethal on the grenade key, the monkey
         // bomb tactical); IW4's scripts named the class themselves.
@@ -1465,4 +1467,35 @@ fn held_melee(world: &mut World, id: crate::ClientId) -> u32 {
         .get(&id.0)
         .and_then(|p| p.melee_weapon.clone());
     name.and_then(|n| weapon(world, &n).ok()).unwrap_or(0)
+}
+
+/// bo2mp: the camo he has on a gun, for every player's draw: his script
+/// value `bo2mp_camos` (`<weapon>:<option>` pairs, comma separated; read by
+/// `asset_core::weapon_camos`). Option 0 takes the gun's camo off.
+fn wear_camo(world: &mut World, id: ClientId, weapon: u32, option: i32) {
+    const KEY: &str = "bo2mp_camos";
+    let mut f = frame(world);
+    let dvars = &mut f.client_meta_mut(id).client_dvars;
+    let mut pairs: Vec<(u32, i32)> = dvars
+        .iter()
+        .find(|(k, _)| k == KEY)
+        .map(|(_, v)| {
+            v.split(',')
+                .filter_map(|p| {
+                    let (w, o) = p.split_once(':')?;
+                    Some((w.parse().ok()?, o.parse().ok()?))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    pairs.retain(|(w, _)| *w != weapon);
+    if option > 0 {
+        pairs.push((weapon, option));
+    }
+    let text = pairs.iter().map(|(w, o)| format!("{w}:{o}")).collect::<Vec<_>>().join(",");
+    match dvars.iter_mut().find(|(k, _)| k == KEY) {
+        Some(row) => row.1 = text,
+        None if !text.is_empty() => dvars.push((KEY.to_owned(), text)),
+        None => {}
+    }
 }

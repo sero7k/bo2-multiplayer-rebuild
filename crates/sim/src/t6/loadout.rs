@@ -340,6 +340,14 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         log_loadout_weapon(world, client, class, &slot, &name, why);
         Ok(vm.string(&name))
     });
+    // bo2mp: the options `giveweapon` takes with a class's gun: its camo
+    // (`primarycamo` / `secondarycamo`, slot 0 / 1), as the option's number.
+    m!("calcweaponoptions", |vm, world, s, a| {
+        let class = arg(a, 0).as_int().unwrap_or(0);
+        let key = if arg(a, 1).as_int() == Some(1) { "secondarycamo" } else { "primarycamo" };
+        let camo = his(vm, world, s, key).map_or(0, |p| p.loadout_item(class, key));
+        Ok(Value::Int(camo.clamp(0, 255)))
+    });
     m!("getloadoutitem", |vm, world, s, a| {
         let class = arg(a, 0).as_int().unwrap_or(0);
         let slot = text(vm, a, 1);

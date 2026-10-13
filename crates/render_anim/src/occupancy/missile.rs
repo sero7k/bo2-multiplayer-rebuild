@@ -43,6 +43,9 @@ pub struct T6MissileModel {
     pub posed: Option<std::sync::Arc<PosedVerts>>,
     /// bo2zm round 1: a zombie's eye brightness (none = unscaled).
     pub eye_luminance: Option<f32>,
+    /// bo2mp: the weapon camo option its gun surfaces wear (0: none;
+    /// `asset_core::weapon_camos`).
+    pub camo: u32,
     /// bo2mp: the parts hidden on its entity (a mannequin's shot-off head)
     /// and where this model's bones start among them; none = all drawn.
     pub hide: Option<([u32; 6], u32)>,
@@ -395,6 +398,7 @@ fn collect_t6_script_models(
                 posed: posed.as_ref().and_then(|p| p.get(i).cloned().flatten()),
                 hide: hide.iter().any(|w| *w != 0).then_some((hide, base)),
                 eye_luminance: state.eye_luminance,
+                camo: 0,
             });
         }
     }
@@ -444,6 +448,7 @@ fn collect_t6_script_models(
             posed: None,
             hide: None,
             eye_luminance: None,
+            camo: 0,
         });
     }
 }
@@ -736,6 +741,7 @@ fn collect_t6_missiles(
             posed: None,
             hide: None,
             eye_luminance: None,
+            camo: 0,
         });
     }
 }
