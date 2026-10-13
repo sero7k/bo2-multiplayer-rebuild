@@ -12,14 +12,16 @@ use super::view::{Ctx, Kids, header, picture_contain};
 use super::{Act, Hit, Row, Screen, Setting, Shell};
 
 /// A class's slots as the edit screen lists them: (slot, label).
-pub(crate) const EDIT_SLOTS: [(&str, &str); 21] = [
+pub(crate) const EDIT_SLOTS: [(&str, &str); 23] = [
     ("primary", "PRIMARY"),
     ("primaryattachment1", "ATTACHMENT 1"),
     ("primaryattachment2", "ATTACHMENT 2"),
     ("primaryattachment3", "ATTACHMENT 3"),
+    ("primarycamo", "CAMO"),
     ("secondary", "SECONDARY"),
     ("secondaryattachment1", "ATTACHMENT"),
     ("secondaryattachment2", "ATTACHMENT 2"),
+    ("secondarycamo", "CAMO"),
     ("primarygrenade", "LETHAL"),
     ("specialgrenade", "TACTICAL"),
     ("specialty1", "PERK 1"),
@@ -49,6 +51,10 @@ fn shown(book: &ClassBook, c: &ClassView, slot: &str) -> bool {
         "specialty4" => has_card(book, c, "perk_1_greed"),
         "specialty5" => has_card(book, c, "perk_2_greed"),
         "specialty6" => has_card(book, c, "perk_3_greed"),
+        // bo2mp: Black Ops II's camos, on its own guns.
+        "primarycamo" | "secondarycamo" => {
+            !book.camos.is_empty() && book.item(c.get(weapon_of(slot))).is_some_and(|i| i.index < bo2_profile::guest::FIRST_INDEX)
+        }
         s if s.starts_with("primaryattachment") => book.item(c.get("primary")).is_some_and(|i| !i.attachments.is_empty()),
         s if s.starts_with("secondaryattachment") => book.item(c.get("secondary")).is_some_and(|i| !i.attachments.is_empty()),
         _ => true,
@@ -68,6 +74,9 @@ fn weapon_of(slot: &str) -> &str {
 /// What a slot holds, as text.
 pub(crate) fn slot_value(book: &ClassBook, c: &ClassView, slot: &str) -> String {
     let v = c.get(slot);
+    if slot.ends_with("camo") {
+        return book.camo(v).map_or_else(|| "NONE".to_owned(), |k| k.name.to_uppercase());
+    }
     if slot.contains("attachment") {
         let weapon = book.item(c.get(weapon_of(slot)));
         return weapon
@@ -141,6 +150,26 @@ pub(crate) struct Pick {
 pub(crate) fn picks(s: &Shell, book: &ClassBook) -> (Vec<String>, Vec<Pick>) {
     let Some(c) = book.classes.get(s.class as usize) else { return (Vec::new(), Vec::new()) };
     let slot = EDIT_SLOTS[s.slot.min(EDIT_SLOTS.len() - 1)].0;
+    // bo2mp: Black Ops II's camos for the gun (Personalize Weapon's list).
+    if slot.ends_with("camo") {
+        let mut v = vec![Pick { value: 0, name: "NONE".to_owned(), desc: "The gun as it comes.".to_owned(), image: String::new(), cost: 0, locked: false, level: 1 }];
+        for k in &book.camos {
+            v.push(Pick {
+                value: k.index,
+                name: k.name.to_uppercase(),
+                desc: if k.drawn {
+                    "Worn on the gun in matches, first and third person.".to_owned()
+                } else {
+                    "A pattern camo: saved with the class; patterns are not drawn on the gun yet.".to_owned()
+                },
+                image: k.image.clone(),
+                cost: 0,
+                locked: false,
+                level: 1,
+            });
+        }
+        return (vec!["CAMOS".to_owned()], v);
+    }
     if slot.contains("attachment") {
         let mut v = vec![Pick { value: 0, name: "NONE".to_owned(), desc: "No attachment.".to_owned(), image: String::new(), cost: 0, locked: false, level: 1 }];
         if let Some(w) = book.item(c.get(weapon_of(slot))) {
@@ -336,8 +365,16 @@ pub(crate) fn class_card(c: &mut Kids, cx: &mut Ctx, book: &ClassBook, class: &C
             .collect();
         names.join("  ·  ")
     };
-    let pa = attach("primary");
-    let sa = attach("secondary");
+    // (And the gun's camo after its attachments.)
+    let with_camo = |weapon: &str, line: String| -> String {
+        match book.camo(class.get(&format!("{weapon}camo"))) {
+            Some(k) if line.is_empty() => k.name.to_uppercase(),
+            Some(k) => format!("{line}  ·  {}", k.name.to_uppercase()),
+            None => line,
+        }
+    };
+    let pa = with_camo("primary", attach("primary"));
+    let sa = with_camo("secondary", attach("secondary"));
     c.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -388,6 +425,10 @@ pub(crate) fn class_card(c: &mut Kids, cx: &mut Ctx, book: &ClassBook, class: &C
 
 /// Compact rows: a label on the left, its value on the right.
 fn slot_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, width: f32) {
+    // (The rows share the height from the header to the footer: a class
+    // with every wildcard slot open still fits.)
+    let height = (870.0 / rows.len().max(1) as f32 - 3.0).clamp(26.0, 38.0);
+    let text = if height < 34.0 { 18.0 } else { 21.0 };
     for (i, r) in rows.iter().enumerate() {
         let on = i == focus;
         let mut e = c.spawn((
@@ -395,7 +436,7 @@ fn slot_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, width: f32) {
             Button,
             Node {
                 width: cx.px(width),
-                height: cx.px(38.0),
+                height: cx.px(height),
                 padding: UiRect::horizontal(cx.px(16.0)),
                 justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,
@@ -410,11 +451,11 @@ fn slot_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, width: f32) {
             e.insert(BackgroundColor(PANEL_SOFT));
         }
         e.with_children(|line| {
-            line.spawn((Text::new(r.label.clone()), cx.bold(21.0), TextColor(if on { WHITE } else { DIM })));
+            line.spawn((Text::new(r.label.clone()), cx.bold(text), TextColor(if on { WHITE } else { DIM })));
             if let Some(v) = &r.value {
                 let selector = matches!(r.act, Act::Cycle(_));
                 let shown = if selector { format!("‹  {v}  ›") } else { format!("{v}  ›") };
-                line.spawn((Text::new(shown), cx.bold(21.0), TextColor(if on { WHITE } else { TEXT })));
+                line.spawn((Text::new(shown), cx.bold(text), TextColor(if on { WHITE } else { TEXT })));
             }
         });
     }

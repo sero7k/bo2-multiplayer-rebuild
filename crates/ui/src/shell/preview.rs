@@ -157,9 +157,20 @@ fn stand_in_book() -> ClassBook {
         }
         ClassView { n, name: name.to_owned(), slots, spent: 0 }
     };
+    let camo = |index: i32, name: &str, drawn: bool| classes::Camo { index, name: name.to_owned(), image: String::new(), drawn };
     let mut b = ClassBook {
         classes: vec![class(0, "Custom 1", 10), class(1, "Custom 2", 30), class(2, "Custom 3", 50), class(3, "Custom 4", 31), class(4, "Custom 5", 50)],
         items,
+        camos: vec![
+            camo(1, "DEVGRU", false),
+            camo(2, "A-TACS AU", false),
+            camo(3, "ERDL", false),
+            camo(9, "KRYPTEK TYPHON", false),
+            camo(10, "CARBON FIBER", true),
+            camo(14, "SKULLS", false),
+            camo(15, "GOLD", true),
+            camo(16, "DIAMOND", true),
+        ],
     };
     let spends: Vec<i32> = b.classes.iter().map(|c| classes::spent(&b, &c.slots)).collect();
     for (c, s) in b.classes.iter_mut().zip(spends) {
@@ -296,9 +307,15 @@ fn step(
         }),
         ("11_item_pick_perk", |s, _| {
             s.screen = Screen::ItemPick;
-            s.slot = 13;
+            s.slot = 15;
             s.page = 0;
             s.focus = 1;
+        }),
+        ("11b_item_pick_camo", |s, _| {
+            s.screen = Screen::ItemPick;
+            s.slot = 4;
+            s.page = 0;
+            s.focus = 7;
         }),
         ("12h_friends", |s, _| {
             let advert = |in_match: bool, players: u8| net::master_protocol::Advert {

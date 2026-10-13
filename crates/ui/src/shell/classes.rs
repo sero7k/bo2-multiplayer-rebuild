@@ -56,9 +56,27 @@ impl ClassView {
 pub(crate) struct ClassBook {
     pub classes: Vec<ClassView>,
     pub items: Vec<ClassItem>,
+    /// bo2mp: Black Ops II's camos (mp/attachmenttable.csv's "camo" weapon
+    /// options), in its order.
+    pub camos: Vec<Camo>,
+}
+
+/// bo2mp: a camo he can put on a Black Ops II gun.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Camo {
+    pub index: i32,
+    pub name: String,
+    pub image: String,
+    /// It swaps the gun's materials (Gold, Diamond, Carbon Fiber): drawn
+    /// in matches. The pattern camos are not drawn yet.
+    pub drawn: bool,
 }
 
 impl ClassBook {
+    pub fn camo(&self, index: i32) -> Option<&Camo> {
+        (index > 0).then(|| self.camos.iter().find(|c| c.index == index)).flatten()
+    }
+
     pub fn item(&self, index: i32) -> Option<&ClassItem> {
         (index > 0).then(|| self.items.iter().find(|i| i.index == index)).flatten()
     }
@@ -180,6 +198,31 @@ fn localized(v: &hks_t6::host::EngineValues, key: &str, fallback: &str) -> Strin
     fallback.replace('_', " ").to_uppercase()
 }
 
+/// Black Ops II's camos: mp/attachmenttable.csv's weapon options of the
+/// "camo" group (column 0 its number, 3 its name, 6 its swatch), and
+/// whether mp/weaponoptions.csv makes it a material camo (column 3 = 1).
+fn camos(v: &hks_t6::host::EngineValues) -> Vec<Camo> {
+    let material: std::collections::HashSet<i32> = hks_t6::mp::table_rows(v, "mp/weaponoptions.csv")
+        .iter()
+        .filter(|r| r.get(1).is_some_and(|c| c.trim() == "camo") && r.get(3).is_some_and(|c| c.trim() == "1"))
+        .filter_map(|r| r.first()?.trim().parse().ok())
+        .collect();
+    hks_t6::mp::table_rows(v, "mp/attachmenttable.csv")
+        .iter()
+        .filter(|r| r.get(1).is_some_and(|c| c.trim() == "camo") && r.get(2).is_some_and(|c| c.trim() == "weaponoption"))
+        .filter_map(|r| {
+            let index: i32 = r.first()?.trim().parse().ok()?;
+            let reference = r.get(4).map_or("", |c| c.trim());
+            (index > 0).then(|| Camo {
+                index,
+                name: localized(v, r.get(3).map_or("", |c| c.trim()), reference.trim_start_matches("camo_")),
+                image: r.get(6).map_or_else(String::new, |c| c.trim().to_owned()),
+                drawn: material.contains(&index) || [10, 15, 16].contains(&index),
+            })
+        })
+        .collect()
+}
+
 fn build(host: &Host, mp: &Mp) -> ClassBook {
     let v = host.values.borrow();
     let m = mp.borrow();
@@ -236,7 +279,8 @@ fn build(host: &Host, mp: &Mp) -> ClassBook {
         };
         classes.push(ClassView { n, name, slots, spent: 0 });
     }
-    let mut book = ClassBook { classes, items };
+    let book_camos = camos(&v);
+    let mut book = ClassBook { classes, items, camos: book_camos };
     let spends: Vec<i32> = book.classes.iter().map(|c| spent(&book, &c.slots)).collect();
     for (c, s) in book.classes.iter_mut().zip(spends) {
         c.spent = s;
