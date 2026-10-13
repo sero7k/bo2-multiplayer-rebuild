@@ -469,6 +469,18 @@ impl Profile {
             let atts: Vec<i32> = (1..=3).map(|n| self.loadout_item(class, &format!("{slot}attachment{n}"))).collect();
             return (self.weapon_name(index, &atts), None);
         }
+        // bo2mp: a guest gun left out as another game's copy of the same gun
+        // (one of each is listed): the copy that is listed, no attachments
+        // (they are numbered in the old gun's own list).
+        if let Some(family) = guest::reference_for_index(index).map(|r| guest::family_of_reference(&r))
+            && let Some(kept) = self
+                .items
+                .iter()
+                .find(|it| !it.reference.is_empty() && guest::family_of_reference(&it.reference) == family)
+        {
+            let name = self.weapon_name(kept.index, &[0, 0, 0]);
+            return (name.clone(), Some(format!("item {index} is another game's copy of `{name}`, which is listed instead")));
+        }
         let default = DEFAULT_CLASSES[class.rem_euclid(DEFAULT_CLASSES.len() as i32) as usize];
         let slots = self.default_class(default);
         let get = |k: &str| slots.iter().find(|(s, _)| s == k).map_or(0, |(_, v)| *v);
@@ -895,6 +907,7 @@ mod tests {
                 .collect()
         };
         let (mut stats, mut atts) = (read("mp__statstable.csv"), read("mp__attachmenttable.csv"));
+        let _games = guest::TEST_GAMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         guest::set_available("t5", true);
         guest::set_available("iw6", true);
         guest::extend_stats_rows(&mut stats);

@@ -576,6 +576,104 @@ impl GuestGun {
     }
 }
 
+// ---------------------------------------------------------------------------
+// bo2mp: one of each gun. The same gun from several games (the AK-47 four
+// times, MW2's SCAR-H beside Black Ops II's) is listed once: Black Ops
+// II's own wins, else the first game in `PRIORITY` that is installed; the
+// others are left out of Create-a-Class (a class that held one gets the
+// one kept, `family_of_reference`).
+
+/// Which game's copy of a shared gun is listed (Black Ops II's always).
+const PRIORITY: [&str; 6] = ["iw4", "iw5", "t5", "iw6", "iw3", "t4"];
+
+/// Guns known by another name in another game (name without its game's
+/// `iw5_` prefix -> the family). (game, name, family); game "" = any.
+const FAMILIES: &[(&str, &str, &str)] = &[
+    ("", "fnfal", "fal"),
+    ("", "sa58", "fal"),
+    ("", "masada", "acr"),
+    ("", "tavor", "tar21"),
+    ("", "fads", "fad"),
+    ("", "mp5k", "mp5"),
+    ("", "ump45", "ump"),
+    ("", "kriss", "vector"),
+    ("", "sa80", "l86"),
+    ("", "m60e4", "m60"),
+    ("", "hk416", "m27"),
+    ("", "l96a1", "l96"),
+    ("", "l115a3", "l96"),
+    ("", "spas12", "spas"),
+    ("", "model1887", "1887"),
+    ("", "glock", "g18"),
+    ("", "usp45", "usp"),
+    ("", "coltanaconda", "44magnum"),
+    ("", "magnum", "44magnum"),
+    ("iw5", "m9", "pm9"),
+    ("", "beretta", "m9"),
+    ("", "m9a1", "m9"),
+    ("", "deserteagle", "deagle"),
+    ("", "colt45", "m1911"),
+    ("t4", "colt", "m1911"),
+    ("", "fnfiveseven", "fiveseven"),
+    ("", "beretta393", "m93"),
+    ("", "beretta93r", "m93"),
+    ("", "crossbow_explosive", "crossbow"),
+    ("", "mk14", "m14"),
+    ("", "mp44", "stg44"),
+    ("", "usrpg", "rpg"),
+];
+
+/// A gun's family: the same gun from any game has the same one.
+fn family(game: &str, name: &str) -> String {
+    let name = name.strip_prefix("iw5_").unwrap_or(name).to_ascii_lowercase();
+    FAMILIES
+        .iter()
+        .find(|(g, n, _)| (g.is_empty() || *g == game) && *n == name)
+        .map_or(name, |(_, _, f)| (*f).to_owned())
+}
+
+/// The family of a statstable reference: a guest gun's (`mw2_scar`) or a
+/// Black Ops II gun's (`sa58` -> `fal`).
+#[must_use]
+pub fn family_of_reference(reference: &str) -> String {
+    for game in GAMES {
+        let p = prefix(game);
+        if let Some(name) = reference.strip_prefix(p) {
+            // (A guest reference names its gun as its game does, MW3's
+            // without `iw5_`.)
+            return family(game, name);
+        }
+    }
+    family("t6", reference)
+}
+
+/// The reference of the guest gun numbered `index` in the statstable,
+/// listed or not (a class saved before a copy was left out).
+#[must_use]
+pub fn reference_for_index(index: i32) -> Option<String> {
+    all().enumerate().find(|(k, g)| stats_index(*k, g) == index).map(|(_, g)| g.reference())
+}
+
+/// The guest guns Create-a-Class lists given Black Ops II's own guns
+/// (references): positions in `all()` of the available guns, each family
+/// once.
+fn listed(bo2: &std::collections::HashSet<String>) -> Vec<usize> {
+    let mut taken: std::collections::HashSet<String> = bo2.clone();
+    let mut keep = Vec::new();
+    for game in PRIORITY {
+        if !available(game) {
+            continue;
+        }
+        for (k, gun) in all().enumerate().filter(|(_, g)| g.game == game) {
+            if taken.insert(family(gun.game, gun.gun)) {
+                keep.push(k);
+            }
+        }
+    }
+    keep.sort_unstable();
+    keep
+}
+
 /// The text keys and words the guest rows use (key, text).
 #[must_use]
 pub fn localize() -> Vec<(String, String)> {
@@ -604,8 +702,18 @@ pub fn extend_stats_rows(rows: &mut Vec<Vec<String>>) -> bool {
     let width = rows.iter().map(Vec::len).max().unwrap_or(19).max(19);
     let mut changed = false;
     let mut sort: std::collections::HashMap<&str, i32> = std::collections::HashMap::new();
+    // Black Ops II's own guns (its rows below the guest indices).
+    let bo2: std::collections::HashSet<String> = rows
+        .iter()
+        .filter(|r| r.first().and_then(|c| c.parse::<i32>().ok()).is_some_and(|i| i < FIRST_INDEX))
+        .filter(|r| r.get(2).is_some_and(|g| g.starts_with("weapon_")))
+        .filter_map(|r| r.get(4))
+        .filter(|r| !r.is_empty())
+        .map(|r| family("t6", r))
+        .collect();
+    let keep = listed(&bo2);
     for (k, gun) in all().enumerate() {
-        if !available(gun.game) {
+        if !available(gun.game) || !keep.contains(&k) {
             continue;
         }
         let reference = gun.reference();
@@ -671,12 +779,17 @@ pub fn extend_attachment_rows(rows: &mut Vec<Vec<String>>) -> bool {
     changed
 }
 
+/// Tests that switch games on and off (the switches are process-wide).
+#[cfg(test)]
+pub(crate) static TEST_GAMES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn rows_only_for_available_games_and_once() {
+        let _games = TEST_GAMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         set_available("t5", false);
         set_available("iw4", false);
         let mut rows = vec![vec!["0".to_owned(); 19]];
@@ -690,10 +803,10 @@ mod tests {
         assert!(extend_stats_rows(&mut rows));
         let refs: Vec<&String> = rows.iter().map(|r| &r[4]).collect();
         assert!(refs.iter().any(|r| *r == "mw2_m4"));
-        assert!(refs.iter().any(|r| *r == "mw3_acr"));
-        assert_eq!(rows.iter().find(|r| r[4] == "mw3_m4").map(|r| r[0].as_str()), Some("500"));
-        assert_eq!(rows.iter().find(|r| r[4] == "waw_stg44").map(|r| r[0].as_str()), Some("600"));
-        assert_eq!(rows.iter().find(|r| r[4] == "cod4_m16").map(|r| r[0].as_str()), Some("700"));
+        assert!(refs.iter().any(|r| *r == "mw3_cm901"));
+        assert_eq!(rows.iter().find(|r| r[4] == "mw3_cm901").map(|r| r[0].as_str()), Some("503"));
+        assert_eq!(rows.iter().find(|r| r[4] == "waw_thompson").map(|r| r[0].as_str()), Some("605"));
+        assert_eq!(rows.iter().find(|r| r[4] == "cod4_g3").map(|r| r[0].as_str()), Some("703"));
         assert_eq!(rows.iter().find(|r| r[4] == "gh_ak12").map(|r| r[0].as_str()), Some("800"));
         assert!(rows.iter().find(|r| r[4] == "gh_k7").is_some_and(|r| r[6] == "iw6:weapon_k7_ui_360|hud_icon_k7_ui"));
         let mut indices: Vec<&String> = rows.iter().map(|r| &r[0]).collect();
@@ -718,5 +831,39 @@ mod tests {
                 assert!(bo2.contains(&a) || atts.iter().any(|r| r[4] == a), "{} {a}", gun.gun);
             }
         }
+    }
+
+    /// One of each gun: Black Ops II's own first, then MW2's, MW3's, ...;
+    /// a class holding a copy left out finds the one kept.
+    #[test]
+    fn each_gun_listed_once() {
+        let _games = TEST_GAMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        for game in GAMES {
+            set_available(game, true);
+        }
+        let bo2 = |r: &str| {
+            let mut row = vec![String::new(); 19];
+            row[0] = "10".to_owned();
+            row[2] = "weapon_assault".to_owned();
+            row[4] = r.to_owned();
+            row
+        };
+        let mut rows = vec![bo2("scar"), bo2("sa58"), bo2("usrpg"), bo2("hk416")];
+        extend_stats_rows(&mut rows);
+        let refs: Vec<&str> = rows.iter().map(|r| r[4].as_str()).collect();
+        for gone in ["mw2_scar", "mw3_scar", "mw2_fal", "bo1_fnfal", "mw2_rpg", "bo1_rpg", "gh_m27", "mw3_m4", "cod4_m4", "cod4_ak47", "bo1_ak47", "mw3_ak47"] {
+            assert!(!refs.contains(&gone), "{gone} listed");
+        }
+        for kept in ["mw2_m4", "mw2_ak47", "mw2_deserteagle", "bo1_ak74u", "mw3_cm901", "gh_ak12"] {
+            assert!(refs.contains(&kept), "{kept} missing");
+        }
+        let mut families: Vec<String> = rows.iter().map(|r| family_of_reference(&r[4])).collect();
+        let n = families.len();
+        families.sort();
+        families.dedup();
+        assert_eq!(families.len(), n, "a family twice");
+        assert_eq!(reference_for_index(500).as_deref(), Some("mw3_m4"));
+        assert_eq!(family_of_reference("mw3_m4"), family_of_reference("mw2_m4"));
+        assert_eq!(family_of_reference("sa58"), "fal");
     }
 }
