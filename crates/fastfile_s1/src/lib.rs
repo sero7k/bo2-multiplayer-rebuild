@@ -11,6 +11,7 @@ pub mod asset_type;
 pub mod container;
 pub mod cursor;
 pub mod image;
+pub mod install;
 pub mod layout;
 pub mod ptr;
 pub mod stream;
@@ -130,6 +131,77 @@ mod retail_walk {
                         shown += 1;
                         if shown > 3 { break; }
                     }
+                }
+            }
+            if std::env::var_os("S1_GUNS").is_some() {
+                let n = |id: Option<walk::AssetId>| id.map(|i| w.cap.name_of(i).to_owned()).unwrap_or_default();
+                for g in &w.cap.weapons {
+                    let anims = g.anims.iter().filter(|a| a.is_some()).count();
+                    println!(
+                        "  gun {} [{}] gun {:?} hand {} world {:?} anims {} raise {} atts {}",
+                        g.name, g.display_name,
+                        g.gun_models.iter().map(|m| n(*m)).collect::<Vec<_>>(),
+                        n(g.hand_model),
+                        g.world_models.iter().map(|m| n(*m)).collect::<Vec<_>>(),
+                        anims,
+                        g.anims.get(1).map(|a| n(*a)).unwrap_or_default(),
+                        g.attachments.len(),
+                    );
+                }
+            }
+            if let Ok(want) = std::env::var("S1_MAT") {
+                for m in w.cap.materials.iter().filter(|m| m.name == want) {
+                    let ts = m.techset.map(|t| w.cap.name_of(t).to_owned()).unwrap_or_default();
+                    println!("  mat {} techset {ts}", m.name);
+                    for t in &m.textures {
+                        let Some(id) = t.image else { continue };
+                        let i = &w.cap.images[id.index as usize];
+                        println!("    tex sem {} hash {:08x} {} {}x{} fmt {} streamed {} streams {:?} files {:?}", t.semantic, t.name_hash, i.name, i.width, i.height, i.format, i.streamed, i.streams, i.stream_files);
+                    }
+                }
+            }
+            if let Ok(want) = std::env::var("S1_MODEL") {
+                for m in w.cap.xmodels.iter().filter(|m| m.name.trim_start_matches(',') == want) {
+                    let parts: Vec<String> = m.composite.iter().map(|p| p.map(|p| w.cap.name_of(p).to_owned()).unwrap_or_default()).collect();
+                    println!("  model {} bones {} surfs {} composite {:?}", m.name, m.num_bones, m.numsurfs, parts);
+                    let bones: Vec<String> = m.bone_names.iter().map(|&s| zone.assets.script_strings.get(s as usize).cloned().flatten().unwrap_or_default()).collect();
+                    println!("    bones {bones:?} parents {:?} root {}", m.parent_list, m.num_root_bones);
+                    println!("    tagpos {:?}", m.tag_positions.iter().take(4).collect::<Vec<_>>());
+                    let Some(surfs) = m.lods.first().and_then(|l| l.surfs) else { continue };
+                    let ms = &w.cap.model_surfs[surfs.index as usize];
+                    let (mut n, mut sum_u, mut sum_s) = (0usize, 0f64, 0f64);
+                    for s in &ms.surfs {
+                        let Some(v) = s.verts else { continue };
+                        for vert in v.get(&zone.image).chunks_exact(32) {
+                            let p = u32::from_le_bytes(vert[24..28].try_into().unwrap());
+                            let u: Vec<f64> = (0..3).map(|k| ((p >> (10 * k)) & 0x3ff) as f64 / 1023.0 * 2.0 - 1.0).collect();
+                            let s: Vec<f64> = (0..3).map(|k| { let x = ((p >> (10 * k)) & 0x3ff) as i32; let x = if x > 511 { x - 1024 } else { x }; x as f64 / 511.0 }).collect();
+                            sum_u += u.iter().map(|x| x * x).sum::<f64>().sqrt();
+                            sum_s += s.iter().map(|x| x * x).sum::<f64>().sqrt();
+                            n += 1;
+                        }
+                        let mut lo = [f32::MAX; 3];
+                        let mut hi = [f32::MIN; 3];
+                        for vert in v.get(&zone.image).chunks_exact(32) {
+                            for k in 0..3 {
+                                let x = f32::from_le_bytes(vert[4 * k..4 * k + 4].try_into().unwrap());
+                                lo[k] = lo[k].min(x);
+                                hi[k] = hi[k].max(x);
+                            }
+                        }
+                        println!("    surf verts {} tris {} blend {:?} rigid {:?} flags {:#x} box {:?}..{:?}", s.vert_count, s.tri_count, s.blend_vert_counts, s.rigid, s.flags, lo, hi);
+                    }
+                    println!("    mean |n| unsigned {:.3} signed {:.3} over {n}", sum_u / n.max(1) as f64, sum_s / n.max(1) as f64);
+                    let mats: Vec<String> = m.materials.iter().map(|p| p.map(|p| w.cap.name_of(p).to_owned()).unwrap_or_default()).collect();
+                    println!("    materials {mats:?}");
+                }
+            }
+            if std::env::var_os("S1_CLASSES").is_some() {
+                for g in &w.cap.weapons {
+                    let d = g.def.get(&zone.image);
+                    let i = |o: usize| i32::from_le_bytes(d[o..o + 4].try_into().unwrap());
+                    use crate::layout::WeaponDef as D;
+                    println!("  class {} type {} class {} inv {} fire {} clip {} dmg {}", g.name, i(D::weapType), i(D::weapClass), i(D::inventoryType), i(D::fireType), i(D::clipSize), i(D::damage));
                 }
             }
             if std::env::var_os("S1_LIST").is_some() {

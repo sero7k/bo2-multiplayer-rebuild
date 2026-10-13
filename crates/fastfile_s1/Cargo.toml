@@ -8,7 +8,6 @@ description = "Call of Duty: Advanced Warfare (S1, PC x64) zones: LZ4 container,
 [dependencies]
 lz4_flex.workspace = true
 bcdec_rs.workspace = true
-flate2.workspace = true
 
 [lints]
 workspace = true

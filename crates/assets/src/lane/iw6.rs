@@ -464,13 +464,13 @@ struct Builder<'a> {
     decoded: usize,
 }
 
-fn le_u16s(b: &[u8]) -> Vec<u16> {
+pub(super) fn le_u16s(b: &[u8]) -> Vec<u16> {
     b.chunks_exact(2)
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect()
 }
 
-fn le_u32s(b: &[u8]) -> Vec<u32> {
+pub(super) fn le_u32s(b: &[u8]) -> Vec<u32> {
     b.chunks_exact(4)
         .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
         .collect()
@@ -478,7 +478,7 @@ fn le_u32s(b: &[u8]) -> Vec<u32> {
 
 /// Ghosts' packed unit vector (unsigned 10:10:10 over 1023) as Black Ops
 /// II's (signed 10:10:10 over 511).
-fn iw6_unit_vec_to_t6(packed: u32) -> u32 {
+pub(super) fn iw6_unit_vec_to_t6(packed: u32) -> u32 {
     let mut out = 0u32;
     for k in 0..3 {
         let v = ((packed >> (10 * k)) & 0x3ff) as f32 / 1023.0 * 2.0 - 1.0;
@@ -505,7 +505,7 @@ fn iw6_vertex_to_t6(v: &[u8]) -> [u8; 32] {
 /// bone word then a bone and weight word per extra influence) as Black Ops
 /// II's four: a vertex with more than four keeps its first four (the rest's
 /// weight goes to its first bone).
-fn fold_blend(counts: [u16; 8], words: &[u16]) -> ([i16; 4], Vec<u16>) {
+pub(super) fn fold_blend(counts: [u16; 8], words: &[u16]) -> ([i16; 4], Vec<u16>) {
     let mut out_counts = [0i16; 4];
     let mut out = Vec::with_capacity(words.len());
     let mut at = 0usize;
@@ -527,7 +527,7 @@ fn fold_blend(counts: [u16; 8], words: &[u16]) -> ([i16; 4], Vec<u16>) {
 /// Ghosts' model technique set as Black Ops II's draw: by its name (the
 /// `m_`/`mc_` model techniques' tokens read as BO2's), drawn double-sided,
 /// none of BO2's own special kinds.
-fn iw6_model_draw(technique_set: &str, sort_key: u8) -> T6Draw {
+pub(super) fn iw6_model_draw(technique_set: &str, sort_key: u8) -> T6Draw {
     let name = technique_set.trim_start_matches(',');
     let name = name.rsplit(['/', '\\']).next().unwrap_or(name);
     let name = match name.strip_prefix("m_") {
@@ -594,7 +594,7 @@ fn bc5_normals_for_bo2(data: &mut [u8], signed: bool) {
 
 /// A GPU image of Ghosts pixels: block formats as they are (BC5 signed
 /// normals made unsigned), colour maps read as sRGB.
-fn gpu_image(px: &fastfile_iw6::image::ImagePixels, colour: bool) -> Result<Image, String> {
+pub(super) fn gpu_image(px: &fastfile_iw6::image::ImagePixels, colour: bool) -> Result<Image, String> {
     let srgb = |linear: TextureFormat, s: TextureFormat| if colour { s } else { linear };
     let mut data = px.data.clone();
     let format = match px.dxgi_format {

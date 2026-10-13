@@ -674,11 +674,13 @@ pub fn foreign_kill_icon_base(ns: asset_core::AssetNamespace, name: &str) -> Opt
         asset_core::AssetNamespace::Iw6 => "gh_",
         asset_core::AssetNamespace::T4 => "waw_",
         asset_core::AssetNamespace::Iw3 => "cod4_",
+        asset_core::AssetNamespace::S1 => "aw_",
         asset_core::AssetNamespace::T6 => return None,
     };
     let base = name.split('+').next().unwrap_or(name).trim_end_matches("_mp");
-    // (MW3's `iw5_acr` is `mw3_acr_mp` in a BO2 match.)
-    let base = if ns == asset_core::AssetNamespace::Iw5 { base.strip_prefix("iw5_").unwrap_or(base) } else { base };
+    // (MW3's `iw5_acr` is `mw3_acr_mp` in a BO2 match; AW's guns carry the
+    // same `iw5_` prefix: `iw5_bal27` is `aw_bal27_mp`.)
+    let base = if matches!(ns, asset_core::AssetNamespace::Iw5 | asset_core::AssetNamespace::S1) { base.strip_prefix("iw5_").unwrap_or(base) } else { base };
     if base.is_empty() || base == "none" {
         return None;
     }

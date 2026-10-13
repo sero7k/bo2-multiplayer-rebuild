@@ -8,6 +8,10 @@ pub use t6::T6_SIGHT_ATTACHMENTS;
 #[path = "weapon_catalog_iw6.rs"]
 mod iw6;
 pub use iw6::Iw6WeaponView;
+// bo2mp: Advanced Warfare weapons (guest guns).
+#[path = "weapon_catalog_s1.rs"]
+mod s1;
+pub use s1::S1WeaponView;
 // bo2mp: Call of Duty 4 and World at War weapons (guest guns).
 #[path = "weapon_catalog_legacy.rs"]
 mod legacy;

@@ -379,18 +379,6 @@ fn find_next_asset(w: &Walker, from: usize) -> Option<usize> {
     })
 }
 
-/// `Font_s` (x64-zt `fontdef.cpp`): name, materials, glyphs (aligned 4).
-pub(super) fn font(w: &mut Walker, h: usize) -> Result<AssetId> {
-    use L::Font_s as F;
-    w.s.push(VIRTUAL);
-    let name = w.xstr(h + F::fontName)?.unwrap_or_default();
-    w.asset(AssetType::Material, h + F::material)?;
-    w.asset(AssetType::Material, h + F::glowMaterial)?;
-    let n = w.s.i32_at(h + F::glyphCount)?.max(0) as usize;
-    w.blob(h + F::glyphs, L::Glyph::SIZE * n, 3)?;
-    w.s.pop();
-    Ok(w.name_only(AssetType::Font, name))
-}
 
 pub(super) fn skeleton_script(w: &mut Walker, h: usize) -> Result<AssetId> {
     use L::SkeletonScript as S;

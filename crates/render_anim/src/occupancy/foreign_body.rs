@@ -33,6 +33,7 @@ pub fn game_label(ns: Option<AssetNamespace>) -> &'static str {
         Some(AssetNamespace::T4) => "WaW",
         Some(AssetNamespace::Iw3) => "CoD4",
         Some(AssetNamespace::Iw6) => "Ghosts",
+        Some(AssetNamespace::S1) => "AW",
         None => "unknown",
     }
 }
@@ -111,6 +112,7 @@ fn anim_order(game: AssetNamespace) -> &'static [AssetNamespace] {
         Iw3 => &[Iw3, Iw4],
         T6 => &[T6],
         Iw6 => &[Iw6, Iw5, Iw4],
+        S1 => &[S1, Iw6, Iw5, Iw4],
     }
 }
 

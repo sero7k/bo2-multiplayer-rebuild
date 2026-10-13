@@ -1162,6 +1162,7 @@ pub fn check_guest_guns() -> Vec<String> {
         ("t4", asset_core::AssetNamespace::T4),
         ("iw3", asset_core::AssetNamespace::Iw3),
         ("iw6", asset_core::AssetNamespace::Iw6),
+        ("s1", asset_core::AssetNamespace::S1),
     ] {
         // (`BO2MP_CHECK_GUNS=iw5,t4` checks only those games.)
         if std::env::var("BO2MP_CHECK_GUNS").is_ok_and(|only| !only.split(',').any(|g| g.trim() == game)) {
@@ -1190,6 +1191,14 @@ fn load_guest_check(game: &str, ns: asset_core::AssetNamespace, progress: &LoadP
         let mut guests = crate::lane::walk_iw6_guest_guns(true, MaterialCatalog::default(), progress);
         guests.report.extend(crate::lane::iw6_sound_check(&guests.weapons));
         guests.report.push(crate::lane::iw6_anim_check(&guests.xanims));
+        let fpv_names = (0..guests.fpv.len()).filter_map(|i| guests.fpv.name_at(i).map(str::to_owned)).collect();
+        return GuestCheckLoad { weapons: guests.weapons, fpv_names, xanims: guests.xanims, report: guests.report };
+    }
+    // bo2mp: Advanced Warfare's guns, read by `fastfile_s1` as a match
+    // reads them.
+    if game == "s1" {
+        let mut guests = crate::lane::walk_s1_guest_guns(true, MaterialCatalog::default(), progress);
+        guests.report.push(crate::lane::s1_anim_check(&guests.xanims));
         let fpv_names = (0..guests.fpv.len()).filter_map(|i| guests.fpv.name_at(i).map(str::to_owned)).collect();
         return GuestCheckLoad { weapons: guests.weapons, fpv_names, xanims: guests.xanims, report: guests.report };
     }

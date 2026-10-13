@@ -685,6 +685,11 @@ pub(crate) fn guest_guns_available() {
     let ghosts = on && ghosts_install(root.as_ref()).is_some_and(|i| i.join("zone").join("common_core_mp.ff").is_file());
     bo2_profile::guest::set_available("iw6", ghosts);
     diag::info!(Ui, "bo2mp guest guns: Ghosts {}", say(ghosts));
+    // (Advanced Warfare: read by `fastfile_s1`; its guns are in common_mp.)
+    let extra: Vec<std::path::PathBuf> = asset_transport::game_paths::get("aw").into_iter().collect();
+    let aw = on && fastfile_s1::install::find_install(root.as_ref().map(|r| r.0.as_path()), &extra).is_some();
+    bo2_profile::guest::set_available("s1", aw);
+    diag::info!(Ui, "bo2mp guest guns: Advanced Warfare {}", say(aw));
 }
 
 /// bo2mp: where Ghosts is installed (`fastfile_iw6::install`'s search, with

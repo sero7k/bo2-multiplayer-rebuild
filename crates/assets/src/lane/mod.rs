@@ -12,6 +12,9 @@ mod iw6;
 pub(crate) use iw6::{
     Iw6Guests, build_iw6_guest_guns, iw6_anim_check, iw6_sound_check, prefetch_iw6_guest_guns, walk_iw6_guest_guns,
 };
+// bo2mp: Advanced Warfare's guns as guest guns.
+mod s1;
+pub(crate) use s1::{S1Guests, build_s1_guest_guns, prefetch_s1_guest_guns, s1_anim_check, walk_s1_guest_guns};
 // bo2mp: Call of Duty 4's and World at War's guns as guest guns.
 mod legacy_guns;
 pub(crate) use legacy_guns::{

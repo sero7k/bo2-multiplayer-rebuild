@@ -243,6 +243,7 @@ impl XAnimCatalog {
                 AssetNamespace::Iw6 => 16,
                 AssetNamespace::T4 => 32,
                 AssetNamespace::Iw3 => 64,
+                AssetNamespace::S1 => 128,
             };
         }
         seen.values().filter(|bits| bits.count_ones() >= 2).count()

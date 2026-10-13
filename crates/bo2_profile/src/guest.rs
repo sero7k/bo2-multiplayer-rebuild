@@ -236,6 +236,59 @@ pub const GHOSTS: &[GuestGun] = &[
 /// The first statstable index of Ghosts' guns (fixed, as MW3's).
 pub const GHOSTS_FIRST_INDEX: i32 = 800;
 
+const fn aw(
+    gun: &'static str,
+    name: &'static str,
+    group: &'static str,
+    slot: &'static str,
+) -> GuestGun {
+    GuestGun { game: "s1", gun, name, group, slot, attachments: "", icon: "" }
+}
+
+/// bo2mp: Call of Duty: Advanced Warfare's multiplayer guns (`iw5_<gun>_mp`
+/// in its common_mp; Create-a-Class and the scripts call it `aw_<gun>`),
+/// grouped by their weapon definitions' class. AW builds variants from
+/// attachment fields at run time; a guest gun is its base gun. Its
+/// statstable rows are numbered from `AW_FIRST_INDEX`.
+pub const AW: &[GuestGun] = &[
+    aw("bal27", "Bal-27", AR, P),
+    aw("ak12", "AK12", AR, P),
+    aw("arx160", "ARX-160", AR, P),
+    aw("hbra3", "HBRa3", AR, P),
+    aw("himar", "IMR", AR, P),
+    aw("m182spr", "MK14", AR, P),
+    aw("epm3", "EPM3", AR, P),
+    aw("kf5", "KF5", SMG, P),
+    aw("mp11", "MP11", SMG, P),
+    aw("asm1", "ASM1", SMG, P),
+    aw("sn6", "SN6", SMG, P),
+    aw("hmr9", "AMR9", SMG, P),
+    aw("sac3", "SAC3", SMG, P),
+    aw("lsat", "Pytaek", LMG, P),
+    aw("exoxmg", "XMG", LMG, P),
+    aw("asaw", "Ameli", LMG, P),
+    aw("em1", "EM1", LMG, P),
+    aw("mors", "MORS", SNIPER, P),
+    aw("thor", "Atlas 20mm", SNIPER, P),
+    aw("gm6", "Lynx", SNIPER, P),
+    aw("m990", "NA-45", SNIPER, P),
+    aw("uts19", "Tac-19", CQB, P),
+    aw("rhino", "S-12", CQB, P),
+    aw("maul", "Bulldog", CQB, P),
+    aw("titan45", "Atlas 45", PISTOL, S),
+    aw("pbw", "PDW", PISTOL, S),
+    aw("rw1", "RW1", PISTOL, S),
+    aw("vbr", "VBR", PISTOL, S),
+    aw("mahem", "MAHEM", LAUNCHER, S),
+    aw("stingerm7", "Stinger M7", LAUNCHER, S),
+    aw("maaws", "MAAWS", LAUNCHER, S),
+    aw("exocrossbow", "Crossbow", SPECIAL, S),
+    aw("microdronelauncher", "MDL", SPECIAL, S),
+];
+
+/// The first statstable index of Advanced Warfare's guns.
+pub const AW_FIRST_INDEX: i32 = 900;
+
 const fn w3(
     gun: &'static str,
     name: &'static str,
@@ -475,6 +528,7 @@ pub fn prefix(game: &str) -> &'static str {
         "iw6" => "gh_",
         "t4" => "waw_",
         "iw3" => "cod4_",
+        "s1" => "aw_",
         _ => "",
     }
 }
@@ -486,7 +540,7 @@ pub fn is_guest_name(name: &str) -> bool {
     GAMES.iter().any(|g| name.starts_with(prefix(g)))
 }
 
-const GAMES: [&str; 6] = ["t5", "iw4", "iw5", "iw6", "t4", "iw3"];
+const GAMES: [&str; 7] = ["t5", "iw4", "iw5", "iw6", "t4", "iw3", "s1"];
 static AVAILABLE: AtomicU8 = AtomicU8::new(0);
 
 fn bit(game: &str) -> u8 {
@@ -509,14 +563,20 @@ pub fn available(game: &str) -> bool {
 
 /// Every guest gun, available or not, in table order.
 pub fn all() -> impl Iterator<Item = &'static GuestGun> {
-    BO1.iter().chain(MW2.iter()).chain(GHOSTS.iter()).chain(MW3.iter()).chain(WAW.iter()).chain(COD4.iter())
+    BO1.iter().chain(MW2.iter()).chain(GHOSTS.iter()).chain(MW3.iter()).chain(WAW.iter()).chain(COD4.iter()).chain(AW.iter())
 }
 
 /// The statstable index of the guest gun at `position` in `all()`: a
 /// roster with its own first index (MW3's) numbers from it by its place in
 /// that roster; the others by their place in `all()` from `FIRST_INDEX`.
 fn stats_index(position: usize, gun: &GuestGun) -> i32 {
-    let own = [(MW3, MW3_FIRST_INDEX), (WAW, WAW_FIRST_INDEX), (COD4, COD4_FIRST_INDEX), (GHOSTS, GHOSTS_FIRST_INDEX)];
+    let own = [
+        (MW3, MW3_FIRST_INDEX),
+        (WAW, WAW_FIRST_INDEX),
+        (COD4, COD4_FIRST_INDEX),
+        (GHOSTS, GHOSTS_FIRST_INDEX),
+        (AW, AW_FIRST_INDEX),
+    ];
     for (roster, first) in own {
         if let Some(k) = roster.iter().position(|g| g.game == gun.game && g.gun == gun.gun) {
             return first + k as i32;
@@ -545,6 +605,7 @@ impl GuestGun {
             "iw6" => "Call of Duty: Ghosts",
             "t4" => "Call of Duty: World at War",
             "iw3" => "Call of Duty 4",
+            "s1" => "Call of Duty: Advanced Warfare",
             _ => "another game",
         }
     }
@@ -564,6 +625,8 @@ impl GuestGun {
             // (Ghosts' are its ui_mp's `weapon_<gun>_360`, then the HUD icon.)
             "iw6" if self.icon.is_empty() => format!("iw6:weapon_{0}_360|hud_icon_{0}", self.gun),
             "iw6" => format!("iw6:{}", self.icon),
+            // (AW's pictures are not read yet: its kill icon name.)
+            "s1" => format!("s1:hud_icon_{}", self.gun),
             _ => {
                 let mut p = format!("{}:menu_mp_weapons_{}", self.game, self.gun);
                 if !self.icon.is_empty() {
@@ -584,7 +647,7 @@ impl GuestGun {
 // one kept, `family_of_reference`).
 
 /// Which game's copy of a shared gun is listed (Black Ops II's always).
-const PRIORITY: [&str; 6] = ["iw4", "iw5", "t5", "iw6", "iw3", "t4"];
+const PRIORITY: [&str; 7] = ["iw4", "iw5", "t5", "iw6", "iw3", "t4", "s1"];
 
 /// Guns known by another name in another game (name without its game's
 /// `iw5_` prefix -> the family). (game, name, family); game "" = any.
@@ -621,6 +684,8 @@ const FAMILIES: &[(&str, &str, &str)] = &[
     ("", "mk14", "m14"),
     ("", "mp44", "stg44"),
     ("", "usrpg", "rpg"),
+    // (AW's `lsat` is the Pytaek, not Ghosts' LSAT.)
+    ("s1", "lsat", "pytaek"),
 ];
 
 /// A gun's family: the same gun from any game has the same one.

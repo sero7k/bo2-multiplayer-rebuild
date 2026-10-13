@@ -138,7 +138,8 @@ pub(super) fn xmodel(w: &mut Walker, h: usize) -> Result<AssetId> {
     let composite = w.s.u8_at(h + X::numCompositeModels)? as usize;
     if let Some(at) = w.inline_array(h + X::compositeModels, 8 * composite, 7)? {
         for i in 0..composite {
-            w.asset(AssetType::XModel, at + 8 * i)?;
+            let part = w.asset(AssetType::XModel, at + 8 * i)?;
+            rec.composite.push(part);
         }
     }
     let physics = w.s.u8_at(h + X::numBonePhysics)? as usize;

@@ -388,12 +388,6 @@ impl<'a> Walker<'a> {
     }
 
     /// The asset a reference to a pointer slot names.
-    /// Where a table asset's header was read (file offset).
-    pub(crate) fn header_of(&self, id: AssetId) -> Option<usize> {
-        let (&i, _) = self.cap.by_table.iter().find(|(_, v)| **v == id)?;
-        self.cap.starts.get(i).copied()
-    }
-
     pub(crate) fn resolve_slot(&self, ty: AssetType, virt: u64) -> Option<AssetId> {
         if let Some(id) = self.slots.get(&virt) {
             return Some(*id);

@@ -151,6 +151,9 @@ pub struct XModelRec {
     pub bounds: ([f32; 3], [f32; 3]),
     pub phys_preset: Option<AssetId>,
     pub phys_collmap: Option<AssetId>,
+    /// AW's composite models: the part models drawn together (a gun's
+    /// base, sight, stock ...), each with its own surfaces.
+    pub composite: Vec<Option<AssetId>>,
 }
 
 #[derive(Clone, Debug, Default)]

@@ -4,8 +4,9 @@
 //! A streamed image names four parts (`XStreamFile`s in the zone header).
 //! Part 0 holds the smallest streamed size with all its smaller levels;
 //! each later part adds the next larger level (`GfxImageStreamData`:
-//! width, height and the cumulative byte count). Each part is one zlib
-//! stream in its pak.
+//! width, height and the cumulative byte count). Each part is packed in its
+//! pak as the zone data is: u64 size, u32 flags, then LZ4 blocks
+//! (`container::inflate_blocks`; read on retail `imagefile1.pak`).
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -87,10 +88,7 @@ impl ImagePaks {
         file.seek(SeekFrom::Start(part.offset)).ok()?;
         let mut packed = vec![0u8; (part.offset_end - part.offset) as usize];
         file.read_exact(&mut packed).ok()?;
-        let mut out = Vec::with_capacity(expect);
-        flate2::read::ZlibDecoder::new(&packed[..])
-            .read_to_end(&mut out)
-            .ok()?;
+        let mut out = crate::container::inflate_blocks(&packed).ok()?;
         (out.len() >= expect).then(|| {
             out.truncate(expect);
             out
