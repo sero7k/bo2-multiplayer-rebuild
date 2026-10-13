@@ -354,13 +354,8 @@ fn iw6_body_facts(w: &Iw6WeaponView) -> WeaponBodyFacts {
     f.projectile_speed_forward = w.def_i32(d::iProjectileSpeedForward);
     f.projectile_activate_dist = w.def_i32(d::iProjectileActivateDist);
     f.require_lock_to_fire = w.def_u8(d::requireLockonToFire) != 0;
-    f.location_damage_mult = w.location_damage.as_ref().map(|v| {
-        let mut out = [1.0f32; 20];
-        for (o, x) in out.iter_mut().zip(v.iter()) {
-            *o = *x;
-        }
-        out
-    });
+    // (Ghosts' IW order.)
+    f.location_damage_mult = w.location_damage.as_ref().map(|v| weapon_iw4::hitloc_iw_to_t6(v));
     f.no_dual_wield = w.def_u8(d::noDualWield) != 0;
     f.kick.gun_max_pitch = w.def_f32(d::fGunMaxPitch);
     f.kick.gun_max_yaw = w.def_f32(d::fGunMaxYaw);

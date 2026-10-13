@@ -322,7 +322,8 @@ pub struct WeaponBodyFacts {
     pub projectile_explosion_type: i32,
     pub parallel_bounce: Option<[f32; 31]>,
     pub perpendicular_bounce: Option<[f32; 31]>,
-    pub location_damage_mult: Option<[f32; 20]>,
+    /// Black Ops II's hit-location order (`weapon_iw4::HITLOC_NAMES`).
+    pub location_damage_mult: Option<[f32; weapon_iw4::HITLOC_COUNT]>,
     pub start_ammo: i32,
 
     pub ammo_count_clip_relative: bool,
@@ -1833,7 +1834,7 @@ impl WeaponCatalog {
                 projectile_explosion_type: geometry.projectile_explosion_type,
                 parallel_bounce: geometry.parallel_bounce,
                 perpendicular_bounce: geometry.perpendicular_bounce,
-                location_damage_mult: geometry.location_damage_mult,
+                location_damage_mult: geometry.location_damage_mult.map(|m| weapon_iw4::hitloc_iw_to_t6(&m)),
                 start_ammo: geometry.start_ammo,
                 ammo_count_clip_relative: false,
                 min_damage: geometry.min_damage,
@@ -7970,9 +7971,8 @@ fn apply_iw5_parameter_blocks(facts: &mut WeaponBodyFacts, assets: &[&Iw5ScopeRo
     facts.min_player_damage = scale_i32(facts.min_player_damage, damage_min);
 
     if let Some(location) = iw5_first_block(assets, |a| a.location_damage) {
-        let mut mult = facts.location_damage_mult.unwrap_or([1.0; 20]);
-        mult[..19].copy_from_slice(&location);
-        facts.location_damage_mult = Some(mult);
+        // (MW3's 19 locations, IW order.)
+        facts.location_damage_mult = Some(weapon_iw4::hitloc_iw_to_t6(&location));
     }
 
     if let Some(idle) = iw5_first_block(assets, |a| a.idle_settings) {

@@ -315,6 +315,9 @@ pub fn apply_prepared_match(
         let mut content = sim::SimContentBuilder::default();
         let mut sim = sim::SimWorld::new();
         content.set_weapon_def_scales(weapons.0.scales_table());
+        // bo2mp: under Black Ops II's rules, its own global location table
+        // (the zone's table under the other games' rules).
+        let lochit_table = if assets::t6_rules() { Some(asset_game::bo2_lochit_table()) } else { lochit_table };
         let combat = combat_table::from_registry(&weapons.0, lochit_table);
         content.set_weapon_combat_table(combat.clone());
         content.set_weapon_runnable_table(weapons.0.runnable_table());

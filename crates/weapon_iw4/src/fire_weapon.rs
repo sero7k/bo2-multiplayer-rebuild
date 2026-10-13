@@ -7,7 +7,12 @@ pub const WEAPCLASS_SPREAD: i32 = 4;
 pub const WEAPCLASS_TURRET: i32 = 8;
 pub const BULLET_MAX_RANGE: f32 = 8192.0;
 pub const ROCKET_SPREAD_PLANE: f32 = 16.0;
-pub const HITLOC_COUNT: usize = 20;
+/// Hit locations in Black Ops II's order (its models' bone part classes and
+/// its weapons' `locationDamageMultipliers` run this way: 21 entries, with
+/// `torso_mid` after `torso_upper` and `riotshield` last). Tables from the
+/// IW games (MW2, MW3, CoD4/WaW, Ghosts: 20 entries, no `torso_mid`) go
+/// through [`hitloc_iw_to_t6`].
+pub const HITLOC_COUNT: usize = 21;
 pub const LOCATION_DAMAGE_IDENTITY: [f32; HITLOC_COUNT] = [1.0; HITLOC_COUNT];
 
 pub const HITLOC_NAMES: [&str; HITLOC_COUNT] = [
@@ -16,6 +21,7 @@ pub const HITLOC_NAMES: [&str; HITLOC_COUNT] = [
     "head",
     "neck",
     "torso_upper",
+    "torso_mid",
     "torso_lower",
     "right_arm_upper",
     "left_arm_upper",
@@ -30,8 +36,35 @@ pub const HITLOC_NAMES: [&str; HITLOC_COUNT] = [
     "right_foot",
     "left_foot",
     "gun",
-    "shield",
+    "riotshield",
 ];
+
+/// `torso_mid`'s slot (Black Ops II only).
+pub const HITLOC_TORSO_MID: usize = 5;
+/// The riot shield's slot.
+pub const HITLOC_RIOTSHIELD: usize = 20;
+
+/// The slot of a hit location name (the IW games' `shield` is
+/// `riotshield`).
+pub fn hitloc_slot(name: &str) -> Option<usize> {
+    let name = if name == "shield" { "riotshield" } else { name };
+    HITLOC_NAMES.iter().position(|n| *n == name)
+}
+
+/// An IW-order table (none .. left_foot, gun, shield; no `torso_mid`) in
+/// Black Ops II's order; `torso_mid` takes `torso_upper`'s value. Shorter
+/// tables leave the rest at 1.
+pub fn hitloc_iw_to_t6(iw: &[f32]) -> [f32; HITLOC_COUNT] {
+    let mut out = LOCATION_DAMAGE_IDENTITY;
+    for (i, &v) in iw.iter().enumerate().take(20) {
+        let slot = if i < HITLOC_TORSO_MID { i } else { i + 1 };
+        out[slot] = v;
+    }
+    if iw.len() > 4 {
+        out[HITLOC_TORSO_MID] = iw[4];
+    }
+    out
+}
 
 pub const WEAPCLASS_PISTOL: i32 = 5;
 

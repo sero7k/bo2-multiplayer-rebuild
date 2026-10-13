@@ -954,7 +954,7 @@ pub struct PlayerCollisionPose {
 
 /// The hit location of a bullet the riot shield stopped ("riotshield" to
 /// BO2's scripts).
-pub const HITLOC_SHIELD: u8 = 19;
+pub const HITLOC_SHIELD: u8 = weapon_iw4::HITLOC_RIOTSHIELD as u8;
 /// The surface a riot shield is (its impact effects; nothing goes through).
 pub const SURF_TYPE_RIOTSHIELD: u32 = 29;
 

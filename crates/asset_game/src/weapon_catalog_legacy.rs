@@ -367,9 +367,9 @@ fn legacy_body_facts(w: &LegacyWeaponView) -> WeaponBodyFacts {
     f.projectile_activate_dist = w.i("iProjectileActivateDist");
     f.require_lock_to_fire = w.b("requireLockonToFire");
     // (19 hit locations, IW4's order; the rest take 1.)
-    f.location_damage_mult = Some(std::array::from_fn(|k| {
-        if k < 19 { w.fk("locationDamageMultipliers", k) } else { 1.0 }
-    }));
+    f.location_damage_mult = Some(weapon_iw4::hitloc_iw_to_t6(
+        &(0..19).map(|k| w.fk("locationDamageMultipliers", k)).collect::<Vec<_>>(),
+    ));
     // (No dual wield in either game.)
     f.no_dual_wield = true;
     f.kick.gun_max_pitch = w.f("fGunMaxPitch");

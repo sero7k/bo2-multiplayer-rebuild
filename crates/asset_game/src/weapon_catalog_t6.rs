@@ -417,8 +417,9 @@ fn t6_body_facts(w: &asset_t6::WeaponRef) -> WeaponBodyFacts {
     };
     f.parallel_bounce = array31(&w.parallel_bounce);
     f.perpendicular_bounce = array31(&w.perpendicular_bounce);
+    // (Black Ops II's own order, all 21.)
     f.location_damage_mult = w.location_damage.as_ref().map(|v| {
-        let mut out = [1.0f32; 20];
+        let mut out = weapon_iw4::LOCATION_DAMAGE_IDENTITY;
         for (o, x) in out.iter_mut().zip(v.iter()) {
             *o = *x;
         }

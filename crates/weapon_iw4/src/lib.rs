@@ -50,7 +50,7 @@ pub use event_sound::{
 };
 pub use fire_sound::{select_cg_fire_sound_ptr, select_fire_last_sound_ptr, select_fire_sound_ptr};
 pub use fire_weapon::{
-    BULLET_MAX_RANGE, FireWeaponKind, HITLOC_COUNT, HITLOC_NAMES, LOCATION_DAMAGE_IDENTITY,
+    BULLET_MAX_RANGE, FireWeaponKind, HITLOC_COUNT, HITLOC_NAMES, HITLOC_RIOTSHIELD, HITLOC_TORSO_MID, LOCATION_DAMAGE_IDENTITY, hitloc_iw_to_t6, hitloc_slot,
     ROCKET_SPREAD_PLANE, WEAPCLASS_GRENADE, WEAPCLASS_PISTOL, WEAPCLASS_SPREAD, WEAPCLASS_TURRET,
     WEAPTYPE_BULLET, WEAPTYPE_GRENADE, WEAPTYPE_PROJECTILE, bake_location_damage, fire_weapon_kind,
     location_damage_is_valid, location_damage_scale,
