@@ -1,14 +1,22 @@
 # BO2 Multiplayer Rebuild
 
-A fan rebuild that plays Call of Duty: Black Ops II multiplayer from your own PC copy of the game, in an engine
-written in Rust. It is a fork of [IW4L](https://github.com/vladtrc/iw4L), an open-source Call of Duty runtime built
-on [Bevy](https://bevyengine.org/) and [wgpu](https://wgpu.rs/). The same code that runs Black Ops II's Nuketown
-Zombies in this fork runs Black Ops II's own multiplayer scripts, menus and bots, so a match follows the game's real
-rules without ever starting the original executable.
+A fan rebuild of Call of Duty: Black Ops II multiplayer in an engine written in Rust, built to feel exactly like
+Black Ops II: its movement, gunplay, rules, menus and bots. It is a fork of [IW4L](https://github.com/vladtrc/iw4L),
+an open-source Call of Duty runtime built on [Bevy](https://bevyengine.org/) and [wgpu](https://wgpu.rs/), and runs
+Black Ops II's own multiplayer scripts without ever starting the original executable.
+
+On top of Black Ops II it brings in the classic era's other games, played under Black Ops II's rules:
+
+- **Maps** from Call of Duty 4, World at War (custom maps too), Modern Warfare 2, Modern Warfare 3 and Black Ops,
+  with each game's own lighting, fog and soldiers; Ghosts maps are in progress (Prison Break first).
+- **Guns** from Black Ops, Modern Warfare 2 and Ghosts as extra weapons in Create-a-Class.
+- **Online play**: host on your PC, a friend's PC or a VPS; friend codes, a friends list, lobby browser and joining a
+  friend's lobby in one press ([docs/ONLINE.md](docs/ONLINE.md)).
+- **Zombies**: every Black Ops II Zombies map through the companion Zombies rebuild.
 
 **No game files are included.** This repository holds no Black Ops II (or any other Call of Duty) files: no maps,
 models, textures, sounds, scripts or executables. You need your own legally owned copy of Black Ops II for PC with
-Multiplayer installed. The engine reads that install read-only at run time and never patches, copies or
+Multiplayer installed (and of any other game whose maps or guns you want). The engine reads that install read-only at run time and never patches, copies or
 redistributes it. Unofficial fan project, not affiliated with or endorsed by Activision, Treyarch or Infinity Ward.
 
 ## Contents
