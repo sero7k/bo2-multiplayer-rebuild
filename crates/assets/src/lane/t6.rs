@@ -1866,8 +1866,32 @@ pub(crate) fn attach_t6_rules(
     };
     let previous_ns = loaded.materials.capture_ns();
     loaded.materials.set_capture_ns(asset_core::AssetNamespace::T6);
-    let empty = asset_t6::ZoneCapture::default();
+    // bo2mp: a burning World at War map's fires and smoke: Black Ops II's
+    // from its model map's zone (only those effects of it), in the map's
+    // place among the zones.
+    let pending_fx = super::bo2_look::take_pending_fx();
+    let empty = match &pending_fx {
+        Some((shots, zone)) if !shots.is_empty() => {
+            let wanted = shots.iter().map(|s| s.fxid.clone()).collect();
+            match super::bo2_look::donor_fx_capture(&dir, zone, &wanted) {
+                Ok(c) => {
+                    report.push(format!("bo2 rules: {} effects from {zone} for the map's fires and smoke", c.fx.len()));
+                    c
+                }
+                Err(e) => {
+                    report.push(format!("bo2 rules: {zone} effects not read ({e})"));
+                    asset_t6::ZoneCapture::default()
+                }
+            }
+        }
+        _ => asset_t6::ZoneCapture::default(),
+    };
     let mut combat = super::t6_m2::load_t6_combat(&path, &empty, &mut loaded.materials, packs.as_ref());
+    if let (Some((shots, _)), Ok(sound)) = (pending_fx, combat.sound.as_mut()) {
+        let n = shots.len();
+        sound.scripted_map_fx.get_or_insert_with(Default::default).oneshots = shots;
+        report.push(format!("bo2 rules: {n} map effects placed"));
+    }
     loaded.materials.set_capture_ns(previous_ns);
     report.append(&mut combat.report);
 

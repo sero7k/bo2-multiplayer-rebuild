@@ -630,6 +630,17 @@ pub(crate) fn build_legacy_world(
     let tag = game.tag;
     let title = game.title;
     super::bo2_look::set_pending_grade(None);
+    // bo2mp: the map's createfx as Black Ops II effects (burning maps).
+    {
+        let map = path.file_stem().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+        let text = |name: &str| {
+            zone.assets.iter().find_map(|a| match a {
+                iw3::zone::Asset::RawFile(r) if r.name.eq_ignore_ascii_case(name) => Some(String::from_utf8_lossy(&r.data).into_owned()),
+                _ => None,
+            })
+        };
+        super::bo2_look::set_pending_fx(super::bo2_look::map_fx(&map, text, &mut report));
+    }
     report.push(format!(
         "{tag} zone: {} of {} assets{}",
         zone.stats.top_level_parsed,

@@ -112,6 +112,19 @@ pub fn parse_createfx_loop_sounds(source: &str) -> Vec<CreateFxLoopSound> {
 }
 
 pub fn parse_createfx_oneshots(source: &str) -> Vec<CreateFxOneshot> {
+    parse_createfx_effects(source, false)
+}
+
+/// bo2mp: the createfx effects, the loop effects too (`createLoopEffect`,
+/// started at once: World at War's fires and smoke are loop effects).
+pub fn parse_createfx_effects_and_loops(source: &str) -> Vec<CreateFxOneshot> {
+    parse_createfx_effects(source, true)
+}
+
+fn parse_createfx_effects(source: &str, loops: bool) -> Vec<CreateFxOneshot> {
+    let parse_create_oneshot_line = |line: &str| {
+        parse_create_oneshot_line(line).or_else(|| loops.then(|| parse_create_line(line, "createLoopEffect")).flatten())
+    };
     let mut out = Vec::new();
     let mut pending = PendingOneshot::default();
     let mut in_oneshot = false;
@@ -134,6 +147,7 @@ pub fn parse_createfx_oneshots(source: &str) -> Vec<CreateFxOneshot> {
             || trimmed.contains("createExploder")
             || trimmed.contains("createIntervalSound")
             || trimmed.contains("createOneshotEffect")
+            || (loops && trimmed.contains("createLoopEffect"))
         {
             flush_oneshot(&mut out, &mut pending, in_oneshot);
             in_oneshot = false;
@@ -220,7 +234,10 @@ fn flush_oneshot(out: &mut Vec<CreateFxOneshot>, pending: &mut PendingOneshot, i
 }
 
 fn parse_create_oneshot_line(line: &str) -> Option<String> {
-    let key = "createOneshotEffect";
+    parse_create_line(line, "createOneshotEffect")
+}
+
+fn parse_create_line(line: &str, key: &str) -> Option<String> {
     let idx = line.find(key)?;
     let rest = &line[idx + key.len()..];
     let open = rest.find('(')?;
@@ -303,4 +320,32 @@ fn parse_quoted(s: &str) -> Option<String> {
     let rest = &rest[1..];
     let end = rest.find('"')?;
     Some(rest[..end].to_owned())
+}
+
+#[cfg(test)]
+mod loop_effect_tests {
+    use super::*;
+
+    const DOME: &str = r#"
+     	ent = maps\mp\_utility::createOneshotEffect( "mp_smoke_column_tall" );
+     	ent.v[ "origin" ] = ( 907.471, -10815.3, -568.597 );
+     	ent.v[ "angles" ] = ( 270, 357.397, 136.603 );
+     	ent.v[ "fxid" ] = "mp_smoke_column_tall";
+     	ent.v[ "delay" ] = -15;
+     	ent = maps\mp\_utility::createLoopEffect( "mp_battlesmoke_large" );
+     	ent.v[ "origin" ] = ( -657.383, 845.405, 233.108 );
+     	ent.v[ "angles" ] = ( 270, 0, 116 );
+     	ent.v[ "fxid" ] = "mp_battlesmoke_large";
+     	ent.v[ "delay" ] = 7;
+"#;
+
+    #[test]
+    fn loop_effects_only_when_asked() {
+        assert_eq!(parse_createfx_oneshots(DOME).len(), 1);
+        let both = parse_createfx_effects_and_loops(DOME);
+        assert_eq!(both.len(), 2);
+        assert_eq!(both[1].fxid, "mp_battlesmoke_large");
+        assert_eq!(both[1].origin_inches, [-657.383, 845.405, 233.108]);
+        assert_eq!(both[0].origin_inches, [907.471, -10815.3, -568.597]);
+    }
 }

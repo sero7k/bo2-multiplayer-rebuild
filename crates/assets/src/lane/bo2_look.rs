@@ -425,6 +425,137 @@ fn swap_images(capture: &asset_t6::ZoneCapture, packs: &asset_t6::PackSet, name:
 /// The model map's colour grade, made while the world loads and installed
 /// after the Black Ops II rules' own (which would put the map's own film
 /// vision back).
+/// bo2mp: a World at War map's own effects (its createfx: fires, smoke
+/// columns, battle smoke) drawn as Black Ops II effects of the same kind
+/// from its model map, when the model is Nuketown Zombies (the burning
+/// Berlin maps: Dome, Downfall, ...). By the World at War effect's file
+/// name, first match; effects with no match (god rays, mist) are left out.
+pub(crate) const NUKED_FX_SWAPS: &[(&str, &str)] = &[
+    ("fire_small_detail", "fire/fx_fire_xsm_no_flicker"),
+    ("fire_tree_trunk", "fire/fx_nic_fire_pole_md_long"),
+    ("fire_large", "maps/zombie/fx_zmb_tranzit_fire_lrg"),
+    ("fire_lg", "maps/zombie/fx_zmb_tranzit_fire_lrg"),
+    ("fire_medium", "maps/zombie/fx_zmb_nuke_fire_med"),
+    ("fire_med", "maps/zombie/fx_zmb_nuke_fire_med"),
+    ("fire_small", "fire/fx_nic_fire_line_sm"),
+    ("fire_sm", "fire/fx_nic_fire_line_sm"),
+    ("smoke_column_tall", "smoke/fx_smk_fire_lg_black"),
+    ("smoke_column", "smoke/fx_smk_plume_md_blk_wispy_dist"),
+    ("battlesmoke", "smoke/fx_smk_linger_lit_slow"),
+    ("embers", "env/fire/fx_embers_falling_md"),
+    ("ash", "maps/zombie/fx_zmb_nuke_burning_ash_gusty"),
+];
+
+/// The map's effects as Black Ops II's (`fxid` is the Black Ops II
+/// effect's name), from its createfx and `level._effect` scripts
+/// (`text(name)`: a raw file of its zone), and the zone they come from.
+pub(crate) fn map_fx(map: &str, text: impl Fn(&str) -> Option<String>, report: &mut Vec<String>) -> Option<(Vec<asset_audio::CreateFxOneshot>, &'static str)> {
+    let recipe = recipe(map)?;
+    if recipe.model != "zm_nuked" {
+        return None;
+    }
+    let lower = map.to_ascii_lowercase();
+    let placed = [
+        format!("maps/mp/createfx/{lower}_fx.gsc"),
+        format!("clientscripts/mp/createfx/{lower}_fx.csc"),
+        format!("maps/createfx/{lower}_fx.gsc"),
+    ]
+    .iter()
+    .find_map(|n| text(n))?;
+    let mut shots = asset_audio::parse_createfx_effects_and_loops(&placed);
+    if let Some(src) = [format!("maps/mp/{lower}_fx.gsc"), format!("clientscripts/mp/{lower}_fx.csc")].iter().find_map(|n| text(n)) {
+        let aliases = asset_audio::parse_createfx_effect_aliases(&src);
+        asset_audio::apply_createfx_effect_aliases(&mut shots, &aliases);
+    }
+    let total = shots.len();
+    let mut kinds: std::collections::BTreeMap<&'static str, usize> = std::collections::BTreeMap::new();
+    shots.retain_mut(|s| {
+        let id = s.fxid.to_ascii_lowercase();
+        match NUKED_FX_SWAPS.iter().find(|(k, _)| id.contains(k)) {
+            Some((_, to)) => {
+                *kinds.entry(to).or_default() += 1;
+                s.fxid = (*to).to_owned();
+                // (A loop effect's delay is its repeat; these loop themselves.)
+                s.delay = s.delay.min(0.0);
+                true
+            }
+            None => false,
+        }
+    });
+    report.push(format!("bo2 look: {} of {total} map effects drawn as {}'s: {kinds:?}", shots.len(), recipe.model));
+    Some((shots, recipe.model))
+}
+
+static PENDING_FX: Mutex<Option<(Vec<asset_audio::CreateFxOneshot>, &'static str)>> = Mutex::new(None);
+
+pub(crate) fn set_pending_fx(fx: Option<(Vec<asset_audio::CreateFxOneshot>, &'static str)>) {
+    if let Ok(mut g) = PENDING_FX.lock() {
+        *g = fx;
+    }
+}
+
+pub(crate) fn take_pending_fx() -> Option<(Vec<asset_audio::CreateFxOneshot>, &'static str)> {
+    PENDING_FX.lock().ok().and_then(|mut g| g.take())
+}
+
+/// The model zone with only the named effects (and the effects they run)
+/// and what draws them (materials, images, models): nothing else of it
+/// (its weapons, sounds, scripts, world) joins the match.
+pub(crate) fn donor_fx_capture(dir: &Path, zone: &str, wanted: &std::collections::BTreeSet<String>) -> Result<asset_t6::ZoneCapture, String> {
+    let mut c = asset_t6::capture_zone(&dir.join(format!("{zone}.ff"))).map_err(|e| e.to_string())?;
+    let mut keep: std::collections::BTreeSet<String> = wanted.iter().map(|n| n.to_ascii_lowercase()).collect();
+    loop {
+        let before = keep.len();
+        let mut more = Vec::new();
+        for e in c.fx.iter().filter(|e| keep.contains(&e.name.to_ascii_lowercase())) {
+            for el in &e.elems {
+                for n in [&el.effect_on_impact, &el.effect_on_death, &el.effect_emitted, &el.effect_attached] {
+                    if !n.is_empty() {
+                        more.push(n.to_ascii_lowercase());
+                    }
+                }
+                for v in &el.visuals {
+                    if let asset_t6::FxVisualRef::Effect(n) = v {
+                        more.push(n.to_ascii_lowercase());
+                    }
+                }
+            }
+        }
+        keep.extend(more);
+        if keep.len() == before {
+            break;
+        }
+    }
+    c.fx.retain(|e| keep.contains(&e.name.to_ascii_lowercase()));
+    c.world = None;
+    c.clip = None;
+    c.primary_lights.clear();
+    c.raw_files.clear();
+    c.string_tables.clear();
+    c.zbarriers.clear();
+    c.localize.clear();
+    c.path_nodes.clear();
+    c.path_tables = Default::default();
+    c.xanims.clear();
+    c.map_ents.clear();
+    c.weapons.clear();
+    c.attachments.clear();
+    c.attachment_uniques.clear();
+    c.vehicles.clear();
+    c.destructibles.clear();
+    c.phys_presets.clear();
+    c.phys_constraints.clear();
+    c.weapon_camos.clear();
+    c.fonts.clear();
+    c.tracers.clear();
+    c.impact_tables.clear();
+    c.footstep_tables.clear();
+    c.footstep_fx_tables.clear();
+    c.sound_banks.clear();
+    c.snd_globals = None;
+    Ok(c)
+}
+
 static PENDING_GRADE: Mutex<Option<asset_world::T6Grade>> = Mutex::new(None);
 
 pub(crate) fn set_pending_grade(grade: Option<asset_world::T6Grade>) {
@@ -496,5 +627,23 @@ mod sky_tint_tests {
         let (r, g, b, a) = (d[0], d[1], d[2], d[3]);
         assert!(r > g && g > b, "{r} {g} {b}");
         assert_eq!(a, 128);
+    }
+}
+
+#[cfg(test)]
+mod donor_fx_tests {
+    /// Nuketown Zombies' fires and smoke, alone, when its zone is here
+    /// (`IW4L_TEST_T6_ZONES`: the folder holding zm_nuked.ff).
+    #[test]
+    fn donor_keeps_only_the_wanted_effects() {
+        let Ok(dir) = std::env::var("IW4L_TEST_T6_ZONES") else { return };
+        let wanted = super::NUKED_FX_SWAPS.iter().map(|(_, to)| (*to).to_owned()).collect();
+        let c = super::donor_fx_capture(std::path::Path::new(&dir), "zm_nuked", &wanted).unwrap();
+        let names: Vec<&str> = c.fx.iter().map(|e| e.name.as_str()).collect();
+        for (_, to) in super::NUKED_FX_SWAPS {
+            assert!(names.iter().any(|n| n.eq_ignore_ascii_case(to)), "{to} missing from {names:?}");
+        }
+        assert!(c.weapons.is_empty() && c.world.is_none() && c.raw_files.is_empty());
+        println!("{} effects kept: {names:?}", c.fx.len());
     }
 }
