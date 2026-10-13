@@ -1079,6 +1079,53 @@ pub(crate) fn match_load(host: &mut Host, mp: &Mp, gametype: &str, map: &str) {
         v.bits.extend(bits);
     }
     host.require("T6.HUD");
+    modern_killcam_card(host);
+}
+
+/// bo2mp: with the modern HUD, BO2's Killcam widget is made without its
+/// killer's NamePlate (`hud_match::killcam_card` draws our card there); its
+/// KILLCAM title, its bands and the prompts stay. killcam.lua's
+/// `LUI.createMenu.Killcam` reads `CoD.NamePlate.New` as it builds (HUD
+/// StartKillcamHud calls it as BIT_IN_KILLCAM goes on), adds the plate to
+/// its bottom band and keeps nothing of it; so ours wraps it and, for that
+/// call only, `NamePlate.New` gives an empty element (the widget still sets
+/// its place and adds it, as it would the plate). The HUD's choice is read
+/// at each killcam: switching the HUD needs no reload. Any other NamePlate
+/// (the scoreboard's, the obituary callout's) is untouched.
+fn modern_killcam_card(host: &mut Host) {
+    let menus = host.field("LUI", "createMenu");
+    let Some(menus) = menus.table() else { return };
+    let original = menus.borrow().get_str("Killcam");
+    // (BO2's is a script function; ours, already in place, a native one.)
+    if !matches!(original, Value::Func(_)) {
+        if !matches!(original, Value::Native(_)) {
+            diag::warn!(Ui, "bo2mp lui: no LUI.createMenu.Killcam to wrap: BO2's killcam card stays");
+        }
+        return;
+    }
+    let wrapped = host.vm.native("Killcam", move |vm, args| {
+        if !crate::hud_modern::modern_hud_enabled() {
+            return vm.call(original.clone(), args);
+        }
+        let cod = vm.global("CoD");
+        let plate = vm.index(&cod, &Value::str("NamePlate"))?;
+        let Some(plate) = plate.table().cloned() else {
+            return vm.call(original.clone(), args);
+        };
+        let new = plate.borrow().get_str("New");
+        let blank = vm.native("NamePlate.New", |vm, _| {
+            let lui = vm.global("LUI");
+            let element = vm.index(&lui, &Value::str("UIElement"))?;
+            let make = vm.index(&element, &Value::str("new"))?;
+            vm.call(make, Vec::new())
+        });
+        plate.borrow_mut().set_str("New", blank);
+        let made = vm.call(original.clone(), args);
+        // (Back even if the widget failed: the other plates need it.)
+        plate.borrow_mut().set_str("New", new);
+        made
+    });
+    menus.borrow_mut().set_str("Killcam", wrapped);
 }
 
 /// The game type's settings ("name=value,...") for the HUD's

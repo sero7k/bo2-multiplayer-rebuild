@@ -22,6 +22,9 @@
 //!   last kill (the final killcam has it).
 //! - Killed By: at his death, before the killcam, the killer's card the
 //!   same way under "KILLED BY" (BO2's own LUI card is not sent).
+//! - Killcam card: through the killcam, the killer's card at the bottom
+//!   middle where BO2's Killcam widget had its NamePlate (that one is not
+//!   made; the widget's title, bands and prompts stay).
 //! - Scoreboard: while his scores key is held and at the match's end (BO2's
 //!   LUI `Scoreboard` menu is not opened then, `lui_hud`): the game type and
 //!   the clock, then each side's players (or one list in a free-for-all)
@@ -1293,7 +1296,7 @@ fn kill_banner(
     (shell_fonts, game_font, mut pics): (Option<Res<ShellFonts>>, Option<Res<GameUiFont>>, Option<ResMut<crate::shell::pics::ShellPics>>),
     slot: NonSend<crate::lui_hud::LuiHudSlot>,
     window: Query<&Window, With<PrimaryWindow>>,
-    roots: Query<Entity, (With<BannerRoot>, Without<KilledByRoot>)>,
+    roots: Query<Entity, (With<BannerRoot>, Without<KilledByRoot>, Without<KillcamCardRoot>)>,
     killed_by: Res<KilledByUntil>,
     time: Res<Time<Real>>,
     mut images: ResMut<Assets<Image>>,
@@ -1475,6 +1478,111 @@ fn killed_by_card(
     let e = spawn_banner(&mut commands, &faces, &model, size);
     commands.entity(e).insert(KilledByRoot);
     st.shown = Some((killer, model, key));
+}
+
+/// The killcam's card (a `BannerRoot` too, for its slide in).
+#[derive(Component)]
+struct KillcamCardRoot;
+
+/// Where the killcam card's middle sits, as a share of the screen's height:
+/// where BO2's Killcam widget put its NamePlate (killcam.lua: the bottom
+/// band, 120 of 720 high, the plate anchored to its bottom from -2 to -1
+/// `PlayerCallout_Height` (60), so 600..660), just above the respawn and
+/// skip prompts under it.
+const KILLCAM_CARD_CENTRE: f32 = 630.0 / 720.0;
+
+/// It holds while the killcam plays (it goes with it, no fade out).
+const KILLCAM_CARD_HOLD: f32 = 3600.0;
+
+/// The killer's card through the killcam and the final killcam
+/// (`bo2mp_killcam` "1|<killer>" / "2|<killer>"), in place of the NamePlate
+/// BO2's LUI Killcam widget draws (that one is not made under this HUD,
+/// `lui_frontend::modern_killcam_card`; the widget's KILLCAM title, its
+/// bands and the prompts stay BO2's). No title: the widget's says it.
+#[allow(clippy::too_many_arguments)]
+fn killcam_card(
+    mut commands: Commands,
+    presented: Option<Res<PresentedSnapshot>>,
+    local: Option<Res<LocalPresentClient>>,
+    icons: Option<Res<assets::T6HudIcons>>,
+    (shell_fonts, game_font, mut pics): (Option<Res<ShellFonts>>, Option<Res<GameUiFont>>, Option<ResMut<crate::shell::pics::ShellPics>>),
+    slot: NonSend<crate::lui_hud::LuiHudSlot>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    roots: Query<Entity, With<KillcamCardRoot>>,
+    time: Res<Time<Real>>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: Local<HashMap<String, Option<(Handle<Image>, Vec2)>>>,
+    // The killer's client and the card as built (its key).
+    mut st: Local<Option<(i32, BannerModel, u32)>>,
+) {
+    let clear = |commands: &mut Commands| {
+        for e in &roots {
+            commands.entity(e).despawn();
+        }
+    };
+    let snap = presented.as_deref().and_then(PresentedSnapshot::snapshot);
+    let found = match (snap, local.as_deref()) {
+        (Some(snap), Some(l)) if crate::hud_modern::modern_hud_enabled() => {
+            let dvars = snap.meta.script_dvars(l.0);
+            let me = snap.meta.for_client(l.0).map(|m| String::from_utf8_lossy(&m.name).trim_end_matches(char::from(0)).to_owned()).unwrap_or_default();
+            // (Not "3|": that is the Killed By card at his death.)
+            let killer = dvars
+                .string("bo2mp_killcam")
+                .and_then(|k| k.strip_prefix("1|").or_else(|| k.strip_prefix("2|")))
+                .and_then(|k| k.trim().parse::<i32>().ok())
+                .filter(|k| *k >= 0);
+            killer.map(|k| (k, me))
+        }
+        _ => None,
+    };
+    let Some((killer, me)) = found else {
+        clear(&mut commands);
+        *st = None;
+        return;
+    };
+    let now = now_secs(&time);
+    let mut model = match st.take() {
+        Some((k, m, built)) if k == killer => {
+            *st = Some((k, m.clone(), built));
+            m
+        }
+        _ => {
+            let name = snap
+                .and_then(|s| s.meta.clients.iter().find(|(c, _)| c.0 as i32 == killer))
+                .map(|(_, m)| String::from_utf8_lossy(&m.name).trim_end_matches(char::from(0)).to_owned())
+                .unwrap_or_default();
+            if name.is_empty() {
+                clear(&mut commands);
+                return;
+            }
+            diag::info!(Ui, "bo2mp hud: killcam card: {name} (client {killer})");
+            let mut m = BannerModel::new(name, 1, now);
+            m.hold = KILLCAM_CARD_HOLD;
+            *st = Some((killer, m.clone(), u32::MAX));
+            m
+        }
+    };
+    let cat = catalog();
+    let pictures = dress_card(&mut model, &me, snap, &slot, cat.as_ref(), &mut cache, pics.as_deref_mut(), icons.as_deref(), &mut images);
+    let size = window_size(&window);
+    let key = pictures | (size.y as u32) << 3 | (size.x as u32) << 16;
+    if st.as_ref().is_some_and(|(_, _, b)| *b == key) && !roots.is_empty() {
+        return;
+    }
+    let Some(faces) = Faces::of(shell_fonts.as_deref(), game_font.as_deref()) else { return };
+    clear(&mut commands);
+    let e = spawn_banner(&mut commands, &faces, &model, size);
+    // (Lower than the kill card's place: where BO2's plate was.)
+    let h = (CARD_H * card_scale(size)).round();
+    commands.entity(e).insert((KillcamCardRoot, Node {
+        position_type: PositionType::Absolute,
+        top: Val::Px((size.y * KILLCAM_CARD_CENTRE - h * 0.5).round()),
+        width: Val::Percent(100.0),
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        ..default()
+    }));
+    *st = Some((killer, model, key));
 }
 
 // --- Scorestreak callouts ------------------------------------------------------
@@ -1928,9 +2036,9 @@ pub(crate) fn register_match_hud_systems(app: &mut App) {
     app.init_resource::<KilledByUntil>();
     app.add_systems(
         Update,
-        (kill_feed, hit_marker, killed_by_card, kill_banner.after(killed_by_card), scoreboard, streak_callout).in_set(ClientSet::Ui),
+        (kill_feed, hit_marker, killed_by_card, killcam_card, kill_banner.after(killed_by_card), scoreboard, streak_callout).in_set(ClientSet::Ui),
     )
-    .add_systems(Update, (banner_pop, apply_fades).in_set(ClientSet::Ui).after(kill_banner).after(killed_by_card).after(kill_feed));
+    .add_systems(Update, (banner_pop, apply_fades).in_set(ClientSet::Ui).after(kill_banner).after(killed_by_card).after(killcam_card).after(kill_feed));
 }
 
 // --- Preview --------------------------------------------------------------------
