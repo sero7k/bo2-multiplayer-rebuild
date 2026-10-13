@@ -536,6 +536,35 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         }
         Ok(Value::Undefined)
     });
+    // bo2mp: spawntimedfx(fx, origin, up, seconds): an effect that plays
+    // where it is put (the smoke grenade's cloud: `_smokegrenade.gsc`), and
+    // an entity for it the script keeps (it blocks sight with it and
+    // deletes it when the cloud is gone).
+    vm.bind("spawntimedfx", false, |vm, world, _, a| {
+        let name = int(a, 0)
+            .ok()
+            .and_then(|id| fx_name(world, id))
+            .unwrap_or_default();
+        let origin = arg(a, 1).as_vec3().unwrap_or([0.0; 3]);
+        let up = arg(a, 2).as_vec3().unwrap_or([0.0, 0.0, 1.0]);
+        if !name.is_empty() {
+            effect(world, &name, origin, up);
+        }
+        let n = world.resource_mut::<Zm>().alloc_entnum();
+        let obj = vm.alloc_object(ObjKind::Entity(n));
+        world.resource_mut::<Zm>().ents.insert(
+            n,
+            super::Ent {
+                obj: Some(obj),
+                classname: "fx".into(),
+                origin,
+                ..Default::default()
+            },
+        );
+        Ok(Value::Object(obj))
+    });
+    // (Smoke blocking the bots' and turrets' sight: not modelled.)
+    vm.bind("fxblocksight", false, |_, _, _, _| Ok(Value::Undefined));
     vm.bind("activateclientexploder", false, |vm, world, _, a| {
         let id = arg(a, 0).clone();
         client_exploder(vm, world, &id);

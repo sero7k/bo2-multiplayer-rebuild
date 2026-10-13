@@ -576,6 +576,8 @@ pub(crate) fn apply_flashbang_blast(
         hits.push((target, amount_distance, amount_angle));
     }
     for (target, amount_distance, amount_angle) in hits {
+        // bo2mp: Black Ops II's scripts blind him (`monitorflash`).
+        crate::t6::t6_flashbang(world.ecs(), target, amount_distance, amount_angle, attacker);
         crate::script::flashbang(
             world.ecs(),
             target,

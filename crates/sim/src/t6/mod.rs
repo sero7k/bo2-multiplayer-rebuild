@@ -79,6 +79,7 @@ mod riotshield;
 pub(crate) mod jetgun;
 mod limits;
 mod offhand;
+pub(crate) use offhand::flashbang as t6_flashbang;
 mod transit;
 mod triggers;
 mod turrets;

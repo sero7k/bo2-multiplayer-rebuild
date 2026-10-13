@@ -528,6 +528,11 @@ pub(super) fn advance(world: &mut World, now: i64) {
             });
         }
     }
+    // bo2mp: in multiplayer the killstreaks' projectile table adopts every
+    // throw (one entity and one `grenade_fire` per grenade, as BO2 sends).
+    if world.resource::<Zm>().mp {
+        return;
+    }
     // New throws: an entity for each and `grenade_fire` to the thrower.
     for p in &live {
         if world.resource::<Zm>().thrown.iter().any(|t| t.id == p.id) {

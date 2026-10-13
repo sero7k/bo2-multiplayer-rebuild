@@ -88,3 +88,30 @@ pub(super) fn tick(world: &mut World) {
         }
     }
 }
+
+/// bo2mp: a flashbang caught him: Black Ops II's `_flashgrenades.gsc`
+/// (`monitorflash`) waits on his player for `"flashbang", amount_distance,
+/// amount_angle, attacker` and blinds and deafens him by them.
+pub(crate) fn flashbang(
+    world: &mut World,
+    target: ClientId,
+    amount_distance: f32,
+    amount_angle: f32,
+    attacker: ClientId,
+) {
+    let (obj, by) = {
+        let Some(zm) = world.get_resource::<super::Zm>() else {
+            return;
+        };
+        let Some(obj) = zm.players.get(&target.0).map(|p| p.obj) else {
+            return;
+        };
+        let by = zm.players.get(&attacker.0).map_or(gsc_t6::Value::Undefined, |p| gsc_t6::Value::Object(p.obj));
+        (obj, by)
+    };
+    super::with_vm(world, |vm, world| {
+        if vm.alive(obj) {
+            vm.notify_str(world, obj, "flashbang", &[gsc_t6::Value::Float(amount_distance), gsc_t6::Value::Float(amount_angle), by]);
+        }
+    });
+}

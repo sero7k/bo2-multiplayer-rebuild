@@ -408,6 +408,14 @@ fn t6_body_facts(w: &asset_t6::WeaponRef) -> WeaponBodyFacts {
     f.spread_before_fire_add = true;
     f.timed_detonation = w.def_u8(d::timedDetonation) != 0;
     f.proj_impact_explode = w.def_u8(d::bProjImpactExplode) != 0;
+    // bo2mp: what the projectile does when it goes off. Black Ops II's
+    // weapProjExposion_t starts as IW4's (0 grenade, 1 rocket, 2 flashbang,
+    // 3 none, 4 dud, 5 smoke, 6 heavy); its fire, napalm, bolt and
+    // shrapnel kinds (7..) explode as grenades here.
+    f.projectile_explosion_type = match w.def_i32(d::projExplosion) {
+        t @ 0..=6 => t,
+        _ => 0,
+    };
     f.bullet_impact_explode = w.def_u8(d::bBulletImpactExplode) != 0;
     f.explosion_radius = w.def_i32(d::iExplosionRadius);
     f.explosion_radius_min = w.def_i32(d::iExplosionRadiusMin);
