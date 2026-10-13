@@ -44,6 +44,9 @@ pub(crate) fn load_user_settings(
         Err(error) => warn!("could not read {}: {error}", path.display()),
     }
     settings.sanitize();
+    // bo2mp: the game always boots borderless fullscreen (Options can still
+    // make this session windowed).
+    settings.fullscreen = true;
     persistence.last_payload = Some(serialize_settings(&settings, &binds));
     // bo2mp: his friend code, made the first time (saved with the next
     // change of settings, and at once here).

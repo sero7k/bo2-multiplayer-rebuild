@@ -77,7 +77,7 @@ impl Default for GameSettings {
     fn default() -> Self {
         Self {
             resolution: DisplayResolution::HD,
-            fullscreen: false,
+            fullscreen: true,
             vsync: true,
             fov: Self::FOV_DEFAULT,
             master_volume: 1.0,
