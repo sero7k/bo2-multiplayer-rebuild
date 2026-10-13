@@ -1890,6 +1890,11 @@ pub(crate) fn give_killstreak(world: &mut World, client: u32, menu_name: &str) -
         let given = with_vm(world, |vm, world| {
             let obj = world.resource::<Zm>().players.get(&client)?.obj;
             let (ready, earned) = (vm.intern("moab_ready"), vm.intern("moab_earned"));
+            // (Asked again while he has one: it is called in.)
+            if vm.raw_field(obj, ready).as_int() == Some(1) {
+                let now = vm.intern("moab_call_now");
+                vm.set_raw_field(obj, now, gsc_t6::Value::Int(1));
+            }
             vm.set_raw_field(obj, ready, gsc_t6::Value::Int(1));
             vm.set_raw_field(obj, earned, gsc_t6::Value::Int(1));
             Some(())

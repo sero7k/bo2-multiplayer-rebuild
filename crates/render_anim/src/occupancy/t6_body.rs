@@ -657,6 +657,9 @@ fn foreign_state<'a>(
 /// carrying on and not a new one standing up again.
 const CORPSE_GAP_KEEP_MS: i32 = 9000;
 
+/// How long a dead player's body stays (ms after it fell).
+const CORPSE_LIFE_MS: i32 = 15_000;
+
 /// A step back in the clock smaller than this is a hiccup, not a killcam's
 /// replay starting.
 const CLOCK_BACK_REPLAY_MS: i32 = 250;
@@ -1856,6 +1859,10 @@ fn collect_t6_bodies(
                 },
             );
             corpse_since = Some(since);
+            // bo2mp: a body goes 15 s after the death.
+            if now.wrapping_sub(since) > CORPSE_LIFE_MS {
+                continue;
+            }
         }
         let meta = snapshot.meta.for_client(client);
         // bo2mp: on another game's map his team's soldier from that map

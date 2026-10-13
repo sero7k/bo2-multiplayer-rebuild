@@ -117,6 +117,16 @@ moab_watchstreak()
             self moab_voice( "achieve_kem" );
         }
 
+        // (`give killstreak nuke` while he has one: called in at once.)
+        if ( self.moab_ready && isalive( self ) && isdefined( self.moab_call_now ) && !isdefined( level.moab_incoming ) )
+        {
+            self.moab_call_now = undefined;
+            self.moab_ready = 0;
+            self.moab_announced = undefined;
+            level thread moab_launch( self );
+            continue;
+        }
+
         if ( self.moab_ready && isalive( self ) && self usebuttonpressed() )
         {
             held = 0;
