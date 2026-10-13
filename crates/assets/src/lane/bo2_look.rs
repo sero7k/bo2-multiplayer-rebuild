@@ -226,6 +226,81 @@ fn model_sky(capture: &asset_t6::ZoneCapture, packs: &asset_t6::PackSet) -> Resu
     Ok((material.name.clone(), Arc::new(cube)))
 }
 
+/// bo2mp: maps whose borrowed sky is pulled toward a colour (by how much,
+/// 0..1): Dome burns, so its sky is the orange of the fires and smoke.
+const SKY_TINTS: &[(&str, [f32; 3], f32)] = &[("mp_dome", [1.0, 0.52, 0.22], 0.7)];
+
+/// The sky's colour pulled toward `colour` at its own brightness (each
+/// face's top level, its HDR scale in alpha kept); one level, RGBA8.
+fn tinted_sky(sky: &Image, colour: [f32; 3], amount: f32) -> Option<Image> {
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let fmt = sky.texture_descriptor.format;
+    let (block, decode): (usize, fn(&[u8], &mut [u8], usize)) = match fmt {
+        TextureFormat::Bc1RgbaUnorm | TextureFormat::Bc1RgbaUnormSrgb => (8, bcdec_rs::bc1),
+        TextureFormat::Bc2RgbaUnorm | TextureFormat::Bc2RgbaUnormSrgb => (16, bcdec_rs::bc2),
+        TextureFormat::Bc3RgbaUnorm | TextureFormat::Bc3RgbaUnormSrgb => (16, bcdec_rs::bc3),
+        TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb => (0, |_, _, _| {}),
+        _ => return None,
+    };
+    let size = sky.texture_descriptor.size;
+    let (w, h, faces) = (size.width as usize, size.height as usize, size.depth_or_array_layers as usize);
+    let levels = sky.texture_descriptor.mip_level_count.max(1) as usize;
+    let data = sky.data.as_ref()?;
+    let level_bytes = |l: usize| {
+        let (lw, lh) = ((w >> l).max(1), (h >> l).max(1));
+        if block == 0 { lw * lh * 4 } else { lw.div_ceil(4) * lh.div_ceil(4) * block }
+    };
+    let face_bytes: usize = (0..levels).map(level_bytes).sum();
+    let lum_of = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    let k = 1.0 / lum_of(colour).max(0.05);
+    let mut out = Vec::with_capacity(w * h * 4 * faces);
+    let mut tile = [0u8; 64];
+    for face in 0..faces {
+        let top = data.get(face * face_bytes..face * face_bytes + level_bytes(0))?;
+        let mut rgba = vec![0u8; w * h * 4];
+        if block == 0 {
+            rgba.copy_from_slice(top);
+        } else {
+            let (bw, bh) = (w.div_ceil(4), h.div_ceil(4));
+            for by in 0..bh {
+                for bx in 0..bw {
+                    let at = (by * bw + bx) * block;
+                    decode(&top[at..at + block], &mut tile, 16);
+                    for y in 0..4 {
+                        for x in 0..4 {
+                            let (px, py) = (bx * 4 + x, by * 4 + y);
+                            if px < w && py < h {
+                                let d = (py * w + px) * 4;
+                                rgba[d..d + 4].copy_from_slice(&tile[(y * 4 + x) * 4..(y * 4 + x) * 4 + 4]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for p in rgba.chunks_exact_mut(4) {
+            let c = [f32::from(p[0]) / 255.0, f32::from(p[1]) / 255.0, f32::from(p[2]) / 255.0];
+            let lum = lum_of(c);
+            for i in 0..3 {
+                let v = c[i] * (1.0 - amount) + lum * colour[i] * k * amount;
+                p[i] = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
+        }
+        out.extend_from_slice(&rgba);
+    }
+    let format = if fmt.is_srgb() { TextureFormat::Rgba8UnormSrgb } else { TextureFormat::Rgba8Unorm };
+    let mut image = Image::new(
+        Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: faces as u32 },
+        TextureDimension::D2,
+        out,
+        format,
+        bevy::asset::RenderAssetUsages::RENDER_WORLD,
+    );
+    image.texture_view_descriptor = sky.texture_view_descriptor.clone();
+    image.sampler = sky.sampler.clone();
+    Some(image)
+}
+
 /// Black Ops II's zone folder (where every model and palette map is).
 fn zone_dir() -> Result<PathBuf, String> {
     let root = asset_transport::games_root_from_env().map_err(|e| e.to_string())?;
@@ -297,7 +372,19 @@ pub(crate) fn load(recipe: &'static Recipe, images: &[String], report: &mut Vec<
     let sky = match model_sky(&capture, &packs) {
         Ok(found) => {
             report.push(format!("bo2 look: sky from {}: {}", recipe.model, found.0));
-            Some(found)
+            match SKY_TINTS.iter().find(|t| t.0 == recipe.map) {
+                Some(&(_, colour, amount)) => match tinted_sky(&found.1, colour, amount) {
+                    Some(t) => {
+                        report.push(format!("bo2 look: sky tinted {colour:?} x{amount}"));
+                        Some((found.0, Arc::new(t)))
+                    }
+                    None => {
+                        report.push("bo2 look: sky tint skipped (format)".to_owned());
+                        Some(found)
+                    }
+                },
+                None => Some(found),
+            }
         }
         Err(e) => {
             report.push(format!("bo2 look: {}'s sky not used ({e}); the map keeps its own", recipe.model));
@@ -383,5 +470,31 @@ mod tests {
         assert_eq!(swap_for(r, "decal_cable_c"), None);
         assert_eq!(swap_for(r, "berlin_ceilings_metal_rust_c"), Some(("mp_socotra", "wpc/iw_ch_metal_rusty_02")));
         assert_eq!(swap_for(r, "makin_terrain_sand_dry_soft_c"), Some(("mp_castaway", "wpc/cas_sand_clean_crushed")));
+    }
+}
+
+#[cfg(test)]
+mod sky_tint_tests {
+    use super::*;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+
+    #[test]
+    fn grey_sky_turns_orange_and_keeps_its_scale() {
+        // A 4x4 cube, every face grey with HDR scale 0.5 in alpha.
+        let px = [128u8, 128, 128, 128];
+        let data: Vec<u8> = std::iter::repeat_n(px, 16 * 6).flatten().collect();
+        let sky = Image::new(
+            Extent3d { width: 4, height: 4, depth_or_array_layers: 6 },
+            TextureDimension::D2,
+            data,
+            TextureFormat::Rgba8Unorm,
+            bevy::asset::RenderAssetUsages::RENDER_WORLD,
+        );
+        let t = tinted_sky(&sky, [1.0, 0.52, 0.22], 0.7).unwrap();
+        let d = t.data.as_ref().unwrap();
+        assert_eq!(d.len(), 16 * 6 * 4);
+        let (r, g, b, a) = (d[0], d[1], d[2], d[3]);
+        assert!(r > g && g > b, "{r} {g} {b}");
+        assert_eq!(a, 128);
     }
 }
