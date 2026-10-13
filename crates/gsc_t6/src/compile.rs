@@ -117,6 +117,13 @@ fn lex(src: &str) -> Result<Vec<Token>, String> {
             i += end + 4;
             continue;
         }
+        // Paths written with backslashes (`maps\mp\_utility::x`, as
+        // decompilers print them) are the same as with slashes.
+        if c == b'\\' {
+            out.push(Token { tok: Tok::Punct("/"), line });
+            i += 1;
+            continue;
+        }
         // Developer blocks: retail builds skip them.
         if src[i..].starts_with("/#") {
             let end = src[i + 2..].find("#/").ok_or("unterminated /# block")?;

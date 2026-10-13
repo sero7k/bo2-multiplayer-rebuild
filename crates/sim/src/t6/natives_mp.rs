@@ -228,18 +228,20 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     }
     m!("isweaponviewonlylinked", |_, _, _, _| Ok(Value::Int(0)));
     // The spawn a player gets (`getsortedspawnpoints(point team, influencer
-    // team, enemy mask, player, predicted)`): BO2's engine rates every spawn
-    // point by its influencers, sorts them, then walks the best twenty
-    // skipping dangerous ones (it would telefrag, or a living enemy within
-    // 2600 units sees it, eyes 65 units up) and stops at the first safe
-    // one, so it pays sight traces only for the points it walks. Ours rates
-    // the team's points by the nearest living enemy and takes one of the
-    // first three safe ones, so a team does not stack on one point. (The
-    // scripts ask every half second for each dead player's predicted spawn:
-    // that answer only tells the client what to stream, and ours streams
-    // nothing, so it gets the best-rated point and pays no sight traces.)
+    // team, enemy mask, player, predicted)`): as BO2's engine, every spawn
+    // point of the team is rated by the spawn influencers that count for
+    // the influencer team (`influencers`), the points walked best first,
+    // the best twenty at most, skipping dangerous ones (it would telefrag,
+    // or a living enemy within 2600 units, spawnsystem_sight_check_max_
+    // distance, sees it, eyes 65 units up) and the first safe one taken.
+    // Points the influencers rate alike keep the farthest from the nearest
+    // enemy first. (The scripts ask every half second for each dead
+    // player's predicted spawn: that answer only tells the client what to
+    // stream, and ours streams nothing, so it takes the best-rated point
+    // and pays no sight traces.)
     f!("getsortedspawnpoints", |vm, world, _, a| {
         let team = text(vm, a, 0);
+        let influencer_team = text(vm, a, 1);
         let player = arg(a, 3).clone();
         let predicted = super::flag(a, 4, false);
         let level = vm.level;
@@ -351,7 +353,20 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         // spawnsystem_sight_check_max_distance, spawnsystem_sight_height_offset.
         const SIGHT_RANGE: f32 = 2600.0;
         const SIGHT_HEIGHT: f32 = 65.0;
-        let mut rated: Vec<(f32, [f32; 3], Value)> = Vec::new();
+        // The influencer team's bit (level.spawnsystem.ispawn_teammask).
+        let team_bit = {
+            let ss = vm.intern("spawnsystem");
+            let masks = vm.intern("ispawn_teammask");
+            let key = gsc_t6::Key::Str(vm.intern(&influencer_team));
+            match vm.raw_field(level, ss) {
+                Value::Object(o) => match vm.raw_field(o, masks) {
+                    Value::Array(arr) => arr.get(&key).and_then(|v| v.as_int()).unwrap_or(1),
+                    _ => 1,
+                },
+                _ => 1,
+            }
+        };
+        let mut rated: Vec<(f32, f32, [f32; 3], Value)> = Vec::new();
         for p in points {
             let Some(o) = super::origin_of(vm, world, &p).or_else(|| {
                 let Value::Object(obj) = &p else { return None };
@@ -360,16 +375,47 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             }) else {
                 continue;
             };
-            let score = enemies
+            let far = enemies
                 .iter()
                 .map(|e| ((e[0] - o[0]).powi(2) + (e[1] - o[1]).powi(2)).sqrt())
                 .fold(4096.0f32, f32::min);
-            rated.push((score, o, p));
+            rated.push((0.0, far, o, p));
         }
+        // The influencers where they are now (one following an entity is
+        // where that entity is; one whose entity is gone counts no more).
+        let now = vm.time_ms;
+        let infl = world.get_resource_mut::<super::influencers::SpawnInfluencers>().map(|mut s| {
+            s.expire(now);
+            s.list.clone()
+        });
+        if let Some(list) = infl {
+            let mut at: Vec<Option<[f32; 3]>> = Vec::with_capacity(list.len());
+            for i in &list {
+                at.push(match &i.entity {
+                    Some(e) => super::origin_of(vm, world, e),
+                    None => Some(i.origin),
+                });
+            }
+            let origin_now = |i: &super::influencers::Influencer| {
+                list.iter().position(|x| x.id == i.id).and_then(|k| at[k])
+            };
+            let spots: Vec<[f32; 3]> = rated.iter().map(|r| r.2).collect();
+            let scores = super::influencers::score_points(&list, team_bit, &spots, &origin_now);
+            for (r, s) in rated.iter_mut().zip(scores) {
+                r.0 = s;
+            }
+        }
+        let rated: Vec<(f32, [f32; 3], Value)> = {
+            rated.sort_by(|x, y| {
+                y.0.partial_cmp(&x.0)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then(y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal))
+            });
+            rated.into_iter().map(|(s, _, o, p)| (s, o, p)).collect()
+        };
         if rated.is_empty() {
             return Ok(super::list(Vec::new()));
         }
-        rated.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap_or(std::cmp::Ordering::Equal));
         let f = super::frame(world);
         let alive: Vec<[f32; 3]> = f
             .client_ids_sorted()
@@ -401,9 +447,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             });
             if !seen {
                 safe.push(i);
-                if safe.len() == 3 {
-                    break;
-                }
+                break;
             }
         }
         let ms = tracing.elapsed().as_secs_f64() * 1000.0;
@@ -413,7 +457,7 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         // All dangerous: the best that would not telefrag, else the best.
         let fallback = rated.iter().position(|(_, o, _)| !telefrag(*o)).unwrap_or(0);
         drop(f);
-        let pick = if safe.is_empty() { fallback } else { safe[(vm.rand_u32() as usize) % safe.len()] };
+        let pick = safe.first().copied().unwrap_or(fallback);
         Ok(super::list(vec![rated[pick].2.clone()]))
     });
     // The death path's small answers: no revive, rank XP waits for the

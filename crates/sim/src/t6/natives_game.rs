@@ -362,14 +362,10 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     });
     f!("weaponfuellife", |_, _, _, _| Ok(Value::Int(0)));
     f!("numremoteclients", |_, _, _, _| Ok(Value::Int(0)));
-    f!("addsphereinfluencer", |_, _, _, _| Ok(Value::Int(1)));
-    f!("addcylinderinfluencer", |_, _, _, _| Ok(Value::Int(1)));
     f!("addboxinfluencer", |_, _, _, _| Ok(Value::Int(1)));
     for name in [
         "adddemobookmark",
         "setinitialplayersconnected",
-        "removeinfluencer",
-        "enableinfluencer",
         "addinfluencerspawnpoints",
         "addspawnpoints",
         "clearspawnpoints",

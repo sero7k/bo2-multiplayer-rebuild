@@ -32,6 +32,7 @@ mod fields;
 mod globallogic;
 mod hud;
 mod hurt;
+mod influencers;
 mod items;
 mod killstreaks;
 mod loadout;
@@ -510,6 +511,7 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
     vehicles::bind(&mut vm);
     hud::bind(&mut vm);
     if mp {
+        influencers::bind(&mut vm);
         natives_mp::bind(&mut vm);
         stats::bind(&mut vm);
         bots::bind(&mut vm);
