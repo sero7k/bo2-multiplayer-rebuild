@@ -474,15 +474,15 @@ impl<'a> Walker<'a> {
             T::XModelSurfs => model::xmodel_surfs(self, h),
             T::XAnimParts => anim::xanim(self, h),
             T::Fx => fx::effect(self, h),
+            T::ImpactFx | T::SurfaceFx => misc::fx_table(self, ty, h, if ty == T::ImpactFx { misc::IMPACT_FX_EFFECTS } else { misc::SURFACE_FX_EFFECTS }),
             T::ParticleSimAnimation => fx::particle_sim_animation(self, h),
             T::Sound => sound::sound(self, h),
             T::LoadedSound => sound::loaded_sound(self, h),
             T::Attachment => weapon::attachment(self, h),
             T::Weapon => weapon::weapon(self, h),
             T::SkeletonScript => misc::skeleton_script(self, h),
+            T::PhysConstraint => misc::named_only(self, ty, h, 0),
             T::EquipmentSndTable => misc::equipment_snd_table(self, h),
-            T::ImpactFx => misc::fx_table(self, ty, h, misc::IMPACT_FX_EFFECTS),
-            T::SurfaceFx => misc::fx_table(self, ty, h, misc::SURFACE_FX_EFFECTS),
             _ => Err(ReadError::Invalid(ty.name(), h)),
         }
     }

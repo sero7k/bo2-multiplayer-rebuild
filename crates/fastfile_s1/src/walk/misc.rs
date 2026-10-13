@@ -263,7 +263,17 @@ fn _unused(_: OtherRec) {}
 /// `FxImpactTable` { name; FxImpactEntry* table } with 15 entries of 38
 /// effects each (Ghosts' surface types plus flesh; measured on retail
 /// common_mp: 570 effect pointers between the name and the next asset).
-pub(super) const IMPACT_FX_EFFECTS: usize = 15 * 38;
+pub(super) const IMPACT_FX_EFFECTS: usize = 19 * 60;
+
+/// Debug override of an effect table's size (`S1_FXTABLE_<ty>=<n>`).
+pub(super) fn table_size(ty: AssetType, default: usize) -> usize {
+    #[cfg(test)]
+    if let Ok(v) = std::env::var(format!("S1_FXTABLE_{}", ty.name())) {
+        return v.parse().unwrap_or(default);
+    }
+    let _ = ty;
+    default
+}
 
 /// `SurfaceFxTable` { name; SurfaceFxEntry* table }: 6 entries of 31
 /// effects (186 pointers in retail common_mp).
@@ -272,10 +282,15 @@ pub(super) const SURFACE_FX_EFFECTS: usize = 6 * 31;
 /// An effect table (`ImpactFx`, `SurfaceFx`): name, then a pointer to
 /// `effects` effect pointers.
 pub(super) fn fx_table(w: &mut Walker, ty: AssetType, h: usize, effects: usize) -> Result<AssetId> {
+    let effects = table_size(ty, effects);
     w.s.push(VIRTUAL);
     let name = w.xstr(h)?.unwrap_or_default();
     if let Some(table) = w.inline_array(h + 8, 8 * effects, 7)? {
         for i in 0..effects {
+            #[cfg(test)]
+            if matches!(w.s.ptr_at(table + 8 * i)?, crate::Ptr::Other(_)) {
+                eprintln!("FXTABLE {} entry {i} is not a pointer", ty.name());
+            }
             w.asset(AssetType::Fx, table + 8 * i)?;
         }
     }

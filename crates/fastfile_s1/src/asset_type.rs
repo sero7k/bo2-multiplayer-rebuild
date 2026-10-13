@@ -83,8 +83,8 @@ asset_types! {
     Weapon = 0x28, "weapon", 3560;
     SndDriverGlobals = 0x29, "snddriverglobals", 0;
     Fx = 0x2a, "fx", 64;
-    ImpactFx = 0x2b, "impactfx", 0;
-    SurfaceFx = 0x2c, "surfacefx", 0;
+    ImpactFx = 0x2b, "impactfx", 16;
+    SurfaceFx = 0x2c, "surfacefx", 16;
     AiType = 0x2d, "aitype", 0;
     MpType = 0x2e, "mptype", 0;
     Character = 0x2f, "character", 0;

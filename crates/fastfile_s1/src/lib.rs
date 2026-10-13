@@ -97,6 +97,7 @@ mod retail_walk {
                 w.unresolved.get(),
                 stop
             );
+            println!("  first unresolved (asset, pos, virt): {:x?}", w.first_unresolved.get());
             if std::env::var_os("S1_LIST").is_some() {
                 for m in &w.cap.xmodels {
                     println!("  model {} bones {} surfs {} lods {:?}", m.name, m.num_bones, m.numsurfs,
