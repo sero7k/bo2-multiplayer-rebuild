@@ -37,6 +37,40 @@ pub(crate) struct ModeEntry {
     pub key: String,
     pub title: String,
     pub desc: String,
+    /// bo2mp: its rules as Black Ops II's game settings give them
+    /// (mp/gamesettings_default.cfg, then mp/gamesettings_<type>.cfg):
+    /// time limit (minutes, 0 none), score limit, round limit, lives.
+    pub rules: ModeRules,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct ModeRules {
+    pub time_limit: Option<f32>,
+    pub score_limit: Option<f32>,
+    pub round_limit: Option<f32>,
+    pub lives: Option<f32>,
+}
+
+/// A game type's `gametype_setting` lines (the default file, then its own).
+pub(crate) fn mode_rules(configs: &std::collections::HashMap<String, String>, key: &str) -> ModeRules {
+    let mut set: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
+    for file in ["mp/gamesettings_default.cfg".to_owned(), format!("mp/gamesettings_{key}.cfg")] {
+        let Some(text) = configs.get(&file) else { continue };
+        for line in text.lines() {
+            let mut w = line.split("//").next().unwrap_or("").split_whitespace();
+            if w.next().is_some_and(|v| v.eq_ignore_ascii_case("gametype_setting"))
+                && let (Some(name), Some(value)) = (w.next(), w.next().and_then(|x| x.trim_matches('"').parse::<f32>().ok()))
+            {
+                set.insert(name.to_ascii_lowercase(), value);
+            }
+        }
+    }
+    ModeRules {
+        time_limit: set.get("timelimit").copied(),
+        score_limit: set.get("scorelimit").copied(),
+        round_limit: set.get("roundlimit").copied(),
+        lives: set.get("playernumlives").copied(),
+    }
 }
 
 /// His card: name, level, prestige and how far into the level he is.
@@ -282,6 +316,7 @@ fn build_catalog(host: &Host, mp: Option<&Mp>) -> Catalog {
             key: key.to_owned(),
             title: title.to_uppercase(),
             desc,
+            rules: mode_rules(&v.configs, key),
         });
     }
     // His card.

@@ -48,10 +48,20 @@ fn stand_in_catalog() -> Catalog {
         ("dom", "DOMINATION", "Capture and hold the flags."),
         ("sd", "SEARCH & DESTROY", "One life per round: plant or defuse the bomb."),
         ("gun", "GUN GAME", "A new gun with every kill."),
+        ("oic", "ONE IN THE CHAMBER", "One bullet, three lives."),
+        ("conf", "KILL CONFIRMED", "Collect dog tags to score."),
     ];
     Catalog {
         maps,
-        modes: modes.iter().map(|(k, t, d)| ModeEntry { key: (*k).to_owned(), title: (*t).to_owned(), desc: (*d).to_owned() }).collect(),
+        modes: modes
+            .iter()
+            .map(|(k, t, d)| ModeEntry {
+                key: (*k).to_owned(),
+                title: (*t).to_owned(),
+                desc: (*d).to_owned(),
+                rules: super::bridge::ModeRules { time_limit: Some(10.0), score_limit: Some(75.0), round_limit: Some(1.0), lives: Some(0.0) },
+            })
+            .collect(),
         player: PlayerCard {
             name: "simon".to_owned(),
             level: 72,
@@ -340,6 +350,32 @@ fn step(
             ]);
             s.screen = Screen::Lobbies;
             s.focus = 0;
+        }),
+        ("12k_match_filter", |s, _| {
+            s.screen = Screen::MatchFilter;
+            s.page = 0;
+            s.filter = vec!["tdm".to_owned(), "dom".to_owned()];
+            s.focus = 3;
+        }),
+        ("12n_brainrot", |s, _| {
+            s.screen = Screen::MatchFilter;
+            s.page = 0;
+            s.filter = Vec::new();
+            s.brainrot = true;
+            s.focus = 0;
+        }),
+        ("12l_match_party", |s, _| {
+            s.screen = Screen::MatchFilter;
+            s.page = 1;
+            s.filter = vec!["gun".to_owned()];
+            s.focus = 0;
+        }),
+        ("12m_match_none", |s, _| {
+            super::lobbies::preview(Vec::new());
+            s.screen = Screen::Lobbies;
+            s.searching = true;
+            s.filter = vec!["oic".to_owned()];
+            s.focus = 1;
         }),
         ("12j_room", |s, _| {
             super::lobbies::preview(Vec::new());

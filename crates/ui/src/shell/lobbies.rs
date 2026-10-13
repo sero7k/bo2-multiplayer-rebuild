@@ -70,8 +70,39 @@ fn status(a: &MasterAdvert) -> String {
     }
 }
 
-pub(crate) fn rows(_shell: &Shell) -> Vec<Row> {
+/// The lobbies shown: every one, or FIND A MATCH's search (open lobbies of
+/// the modes ticked).
+fn shown(shell: &Shell) -> Vec<MasterAdvert> {
     let list = list();
+    if !shell.searching {
+        return list;
+    }
+    list.into_iter().filter(|a| joinable(a) && super::matchmaking::passes(shell, &a.map, &a.mode)).collect()
+}
+
+pub(crate) fn rows(shell: &Shell) -> Vec<Row> {
+    let list = shown(shell);
+    if list.is_empty() && shell.searching {
+        let online = crate::online_match::online_available() || PREVIEW.lock().is_ok_and(|p| p.is_some());
+        return vec![
+            Row {
+                label: "NO MATCHES FOUND".to_owned(),
+                sub: if online {
+                    "Nobody is in an open lobby of these modes yet. Searching again every 15 seconds.".to_owned()
+                } else {
+                    "No server set: fill in online.cfg next to run-bo2.cmd (see docs\\ONLINE.md).".to_owned()
+                },
+                value: None,
+                act: Act::Info,
+            },
+            Row {
+                label: "HOST A MATCH".to_owned(),
+                sub: "Open your own lobby in this playlist: the next player searching finds it.".to_owned(),
+                value: None,
+                act: Act::HostMatch,
+            },
+        ];
+    }
     if list.is_empty() {
         let online = crate::online_match::online_available() || PREVIEW.lock().is_ok_and(|p| p.is_some());
         return vec![Row {
@@ -112,10 +143,14 @@ pub(crate) fn lobby_note(id: AdvertId) -> String {
 }
 
 pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row]) {
-    header(c, cx, &["MULTIPLAYER", "FIND A LOBBY"]);
+    if shell.searching {
+        header(c, cx, &["FIND A MATCH", "SEARCH RESULTS"]);
+    } else {
+        header(c, cx, &["MULTIPLAYER", "FIND A LOBBY"]);
+    }
     c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(8.0), ..abs(Some(72.0), Some(176.0), None, None, cx) })
         .with_children(|col| menu_rows(col, cx, rows, shell.focus, 720.0, false));
-    let list = list();
+    let list = shown(shell);
     let open = list.iter().filter(|a| joinable(a)).count();
     let players: u32 = list.iter().map(|a| u32::from(a.players)).sum();
     c.spawn((

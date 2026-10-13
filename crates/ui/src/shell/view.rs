@@ -264,7 +264,7 @@ fn footer(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, online: &Onl
                 }
                 hint(l, cx, "ENTER", "xenonbutton_a", "SELECT");
                 match shell.screen {
-                    Screen::Lobby | Screen::Options => hint(l, cx, "Q / E", "xenonbutton_lb", "TABS"),
+                    Screen::Lobby | Screen::Options | Screen::MatchFilter => hint(l, cx, "Q / E", "xenonbutton_lb", "TABS"),
                     Screen::MapPick => hint(l, cx, "Q / E", "xenonbutton_lb", "SECTIONS"),
                     Screen::ItemPick => hint(l, cx, "Q / E", "xenonbutton_lb", "CATEGORIES"),
                     Screen::CardPick | Screen::EmblemPick => hint(l, cx, "Q / E", "xenonbutton_lb", "PAGES"),
@@ -1132,6 +1132,7 @@ pub(crate) fn shell_view(
                 Screen::Barracks => barracks_view(c, &mut cx, &shell, &cat, &rows),
                 Screen::Friends => super::friends::view(c, &mut cx, &shell, &rows),
                 Screen::Lobbies => super::lobbies::view(c, &mut cx, &shell, &rows),
+                Screen::MatchFilter => super::matchmaking::view(c, &mut cx, &shell, &cat, &rows),
                 Screen::Room => super::room::view(c, &mut cx, &shell, &rows),
                 Screen::CardPick | Screen::EmblemPick => super::looks::view(c, &mut cx, &shell, &cat, &rows),
                 Screen::Classes | Screen::ClassEdit | Screen::ItemPick => {
