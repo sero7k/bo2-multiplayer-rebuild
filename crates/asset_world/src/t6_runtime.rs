@@ -173,6 +173,14 @@ impl T6LightSampler {
     }
 }
 
+/// bo2mp: `BO2MP_FOREIGN_SUN=1` gives Black Ops II's models on another
+/// game's map the primary light's term again (off: the grid's light only).
+static FOREIGN_SUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_foreign_sun(on: bool) {
+    FOREIGN_SUN.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 impl T6LightSampler {
     /// bo2mp: a foreign map's grid at `pos`: its light (the mean of the
     /// lookup's colours, decoded as `foreign.scale` says), the primary light
@@ -215,6 +223,12 @@ impl T6LightSampler {
         }
         // (No corner naming any light: in no light's view, not in full sun.)
         let visibility = if primary == 0 || all <= 1e-6 { 0.0 } else { (named / all).clamp(0.0, 1.0) };
+        // bo2mp: on another game's map Black Ops II's models take the grid's
+        // light only, not the primary light on top: its sun term (full
+        // colour and Black Ops II's specular) washed guns and players out
+        // white on MW3 and Black Ops maps; MW2's maps, whose grids name a
+        // non-sun row, never got it and look right.
+        let visibility = if FOREIGN_SUN.load(std::sync::atomic::Ordering::Relaxed) { visibility } else { 0.0 };
         T6PointLight {
             light,
             primary,

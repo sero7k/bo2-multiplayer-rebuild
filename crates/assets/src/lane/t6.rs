@@ -1323,16 +1323,22 @@ fn foreign_t6_lighting(loaded: &mut LoadedWorld, map: &str) {
         Some(asset_model::LightGridColorEncoding::T5Y12U6W6) => 255.0 / 8.0,
         _ => 4.0,
     };
+    // bo2mp: the primary light's term on models is off on another game's
+    // map (`BO2MP_FOREIGN_SUN=1` brings it back): see `sample_foreign`.
+    let foreign_sun = std::env::var("BO2MP_FOREIGN_SUN").is_ok_and(|v| v.trim() == "1");
+    asset_world::set_foreign_sun(foreign_sun);
     let foreign = asset_world::ForeignGridLight {
         scale,
         outside: asset_world::T6PointLight {
             light: [0.5; 3],
             primary: sun_primary,
-            visibility: if sun_primary != 0 { 1.0 } else { 0.0 },
+            visibility: if sun_primary != 0 && foreign_sun { 1.0 } else { 0.0 },
         },
     };
+    let sun_colour = sun.and_then(|i| lights.get(i)).map(|l| [l[4], l[5], l[6]]);
     let line = format!(
-        "bo2 rules: {map} moving-thing lighting: light grid {} (scale {scale:.2}), {} primary lights (sun {:?}, grid sun {sun_primary}, table {}), collision {}",
+        "bo2 rules: {map} moving-thing lighting: sun colour {sun_colour:?}, models' sun term {}; light grid {} (scale {scale:.2}), {} primary lights (sun {:?}, grid sun {sun_primary}, table {}), collision {}",
+        if foreign_sun { "on" } else { "off" },
         if grid.is_some() { "READY" } else { "absent (ambient + sun)" },
         lights.len(),
         sun,
