@@ -555,7 +555,26 @@ fn modern_hud(
         .streaks
         .iter()
         .map(|s| {
-            let image = picture(&mut cache, icons, &mut images, &s.icon)?;
+            // (Another game's picture, `iw4:specialty_nuke`: read from its
+            // own files.)
+            let image = match s.icon.split_once(':') {
+                Some((game @ ("iw4" | "iw5" | "t5"), name)) => {
+                    let key = s.icon.clone();
+                    match cache.get(&key) {
+                        Some(Some(h)) => h.clone(),
+                        _ => {
+                            let (game, owned) = (game.to_owned(), name.to_owned());
+                            let img = crate::foreign_maps::picture_async(&key, true, move || {
+                                crate::foreign_maps::read_game_image(&game, &[owned])
+                            })?;
+                            let h = images.add((*img).clone());
+                            cache.insert(key, Some(h.clone()));
+                            h
+                        }
+                    }
+                }
+                _ => picture(&mut cache, icons, &mut images, &s.icon)?,
+            };
             let (rect, aspect) = images.get(&image).map_or((None, 1.0), visible_part);
             Some(StreakPic { image, rect, aspect })
         })

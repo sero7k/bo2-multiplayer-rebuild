@@ -199,7 +199,7 @@ impl Row {
     }
 }
 
-/// The M.O.A.B.'s choices: off, Modern Warfare 3's 25 kills, then others.
+/// The Tactical Nuke's kill counts: off, Modern Warfare 2's 25 (the default), then others.
 pub(crate) const MOAB_KILLS: [u32; 5] = [0, 25, 20, 15, 30];
 
 pub(crate) const DIFFICULTY: [&str; 4] = ["RECRUIT", "REGULAR", "HARDENED", "VETERAN"];
@@ -272,7 +272,7 @@ impl Default for Shell {
             friends: 5,
             enemies: 6,
             difficulty: 1,
-            moab: 0,
+            moab: 1,
             page: 0,
             note: None,
             played: false,
@@ -351,8 +351,8 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
                     Row::new("BOT DIFFICULTY", "", Act::Cycle(Setting::Difficulty)),
                     Row::new("MAP", "", Act::PickMap),
                     Row::new(
-                        "M.O.A.B.",
-                        "Optional, not Black Ops II: Modern Warfare 3's M.O.A.B. for a kill streak in one life (kills every enemy, then an EMP).",
+                        "TACTICAL NUKE",
+                        "Optional, not Black Ops II: Modern Warfare 2's Tactical Nuke for a kill streak in one life, called in with Ghosts' KEM Strike voice. It kills everyone and ends the match.",
                         Act::Cycle(Setting::Moab),
                     ),
                 ];

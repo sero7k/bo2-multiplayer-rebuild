@@ -15,7 +15,7 @@ use super::Zm;
 /// Our `maps/mp/gametypes/_globallogic`.
 const GLOBALLOGIC: &str = include_str!("scripts/mp_globallogic.gsc");
 
-static MOAB_KILLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static MOAB_KILLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(25);
 
 /// bo2mp: the lobby's M.O.A.B. setting for the next match: the kills in
 /// one life that earn it, 0 for none (native Black Ops II).
@@ -115,8 +115,8 @@ mod moab_tests {
     }
 
     #[test]
-    fn the_moab_is_off_unless_chosen() {
-        assert_eq!(super::moab_kills(), 0);
+    fn the_nuke_is_on_by_default_at_25_kills() {
+        assert_eq!(super::moab_kills(), 25);
         assert!(super::MOAB.contains("getdvarint( \"scr_moab\" ) == 0"));
     }
 }

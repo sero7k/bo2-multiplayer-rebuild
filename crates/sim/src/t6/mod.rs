@@ -2729,9 +2729,24 @@ fn publish_hud(world: &mut World) {
         // class script has given him his. Sent every tick it changes, an
         // empty list too (no streaks: the column goes), so nothing of a
         // last life or class stays on his screen.
-        let picks = with_vm(world, |vm, world| loadout::his_streaks(vm, world, c))
+        let mut picks = with_vm(world, |vm, world| loadout::his_streaks(vm, world, c))
             .flatten()
             .unwrap_or_else(|| picks.clone());
+        // bo2mp: the Tactical Nuke, once earned (`self.moab_ready`), at the
+        // top of the column (dearest), lit until he calls it in.
+        let nuke = with_vm(world, |vm, world| {
+            let obj = world.resource::<Zm>().players.get(&c)?.obj;
+            let f = vm.intern("moab_ready");
+            Some(vm.raw_field(obj, f).as_int() == Some(1))
+        })
+        .flatten()
+        .unwrap_or(false);
+        if nuke {
+            if !picks.is_empty() {
+                picks.push(';');
+            }
+            picks.push_str("iw4:specialty_nuke:99999:1");
+        }
         {
             let mut f = frame(world);
             if f.client_meta(crate::world::ClientId(c)).is_some() {

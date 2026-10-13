@@ -1,21 +1,21 @@
-// bo2mp: an optional M.O.A.B. (Modern Warfare 3's Massive Ordnance Air
-// Blast) for Black Ops II multiplayer. OUR CODE, not the original: no
-// Modern Warfare 3 script is readable on a PC install (they ship compiled),
-// so it follows Modern Warfare 2's tactical nuke script (maps/mp/
-// killstreaks/_nuke.gsc, read from MW2's common_mp: a ten second
-// countdown with a ticking timer, the incoming sound 3.3 s before the
-// blast, the blast's sound, the flash vision, the deaths 1.5 s after,
-// then the aftermath vision) with Modern Warfare 3's rules: the match goes
-// on, every enemy dies, and the enemy team is hit by an EMP (Black Ops
-// II's own `_emp::emp_use`, whose aftermath already restores
-// `level.nukevisionset`).
+// bo2mp: an optional Tactical Nuke (Modern Warfare 2's) for Black Ops II
+// multiplayer, called in with Ghosts' KEM Strike voice lines. OUR CODE,
+// after Modern Warfare 2's maps/mp/killstreaks/_nuke.gsc (read from MW2's
+// common_mp): a ten second countdown with its ticking timer, the incoming
+// sound 3.3 s before the blast, the blast and its shock wave, the flash
+// vision, every enemy dead 1.5 s after (by the caller's hand) and the
+// aftermath vision. The match goes on.
 //
+// Earned by kills in one life, killstreak kills too (as MW2 counts them);
+// its own kills count toward nothing: not the next nuke, not his
+// scorestreaks.
+//
+// (The script keeps its old name, `bo2mp/moab`, and its dvars.)
 // Off unless `scr_moab 1`. Settings (dvars):
 //   scr_moab              1 to allow it (default 0: native Black Ops II)
 //   scr_moab_kills        kills in one life to earn it (default 25)
 //   scr_moab_timer        countdown seconds (default 10)
-//   scr_moab_emp          1: EMP the enemy team after the blast (default 1)
-//   scr_moab_endsgame     1: the blast ends the match, as MW2's nuke (default 0)
+//   scr_moab_endsgame     1: the blast ends the match, as MW2's (default 0)
 // Earned once per kill streak; held until used: hold [Use] for a second.
 
 main()
@@ -25,7 +25,6 @@ main()
 
     level.moab_kills = moab_dvar_int( "scr_moab_kills", 25 );
     level.moab_timer = moab_dvar_int( "scr_moab_timer", 10 );
-    level.moab_emp = moab_dvar_int( "scr_moab_emp", 1 );
     level.moab_endsgame = moab_dvar_int( "scr_moab_endsgame", 0 );
     level.nukevisionset = "mpnuke_aftermath";
     level thread moab_onconnect();
@@ -53,32 +52,63 @@ moab_onconnect()
     }
 }
 
+// Ghosts' announcer (its KEM Strike lines), else Modern Warfare 2's.
+moab_voice( line )
+{
+    self playlocalsound( "iw6:US_1mc_" + line );
+}
+
+// This life's kills: every kill since he spawned (killstreak kills too),
+// less what a nuke of his killed.
+moab_life_kills()
+{
+    if ( !isdefined( self.pers["kills"] ) || !isdefined( self.moab_base ) )
+        return 0;
+
+    return self.pers["kills"] - self.moab_base;
+}
+
+moab_onspawn()
+{
+    self endon( "disconnect" );
+    level endon( "game_ended" );
+
+    for (;;)
+    {
+        self waittill( "spawned_player" );
+        self.moab_base = 0;
+
+        if ( isdefined( self.pers["kills"] ) )
+            self.moab_base = self.pers["kills"];
+
+        self.moab_earned = 0;
+    }
+}
+
 // Earned when this life's kills reach the count; used by holding [Use].
 moab_watchstreak()
 {
     self endon( "disconnect" );
     level endon( "game_ended" );
     self.moab_ready = 0;
-    earned_at = -1;
+    self.moab_earned = 0;
+    self.moab_base = 0;
+
+    if ( isdefined( self.pers["kills"] ) )
+        self.moab_base = self.pers["kills"];
+
+    self thread moab_onspawn();
 
     for (;;)
     {
         wait 0.25;
 
-        if ( !isdefined( self.pers["cur_kill_streak"] ) )
-            continue;
-
-        streak = self.pers["cur_kill_streak"];
-
-        if ( streak < earned_at )
-            earned_at = -1;
-
-        if ( !self.moab_ready && earned_at < 0 && streak >= level.moab_kills )
+        if ( !self.moab_ready && !self.moab_earned && isalive( self ) && self moab_life_kills() >= level.moab_kills )
         {
-            earned_at = streak;
+            self.moab_earned = 1;
             self.moab_ready = 1;
-            self iprintlnbold( "M.O.A.B. READY: HOLD [USE] TO CALL IT IN" );
-            self playlocalsound( "mpl_killstreak_emp_activate" );
+            self iprintlnbold( "TACTICAL NUKE READY: HOLD [USE] TO CALL IT IN" );
+            self moab_voice( "achieve_kem" );
         }
 
         if ( self.moab_ready && isalive( self ) && self usebuttonpressed() )
@@ -110,11 +140,20 @@ moab_launch( owner )
     foreach ( player in level.players )
     {
         if ( player == owner )
-            player iprintlnbold( "M.O.A.B. INBOUND" );
+        {
+            player iprintlnbold( "TACTICAL NUKE INBOUND" );
+            player moab_voice( "use_tnuke" );
+        }
         else if ( level.teambased && player.pers["team"] == level.moab_team )
-            player iprintlnbold( "FRIENDLY M.O.A.B. INBOUND" );
+        {
+            player iprintlnbold( "FRIENDLY TACTICAL NUKE INBOUND" );
+            player moab_voice( "use_tnuke" );
+        }
         else
-            player iprintlnbold( "ENEMY M.O.A.B. INBOUND" );
+        {
+            player iprintlnbold( "ENEMY TACTICAL NUKE INBOUND" );
+            player moab_voice( "enemy_tnuke" );
+        }
     }
 
     timer = maps\mp\gametypes\_hud_util::createservertimer( "objective", 2.0 );
@@ -129,15 +168,13 @@ moab_launch( owner )
 
     foreach ( player in level.players )
     {
-        // (Modern Warfare's own when its sounds are installed, and Black
-        // Ops II's biggest blast under it.)
-        player playlocalsound( "nuke_explosion" );
-        player playlocalsound( "nuke_wave" );
+        player playlocalsound( "iw4:nuke_explosion" );
+        player playlocalsound( "iw4:nuke_wave" );
+        // (Black Ops II's biggest blast under it.)
         player playlocalsound( "mpl_sd_exp_suitcase_bomb_main" );
-        player playlocalsound( "mpl_killstreak_emp_blast_front" );
     }
 
-    earthquake( 0.6, 5, owner.origin, 100000 );
+    earthquake( 0.6, 10, owner.origin, 100000 );
     wait 0.25;
     visionsetnaked( "mpnuke", 3 );
     wait 1.25;
@@ -147,16 +184,15 @@ moab_launch( owner )
 
     if ( level.moab_endsgame )
     {
+        wait 2;
+
         if ( level.teambased )
-            thread maps\mp\gametypes\_globallogic::endgame( level.moab_team, "M.O.A.B." );
+            thread maps\mp\gametypes\_globallogic::endgame( level.moab_team, "TACTICAL NUKE" );
         else if ( isdefined( owner ) )
-            thread maps\mp\gametypes\_globallogic::endgame( owner, "M.O.A.B." );
+            thread maps\mp\gametypes\_globallogic::endgame( owner, "TACTICAL NUKE" );
 
         return;
     }
-
-    if ( level.moab_emp && isdefined( owner ) )
-        owner maps\mp\killstreaks\_emp::emp_use( 0 );
 
     level.moab_incoming = undefined;
 }
@@ -166,10 +202,7 @@ moab_ticks()
     while ( !isdefined( level.moab_detonated ) )
     {
         foreach ( player in level.players )
-        {
-            player playlocalsound( "ui_mp_nukebomb_timer" );
-            player playlocalsound( "mpl_sab_ui_suitcasebomb_timer" );
-        }
+            player playlocalsound( "iw4:ui_mp_nukebomb_timer" );
 
         wait 1.0;
     }
@@ -183,15 +216,25 @@ moab_incoming_sound( delay )
         wait delay;
 
     foreach ( player in level.players )
-    {
-        player playlocalsound( "nuke_incoming" );
-        player playlocalsound( "mpl_lightning_bomb_incoming" );
-    }
+        player playlocalsound( "iw4:nuke_incoming" );
 }
 
-// Every enemy dies by the owner's hand (in free-for-all, everyone else).
+// Every enemy dies by the caller's hand (in free-for-all, everyone else).
+// The kills count toward nothing: his kill count for the next nuke, his
+// kill streak and his scorestreak momentum are put back as they were.
 moab_deaths( owner )
 {
+    kills = undefined;
+    streak = undefined;
+    momentum = undefined;
+
+    if ( isdefined( owner ) )
+    {
+        kills = owner.pers["kills"];
+        streak = owner.pers["cur_kill_streak"];
+        momentum = owner.pers["momentum"];
+    }
+
     foreach ( player in level.players )
     {
         if ( !isalive( player ) || player == owner )
@@ -202,4 +245,18 @@ moab_deaths( owner )
 
         player dodamage( player.health + 100000, player.origin, owner, owner, "none", "MOD_EXPLOSIVE" );
     }
+
+    wait 0.1;
+
+    if ( !isdefined( owner ) )
+        return;
+
+    if ( isdefined( kills ) && isdefined( owner.pers["kills"] ) && isdefined( owner.moab_base ) )
+        owner.moab_base = owner.moab_base + ( owner.pers["kills"] - kills );
+
+    if ( isdefined( streak ) )
+        owner.pers["cur_kill_streak"] = streak;
+
+    if ( isdefined( momentum ) )
+        owner.pers["momentum"] = momentum;
 }

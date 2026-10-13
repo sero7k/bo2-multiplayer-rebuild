@@ -22,7 +22,7 @@ use crate::{AssetNamespace, ZoneGame, ZoneOwner};
 /// The alias name prefixes kept (weapons' fire, reload, handling and
 /// melee sounds, and what their notetracks play), with every alias they
 /// chain to.
-const KEEP_PREFIXES: &[&str] = &["weap_", "wpn_", "melee_", "gear_", "foly_", "mvmt_"];
+const KEEP_PREFIXES: &[&str] = &["weap_", "wpn_", "melee_", "gear_", "foly_", "mvmt_", "US_1mc_achieve_kem", "US_1mc_use_tnuke", "US_1mc_enemy_tnuke"];
 
 /// Where a Ghosts install is, from the games root and game_paths.cfg.
 pub fn ghosts_install(games_root: Option<&Path>) -> Option<PathBuf> {
