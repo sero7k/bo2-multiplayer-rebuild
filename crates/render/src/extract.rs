@@ -819,12 +819,20 @@ fn t6_lighting(
     sky: Option<[f32; 4]>,
 ) -> Option<[[f32; 4]; 3]> {
     let (sun, exposure) = (sun?, exposure?);
+    // bo2mp: a Black Ops map keeps its sunParse exposure raw (its own world
+    // path divides it by 8, `T5_HDRCONTROL_EXPOSURE_DIVISOR`); Black Ops
+    // II's models took it raw, 8 times the light, and drew blown out white.
+    let exposure_scale = if assets::map_game() == Some(asset_core::AssetNamespace::T5) {
+        exposure.exposure / render_frontend::assemble::drawsurf::T5_HDRCONTROL_EXPOSURE_DIVISOR
+    } else {
+        exposure.exposure
+    };
     Some([
         [
             sun.direction[0],
             sun.direction[1],
             sun.direction[2],
-            exposure.exposure,
+            exposure_scale,
         ],
         [sun.color[0], sun.color[1], sun.color[2], 1.0],
         sky.unwrap_or([1.0, 0.0, 0.0, 1.0]),
@@ -850,12 +858,19 @@ fn t6_dynamic_lighting(
         return full;
     }
     let exposure = exposure.map_or(1.0, |e| e.exposure);
-    let (direction, color) = sun.map_or(([0.0, 0.0, 1.0], [0.0; 3]), |s| (s.direction, s.color));
+    // bo2mp: the map's sun colour as Infinity Ward's own lit models take it
+    // (sRGB to linear, `lighting_iw4::light_diffuse`); raw, MW3's sun washed
+    // Black Ops II's guns and players out white.
+    let (direction, color) = sun.map_or(([0.0, 0.0, 1.0], [0.0; 3]), |s| (s.direction, s.color.map(srgb_to_linear)));
     Some([
         [direction[0], direction[1], direction[2], exposure],
         [color[0], color[1], color[2], 1.0],
         sky.unwrap_or([1.0, 0.0, 0.0, 1.0]),
     ])
+}
+
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
 }
 
 pub fn extract_geometry(

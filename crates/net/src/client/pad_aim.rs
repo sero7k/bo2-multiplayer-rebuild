@@ -1,9 +1,12 @@
 use super::input::ClientActionInput;
 
 const TURN_YAW: f32 = 260.0;
-const TURN_PITCH: f32 = 90.0;
+// bo2mp: up and down turn as fast as left and right (he asked for one
+// speed whichever way the stick goes); the stock pitch rates (90 hip, 55
+// ADS) made looking up and down feel a third as sensitive.
+const TURN_PITCH: f32 = TURN_YAW;
 const TURN_YAW_ADS: f32 = 90.0;
-const TURN_PITCH_ADS: f32 = 55.0;
+const TURN_PITCH_ADS: f32 = TURN_YAW_ADS;
 const TURN_ACCEL: f32 = 1200.0;
 
 const SLOWDOWN_HIP: f32 = 0.4;

@@ -198,22 +198,23 @@ impl T6LightSampler {
         let mean = asset_model::mean_tile_rgba01(&s.tile);
         let light = mean.map(|c| c * c * foreign.scale);
         let primary = s.picked_primary;
+        // bo2mp: corners name the sun in the grid's sun band (255 and up
+        // to it), the picked light by its table index: compare the same
+        // way, or the sun's corners counted as another light's.
+        let sun_first = grid.sun_primary_light_index;
+        let sun_band = lighting_iw4::light_grid_primary_light_sun_band(sun_first);
+        let remap = |p: u8| if u32::from(p) >= sun_band { p.wrapping_sub(0xff).wrapping_add(sun_first as u8) } else { p };
         let (mut named, mut all) = (0.0f32, 0.0f32);
         for i in 0..8 {
             if let Some(p) = s.corner_primaries[i] {
                 all += s.weights[i];
-                if p == primary {
+                if p == primary || remap(p) == primary {
                     named += s.weights[i];
                 }
             }
         }
-        let visibility = if primary == 0 {
-            0.0
-        } else if all > 1e-6 {
-            (named / all).clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
+        // (No corner naming any light: in no light's view, not in full sun.)
+        let visibility = if primary == 0 || all <= 1e-6 { 0.0 } else { (named / all).clamp(0.0, 1.0) };
         T6PointLight {
             light,
             primary,
