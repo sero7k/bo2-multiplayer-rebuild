@@ -120,7 +120,7 @@ fn game_folders_panel(
                 };
             }
             Some(folder) => {
-                state.note = format!("{} has no `zone` folder: pick the folder the game's .exe is in.", folder.display());
+                state.note = format!("{} has no `zone` folder or fast files: pick the folder the game's .exe is in.", folder.display());
             }
             None => state.note = "No folder picked.".to_owned(),
         }

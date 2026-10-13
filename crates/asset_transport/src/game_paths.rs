@@ -2,7 +2,8 @@
 //!
 //! `game_paths.cfg` beside the game (`IW4L_GAME_PATHS` overrides where):
 //! one `key=folder` line per game, for Black Ops II (needed), Black Ops,
-//! Modern Warfare 2, Modern Warfare 3, World at War and Call of Duty 4.
+//! Modern Warfare 2, Modern Warfare 3, World at War, Call of Duty 4, Ghosts
+//! and Advanced Warfare.
 //! Every folder set here is searched for zones and archives as if it were
 //! under `IW4L_GAMES`, so no links or copies are needed. The first launch
 //! asks for each game's folder; the front end's Game Folders panel changes
@@ -11,13 +12,15 @@
 use std::path::{Path, PathBuf};
 
 /// (key, title, needed) for every game the rebuild reads.
-pub const GAMES: [(&str, &str, bool); 6] = [
+pub const GAMES: [(&str, &str, bool); 8] = [
     ("bo2", "Call of Duty: Black Ops II", true),
     ("bo1", "Call of Duty: Black Ops", false),
     ("mw2", "Call of Duty: Modern Warfare 2", false),
     ("mw3", "Call of Duty: Modern Warfare 3", false),
     ("waw", "Call of Duty: World at War", false),
     ("cod4", "Call of Duty 4: Modern Warfare", false),
+    ("ghosts", "Call of Duty: Ghosts", false),
+    ("aw", "Call of Duty: Advanced Warfare", false),
 ];
 
 /// Where the folders are kept.
@@ -55,6 +58,18 @@ pub fn load() -> Vec<(String, PathBuf)> {
         .collect()
 }
 
+/// The games the file has a line for (set or skipped): a game added to
+/// [`GAMES`] after the file was written has none, and is asked for once.
+pub fn asked() -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(config_path()) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .filter_map(|l| l.split_once('=').map(|(k, _)| k.trim().to_ascii_lowercase()))
+        .collect()
+}
+
 /// One game's folder, as set.
 pub fn get(key: &str) -> Option<PathBuf> {
     load().into_iter().find(|(k, _)| k == key).map(|(_, p)| p)
@@ -82,9 +97,12 @@ pub fn set(key: &str, folder: Option<PathBuf>) -> Result<(), String> {
 }
 
 /// Whether a folder looks like that game's install: it has a `zone` folder
-/// (every one of these games keeps its fast files there).
+/// (where these games keep their fast files), or fast files of its own.
 pub fn looks_valid(folder: &Path) -> bool {
     folder.join("zone").is_dir()
+        || std::fs::read_dir(folder).is_ok_and(|d| {
+            d.flatten().any(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("ff")))
+        })
 }
 
 /// The folders set that exist, for the zone search.

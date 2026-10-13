@@ -1,7 +1,9 @@
 //! The first launch asks where each game is installed.
 //!
 //! Black Ops II is needed; Black Ops, Modern Warfare 2, Modern Warfare 3,
-//! World at War and Call of Duty 4 add their maps when present. Each game
+//! World at War, Call of Duty 4, Ghosts and Advanced Warfare add their maps
+//! when present. A game added later (Ghosts, Advanced Warfare) is asked for
+//! once on the next launch, keeping the folders already set. Each game
 //! gets a folder picker (Cancel skips it); a folder without a `zone` folder
 //! is asked for again once. The answers go to `game_paths.cfg`
 //! (`asset_transport::game_paths`) and can be changed later in the front
@@ -13,11 +15,16 @@ use asset_transport::game_paths;
 
 /// Asks for the game folders when they were never set.
 pub(crate) fn first_run() {
-    if game_paths::configured() || std::env::var_os("IW4L_NO_FOLDER_PROMPT").is_some() {
+    if std::env::var_os("IW4L_NO_FOLDER_PROMPT").is_some() {
         return;
     }
-    let mut chosen: Vec<(String, PathBuf)> = Vec::new();
-    for (key, title, needed) in game_paths::GAMES {
+    let asked = game_paths::asked();
+    let new: Vec<_> = game_paths::GAMES.into_iter().filter(|(k, _, _)| !asked.iter().any(|a| a == k)).collect();
+    if new.is_empty() {
+        return;
+    }
+    let mut chosen: Vec<(String, PathBuf)> = game_paths::load();
+    for (key, title, needed) in new {
         let note = if needed { "needed" } else { "optional: Cancel to skip" };
         let mut tries = 0;
         while tries < 2 {
