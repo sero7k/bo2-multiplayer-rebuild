@@ -298,14 +298,32 @@ fn apply_svc_local_sound(
     mut cmds: MessageReader<SvcLocalSound>,
     adopted: Res<LastAdoptedSnapshot>,
     announcer: Res<crate::match_voices::AnnouncerRoutes>,
+    bank: Option<Res<SoundBank>>,
     mut play: MessageWriter<crate::AliasCommand>,
 ) {
     for cmd in cmds.read() {
-        let Some((namespace, alias)) = adopted
-            .sound_alias_name(cmd.index)
-            .map(|alias| announcer.route(alias))
-            .map(|(namespace, alias)| (namespace, alias.to_owned()))
-        else {
+        // bo2mp: a game-tagged name (`t6:mpl_hit_alert`, Black Ops II's
+        // `playlocalsound`) plays from that game's aliases, through the
+        // announcer's and interface sounds' routes as the event path does.
+        let Some((namespace, alias)) = adopted.sound_alias_name(cmd.index).map(|alias| {
+            match alias.split_once(':').and_then(|(ns, name)| AssetNamespace::parse(ns).map(|ns| (ns, name))) {
+                Some((ns, name)) => {
+                    let (ns, name) = announcer.routed(ns, name).unwrap_or((ns, name));
+                    match bank
+                        .as_deref()
+                        .filter(|_| ns == AssetNamespace::T6)
+                        .and_then(|bank| crate::ui_sounds::ui_sound(&bank.0, name))
+                    {
+                        Some((ns, to)) => (ns, to.to_owned()),
+                        None => (ns, name.to_owned()),
+                    }
+                }
+                None => {
+                    let (ns, name) = announcer.route(alias);
+                    (ns, name.to_owned())
+                }
+            }
+        }) else {
             diag::warn!(
                 Audio,
                 "audio: svc local sound CS index {} is unresolved (typed gap)",

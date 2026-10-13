@@ -166,7 +166,12 @@ fn queue_match_clips(
     if walk.is_some() {
         return;
     }
-    let Some(clips) = clips.as_mut() else {
+    // bo2mp: the bank failed to install (no `SoundBankNamespace` for this
+    // load), whatever clip store a previous match left: nothing will ever
+    // be queued, so the match goes on without its sounds rather than
+    // holding admission for good.
+    let installed = namespace.is_some();
+    let Some(clips) = clips.as_mut().filter(|_| installed) else {
         ready.0 = true;
         if let Some(loading) = loading.as_ref() {
             loading

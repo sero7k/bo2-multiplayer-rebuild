@@ -53,6 +53,22 @@ pub(super) fn sound(world: &mut World, audience: EventAudience, alias: &str, ori
     );
 }
 
+/// bo2mp: `playlocalsound`: a 2D sound only `client` hears, sent as the
+/// engine sends one (a local-sound server command, as on MW2), not a sound
+/// event at the player's origin: sent that way his hit markers were logged
+/// but never heard.
+pub(super) fn local_sound(world: &mut World, client: ClientId, alias: &str) {
+    if alias.is_empty() {
+        return;
+    }
+    if std::env::var_os("BO2MP_SNDLOG").is_some() {
+        diag::info!(Sim, "bo2mp sndlog local {alias} {client:?}");
+    }
+    let mut frame = frame(world);
+    let alias_index = frame.sound_alias_index(&format!("t6:{}", alias.to_ascii_lowercase()));
+    frame.push_local_sound(crate::PendingLocalSound { recipient: client, stop: false, alias_index });
+}
+
 /// An effect turned by both its forward and up (sent in origin2).
 pub(super) fn effect_axis(
     world: &mut World,
@@ -337,11 +353,10 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     });
     vm.bind("playlocalsound", true, |vm, world, s, a| {
         let alias = text(vm, a, 0);
-        let Some(audience) = player_audience(vm, world, s) else {
+        let Some(EventAudience::Client(client)) = player_audience(vm, world, s) else {
             return Ok(Value::Undefined);
         };
-        let origin = origin_of(vm, world, s).unwrap_or([0.0; 3]);
-        sound(world, audience, &alias, origin);
+        local_sound(world, client, &alias);
         Ok(Value::Undefined)
     });
     vm.bind("playsoundtoteam", true, |vm, world, s, a| {

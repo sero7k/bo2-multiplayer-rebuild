@@ -214,6 +214,10 @@ pub(crate) fn stop_map_ambient_on_match_end(
     diag::info!(Audio, "audio: map ambient stopped");
 }
 
+/// bo2mp: the BO2 map zone whose neighbours give a map from a game the sound
+/// reader cannot open its common sound zones.
+const BO2_SOUND_ANCHOR: &str = "mp_la";
+
 pub(crate) fn start_sound_bank_compose(
     mut attempted: ResMut<SoundBankLoadAttempted>,
     accepted: Option<Res<assets::MatchLoadAccepted>>,
@@ -367,8 +371,26 @@ pub(crate) fn install_sound_bank(
                             reused: false,
                         };
                     };
-                    let namespace = namespace_for_zone(&games, &zone);
-                    let loaded = asset_transport::find_zone_file(&games, &zone).map(|found| {
+                    // bo2mp: a map whose zone the sound reader cannot open
+                    // (World at War's and Call of Duty 4's, read by their
+                    // own lane) is played by Black Ops II's rules: its bank
+                    // is Black Ops II's own common sounds, found beside
+                    // BO2's Aftermath. Failing here left AudioReady unset
+                    // and the load sat on "admission" for good.
+                    let (found, namespace) = match asset_transport::find_zone_file(&games, &zone) {
+                        Ok(found) => (Ok(found), namespace_for_zone(&games, &zone)),
+                        Err(error) => match asset_transport::find_zone_file(&games, BO2_SOUND_ANCHOR) {
+                            Ok(anchor) => {
+                                diag::info!(
+                                    Audio,
+                                    "audio: `{zone}` has no zone the sound reader opens ({error}); its bank is Black Ops II's common sounds"
+                                );
+                                (Ok(anchor), AssetNamespace::T6)
+                            }
+                            Err(_) => (Err(error), AssetNamespace::Iw4),
+                        },
+                    };
+                    let loaded = found.map(|found| {
                         let sources = gather_sound_sources(&games, &found.path);
                         let LoadedSoundBank { catalog, gaps, .. } =
                             compose_sound_bank(sources, &zone, namespace, map);
@@ -478,6 +500,9 @@ pub(crate) fn install_sound_bank(
                 "audio: sound bank load failed for {}: {e}",
                 compose.zone
             );
+            // No namespace for this load: the match set sees the bank
+            // failed and lets the match go on silent.
+            commands.remove_resource::<SoundBankNamespace>();
         }
     }
 }
