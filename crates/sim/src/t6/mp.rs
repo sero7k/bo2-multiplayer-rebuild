@@ -46,17 +46,85 @@ pub(super) fn register_moab_visions() {
         dark_tint: [0.75, 0.9, 1.05],
         ..Default::default()
     };
-    let aftermath = asset_world::FilmVision {
+    // The KEM's last seconds (Ghosts): the light swells and burns warm,
+    // then all white, then the burnt dark after.
+    let glare = asset_world::FilmVision {
         enable: true,
-        contrast: 1.7,
-        brightness: 0.04,
-        desaturation: 0.6,
-        light_tint: [1.0, 0.95, 0.88],
-        medium_tint: [0.9, 0.75, 0.65],
-        dark_tint: [0.7, 0.32, 0.2],
+        contrast: 1.25,
+        brightness: 0.16,
+        desaturation: 0.35,
+        light_tint: [1.7, 1.42, 0.95],
+        medium_tint: [1.35, 1.18, 0.86],
+        dark_tint: [1.0, 0.9, 0.72],
+        glow_enable: true,
+        glow_radius: 8.0,
+        glow_bloom_cutoff: 0.35,
+        glow_bloom_desaturation: 0.3,
+        glow_bloom_intensity: 2.2,
         ..Default::default()
     };
-    asset_world::register_film_visions(vec![("mpnuke".to_owned(), flash), ("mpnuke_aftermath".to_owned(), aftermath)]);
+    let white = asset_world::FilmVision {
+        enable: true,
+        contrast: 0.25,
+        brightness: 0.85,
+        desaturation: 1.0,
+        light_tint: [2.0, 2.0, 1.95],
+        medium_tint: [2.0, 2.0, 1.95],
+        dark_tint: [1.8, 1.8, 1.75],
+        glow_enable: true,
+        glow_radius: 10.0,
+        glow_bloom_cutoff: 0.1,
+        glow_bloom_intensity: 4.0,
+        ..Default::default()
+    };
+    let aftermath = asset_world::FilmVision {
+        enable: true,
+        contrast: 1.4,
+        brightness: -0.06,
+        desaturation: 0.65,
+        light_tint: [0.85, 0.7, 0.5],
+        medium_tint: [0.62, 0.46, 0.32],
+        dark_tint: [0.36, 0.22, 0.12],
+        ..Default::default()
+    };
+    // (A script's vision switches at once: the swell and the burn-down are
+    // steps the script walks through, `kem_glare_1`..`_8` from the plain
+    // look to the glare, `kem_burn_1`..`_8` from the white to the dark.)
+    let plain = asset_world::FilmVision { enable: true, ..Default::default() };
+    let mut list = vec![
+        ("mpnuke".to_owned(), flash),
+        ("kem_glare".to_owned(), glare.clone()),
+        ("kem_white".to_owned(), white.clone()),
+        ("mpnuke_aftermath".to_owned(), aftermath.clone()),
+    ];
+    for k in 1..=8 {
+        let t = k as f32 / 8.0;
+        list.push((format!("kem_glare_{k}"), lerp_film(&plain, &glare, t * t)));
+        list.push((format!("kem_burn_{k}"), lerp_film(&white, &aftermath, 1.0 - (1.0 - t) * (1.0 - t))));
+    }
+    asset_world::register_film_visions(list);
+}
+
+/// A film vision between two (`t` 0: `a`, 1: `b`).
+fn lerp_film(a: &asset_world::FilmVision, b: &asset_world::FilmVision, t: f32) -> asset_world::FilmVision {
+    let l = |x: f32, y: f32| x + (y - x) * t;
+    let v = |x: [f32; 3], y: [f32; 3]| [l(x[0], y[0]), l(x[1], y[1]), l(x[2], y[2])];
+    asset_world::FilmVision {
+        enable: true,
+        contrast: l(a.contrast, b.contrast),
+        brightness: l(a.brightness, b.brightness),
+        desaturation: l(a.desaturation, b.desaturation),
+        desaturation_dark: l(a.desaturation_dark, b.desaturation_dark),
+        invert: false,
+        light_tint: v(a.light_tint, b.light_tint),
+        medium_tint: v(a.medium_tint, b.medium_tint),
+        dark_tint: v(a.dark_tint, b.dark_tint),
+        glow_enable: a.glow_enable || b.glow_enable,
+        glow_radius: l(a.glow_radius, b.glow_radius),
+        glow_bloom_cutoff: l(a.glow_bloom_cutoff, b.glow_bloom_cutoff),
+        glow_bloom_desaturation: l(a.glow_bloom_desaturation, b.glow_bloom_desaturation),
+        glow_bloom_intensity: l(a.glow_bloom_intensity, b.glow_bloom_intensity),
+    }
 }
 
 /// A multiplayer map, by its zone name.

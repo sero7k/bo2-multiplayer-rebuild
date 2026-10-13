@@ -14,7 +14,7 @@
 // Off unless `scr_moab 1`. Settings (dvars):
 //   scr_moab              1 to allow it (default 0: native Black Ops II)
 //   scr_moab_kills        kills in one life to earn it (default 25)
-//   scr_moab_timer        countdown seconds (default 10)
+//   scr_moab_timer        countdown seconds (default 7)
 //   scr_moab_endsgame     1: the blast ends the match, as MW2's (default 0)
 // Earned once per kill streak; held until used: hold [Use] for a second.
 
@@ -24,7 +24,7 @@ main()
         return;
 
     level.moab_kills = moab_dvar_int( "scr_moab_kills", 25 );
-    level.moab_timer = moab_dvar_int( "scr_moab_timer", 10 );
+    level.moab_timer = moab_dvar_int( "scr_moab_timer", 7 );
     level.moab_endsgame = moab_dvar_int( "scr_moab_endsgame", 0 );
     level.nukevisionset = "mpnuke_aftermath";
     level thread moab_onconnect();
@@ -186,13 +186,21 @@ moab_launch( owner )
         player playlocalsound( "mpl_sd_exp_suitcase_bomb_main" );
     }
 
-    earthquake( 0.6, 10, owner.origin, 100000 );
-    wait 0.25;
-    visionsetnaked( "mpnuke", 3 );
-    wait 1.25;
+    // (Ghosts' KEM: the light has swelled for the last seconds; the
+    // blast goes all white, the enemies die in it, and the white burns down
+    // to the dark after.)
+    earthquake( 0.7, 6, owner.origin, 100000 );
+    visionsetnaked( "kem_white", 0 );
+    wait 1.2;
     moab_deaths( owner );
     level.nukedetonated = 1;
-    visionsetnaked( "mpnuke_aftermath", 5 );
+
+    for ( k = 1; k <= 8; k++ )
+    {
+        visionsetnaked( "kem_burn_" + k, 0 );
+        wait 0.3;
+    }
+    level thread moab_vision_back();
 
     if ( level.moab_endsgame )
     {
@@ -234,6 +242,27 @@ moab_incoming_sound( delay )
 
     foreach ( player in level.players )
         player playlocalsound( "iw6:kem_incoming" );
+
+    // (The glare swells over the last seconds, the ground shaking more.)
+    earthquake( 0.15, 3.3, level.moab_owner.origin, 100000 );
+
+    for ( k = 1; k <= 8; k++ )
+    {
+        visionsetnaked( "kem_glare_" + k, 0 );
+        wait 0.4;
+    }
+}
+
+// The map's own look again once the dust has settled.
+moab_vision_back()
+{
+    level endon( "game_ended" );
+    wait 20;
+
+    if ( isdefined( level.moab_incoming ) )
+        return;
+
+    visionsetnaked( getdvar( "mapname" ), 8 );
 }
 
 // Every enemy dies by the caller's hand (in free-for-all, everyone else).
