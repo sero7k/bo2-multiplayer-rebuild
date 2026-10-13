@@ -92,6 +92,42 @@ BO1 Nuketown has 514 of 585 catalog materials missing their colour map.
 The catalog is zone-wide (world, props, FX and viewmodel), so the count
 includes non-world materials.
 
+## Re-run on the full install (user's PC, 13 Oct)
+
+With World at War's IWDs present, every WaW map's world and prop materials
+resolve (`status ok`); the rest are engine images (`$identitynormalmap`,
+1-8 per map) and three broken references (Nachtfeuer, Downfall,
+Roundhouse; one each). The visible gaps on the full install were the
+dropped blend layers: fixed in 54f716cd (colorMap1/2 on the T6 layer slots,
+weighted by vertex green/blue). Still open: normal and specular maps on
+WaW/CoD4 surfaces, BO1 technique routing, and BO2-look targets whose packs
+are missing.
+
+| Map | ok | engine | broken |
+|---|---|---|---|
+| airfield | 406 | 3 | 0 |
+| asylum | 524 | 6 | 0 |
+| bgate | 395 | 6 | 0 |
+| castle | 343 | 7 | 0 |
+| courtyard | 288 | 6 | 0 |
+| docks | 299 | 6 | 0 |
+| dome | 286 | 4 | 0 |
+| downfall | 259 | 2 | 1 |
+| drum | 359 | 8 | 0 |
+| hangar | 355 | 6 | 0 |
+| kneedeep | 345 | 2 | 0 |
+| kwai | 282 | 4 | 0 |
+| makin | 287 | 7 | 0 |
+| makin_day | 294 | 5 | 0 |
+| nachtfeuer | 319 | 4 | 1 |
+| outskirts | 378 | 1 | 0 |
+| roundhouse | 256 | 3 | 1 |
+| seelow | 222 | 1 | 0 |
+| shrine | 292 | 4 | 0 |
+| stalingrad | 298 | 6 | 0 |
+| suburban | 357 | 4 | 0 |
+| subway | 494 | 3 | 0 |
+
 ## Method
 
 Two offline probes, run sequentially, with
