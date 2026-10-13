@@ -124,7 +124,7 @@ fn link_world_materials(
     let owner = ZoneOwner::intern(owner);
     // bo2mp: Black Ops II pictures linked for swapped surfaces (colour,
     // normal, specular slots), by World at War colour image.
-    let mut swapped: HashMap<&'static str, [Option<usize>; 3]> = HashMap::new();
+    let mut swapped: HashMap<String, [Option<usize>; 3]> = HashMap::new();
     let mut swap_count = 0usize;
     let mut by_material: HashMap<usize, Option<usize>> = HashMap::new();
     let mut images: HashMap<String, Option<usize>> = HashMap::new();
@@ -159,10 +159,10 @@ fn link_world_materials(
             .and_then(|t| t.image)
             .and_then(|i| zone.image(i))
             .and_then(|image| look.and_then(|l| l.swaps.get_key_value(image.name.as_str())));
-        if let Some((&key, swap)) = swap
+        if let Some((key, swap)) = swap
             && let Some(texture) = colour
         {
-            let slots = *swapped.entry(key).or_insert_with(|| {
+            let slots = *swapped.entry(key.clone()).or_insert_with(|| {
                 let link = |catalog: &mut MaterialCatalog, img: &Arc<Image>, part: &str, semantic: u8, srgb: bool| {
                     let size = img.texture_descriptor.size;
                     catalog.link_image(AuthoredImage {
@@ -555,7 +555,24 @@ pub(crate) fn build_legacy_world(
     let look = (tag == "t4")
         .then(|| super::bo2_look::recipe(&map))
         .flatten()
-        .and_then(|recipe| super::bo2_look::load(recipe, &mut report));
+        .and_then(|recipe| {
+            // The colour images the world's surfaces are drawn with.
+            let mut images: Vec<String> = world
+                .surfaces
+                .iter()
+                .filter_map(|s| s.material.and_then(|m| zone.material(m)))
+                .filter_map(|m| {
+                    m.textures
+                        .iter()
+                        .find(|t| t.semantic == iw3::zone::TextureSemantic::Color && t.image.is_some())
+                        .and_then(|t| t.image.and_then(|i| zone.image(i)))
+                        .map(|i| i.name.clone())
+                })
+                .collect();
+            images.sort();
+            images.dedup();
+            super::bo2_look::load(recipe, &images, &mut report)
+        });
     let surface_materials =
         link_world_materials(tag, zone, world, main.as_deref(), &mut materials, &map, &mut report, look.as_ref());
     stage.done();
