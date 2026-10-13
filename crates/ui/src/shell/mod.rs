@@ -28,6 +28,7 @@ pub(crate) mod ingame;
 mod loading;
 mod friends;
 mod lobbies;
+mod room;
 mod looks;
 mod online;
 pub(crate) mod options;
@@ -71,6 +72,8 @@ pub(crate) enum Screen {
     Friends,
     /// The server's lobbies (`lobbies`).
     Lobbies,
+    /// The room he joined, until its host starts (`room`).
+    Room,
     /// Zombies: its lobby (map, start, starting round, START), its map
     /// picker (a page per game, `page`) and the map's starts and modes.
     Zombies,
@@ -318,6 +321,7 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
         Screen::Classes | Screen::ClassEdit | Screen::ItemPick => classes::book().map(|b| cac::rows(s, &b)).unwrap_or_default(),
         Screen::Friends => friends::rows(s),
         Screen::Lobbies => lobbies::rows(s),
+        Screen::Room => room::rows(s),
         Screen::Options => {
             let mut r = options::rows(s.page, &options::snapshot());
             if let Some(t) = &s.typing
@@ -432,6 +436,8 @@ impl Shell {
                 self.go(Screen::Multiplayer);
                 self.focus = 4;
             }
+            // (The shell leaves the room screen once he is out of it.)
+            Screen::Room => crate::online_match::queue_leave(),
             Screen::Multiplayer => self.go(Screen::Main),
             Screen::Zombies => {
                 self.go(Screen::Main);
@@ -678,6 +684,15 @@ fn shell_input(
         return;
     }
     let now_s = time.elapsed_secs_f64();
+    // Online: the room he joined shows until its host starts the match.
+    match (crate::online_match::room().is_some(), shell.screen == Screen::Room) {
+        (true, false) => shell.go(Screen::Room),
+        (false, true) => {
+            shell.go(Screen::Multiplayer);
+            shell.focus = 4;
+        }
+        _ => {}
+    }
     // FRIENDS > ADD FRIEND: digits (8 at most); Enter adds the friend,
     // Esc leaves the list as it was.
     if let Some(mut t) = shell.code_entry.clone() {

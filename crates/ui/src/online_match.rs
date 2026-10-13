@@ -32,6 +32,40 @@ struct Start {
 
 static START: Mutex<Option<Start>> = Mutex::new(None);
 static JOIN: Mutex<Option<MasterMenuAction>> = Mutex::new(None);
+/// He left the room he joined (Esc on the waiting room).
+static LEAVE: AtomicBool = AtomicBool::new(false);
+
+/// The room he joined, while he waits for its host to start the match.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct RoomView {
+    pub name: String,
+    pub map: String,
+    pub mode: String,
+    pub players: Vec<String>,
+    pub max_players: u8,
+}
+
+static ROOM: Mutex<Option<RoomView>> = Mutex::new(None);
+static ROOM_PREVIEW: Mutex<Option<RoomView>> = Mutex::new(None);
+
+/// The room he waits in (the shell shows it instead of its menus).
+pub(crate) fn room() -> Option<RoomView> {
+    if let Some(p) = ROOM_PREVIEW.lock().ok().and_then(|p| p.clone()) {
+        return Some(p);
+    }
+    ROOM.lock().ok().and_then(|r| r.clone())
+}
+
+pub(crate) fn preview_room(room: Option<RoomView>) {
+    if let Ok(mut p) = ROOM_PREVIEW.lock() {
+        *p = room;
+    }
+}
+
+/// Esc in the waiting room: leave it.
+pub(crate) fn queue_leave() {
+    LEAVE.store(true, Ordering::Relaxed);
+}
 
 pub(crate) fn online_available() -> bool {
     AVAILABLE.load(Ordering::Relaxed)
@@ -75,7 +109,29 @@ fn drive_online(
         diag::info!(Ui, "bo2mp online: the host started the match; front end closed");
         commands.remove_resource::<crate::lui_frontend::Bo2mpFrontend>();
     }
+    let waiting = match &state {
+        Some(MasterBridgeState::Joined { name, map, mode, members, member_names, max_players, in_match: false, .. }) => {
+            Some(RoomView {
+                name: name.clone(),
+                map: map.clone(),
+                mode: mode.clone(),
+                players: members.iter().map(|m| member_names.get(m).cloned().unwrap_or_else(|| "PLAYER".to_owned())).collect(),
+                max_players: *max_players,
+            })
+        }
+        _ => None,
+    };
+    if let Ok(mut r) = ROOM.lock()
+        && *r != waiting
+    {
+        *r = waiting;
+    }
     let Some(mut pending) = pending else { return };
+    if LEAVE.swap(false, Ordering::Relaxed) {
+        diag::info!(Ui, "bo2mp online: left the room");
+        pending.0 = Some(MasterMenuAction::LeaveLobby);
+        return;
+    }
     if pending.0.is_none()
         && let Some(join) = JOIN.lock().ok().and_then(|mut j| j.take())
     {

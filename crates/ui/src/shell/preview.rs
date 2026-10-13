@@ -341,7 +341,20 @@ fn step(
             s.screen = Screen::Lobbies;
             s.focus = 0;
         }),
+        ("12j_room", |s, _| {
+            super::lobbies::preview(Vec::new());
+            crate::online_match::preview_room(Some(crate::online_match::RoomView {
+                name: "egs's lobby".to_owned(),
+                map: "t6:mp_nuketown_2020".to_owned(),
+                mode: "tdm".to_owned(),
+                players: vec!["egs".to_owned(), "reaaL".to_owned(), "simon".to_owned()],
+                max_players: 12,
+            }));
+            s.screen = Screen::Room;
+            s.focus = 0;
+        }),
         ("12a_options", |s, _| {
+            crate::online_match::preview_room(None);
             s.screen = Screen::Options;
             s.page = 0;
             s.focus = 3;
