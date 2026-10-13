@@ -41,7 +41,7 @@ const TILE_BLEND_MICRO1_HASH: u32 = name_hash("Micro_1_ColorMap");
 const TILE_BLEND_MICRO2_HASH: u32 = name_hash("Micro_2_ColorMap");
 
 /// `R_HashString`: case-folded, xor with 33 times the running hash.
-const fn name_hash(name: &str) -> u32 {
+pub(crate) const fn name_hash(name: &str) -> u32 {
     let b = name.as_bytes();
     let mut h = 0u32;
     let mut i = 0;
@@ -57,7 +57,7 @@ const fn name_hash(name: &str) -> u32 {
 /// them by semantic. Real T6 semantics stay below 0x20.
 pub const T6_LAYER1_SEMANTIC: u8 = 0xf1;
 pub const T6_LAYER2_SEMANTIC: u8 = 0xf2;
-const LAYER_MAPS: [(u32, u8); 2] = [
+pub(crate) const LAYER_MAPS: [(u32, u8); 2] = [
     (name_hash("colorMap1"), T6_LAYER1_SEMANTIC),
     (name_hash("colorMap2"), T6_LAYER2_SEMANTIC),
 ];

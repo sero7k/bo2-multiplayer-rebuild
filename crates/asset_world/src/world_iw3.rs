@@ -173,9 +173,9 @@ pub fn build_iw3_world_draw(
         &surface_reflection_probes,
     );
     let dpvs = one_cell(n, world.mins, world.maxs, surface_bounds)?;
-    // No extra texture layers: one empty entry per vertex, as the T6 draw
-    // keeps them.
-    let layer_uvs = vec![[0.0f32; 4]; positions.len()];
+    // bo2mp: a layered material's other colour maps use the vertex's own
+    // texture coordinates (CoD4 / World at War keep one set).
+    let layer_uvs: Vec<[f32; 4]> = texture_uvs.iter().map(|uv| [uv[0], uv[1], uv[0], uv[1]]).collect();
     let stats = WorldMeshStats {
         vertices: positions.len(),
         triangles: packed_indices.len() / 3,

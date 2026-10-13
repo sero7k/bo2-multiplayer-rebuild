@@ -134,6 +134,7 @@ fn link_world_materials(
     let mut by_material: HashMap<usize, Option<usize>> = HashMap::new();
     let mut images: HashMap<String, Option<usize>> = HashMap::new();
     let (mut decoded, mut grey, mut missing) = (0usize, 0usize, Vec::new());
+    let mut layer_maps = 0usize;
     let mut out = Vec::with_capacity(world.surfaces.len());
     let mut sky_line = None;
     for surf in &world.surfaces {
@@ -169,10 +170,13 @@ fn link_world_materials(
         let mut draw = T6Draw::from_technique_set(technique_set, material.sort_key, state);
 
         let mut textures = Vec::new();
-        let colour = material
-            .textures
-            .iter()
-            .find(|t| t.semantic == iw3::zone::TextureSemantic::Color && t.image.is_some());
+        // bo2mp: the base colour map is `colorMap` (a layered material's
+        // `colorMap1` / `colorMap2` can sort before it by name hash).
+        let base_hash = super::t6_materials::name_hash("colorMap");
+        let colours = || material.textures.iter().filter(|t| t.semantic == iw3::zone::TextureSemantic::Color && t.image.is_some());
+        let colour = colours().find(|t| t.name_hash == base_hash).or_else(|| {
+            colours().find(|t| !super::t6_materials::LAYER_MAPS.iter().any(|(h, _)| *h == t.name_hash))
+        }).or_else(|| colours().next());
         let swap = colour
             .and_then(|t| t.image)
             .and_then(|i| mzone.image(i))
@@ -316,6 +320,60 @@ fn link_world_materials(
             });
             }
         }
+        // bo2mp: a layered material's other colour maps (`colorMap1`,
+        // `colorMap2`): blended in by the vertex colour's green and blue (the
+        // layer weights, as Black Ops II's layered materials), on the same
+        // texture coordinates. Before, only the first layer drew: rubble,
+        // mud and grass blended over a floor were missing.
+        if draw.layered {
+            for (hash, semantic) in super::t6_materials::LAYER_MAPS {
+                let Some(texture) = material.textures.iter().find(|t| t.name_hash == hash && t.image.is_some()) else {
+                    continue;
+                };
+                let Some(image) = texture.image.and_then(|i| mzone.image(i)) else { continue };
+                let slot = *images.entry(image.name.clone()).or_insert_with(|| {
+                    let pixels = main.and_then(|main| asset_material::decode_ui_image_from_main(main, &image.name).ok().flatten());
+                    let (w, h, rgba) = match pixels {
+                        Some(p) => {
+                            decoded += 1;
+                            p
+                        }
+                        None => {
+                            missing.push(image.name.clone());
+                            (1, 1, vec![128, 128, 128, 255])
+                        }
+                    };
+                    Some(catalog.link_image(AuthoredImage {
+                        namespace: AssetNamespace::T6,
+                        name: AssetRef::Real(format!("{tag}:{}", image.name)),
+                        map_type: 0,
+                        semantic: TS_COLOR_MAP,
+                        category: 0,
+                        use_srgb_reads: true,
+                        width: w as u16,
+                        height: h as u16,
+                        depth: 1,
+                        level_count: 1,
+                        format: 0,
+                        payload: Arc::new(Vec::new()),
+                        decoded: Some(Arc::new(rgba_image(w, h, rgba))),
+                        common_owned: false,
+                        decoded_variant: None,
+                        decoded_by: None,
+                        pending_decode: None,
+                    }))
+                });
+                layer_maps += 1;
+                textures.push(MaterialTextureBinding {
+                    name_hash: texture.name_hash,
+                    name_start: 0,
+                    name_end: 0,
+                    sampler_state: texture.sampler_state,
+                    semantic,
+                    image: slot,
+                });
+            }
+        }
         let index = catalog.link_material(AuthoredMaterial {
             name: AssetRef::Real(format!("{tag}:{}", material.name)),
             namespace: AssetNamespace::T6,
@@ -353,6 +411,10 @@ fn link_world_materials(
             format!(" (first: {})", missing.iter().take(5).cloned().collect::<Vec<_>>().join(", "))
         } + &if from_common > 0 {
             format!("; {from_common} from the game's common_mp")
+        } else {
+            String::new()
+        } + &if layer_maps > 0 {
+            format!("; {layer_maps} blend layers")
         } else {
             String::new()
         } + &if swap_count > 0 {
