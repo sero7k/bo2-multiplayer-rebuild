@@ -462,6 +462,17 @@ fn game_files(root: &Path) -> impl Iterator<Item = Result<PathBuf, String>> {
     files_under(roots)
 }
 
+/// Build output and logs a games root may hold (a cargo target folder, the
+/// game's own artifacts): never game files, and slow to walk. (From
+/// upstream IW4L.)
+const NOT_GAME_DIRS: [&str; 5] = ["incremental", "deps", ".fingerprint", "examples", "iw4l-artifacts"];
+
+fn is_not_game_dir(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| NOT_GAME_DIRS.iter().any(|skip| name.eq_ignore_ascii_case(skip)))
+}
+
 fn files_under(roots: Vec<PathBuf>) -> impl Iterator<Item = Result<PathBuf, String>> {
     let mut pending: VecDeque<_> = roots.into_iter().map(Ok).collect();
     let mut visited = HashSet::new();
@@ -471,6 +482,9 @@ fn files_under(roots: Vec<PathBuf>) -> impl Iterator<Item = Result<PathBuf, Stri
                 Ok(path) => path,
                 Err(error) => return Some(Err(error)),
             };
+            if is_not_game_dir(&path) {
+                continue;
+            }
             let canonical = match std::fs::canonicalize(&path) {
                 Ok(path) => path,
                 Err(error) => {
