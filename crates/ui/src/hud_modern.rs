@@ -247,6 +247,9 @@ fn offhand_picture(weapon: &str) -> Option<(bool, &'static str)> {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 struct HudValues {
+    /// A Tactical Nuke is inbound or settling (`bo2mp_nuke`): its banner
+    /// has the top of the screen, the score bar and clock hide.
+    nuke: bool,
     ffa: bool,
     axis: bool,
     yours: i32,
@@ -397,6 +400,7 @@ fn read_values(
         })
         .collect();
     Some(HudValues {
+        nuke: dvars.string("bo2mp_nuke").is_some_and(|v| !v.trim().is_empty()),
         ffa,
         axis: mp.team == "axis",
         yours,
@@ -618,6 +622,7 @@ fn modern_hud(
             // the right: score, bar (filling from the middle out), team name
             // over it, the team's Black Ops emblem, and the clock between
             // the emblems with WINNING / LOSING / TIED under it. ---
+            if !values.nuke {
             root.spawn(Node {
                 position_type: PositionType::Absolute,
                 top: Val::Percent(1.4),
@@ -743,6 +748,7 @@ fn modern_hud(
                     text(c, bo2, &font, "Default", status, 20.0 * k, color);
                 });
             });
+            }
 
             // --- Bottom left: his name over a thin bar. ---
             root.spawn(Node {

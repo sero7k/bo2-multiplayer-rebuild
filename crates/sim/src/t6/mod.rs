@@ -2747,10 +2747,31 @@ fn publish_hud(world: &mut World) {
             }
             picks.push_str("iw4:specialty_nuke:99999:1");
         }
+        // bo2mp: the Tactical Nuke's banner: `<id>|<countdown ms>|<caller>`
+        // while it is inbound and settling, else empty.
+        let banner = with_vm(world, |vm, _| {
+            let (b, id, ms) = (vm.intern("moab_banner"), vm.intern("moab_banner_id"), vm.intern("moab_banner_ms"));
+            let name = vm.raw_field(vm.level, b);
+            if name.is_undefined() {
+                return Some(String::new());
+            }
+            let name = vm.to_text(&name);
+            let id = vm.raw_field(vm.level, id).as_int().unwrap_or(0);
+            let ms = vm.raw_field(vm.level, ms).as_int().unwrap_or(10_000);
+            Some(format!("{id}|{ms}|{name}"))
+        })
+        .flatten()
+        .unwrap_or_default();
         {
             let mut f = frame(world);
             if f.client_meta(crate::world::ClientId(c)).is_some() {
                 let dvars = &mut f.client_meta_mut(crate::world::ClientId(c)).client_dvars;
+                match dvars.iter_mut().find(|(k, _)| k == "bo2mp_nuke") {
+                    Some(row) if row.1 != banner => row.1 = banner.clone(),
+                    Some(_) => {}
+                    None if !banner.is_empty() => dvars.push(("bo2mp_nuke".to_owned(), banner.clone())),
+                    None => {}
+                }
                 let shown = dvars.iter().any(|(k, _)| k == "bo2mp_streaks");
                 if !picks.is_empty() || shown {
                     for (name, value) in [("bo2mp_streaks", picks.clone()), ("bo2mp_momentum", momentum)] {

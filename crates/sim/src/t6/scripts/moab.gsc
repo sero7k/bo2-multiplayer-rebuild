@@ -137,38 +137,33 @@ moab_launch( owner )
     level.moab_team = owner.pers["team"];
     owner notify( "used_moab" );
 
+    // (The HUD's KEM STRIKE INBOUND banner: who called it, when, for how
+    // long; the score bar and clock hide while it is up.)
+    level.moab_banner = "" + owner.name;
+    level.moab_banner_id = gettime();
+    level.moab_banner_ms = level.moab_timer * 1000;
+
     foreach ( player in level.players )
     {
-        if ( player == owner )
-        {
-            player iprintlnbold( "TACTICAL NUKE INBOUND" );
+        if ( player == owner || ( level.teambased && player.pers["team"] == level.moab_team ) )
             player moab_voice( "use_tnuke" );
-        }
-        else if ( level.teambased && player.pers["team"] == level.moab_team )
-        {
-            player iprintlnbold( "FRIENDLY TACTICAL NUKE INBOUND" );
-            player moab_voice( "use_tnuke" );
-        }
         else
-        {
-            player iprintlnbold( "ENEMY TACTICAL NUKE INBOUND" );
             player moab_voice( "enemy_tnuke" );
-        }
     }
 
-    timer = maps\mp\gametypes\_hud_util::createservertimer( "objective", 2.0 );
-    timer maps\mp\gametypes\_hud_util::setpoint( "CENTER", "TOP", 0, 60 );
-    timer.color = ( 1, 0.35, 0.1 );
-    timer settimer( level.moab_timer );
+    foreach ( player in level.players )
+        player playlocalsound( "iw6:kem_launch" );
+
     level thread moab_ticks();
     level thread moab_incoming_sound( level.moab_timer - 3.3 );
     wait level.moab_timer;
-    timer destroy();
     level.moab_detonated = 1;
 
     foreach ( player in level.players )
     {
-        player playlocalsound( "iw4:nuke_explosion" );
+        player playlocalsound( "iw6:kem_explosion" );
+        player playlocalsound( "iw6:kem_explosion_boom" );
+        player playlocalsound( "iw6:kem_explosion_debris" );
         player playlocalsound( "iw4:nuke_wave" );
         // (Black Ops II's biggest blast under it.)
         player playlocalsound( "mpl_sd_exp_suitcase_bomb_main" );
@@ -185,6 +180,7 @@ moab_launch( owner )
     if ( level.moab_endsgame )
     {
         wait 2;
+        level.moab_banner = undefined;
 
         if ( level.teambased )
             thread maps\mp\gametypes\_globallogic::endgame( level.moab_team, "TACTICAL NUKE" );
@@ -194,17 +190,21 @@ moab_launch( owner )
         return;
     }
 
+    // (The score bar and clock come back once the blast has settled.)
+    wait 4;
+    level.moab_banner = undefined;
     level.moab_incoming = undefined;
 }
 
 moab_ticks()
 {
+    // (Ghosts' KEM Strike alarm, a 1.3 s sound, back to back.)
     while ( !isdefined( level.moab_detonated ) )
     {
         foreach ( player in level.players )
-            player playlocalsound( "iw4:ui_mp_nukebomb_timer" );
+            player playlocalsound( "iw6:ui_mp_kem_timer" );
 
-        wait 1.0;
+        wait 1.3;
     }
 
     level.moab_detonated = undefined;
@@ -216,7 +216,7 @@ moab_incoming_sound( delay )
         wait delay;
 
     foreach ( player in level.players )
-        player playlocalsound( "iw4:nuke_incoming" );
+        player playlocalsound( "iw6:kem_incoming" );
 }
 
 // Every enemy dies by the caller's hand (in free-for-all, everyone else).

@@ -46,6 +46,7 @@ impl Plugin for UiPlugin {
         crate::lui_hud_zm::register_lui_hud_systems(app);
         crate::hud_modern::register_modern_hud_systems(app);
         crate::hud_match::register_match_hud_systems(app);
+        crate::hud_nuke::register(app);
         crate::hud_prematch::register_prematch_hud(app);
         crate::hud_outcome::register_outcome_hud(app);
         crate::online_match::register_online_match(app);

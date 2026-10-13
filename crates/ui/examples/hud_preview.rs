@@ -29,7 +29,9 @@ fn main() {
     app.add_systems(Startup, |mut commands: Commands| {
         commands.spawn(Camera2d);
     });
-    if std::env::args().nth(2).as_deref() == Some("outcome") {
+    if std::env::args().nth(2).as_deref() == Some("nuke") {
+        ui::hud_nuke::preview::install(&mut app, out, std::env::args().nth(4).map(std::path::PathBuf::from));
+    } else if std::env::args().nth(2).as_deref() == Some("outcome") {
         ui::hud_outcome::preview::install(&mut app, out, std::env::args().nth(4).map(std::path::PathBuf::from));
     } else if std::env::args().nth(2).as_deref() == Some("streaks") {
         ui::hud_modern::preview::install(&mut app, out);

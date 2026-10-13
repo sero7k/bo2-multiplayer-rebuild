@@ -23,6 +23,7 @@ mod foreign_maps; // bo2mp: other games' maps in the map list
 mod game_folders; // bo2mp: the Game Folders panel
 pub mod hud_modern; // bo2mp: the modern in-game HUD
 pub mod hud_match; // bo2mp: our kill feed, hit marker, kill banner, scoreboard
+pub mod hud_nuke; // bo2mp: the Tactical Nuke's KEM STRIKE INBOUND banner
 pub mod hud_medals; // bo2mp: Black Ops' medal notification
 pub(crate) mod hud_cards; // bo2mp: MW2/MW3 calling cards and emblems in the HUD
 pub(crate) mod hud_prematch; // bo2mp: the match's start countdown
