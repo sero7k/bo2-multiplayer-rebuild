@@ -65,6 +65,16 @@ const IW4X: &[(&str, &str)] = &[
     ("mp_carentan", "Chinatown"),
 ];
 
+/// bo2mp: MW2's maps that are Call of Duty 4's (IW4x's rebuilds, its
+/// variants of them, and MW2's own Stimulus remakes): listed in Call of
+/// Duty 4's section, played as MW2's.
+const COD4_MAPS_IN_MW2: &[&str] = &[
+    "mp_convoy", "mp_backlot", "mp_bloc", "mp_bloc_sh", "mp_bog_sh", "mp_cargoship", "mp_cargoship_sh",
+    "mp_carentan", "mp_citystreets", "mp_countdown", "mp_crash_snow", "mp_cross_fire", "mp_farm",
+    "mp_killhouse", "mp_pipeline", "mp_shipment", "mp_shipment_long", "mp_showdown", "mp_broadcast",
+    "mp_crash", "mp_overgrown", "mp_strike", "mp_vacant", "mp_creek",
+];
+
 /// bo2mp: Call of Duty 4 maps whose MW2 version has another zone name.
 const COD4_IN_MW2: &[(&str, &str)] = &[("mp_bog", "mp_bog_sh"), ("mp_crossfire", "mp_cross_fire")];
 
@@ -407,6 +417,18 @@ fn discover() -> Vec<Category> {
         diag::info!(Ui, "bo2mp maps: {} Call of Duty 4 maps played as MW2's ports instead: {}", ported.len(), ported.join(", "));
         installed.retain(|(g, s)| !(g == "iw3" && ported.contains(s)));
     }
+    // bo2mp: likewise a Modern Warfare 3 map IW4x has rebuilt for MW2
+    // (Lockdown, Dome, Seatown, ...): MW2's version is played (it looks
+    // better and wears MW2's soldiers), listed under MW3 with its MW3 name.
+    let mw3_ported: Vec<String> = installed
+        .iter()
+        .filter(|(g, s)| g == "iw5" && installed.iter().any(|(g2, s2)| g2 == "iw4" && s2 == s))
+        .map(|(_, s)| s.clone())
+        .collect();
+    if !mw3_ported.is_empty() {
+        diag::info!(Ui, "bo2mp maps: {} Modern Warfare 3 maps played as MW2's ports instead: {}", mw3_ported.len(), mw3_ported.join(", "));
+        installed.retain(|(g, s)| !(g == "iw5" && mw3_ported.contains(s)));
+    }
     let shared = |stem: &str| installed.iter().filter(|(_, s)| s == stem).count() > 1;
     // Every game's maps in one list (base maps, then DLC, game by game),
     // split into sections of at most `PAGE` so no list runs off the screen.
@@ -462,13 +484,20 @@ fn discover() -> Vec<Category> {
         }
         for (maps, suffix) in [(base, ""), (dlc, " (DLC)"), (custom_maps, " (Custom)")] {
             for (stem, title) in maps {
+                let cod4 = game.prefix == "iw4" && suffix != " (Custom)" && COD4_MAPS_IN_MW2.contains(&stem.as_str());
                 all.push(ForeignMap {
                     ui_name: if shared(&stem) { format!("{stem}_{}", game.prefix) } else { stem.clone() },
                     game: game.prefix,
-                    stem,
                     title,
-                    origin: format!("{}{suffix}", game.title),
-                    section: if suffix == " (Custom)" { "CUSTOM MAPS".to_owned() } else { game.title.to_uppercase() },
+                    origin: if cod4 { "Call of Duty 4 (MW2 version)".to_owned() } else { format!("{}{suffix}", game.title) },
+                    section: if suffix == " (Custom)" {
+                        "CUSTOM MAPS".to_owned()
+                    } else if cod4 {
+                        "CALL OF DUTY 4".to_owned()
+                    } else {
+                        game.title.to_uppercase()
+                    },
+                    stem,
                 });
             }
         }

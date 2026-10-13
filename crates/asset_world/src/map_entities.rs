@@ -1078,11 +1078,36 @@ pub fn iw5_entity_string_named(text: &str) -> String {
                 out.push_str("\" ");
                 out.push_str(value.trim());
             }
+            // bo2mp: a bare key name (`classname "mp_tdm_spawn"`): IW4x's
+            // ZoneBuilder writes ported maps' entities so (its MW3 maps in
+            // MW2); the scripts' reader wants it quoted, and saw no spawn.
+            Some((key, value))
+                if !key.starts_with('"')
+                    && value.trim_start().starts_with('"')
+                    && key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') =>
+            {
+                out.push('"');
+                out.push_str(key);
+                out.push_str("\" ");
+                out.push_str(value.trim());
+            }
             _ => out.push_str(trimmed),
         }
         out.push('\n');
     }
     out
+}
+
+#[cfg(test)]
+mod bare_key_tests {
+    #[test]
+    fn bare_keys_are_quoted() {
+        let text = "{\n    origin \"839 -500.6 -378\"\n    classname \"mp_tdm_spawn_axis_start\"\n}\n{\n\"classname\" \"worldspawn\"\n}";
+        let named = super::iw5_entity_string_named(text);
+        assert!(named.contains("\"classname\" \"mp_tdm_spawn_axis_start\""), "{named}");
+        assert!(named.contains("\"origin\" \"839 -500.6 -378\""), "{named}");
+        assert!(named.contains("\"classname\" \"worldspawn\""), "{named}");
+    }
 }
 
 fn entity_pair(line: &str) -> Option<(EntityKey, &str)> {

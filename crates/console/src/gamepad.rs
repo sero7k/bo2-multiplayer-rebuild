@@ -156,26 +156,10 @@ pub(crate) fn track_active_pad(
         1 => frame::PromptStyle::Xbox,
         2 => frame::PromptStyle::PlayStation,
         3 => frame::PromptStyle::Generic,
-        _ => active
-            .0
-            .and_then(|entity| gamepads.get(entity).ok())
-            .map_or(frame::PromptStyle::Generic, |(_, pad, name)| {
-                let name = name.map_or("", |name| name.as_str()).to_ascii_lowercase();
-                if pad.vendor_id() == Some(0x054c)
-                    || name.contains("dualshock")
-                    || name.contains("dualsense")
-                    || name == "wireless controller"
-                {
-                    frame::PromptStyle::PlayStation
-                } else if pad.vendor_id() == Some(0x045e)
-                    || name.contains("xbox")
-                    || name.contains("xinput")
-                {
-                    frame::PromptStyle::Xbox
-                } else {
-                    frame::PromptStyle::Generic
-                }
-            }),
+        // bo2mp: Xbox buttons whatever the pad (PlayStation's only when
+        // picked in the options): the guess by the pad's name showed
+        // PlayStation's buttons for pads that are not one.
+        _ => frame::PromptStyle::Xbox,
     };
 }
 

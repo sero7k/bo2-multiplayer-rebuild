@@ -198,8 +198,9 @@ impl Row {
 pub(crate) const MOAB_KILLS: [u32; 5] = [0, 25, 20, 15, 30];
 
 pub(crate) const DIFFICULTY: [&str; 4] = ["RECRUIT", "REGULAR", "HARDENED", "VETERAN"];
-/// Maps a picker page holds (6 by 4).
-pub(crate) const PAGE: usize = 48;
+/// Maps a picker page holds (6 by 4: a page fits on the screen, no
+/// scrolling; a game with more gets more tabs).
+pub(crate) const PAGE: usize = 24;
 pub(crate) const COLUMNS: usize = 6;
 /// The columns the map / item grid has on this screen, and its first row
 /// in view (the view sets them; moving uses them).
@@ -766,7 +767,15 @@ fn shell_input(
     mut typed: MessageReader<bevy::input::keyboard::KeyboardInput>,
     mut sounds: MessageWriter<frame::UiPlaySound>,
     mut heard: Local<Option<(Screen, usize, Tab, usize)>>,
+    mut cursor: MessageReader<bevy::window::CursorMoved>,
+    mut mouse_leads: Local<bool>,
 ) {
+    // bo2mp: the mouse leads focus only once it has moved (or clicked) since
+    // the last key or pad press: an idle cursor resting on a map tile took
+    // the focus back every frame, so the pad could not move on the grid.
+    if cursor.read().count() > 0 || mouse.get_just_pressed().next().is_some() {
+        *mouse_leads = true;
+    }
     if !enabled() || front.is_none() || bridge::lui_open() || crate::game_folders::is_open() || zombies::running() {
         typed.clear();
         return;
@@ -977,6 +986,9 @@ fn shell_input(
     if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::KeyD) || pad(GamepadButton::DPadRight) {
         dir.0 = 1;
     }
+    if dir != (0, 0) || keys.get_just_pressed().next().is_some() || pads.iter().any(|p| p.get_just_pressed().next().is_some()) {
+        *mouse_leads = false;
+    }
     let confirm = keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::NumpadEnter) || pad(GamepadButton::South);
     let back = keys.just_pressed(KeyCode::Escape) || keys.just_pressed(KeyCode::Backspace) || pad(GamepadButton::East);
     let prev_tab = keys.just_pressed(KeyCode::KeyQ) || pad(GamepadButton::LeftTrigger);
@@ -1076,7 +1088,7 @@ fn shell_input(
         }
         match *hit {
             Hit::Row(i) if i < n => {
-                if shell.focus != i {
+                if *mouse_leads && shell.focus != i {
                     shell.focus = i;
                 }
                 if clicked {

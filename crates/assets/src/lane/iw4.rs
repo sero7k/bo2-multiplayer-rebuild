@@ -162,7 +162,9 @@ impl ZoneLane for Iw4Lane {
         let compass = std::mem::take(&mut sink.compass).resolve(&materials);
         let mut scripts = std::mem::take(&mut sink.scripts);
         if let Some(entities) = map_ents_entity_string(&stream) {
-            scripts.set_entities(entities.to_owned());
+            // bo2mp: keys as the scripts' reader wants them (IW4x's ported
+            // maps write them bare).
+            scripts.set_entities(asset_world::iw5_entity_string_named(entities));
         }
         let script_sound = std::mem::take(&mut sink.script_sound).finish();
         let exp_fog = sink.exp_fog.take();

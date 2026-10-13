@@ -409,8 +409,7 @@ fn publish_client_action_input(
         physical.movement_ready = false;
         physical.look_ready = false;
     } else {
-        out.pad_sensitivity =
-            settings.pad_sensitivity / frame::GameSettings::PAD_SENSITIVITY_DEFAULT;
+        out.pad_sensitivity = frame::GameSettings::pad_look_scale(settings.pad_sensitivity);
         out.pad_ads_sensitivity = settings.pad_ads_sensitivity;
         if let Some(pad) = pad.filter(|_| !crate::startup::scripted_run()) {
             let sticks = crate::gamepad::sticks(pad, &settings);
