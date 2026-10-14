@@ -51,6 +51,7 @@ members = [
     "crates/fastfile_iw6", # Ghosts zones (phase 1: sounds, menu music)
     "crates/fastfile_s1", # Advanced Warfare zones (guns)
     "crates/fastfile_iw7", # Infinite Warfare zones (guns)
+    "crates/fastfile_t7", # Black Ops III zones (guns, later)
     "crates/frame",
     "crates/fx",
     "crates/fx_iw4",
