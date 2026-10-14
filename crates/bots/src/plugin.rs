@@ -633,6 +633,9 @@ fn navigation_for(world: &mut SimWorld, digest: u64) -> NavGraph {
         && graph.digest == digest
         && graph.schema == NAV_SCHEMA
         && graph.hull == NAV_HULL
+        // bo2mp: an empty graph is not kept (one baked before the map's
+        // collision mesh bounded the walk would stay empty for good).
+        && !graph.nodes.is_empty()
     {
         diag::info!(
             Sim,
@@ -651,7 +654,9 @@ fn navigation_for(world: &mut SimWorld, digest: u64) -> NavGraph {
         "bots: navigation prepared in {:.1}ms on worker",
         started.elapsed().as_secs_f64() * 1000.0
     );
-    if let Err(error) = assets::cache_put(NAV_CACHE_KIND, &key, &graph.cache_encode()) {
+    if graph.nodes.is_empty() {
+        diag::warn!(Sim, "bots: navigation found no walkable ground (no collision bounds or seeds); not cached");
+    } else if let Err(error) = assets::cache_put(NAV_CACHE_KIND, &key, &graph.cache_encode()) {
         diag::warn!(Sim, "bots: navigation cache store {key}: {error}");
     }
     graph
@@ -671,7 +676,16 @@ fn bake_navigation(world: &mut SimWorld, graph: &mut NavGraph) {
             .iter()
             .map(|objective| objective.origin),
     );
-    let Some(bounds) = nav::playable_bounds(world.clip_brushes(), &seeds) else {
+    // bo2mp: the world's collision is its brushes and its triangle mesh
+    // together: a map that collides through triangles alone (Infinite
+    // Warfare's: its only brushes are its brush models' boxes, about their
+    // own origins) is bounded by its mesh.
+    let world_bounds = match (nav::brush_bounds(world.clip_brushes()), nav::mesh_bounds(&world.clip_mesh().tables.verts)) {
+        (Some(a), Some(b)) => Some((std::array::from_fn(|k| a.0[k].min(b.0[k])), std::array::from_fn(|k| a.1[k].max(b.1[k])))),
+        (a, b) => a.or(b),
+    };
+    let bounds = world_bounds.and_then(|w| nav::playable_bounds_within(w, &seeds));
+    let Some(bounds) = bounds else {
         *graph = NavGraph {
             generation,
             digest,

@@ -42,12 +42,38 @@ pub(crate) fn sticks(pad: &Gamepad, settings: &frame::GameSettings) -> Sticks {
     }
 }
 
+/// bo2mp: Black Ops II's view stick response (`aim_assist/view_input_3.graph`,
+/// the `aim_input_graph_index` its gamepads use): stick deflection -> the
+/// fraction of the turn rate, straight lines between the points.
+const BO2_VIEW_INPUT_GRAPH: [(f32, f32); 7] = [
+    (0.0, 0.0),
+    (0.1242, 0.0423),
+    (0.2238, 0.0885),
+    (0.3210, 0.1553),
+    (0.4118, 0.2419),
+    (0.5116, 0.3508),
+    (1.0, 1.0),
+];
+
+fn graph(points: &[(f32, f32)], x: f32) -> f32 {
+    for pair in points.windows(2) {
+        let ((x0, y0), (x1, y1)) = (pair[0], pair[1]);
+        if x <= x1 {
+            let t = if x1 > x0 { (x - x0) / (x1 - x0) } else { 1.0 };
+            return y0 + (y1 - y0) * t.clamp(0.0, 1.0);
+        }
+    }
+    points.last().map_or(x, |p| p.1)
+}
+
 fn curve(deflection: f32, kind: u8) -> f32 {
     let d = deflection.clamp(0.0, 1.0);
     match kind {
         1 => d,
         2 => 1.0 - (1.0 - d) * (1.0 - d),
-        _ => 0.35 * d + 0.65 * d * d * d,
+        // (Was 0.35 d + 0.65 d^3, our own: slower than BO2's through the
+        // middle of the stick.)
+        _ => graph(&BO2_VIEW_INPUT_GRAPH, d),
     }
 }
 

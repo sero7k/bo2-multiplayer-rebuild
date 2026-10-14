@@ -467,14 +467,12 @@ fn build_iw7_world(
     let map_name = path.file_stem().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
 
     // Surfaces not drawn: the sky's (the sky pass draws behind them), tool,
-    // shadow-only, distortion and 3D-hud surfaces.
+    // shadow-only, distortion and 3D-hud surfaces, by their technique set.
+    // (Not `sky_surfaces`: those indices name ordinary surfaces in the
+    // drawn order: mp_flip's is a perforated metal deck, which went
+    // missing, from the collision too.)
     let mut hidden = vec![false; map.surfaces.len()];
     let mut hidden_kinds: HashMap<&'static str, usize> = HashMap::new();
-    for &s in &map.sky_surfaces {
-        if let Some(h) = hidden.get_mut(s as usize) {
-            *h = true;
-        }
-    }
     for (i, s) in map.surfaces.iter().enumerate() {
         if let Some(kind) = s.material.and_then(|m| hidden_kind(&map.materials[m].technique_set)) {
             hidden[i] = true;
@@ -551,6 +549,27 @@ fn build_iw7_world(
         .enumerate()
         .map(|(i, s)| if hidden[i] { None } else { s.material.and_then(|m| b.material(m, false)) })
         .collect();
+
+    // bo2mp: the sky: the sky material's cube (`sky_<map>`) for the sky
+    // pass, which draws it behind the world.
+    // (A space map's, mp_proto's, is `sky_lighting_ref_*`: a daylight cube
+    // for its lighting, not what it shows: its sky is its own geometry.)
+    let sky = map
+        .materials
+        .iter()
+        .filter(|m| hidden_kind(&m.technique_set) == Some("sky"))
+        .filter_map(|m| m.texture("colorMap"))
+        .find(|name| !name.contains("lighting_ref"));
+    report.push(match sky {
+        Some(name) => match map.image(name, 4096).and_then(|l| {
+            let px = fastfile_iw6::image::ImagePixels { width: l.width, height: l.height, levels: l.levels, dxgi_format: l.format, data: l.data };
+            super::iw6::link_sky(&mut b.catalog, &format!("iw7:sky:{name}"), &px, b.owner)
+        }) {
+            Ok(_) => format!("iw7 sky: {name} (cube)"),
+            Err(e) => format!("iw7 sky: {name}: {e}"),
+        },
+        None => "iw7 sky: no sky material".to_owned(),
+    });
 
     // The placed models.
     let (prop_meshes, prop_placements) = {

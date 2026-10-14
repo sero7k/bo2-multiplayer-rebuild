@@ -138,11 +138,7 @@ impl PackSet {
     /// another zone defines): the first pack holding that name, in
     /// priority order, and its largest entry (the full mip chain).
     pub fn locate_name(&self, name: &str) -> Option<(usize, IndexEntry)> {
-        let h = ipak_t6::hash_name(name.trim_start_matches(','));
-        self.packs
-            .iter()
-            .enumerate()
-            .find_map(|(i, p)| p.find_name(h).into_iter().max_by_key(|e| e.size).map(|e| (i, e)))
+        self.locate_name_hash(ipak_t6::hash_name(name.trim_start_matches(',')))
     }
 
     pub fn locate(&self, image: &ImageRef) -> Option<ImageSource> {
@@ -152,10 +148,27 @@ impl PackSet {
         if image.streamed_parts == 0 {
             return Some(ImageSource::Empty);
         }
-        self.packs.iter().enumerate().find_map(|(i, p)| {
-            p.find(image.name_hash, image.part_hash)
-                .map(|e| ImageSource::Pack(i, e))
-        })
+        self.packs
+            .iter()
+            .enumerate()
+            .find_map(|(i, p)| {
+                p.find(image.name_hash, image.part_hash)
+                    .map(|e| ImageSource::Pack(i, e))
+            })
+            // A zone built against another build of the same picture (the
+            // Zombies Declassified "DLC5" maps: about 60% of their streamed
+            // images are in the install's packs under their name with
+            // other data hashes): the picture by its name hash alone.
+            .or_else(|| self.locate_name_hash(image.name_hash).map(|(i, e)| ImageSource::Pack(i, e)))
+    }
+
+    /// The first pack, in priority order, with an entry under `name_hash`,
+    /// and its largest such entry (the full mip chain).
+    fn locate_name_hash(&self, name_hash: u32) -> Option<(usize, IndexEntry)> {
+        self.packs
+            .iter()
+            .enumerate()
+            .find_map(|(i, p)| p.find_name(name_hash).into_iter().max_by_key(|e| e.size).map(|e| (i, e)))
     }
 }
 

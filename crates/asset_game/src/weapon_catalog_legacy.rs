@@ -246,6 +246,15 @@ fn legacy_body_facts(w: &LegacyWeaponView) -> WeaponBodyFacts {
     f.sprint_raise_time_ms = w.i("sprintInTime");
     f.sprint_loop_time_ms = w.i("sprintLoopTime");
     f.sprint_drop_time_ms = w.i("sprintOutTime");
+    // bo2mp: World at War's multiplayer guns have no sprint animations (their
+    // `szXAnims` sprint slots are empty): the game moves the idling gun to
+    // its `sprintOfs` / `sprintRot` pose instead. CoD4's have none of these
+    // fields (zero) and have their own animations.
+    let has_sprint_anim = w.xanims.get(23).is_some_and(|n| !n.is_empty());
+    if !has_sprint_anim {
+        f.bob.sprint_ofs = w.v3("sprintOfs");
+        f.bob.sprint_rot = w.v3("sprintRot");
+    }
     f.night_vision_wear_time = w.i("nightVisionWearTime");
     f.fuse_time_ms = w.i("fuseTime");
     f.detonate_delay_ms = w.i("iDetonateDelay");

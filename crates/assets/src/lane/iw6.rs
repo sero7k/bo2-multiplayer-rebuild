@@ -761,6 +761,19 @@ impl<'a> Builder<'a> {
         Some(index_in_catalog)
     }
 
+    /// bo2mp: a Ghosts map's sky (`sky_<map>_hdr`: a cube, its six faces
+    /// one after another in one pak range, BC6H linear light) as a cube
+    /// image under a material whose draw is Black Ops II's sky
+    /// (`T6Blend::Sky`: the sky pass draws it behind the world).
+    pub(super) fn sky_material(&mut self, image_index: usize, max: u32) -> Result<usize, String> {
+        let rec: &ImageRec = self.cap.images.get(image_index).ok_or("sky image not in the zone")?;
+        let name = rec.name.clone();
+        let px = fastfile_iw6::image::image_pixels(rec, self.image, &mut self.paks, max)?;
+        let m = link_sky(&mut self.catalog, &format!("iw6:sky:{name}"), &px, self.owner).map_err(|e| format!("{name}: {e}"))?;
+        self.decoded += 1;
+        Ok(m)
+    }
+
     fn string(&self, index: u32) -> String {
         self.strings
             .get(index as usize)
@@ -1125,4 +1138,105 @@ mod tests {
         assert_eq!(c, [0, 0, 0, 1]);
         assert_eq!(w, vec![0, 1, 2, 3, 4, 5, 6]);
     }
+}
+
+/// bo2mp: a sky cube (Ghosts' and Infinite Warfare's `sky_<map>`: six
+/// faces one after another, each with its levels, BC6H linear light) as a
+/// cube image under a material whose draw is Black Ops II's sky
+/// (`T6Blend::Sky`: the sky pass draws the first such material's colour
+/// map behind the world). The catalog material's index.
+pub(super) fn link_sky(
+    catalog: &mut MaterialCatalog,
+    name: &str,
+    px: &fastfile_iw6::image::ImagePixels,
+    owner: ZoneOwner,
+) -> Result<usize, String> {
+    use bevy::render::render_resource::{TextureViewDescriptor, TextureViewDimension};
+    let mut face = 0usize;
+    let (mut w, mut h) = (px.width, px.height);
+    for _ in 0..px.levels.max(1) {
+        face += fastfile_iw6::image::level_bytes(px.dxgi_format, w, h).ok_or("sky format not read")?;
+        w = (w / 2).max(1);
+        h = (h / 2).max(1);
+    }
+    if px.width != px.height || px.data.len() != 6 * face {
+        return Err(format!("{}x{}, {} bytes ({} wanted for six faces)", px.width, px.height, px.data.len(), 6 * face));
+    }
+    let format = match px.dxgi_format {
+        95 => TextureFormat::Bc6hRgbUfloat,
+        96 => TextureFormat::Bc6hRgbFloat,
+        70..=72 => TextureFormat::Bc1RgbaUnormSrgb,
+        76..=78 => TextureFormat::Bc3RgbaUnormSrgb,
+        97..=99 => TextureFormat::Bc7RgbaUnormSrgb,
+        27..=29 => TextureFormat::Rgba8UnormSrgb,
+        other => return Err(format!("DXGI format {other} is not drawn as a sky")),
+    };
+    let mut image = Image::new_uninit(
+        Extent3d { width: px.width, height: px.height, depth_or_array_layers: 6 },
+        TextureDimension::D2,
+        format,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.texture_descriptor.mip_level_count = px.levels.max(1);
+    image.data = Some(px.data.clone());
+    image.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::Cube), ..Default::default() });
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::ClampToEdge,
+        address_mode_v: ImageAddressMode::ClampToEdge,
+        address_mode_w: ImageAddressMode::ClampToEdge,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        ..Default::default()
+    });
+    let slot = catalog.link_image(AuthoredImage {
+        namespace: AssetNamespace::T6,
+        name: AssetRef::Real(name.to_owned()),
+        map_type: 5,
+        semantic: TS_COLOR_MAP,
+        category: 0,
+        use_srgb_reads: false,
+        width: px.width as u16,
+        height: px.height as u16,
+        depth: 1,
+        level_count: px.levels as u8,
+        format: 0,
+        payload: Arc::new(Vec::new()),
+        decoded: Some(Arc::new(image)),
+        common_owned: false,
+        decoded_variant: None,
+        decoded_by: None,
+        pending_decode: None,
+    });
+    Ok(catalog.link_material(AuthoredMaterial {
+        name: AssetRef::Real(name.to_owned()),
+        namespace: AssetNamespace::T6,
+        technique_set: AssetRef::default(),
+        technique_set_edge: AssetEdge::Absent,
+        draw_surf: 0,
+        sort_key: 0,
+        info_game_flags: 0,
+        texture_atlas: None,
+        surface_type_bits: None,
+        t5_layered_surface_types: None,
+        state_flags: 0,
+        camera_region: 0,
+        state_bits: Vec::new(),
+        state_bits_entry: None,
+        t5_state_bits_entry: None,
+        iw5_state_bits_entry: None,
+        technique_table: None,
+        route: None,
+        textures: vec![MaterialTextureBinding {
+            name_hash: COLOR_MAP_HASH,
+            name_start: 0,
+            name_end: 0,
+            sampler_state: 0x13,
+            semantic: TS_COLOR_MAP,
+            image: Some(slot),
+        }],
+        constants: Vec::new(),
+        zone: owner,
+        t6_draw: Some(T6Draw::from_technique_set("wc_sky", 0, None)),
+    }))
 }

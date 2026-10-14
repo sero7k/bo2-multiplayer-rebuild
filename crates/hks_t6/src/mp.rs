@@ -526,8 +526,23 @@ impl MpState {
         }
     }
 
+    /// A stat BO2's scripts write. bo2mp: never a class's other-game gun
+    /// (its slot, attachments, camo): BO2's CheckClasses puts every weapon
+    /// slot holding an item past its own weapons back to the default
+    /// class's gun when his stats arrive (each front end and match HUD
+    /// build), which turned a class's guest gun into the MTAR after every
+    /// match. Create-a-Class (the shell) changes classes through the
+    /// profile itself.
     fn set_stat(&mut self, path: String, v: &Value) {
-        self.profile.set_stat(path, stat_value(v));
+        let new = stat_value(v);
+        if let Some(gun) = self.profile.guest_class_slot(&path)
+            && self.profile.stat(&path) != Some(&new)
+        {
+            let old = self.profile.stat(&path).cloned();
+            self.stat_log.push(format!("classes: kept {path} = {old:?} (another game's gun, item {gun}); the menu scripts asked for {new:?}"));
+            return;
+        }
+        self.profile.set_stat(path, new);
     }
 
     /// Everything is free in a private match (BO2's custom games unlock
@@ -2028,16 +2043,9 @@ pub fn install(host: &mut Host) -> Mp {
         // bo2mp: BO2's own menu scripts put a class's gun back to the
         // default when they meet an item they do not know (another game's
         // gun, numbered past Black Ops II's table); Create-a-Class (the
-        // shell) is what changes a class, so those writes are refused.
-        if old != new
-            && old >= bo2_profile::guest::FIRST_INDEX
-            && !slot.ends_with("count")
-            && (slot == "primary" || slot == "secondary" || slot.contains("attachment") || slot.ends_with("camo"))
-        {
-            m.stat_log.push(format!("classes: kept {key} = {old} (another game's gun); the menu scripts asked for {new}"));
-            return Ok(vec![]);
-        }
-        if old != new {
+        // shell) is what changes a class, so those writes are refused
+        // (`set_stat`: the gun's slot, attachments and camo).
+        if old != new && m.profile.guest_class_slot(&key).is_none() {
             m.stat_log.push(format!("classes: menu scripts set {key} {old} -> {new}"));
         }
         m.set_stat(key, &arg(&a, 3));

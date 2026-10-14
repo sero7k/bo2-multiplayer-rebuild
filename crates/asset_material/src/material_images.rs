@@ -178,6 +178,18 @@ impl DecodedMips {
             (MipStorage::Bc3, false) => TextureFormat::Bc3RgbaUnormSrgb,
         }
     }
+
+    /// bo2mp: the extra view a linear colour map's texture allows (its sRGB
+    /// twin: same texels, read decoded), none for an sRGB one.
+    fn srgb_view_formats(format: TextureFormat) -> &'static [TextureFormat] {
+        match format {
+            TextureFormat::Rgba8Unorm => &[TextureFormat::Rgba8UnormSrgb],
+            TextureFormat::Bc1RgbaUnorm => &[TextureFormat::Bc1RgbaUnormSrgb],
+            TextureFormat::Bc2RgbaUnorm => &[TextureFormat::Bc2RgbaUnormSrgb],
+            TextureFormat::Bc3RgbaUnorm => &[TextureFormat::Bc3RgbaUnormSrgb],
+            _ => &[],
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1175,6 +1187,15 @@ fn wrap_mips(mips: &DecodedMips, data: Vec<u8>, wrap: WrapRecipe) -> Image {
         RenderAssetUsages::RENDER_WORLD,
     );
     image.texture_descriptor.mip_level_count = levels;
+    // bo2mp: a colour map kept linear (an Infinity Ward or Black Ops lit
+    // model's: its own shaders square the stored bytes) may also be viewed as
+    // sRGB: Black Ops II's fallback pass (other games' guns under Black Ops
+    // II's rules) reads colour maps as sRGB and re-encodes them; read
+    // through the linear view the stored bytes were encoded twice and the
+    // guns drew washed out white.
+    if !wrap.is_normal {
+        image.texture_descriptor.view_formats = DecodedMips::srgb_view_formats(format);
+    }
     image.data = Some(data);
     image.sampler = ImageSampler::Descriptor(sampler_from_iw4(
         wrap.sampler_state,
@@ -3420,4 +3441,47 @@ mod tests {
         assert!(line.starts_with("unresolved material images (mp_x, t5): 1 materials, 2 images"));
         assert!(line.contains("mtl_crate [~crate_n: ~crate_n: unsupported IWI format 19, 0x00000001: image pointer unresolved in the zone]"));
     }
+}
+
+/// bo2zm: a colour picture by name from one game's IWDs (`main`: Black Ops'
+/// or World at War's), for a Black Ops II zone that names a picture its own
+/// packs lack (the Zombies Declassified "DLC5" maps, built from Black Ops'
+/// art), as a GPU image with every mip: sRGB, repeat-wrapped, anisotropic.
+/// `None` when no archive there holds the name.
+pub fn decode_iwd_colour_image(main: &Path, name: &str) -> Option<Result<Image, String>> {
+    let index = IwdIndex::open(main).ok()?;
+    let mips = match index.decode(name)? {
+        Ok(mips) => mips,
+        Err(error) => return Some(Err(error)),
+    };
+    let wrap = WrapRecipe {
+        // Anisotropic (4) with linear mips (2 << 3), wrapping.
+        sampler_state: 4 | (2 << 3),
+        is_normal: false,
+        alpha_test_color: false,
+        force_linear: false,
+        use_srgb_reads: true,
+    };
+    Some(Ok(wrap_mips(&mips, mips.payload().to_vec(), wrap)))
+}
+
+/// bo2zm: every image name in a game's IWDs (lower case, no extension),
+/// sorted, read once per `main`: for a Black Ops II name the zone tool cut
+/// short (`~~-gstatic_berlin_metal_chair~90107ea7`), found by its start.
+pub fn iwd_image_names_sorted(main: &Path) -> Arc<Vec<String>> {
+    static NAMES: std::sync::OnceLock<std::sync::Mutex<HashMap<PathBuf, Arc<Vec<String>>>>> =
+        std::sync::OnceLock::new();
+    let cache = NAMES.get_or_init(Default::default);
+    if let Some(hit) = cache.lock().ok().and_then(|c| c.get(main).cloned()) {
+        return hit;
+    }
+    let mut names: Vec<String> = IwdIndex::open(main)
+        .map(|index| index.0.image_names().map(str::to_owned).collect())
+        .unwrap_or_default();
+    names.sort();
+    let names = Arc::new(names);
+    if let Ok(mut c) = cache.lock() {
+        c.insert(main.to_path_buf(), Arc::clone(&names));
+    }
+    names
 }

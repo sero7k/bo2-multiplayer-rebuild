@@ -45,6 +45,9 @@ struct ZmHudValues {
     offhand: String,
     /// bo2mp: the other players' points, in their place's colour (0-3).
     others: Vec<(usize, i32)>,
+    /// bo2mp: a Zombies match (not a multiplayer one, whose server sends
+    /// these dvars too: the use hint is drawn here in both).
+    zombies: bool,
 }
 
 /// bo2mp: the four players' colours (as Black Ops gives them).
@@ -55,9 +58,18 @@ const PLAYER_COLOURS: [Color; 4] = [
     Color::srgb(0.40, 0.85, 0.40),
 ];
 
-/// bo2mp: Zombies' classic HUD is on (see `hks_t6`'s `zm_classic_hud`).
-fn classic() -> bool {
-    hks_t6::host::zm_classic_hud() && crate::lui_hud::lui_enabled()
+/// bo2mp: Zombies' classic HUD is on (see `hks_t6`'s `zm_classic_hud`):
+/// in a Zombies match only (a multiplayer match keeps its own HUD).
+fn classic(zombies: bool) -> bool {
+    zombies && hks_t6::host::zm_classic_hud() && crate::lui_hud::lui_enabled()
+}
+
+/// bo2mp: the match being played is Zombies: a Zombies map (`zm_`,
+/// `zombie_`, another game's: `cp_*`, `t7:zm_factory`) and no multiplayer
+/// match values (`bo2mp_scores`) from its server.
+fn zombies_match(dvars: &sim::ScriptDvars<'_>, identity: Option<&frame::LaunchIdentity>) -> bool {
+    dvars.string("bo2mp_scores").is_none()
+        && identity.is_none_or(|i| crate::lui_hud::is_zombies_zone(&i.zone))
 }
 
 /// bo2mp: the blood splash behind his points (Black Ops' Zombies HUD): a
@@ -218,7 +230,11 @@ pub(crate) fn hint_runs_with(text: &str, keys: &HudInputView, brackets: bool) ->
     runs
 }
 
-fn read_values(presented: &PresentedSnapshot, local: &LocalPresentClient) -> Option<ZmHudValues> {
+fn read_values(
+    presented: &PresentedSnapshot,
+    local: &LocalPresentClient,
+    identity: Option<&frame::LaunchIdentity>,
+) -> Option<ZmHudValues> {
     let snap = presented.snapshot()?;
     let dvars = snap.meta.script_dvars(local.0);
     // The scripts hid his HUD (the game-over shot).
@@ -252,6 +268,7 @@ fn read_values(presented: &PresentedSnapshot, local: &LocalPresentClient) -> Opt
                 (client != local.0.0).then_some((i.min(3), score))
             })
             .collect(),
+        zombies: zombies_match(&dvars, identity),
     })
 }
 
@@ -296,6 +313,7 @@ fn zm_hud(
     mut shown: Local<Option<ZmHudValues>>,
     mut scale_shown: Local<f32>,
     mut splash: Local<Option<Handle<Image>>>,
+    identity: Option<Res<frame::LaunchIdentity>>,
     (bo2, icons, mut images, mut chalk, lines, mut bo2_shown, mut offhand_imgs): (
         Option<Res<crate::bo2_font::Bo2Fonts>>,
         Option<Res<assets::T6HudIcons>>,
@@ -307,7 +325,7 @@ fn zm_hud(
     ),
 ) {
     let values = match (presented.as_deref(), local.as_deref()) {
-        (Some(p), Some(l)) => read_values(p, l),
+        (Some(p), Some(l)) => read_values(p, l, identity.as_deref()),
         _ => None,
     };
     // The round's chalk marks (rounds 1 to 5), once.
@@ -489,8 +507,9 @@ fn zm_hud(
         // and the ammo.
         // bo2mp: the classic HUD draws them over BO2's (its round, points
         // and ammo widgets left out).
-        let classic = classic();
-        let lui = crate::lui_hud::lui_enabled() && !classic;
+        let classic = classic(values.zombies);
+        // bo2mp: a multiplayer match draws only the use hint from here.
+        let lui = (crate::lui_hud::lui_enabled() && !classic) || !values.zombies;
         for (e, line) in &lines {
             commands.entity(e).despawn_related::<Children>();
             match line.0 {
@@ -624,20 +643,23 @@ fn zm_hud(
     for (e, _) in &lines {
         commands.entity(e).despawn_related::<Children>();
     }
+    // bo2mp: a multiplayer match draws only the use hint from here.
+    let mp = !values.zombies;
     for (mut t, mut tf) in &mut texts.p0() {
-        *t = Text::new(values.round.clone());
+        *t = Text::new(if mp { String::new() } else { values.round.clone() });
         if rescale {
             *tf = game_text_font(&font.0, 84.0 * scale);
         }
     }
     for (mut t, mut tf) in &mut texts.p1() {
-        *t = Text::new(values.points.to_string());
+        *t = Text::new(if mp { String::new() } else { values.points.to_string() });
         if rescale {
             *tf = game_text_font(&font.0, 34.0 * scale);
         }
     }
     for (mut t, mut tf) in &mut texts.p2() {
         *t = Text::new(match values.clip_left {
+            _ if mp => String::new(),
             Some(left) => format!("{left} | {} / {}", values.clip, values.stock),
             None => format!("{} / {}", values.clip, values.stock),
         });
@@ -1385,10 +1407,14 @@ fn zm_popups(
     mut last: Local<Option<i32>>,
     mut seed: Local<u32>,
     mut since: Local<Option<f32>>,
+    identity: Option<Res<frame::LaunchIdentity>>,
 ) {
     let values = match (presented.as_deref(), local.as_deref()) {
-        // BO2's own HUD (unless BO2ZM_LUI=0) flies its own points.
-        (Some(p), Some(l)) if !crate::lui_hud::lui_enabled() => read_values(p, l),
+        // BO2's own HUD (unless BO2ZM_LUI=0) flies its own points; bo2mp:
+        // not with the classic HUD (BO2's points are not drawn), whose
+        // points fly from here, in a Zombies match only.
+        (Some(p), Some(l)) => read_values(p, l, identity.as_deref())
+            .filter(|v| v.zombies && (!crate::lui_hud::lui_enabled() || classic(true))),
         _ => None,
     };
     let Some(values) = values else {

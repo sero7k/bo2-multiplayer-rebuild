@@ -128,6 +128,19 @@ pub struct RuntimeUploadedLightmapViews {
 pub struct UploadedTextureView {
     pub view: TextureView,
     pub dimension: TextureViewDimension,
+    /// bo2mp: the same texels read as sRGB, when the texture is stored
+    /// linear and allows it (a Black Ops or Infinity Ward lit model's colour
+    /// map, kept linear for its own shaders). Black Ops II's fallback pass
+    /// reads colour maps as sRGB: `colour_view`.
+    pub srgb: Option<TextureView>,
+}
+
+impl UploadedTextureView {
+    /// The view a pass that reads colour maps as sRGB (Black Ops II's
+    /// fallback pass: its `raw_texel` re-encodes them) binds.
+    pub fn colour_view(&self) -> &TextureView {
+        self.srgb.as_ref().unwrap_or(&self.view)
+    }
 }
 
 #[derive(Resource, Clone, Debug, Default)]
@@ -756,9 +769,25 @@ fn refresh_native_view(
     if before == Some((gpu.texture_view.id(), dimension)) {
         return ViewChange::None;
     }
+    // bo2mp: a linear 2D texture that allows an sRGB view gets one too.
+    let srgb = (dimension == TextureViewDimension::D2)
+        .then(|| {
+            let format = gpu.texture_descriptor.format;
+            let srgb = format.add_srgb_suffix();
+            (srgb != format && gpu.texture_descriptor.view_formats.contains(&srgb)).then(|| {
+                gpu.texture.create_view(&bevy::render::render_resource::TextureViewDescriptor {
+                    label: Some("bo2mp_colour_map_srgb"),
+                    format: Some(srgb),
+                    dimension: Some(TextureViewDimension::D2),
+                    ..Default::default()
+                })
+            })
+        })
+        .flatten();
     *slot = Some(Ok(UploadedTextureView {
         view: gpu.texture_view.clone(),
         dimension,
+        srgb,
     }));
     ViewChange::of_view(before.map(|(id, _)| id), Some(gpu.texture_view.id()))
 }

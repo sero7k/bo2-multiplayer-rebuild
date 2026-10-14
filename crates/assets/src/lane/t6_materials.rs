@@ -302,8 +302,33 @@ pub(crate) fn decode(packs: &PackSet, image: &ImageRef) -> Result<Image, String>
         }
         Some(ImageSource::Embedded) => embedded_image(image),
         Some(ImageSource::Empty) => Err("no pixels".to_owned()),
-        None => Err("in no pack".to_owned()),
+        None => legacy_iwd_image(&image.name).unwrap_or_else(|| Err("in no pack".to_owned())),
     }
+}
+
+/// bo2zm: a picture no Black Ops II pack holds, from Black Ops' or World at
+/// War's IWDs (`asset_t6::legacy_images`): the Zombies Declassified "DLC5"
+/// maps (Kino, Ascension, Moon ...) name Black Ops' own art, which only
+/// those games' installs carry. Colour pictures only.
+fn legacy_iwd_image(name: &str) -> Option<Result<Image, String>> {
+    use asset_t6::legacy_images as legacy;
+    if !legacy::wants_legacy(name) {
+        return None;
+    }
+    let mains = legacy::legacy_iwd_mains();
+    let found = |main: &std::path::Path, candidate: &str| {
+        asset_material::decode_iwd_colour_image(main, candidate)
+            .map(|r| r.map_err(|e| format!("{candidate} in {}: {e}", main.display())))
+    };
+    mains
+        .iter()
+        .find_map(|main| legacy::legacy_names(name).iter().find_map(|c| found(main, c)))
+        .or_else(|| {
+            mains.iter().find_map(|main| {
+                let sorted = asset_material::iwd_image_names_sorted(main);
+                found(main, &legacy::legacy_cut_name(name, &sorted)?)
+            })
+        })
 }
 
 /// An image whose pixels ride in the zone itself (`GfxImageLoadDef`):

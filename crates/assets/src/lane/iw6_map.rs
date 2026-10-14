@@ -202,6 +202,12 @@ fn iw3_clip(clip: &fastfile_iw6::map::Clip) -> iw3::zone::ClipMap {
     }
 }
 
+/// Ghosts' HDR sun light (linear, its brightest channel) as CoD4's
+/// gamma-space `sunlight`.
+fn sun_gamma(peak: f32) -> f32 {
+    (peak.max(0.0).sqrt() * 0.5).clamp(0.6, 1.6)
+}
+
 /// Ghosts' drawn world as CoD4's `GfxWorld` (materials and lightmaps go
 /// beside it, not in it).
 fn iw3_world(w: &fastfile_iw6::map::World, sun: Option<fastfile_iw6::map::Sun>) -> iw3::zone::GfxWorld {
@@ -260,9 +266,13 @@ fn iw3_world(w: &fastfile_iw6::map::World, sun: Option<fastfile_iw6::map::Sun>) 
             ambient_scale: 0.0,
             ambient_color: [0.0; 3],
             diffuse_fraction: 0.0,
-            // (Ghosts' sun colour is HDR: its brightest channel as the
-            // light, the rest the colour.)
-            sun_light: colour.1.min(4.0),
+            // (Ghosts' sun colour is HDR linear light, 9 on Prison Break,
+            // its brightest channel the light and the rest the colour. The
+            // fallback draw adds the sun in CoD4's gamma space beside the
+            // lightmap's sqrt(light): the square root of Ghosts' light, then
+            // halved, puts it at CoD4's sunlight (1 to 1.5); the light
+            // itself, 4 at most, burnt every sunlit surface white.)
+            sun_light: sun_gamma(colour.1),
             sun_color: colour.0,
             diffuse_color: colour.0,
             angles,
@@ -510,6 +520,16 @@ fn build_iw6_world(
         }
         surface_materials.push(b.world_material(m.index as usize, max));
     }
+    // bo2mp: the sky: its cube under a sky material (the sky surface itself
+    // is not drawn; the sky pass draws the cube behind the world).
+    let sky_line = match world.sky_images.iter().flatten().next() {
+        Some(id) => match b.sky_material(id.index as usize, max.max(1024)) {
+            Ok(_) => format!("iw6 sky: {} (cube)", cap.name_of(*id)),
+            Err(e) => format!("iw6 sky: {e}"),
+        },
+        None => "iw6 sky: none in the world".to_owned(),
+    };
+    report.push(sky_line);
     report.push(format!(
         "iw6 materials: {} world materials linked, {} pictures decoded (at most {max}px), {} failed{}; not drawn: {:?}",
         b.materials.len(),

@@ -662,7 +662,7 @@ impl AuthorityDObjState {
                         self.current_collision = Some(AuthorityDObjCollision {
                             bones,
                             coll,
-                            surface_flags: capability.surface_flags,
+                            surface_flags: bone_box_surface_flags(capability),
                         });
                         self.materialized_model_revision = Some(self.model_revision);
                         self.materialized_pose_revision = Some(self.pose_revision);
@@ -723,13 +723,42 @@ impl AuthorityDObjState {
                 }
             }
             None => {
+                let surface_flags = bone_box_surface_flags(capability);
                 self.current_collision = Some(AuthorityDObjCollision {
                     bones: vec![bone],
                     coll: None,
-                    surface_flags: 0,
+                    surface_flags,
                 });
             }
         }
+    }
+}
+
+/// bo2mp: a model's bone boxes' surface where no collision surface says:
+/// a surface of `default` type that is not 0 (0 plays blood): a high bit no
+/// surface flag reads (the type is bits 20..24).
+pub const PROP_DEFAULT_SURFACE_FLAGS: u32 = 1 << 31;
+
+/// bo2mp: what a bone box of `capability`'s model shows when hit: its paint's
+/// surface; otherwise blood only for a body (a skeleton with a head and a
+/// spine: zombies, soldiers, dogs), the `default` surface for anything else.
+/// Every prop of another game's map (its lane sets no paint) bled: a crate,
+/// a barrel or a model not drawn showed blood where nobody stood.
+fn bone_box_surface_flags(capability: &xmodel_runtime::RetainedModelCapability) -> u32 {
+    if capability.surface_flags != 0 {
+        return capability.surface_flags;
+    }
+    let has = |want: &str| {
+        capability
+            .pose
+            .bone_names
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case(want))
+    };
+    if has("j_head") || has("j_spine4") || has("j_neck") {
+        0
+    } else {
+        PROP_DEFAULT_SURFACE_FLAGS
     }
 }
 
@@ -1356,7 +1385,9 @@ fn trace_dobj_coll_tris(
             owner,
             bone,
             part_classification: 0,
-            surface_flags: tr.surface_flags,
+            // bo2mp: a model's collision surface is a prop's (a body has
+            // none): one with no surface type is `default`, not blood.
+            surface_flags: if tr.surface_flags == 0 { PROP_DEFAULT_SURFACE_FLAGS } else { tr.surface_flags },
         },
         startsolid: false,
     })

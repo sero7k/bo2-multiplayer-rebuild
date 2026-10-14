@@ -400,6 +400,7 @@ dependencies = [
 name = "asset_t6"
 version = "0.1.0"
 dependencies = [
+ "asset_core",
  "asset_transport",
  "fastfile_t6",
  "ipak_t6",

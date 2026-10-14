@@ -615,6 +615,27 @@ fn build_legacy_guests(game: Legacy, path: &Path, read: Arc<LegacyRead>, materia
     weapons.resolve_sz_xanim_edges(&xanims);
     weapons.resolve_fpv_mesh_edges(&fpv);
     weapons.resolve_world_model_edges(&world_guns);
+    // bo2mp: each sniper's 2D scope (`overlayMaterial`): its material's
+    // picture, which the HUD reads from the game's IWDs by name. (The
+    // materials never join the match's definitions, so it was never named
+    // and no scope was drawn.) A 2D material's one texture is its picture.
+    let overlays = {
+        let zone: &iw3::zone::Zone = &read.zone;
+        let names = common_material_names(&[zone]);
+        weapons.resolve_overlay_images(|material| {
+            let key = material.trim_start_matches(',');
+            let &(_, i) = names.get(key)?;
+            let m = zone.material(i)?;
+            let t = m
+                .textures
+                .iter()
+                .find(|t| t.semantic == iw3::zone::TextureSemantic::Color && t.image.is_some())
+                .or_else(|| m.textures.iter().find(|t| t.image.is_some()))?;
+            let image = zone.image(t.image?)?;
+            (!image.name.is_empty()).then(|| image.name.clone())
+        })
+    };
+    report.push(format!("{tag} guest guns: {overlays} scope overlay pictures named"));
     report.push(format!(
         "{tag} guest guns: {captured} weapons captured, {} in the catalog [{:.1} s]",
         weapons.len(),

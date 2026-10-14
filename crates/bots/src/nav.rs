@@ -260,7 +260,29 @@ pub fn brush_bounds(brushes: &[SimBrush]) -> Option<([f32; 3], [f32; 3])> {
 }
 
 pub fn playable_bounds(brushes: &[SimBrush], seeds: &[[f32; 3]]) -> Option<([f32; 3], [f32; 3])> {
-    let (bmins, bmaxs) = brush_bounds(brushes)?;
+    playable_bounds_within(brush_bounds(brushes)?, seeds)
+}
+
+/// bo2mp: the bounds of a collision mesh's vertices (a map that collides
+/// through triangles only: Infinite Warfare's), None when it has none.
+pub fn mesh_bounds(verts: &[[f32; 3]]) -> Option<([f32; 3], [f32; 3])> {
+    let mut mins = [f32::MAX; 3];
+    let mut maxs = [f32::MIN; 3];
+    let mut any = false;
+    for v in verts.iter().filter(|v| v.iter().all(|c| c.is_finite())) {
+        any = true;
+        for i in 0..3 {
+            mins[i] = mins[i].min(v[i]);
+            maxs[i] = maxs[i].max(v[i]);
+        }
+    }
+    any.then_some((mins, maxs))
+}
+
+/// The walkable bounds: the spawn seeds' bounds, padded, inside the
+/// world's collision bounds (`world`).
+pub fn playable_bounds_within(world: ([f32; 3], [f32; 3]), seeds: &[[f32; 3]]) -> Option<([f32; 3], [f32; 3])> {
+    let (bmins, bmaxs) = world;
     if seeds.is_empty() {
         return Some((bmins, bmaxs));
     }

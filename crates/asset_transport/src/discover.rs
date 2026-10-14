@@ -309,11 +309,35 @@ pub fn list_legacy_mp_map_files(root: &GamesRoot) -> Vec<(String, String, PathBu
 /// loading zone (`<map>_load.ff`) is beside it: Ghosts' `mp_` zones are
 /// also its characters' bodies, heads and arms (`mp_body_*`, ...) and its
 /// character room; Extinction's maps (`mp_alien_*`) are not multiplayer.
+///
+/// The DLC maps (Onslaught, Devastation, Invasion, Nemesis) count by their
+/// names too, and a map whose `<map>_path.ff` is beside it: a DLC install
+/// that ships no loading zone of its own still lists its maps.
 fn is_ghosts_mp_map(path: &Path, stem: &str) -> bool {
-    !stem.starts_with("mp_alien")
-        && path
-            .parent()
-            .is_some_and(|dir| dir.join(format!("{stem}_load.ff")).is_file())
+    const NOT_MAPS: [&str; 5] = ["mp_alien", "mp_body_", "mp_head_", "mp_viewhands_", "mp_character_room"];
+    const DLC: [&str; 16] = [
+        "mp_swamp",
+        "mp_ca_rumble",
+        "mp_ca_red_river",
+        "mp_boneyard_ns",
+        "mp_battery3",
+        "mp_ca_impact",
+        "mp_ca_behemoth",
+        "mp_dome_ns",
+        "mp_dig",
+        "mp_favela_iw6",
+        "mp_pirate",
+        "mp_zulu",
+        "mp_zerosub",
+        "mp_conflict",
+        "mp_mine",
+        "mp_shipment_ns",
+    ];
+    if NOT_MAPS.iter().any(|p| stem.starts_with(p)) || stem.ends_with("_path") {
+        return false;
+    }
+    let beside = |suffix: &str| path.parent().is_some_and(|dir| dir.join(format!("{stem}{suffix}.ff")).is_file());
+    beside("_load") || beside("_path") || DLC.contains(&stem)
 }
 
 /// bo2mp: an Infinite Warfare zone is a map when its material zone

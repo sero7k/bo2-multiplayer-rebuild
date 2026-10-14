@@ -6,6 +6,7 @@ license.workspace = true
 description = "bo2zm: Black Ops II zone captures and image packs, turned into engine data."
 
 [dependencies]
+asset_core.workspace = true
 asset_transport.workspace = true
 fastfile_t6.workspace = true
 ipak_t6.workspace = true

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use asset_t6::{ImageSource, PackSet, capture_zone};
+use asset_t6::{ImageSource, PackSet, capture_zone, legacy_images};
 
 const DEFAULT_BO2: &str = r"C:\Program Files (x86)\Steam\steamapps\common\Call of Duty Black Ops II";
 
@@ -55,6 +55,14 @@ fn run(root: &Path, zones: &[String]) -> Result<bool, String> {
             .join(", ")
     );
 
+    let legacy = Legacy::open();
+    if !legacy.mains.is_empty() {
+        println!(
+            "other games' IWDs: {}",
+            legacy.mains.iter().map(|(m, _, _)| m.display().to_string()).collect::<Vec<_>>().join(", ")
+        );
+    }
+
     let mut ok = true;
     let mut images_total = 0usize;
     let mut by_source: BTreeMap<String, usize> = BTreeMap::new();
@@ -79,14 +87,18 @@ fn run(root: &Path, zones: &[String]) -> Result<bool, String> {
             match packs.locate(image) {
                 Some(ImageSource::Pack(i, entry)) => {
                     let pack = &packs.packs[i];
-                    *by_source.entry(pack.name.clone()).or_default() += 1;
+                    // Found by its name alone (another build of the
+                    // picture): its size may differ; that is no failure.
+                    let by_name = pack.find(image.name_hash, image.part_hash).is_none();
+                    let label = if by_name { format!("{} (by name)", pack.name) } else { pack.name.clone() };
+                    *by_source.entry(label).or_default() += 1;
                     match pack.read(entry).and_then(|bytes| {
                         ipak_t6::parse_iwi(&bytes)
                             .map(|iwi| (iwi.width, iwi.height))
                             .map_err(|e| e.to_string())
                     }) {
                         Ok((w, h)) => {
-                            if (w, h) != (image.width as u32, image.height as u32) {
+                            if !by_name && (w, h) != (image.width as u32, image.height as u32) {
                                 size_mismatch.push(format!(
                                     "{} zone {}x{} pack {w}x{h}",
                                     image.name, image.width, image.height
@@ -104,7 +116,17 @@ fn run(root: &Path, zones: &[String]) -> Result<bool, String> {
                         .entry("no pixels (runtime image)".into())
                         .or_default() += 1
                 }
-                None => missing.push(format!("{} ({zone})", image.name)),
+                None => match legacy.find(&image.name) {
+                    Some(from) => *by_source.entry(format!("{from} IWDs")).or_default() += 1,
+                    None => missing.push(format!(
+                        "{} ({zone}) parts={} hash={:08x}/{:08x}{}",
+                        image.name,
+                        image.streamed_parts,
+                        image.name_hash,
+                        image.part_hash,
+                        if legacy_images::is_normal_map_name(&image.name) { " (normal map)" } else { "" }
+                    )),
+                },
             }
         }
     }
@@ -184,5 +206,44 @@ fn dump(c: &asset_t6::ZoneCapture) {
             m.sort_key,
             imgs.join(" ")
         );
+    }
+}
+
+/// Black Ops' and World at War's IWDs (`IW4L_GAMES`), where the engine
+/// finds pictures a Black Ops II zone names but no Black Ops II pack holds
+/// (`asset_t6::legacy_images`): each `main`, its index and sorted names.
+struct Legacy {
+    mains: Vec<(PathBuf, std::sync::Arc<asset_transport::IwdIndex>, Vec<String>)>,
+}
+
+impl Legacy {
+    fn open() -> Legacy {
+        let mains = legacy_images::legacy_iwd_mains()
+            .iter()
+            .filter_map(|m| {
+                let index = asset_transport::IwdIndex::open(m).ok()?;
+                let mut names: Vec<String> = index.image_names().map(str::to_owned).collect();
+                names.sort();
+                Some((m.clone(), index, names))
+            })
+            .collect();
+        Legacy { mains }
+    }
+
+    /// The game folder whose IWDs hold `name` as the engine looks for it.
+    fn find(&self, name: &str) -> Option<String> {
+        if !legacy_images::wants_legacy(name) {
+            return None;
+        }
+        let game = |m: &Path| m.parent().and_then(|p| p.file_name()).map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        self.mains
+            .iter()
+            .find(|(_, index, _)| legacy_images::legacy_names(name).iter().any(|c| index.image_candidates(c).is_some()))
+            .or_else(|| {
+                self.mains.iter().find(|(_, index, names)| {
+                    legacy_images::legacy_cut_name(name, names).is_some_and(|c| index.image_candidates(&c).is_some())
+                })
+            })
+            .map(|(m, _, _)| game(m))
     }
 }

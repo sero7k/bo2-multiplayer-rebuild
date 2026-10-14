@@ -1002,6 +1002,7 @@ pub fn apply_fpv_placement(
     >,
     view: Res<ViewSubject>,
     mut gfx_scene: ResMut<HostGfxScene>,
+    mut sprint_pose: Local<f32>,
 ) {
     *aim = ViewweaponAim::default();
     let Ok(mut transform) = roots.single_mut() else {
@@ -1128,6 +1129,25 @@ pub fn apply_fpv_placement(
     kick.placement_move_angles = state.movement_angles;
     kick.weap_idle_time = state.weap_idle_time;
     kick.last_idle_factor = state.last_idle_factor;
+    // bo2mp: a World at War gun (no sprint animations) is moved to its
+    // sprint pose (`sprintOfs`, `sprintRot`) while he sprints, over its
+    // sprint-in time, and back over its sprint-out time.
+    let mut contrib = contrib;
+    *sprint_pose = wawsprint_pose_frac(
+        *sprint_pose,
+        ps.weaponstate_primary,
+        facts.sprint_raise_time_ms,
+        facts.sprint_drop_time_ms,
+        clock.frametime_secs(),
+    );
+    if *sprint_pose > 0.0 && (facts.bob.sprint_ofs != [0.0; 3] || facts.bob.sprint_rot != [0.0; 3]) {
+        // Eased in and out, as the game's lerp of the pose reads.
+        let k = *sprint_pose * *sprint_pose * (3.0 - 2.0 * *sprint_pose);
+        for c in 0..3 {
+            contrib.origin[c] += k * facts.bob.sprint_ofs[c];
+            contrib.angles[c] += k * facts.bob.sprint_rot[c];
+        }
+    }
     let mut origin = apply_viewweapon_land_view(
         apply_cg_gun_offset_view(contrib.origin, cg_gun.xyz()),
         kick.viewweapon_land_view,
@@ -1203,6 +1223,25 @@ pub fn apply_fpv_placement(
         );
     }
     *transform = placed;
+}
+
+/// bo2mp: how far into its sprint pose a gun without sprint animations is
+/// (0 none, 1 all the way): toward 1 while the weapon state is sprint-in or
+/// sprint-loop, at the sprint-in time's pace; toward 0 otherwise, at the
+/// sprint-out time's (a quarter second where a time is not set).
+fn wawsprint_pose_frac(frac: f32, weaponstate: i32, in_ms: i32, out_ms: i32, dt: f32) -> f32 {
+    use weapon_iw4::WeaponState;
+    let sprinting = matches!(
+        WeaponState::from_i32(weaponstate),
+        Ok(WeaponState::SprintIn | WeaponState::SprintLoop)
+    );
+    let secs = |ms: i32| if ms > 0 { ms as f32 / 1000.0 } else { 0.25 };
+    let dt = dt.max(0.0);
+    if sprinting {
+        (frac + dt / secs(in_ms)).min(1.0)
+    } else {
+        (frac - dt / secs(out_ms)).max(0.0)
+    }
 }
 
 fn fpv_spawn_queued(pending: Res<PendingFpvSpawn>) -> bool {

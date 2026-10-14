@@ -145,22 +145,40 @@ impl GameSettings {
     pub const FOV_DEFAULT: f32 = 65.0;
     pub const FOV_MIN: f32 = 65.0;
     pub const FOV_MAX: f32 = 120.0;
-    pub const PAD_SENSITIVITY_DEFAULT: f32 = 3.0;
+    /// Black Ops II's MEDIUM Look Sensitivity (step 4, input_viewSensitivity 1).
+    pub const PAD_SENSITIVITY_DEFAULT: f32 = 4.0;
 
-    /// bo2mp: the stick's turn-speed multiplier for a Look Sensitivity
-    /// step (1-14, 3 the default). The steps follow Black Ops II's own
-    /// controller sensitivity values (its gamepad options list 0.6, 1.0,
-    /// 1.4, 1.8, 2.0, 2.2, 2.6, 3.0, 3.5 and 4.0, 1.0 the default), with a
-    /// slower first step and a faster last one. It was the step over 3 in a
-    /// straight line, so 1 turned at a third of the default speed and the
-    /// high steps ran away (14 was 4.7 times the default).
+    /// bo2mp: Black Ops II's Look Sensitivity steps 1-14 as its options
+    /// menu sets `input_viewSensitivity` (CoDBase's `CoD.SENSITIVITY_1`
+    /// .. `_14`: VERY LOW 0.4, LOW 0.6, 0.8, MEDIUM 1.0, ... HIGH 1.8, ...
+    /// VERY HIGH 2.5, ... INSANE 4.0). (Ours were our own: 1.0 at step 3 and
+    /// every step above BO2's, 4.5 at 14.)
+    pub const PAD_SENSITIVITY_STEPS: [f32; 14] = [0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.25, 2.5, 3.0, 3.5, 4.0];
+
+    /// The stick's turn-speed multiplier (`input_viewSensitivity`) for a
+    /// Look Sensitivity step (between steps, in a straight line).
     pub fn pad_look_scale(step: f32) -> f32 {
-        const STEPS: [f32; 14] = [0.4, 0.6, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.6, 3.0, 3.5, 4.0, 4.5];
+        const STEPS: [f32; 14] = GameSettings::PAD_SENSITIVITY_STEPS;
         let step = step.clamp(1.0, 14.0);
         let lower = (step.floor() as usize).clamp(1, 14);
         let upper = (lower + 1).min(14);
         let t = step - lower as f32;
         STEPS[lower - 1] + (STEPS[upper - 1] - STEPS[lower - 1]) * t
+    }
+
+    /// The Look Sensitivity step of an `input_viewSensitivity` value (BO2's
+    /// own options menu writes the value).
+    pub fn pad_step_for_scale(scale: f32) -> f32 {
+        const STEPS: [f32; 14] = GameSettings::PAD_SENSITIVITY_STEPS;
+        if !scale.is_finite() || scale <= STEPS[0] {
+            return 1.0;
+        }
+        for (k, pair) in STEPS.windows(2).enumerate() {
+            if scale <= pair[1] {
+                return k as f32 + 1.0 + (scale - pair[0]) / (pair[1] - pair[0]);
+            }
+        }
+        14.0
     }
     pub const PAD_LAYOUT_CUSTOM: u8 = 255;
     pub const MUSIC_VOLUME_DEFAULT: f32 = 0.8;

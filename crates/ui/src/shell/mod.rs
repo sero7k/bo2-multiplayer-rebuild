@@ -1302,11 +1302,34 @@ fn shell_input(
 }
 
 /// The screens are up while the front end is (`covers_lui`), and the
-/// front end comes back from a match to the lobby he started it from.
-fn shell_shown(mut shell: ResMut<Shell>, front: Option<Res<crate::lui_frontend::Bo2mpFrontend>>, mut was: Local<bool>) {
+/// front end comes back from a match to the lobby he started it from:
+/// bo2mp: a Zombies game (any map that plays as Zombies, however it was
+/// started) back to the Zombies lobby its START GAME is on, a multiplayer
+/// match to the multiplayer lobby.
+fn shell_shown(
+    mut shell: ResMut<Shell>,
+    front: Option<Res<crate::lui_frontend::Bo2mpFrontend>>,
+    identity: Option<Res<frame::LaunchIdentity>>,
+    mut was: Local<bool>,
+    mut last_zm: Local<bool>,
+) {
     let on = enabled() && front.is_some();
     bridge::set_shown(on);
-    if on && !*was && shell.played {
+    if !on {
+        // The game being played: Zombies if the shell's Zombies START began
+        // it (until the map is in), then by the map.
+        if *was {
+            *last_zm = zombies::loading().is_some();
+        }
+        if let Some(zone) = identity.as_deref().map(|i| i.zone.as_str()).filter(|z| !z.is_empty()) {
+            *last_zm = crate::lui_hud::is_zombies_zone(zone);
+        }
+    }
+    if on && !*was && *last_zm {
+        *last_zm = false;
+        shell.screen = Screen::ZmLobby;
+        shell.focus = 0;
+    } else if on && !*was && shell.played {
         shell.screen = Screen::Lobby;
         shell.tab = Tab::Lobby;
         shell.focus = 0;

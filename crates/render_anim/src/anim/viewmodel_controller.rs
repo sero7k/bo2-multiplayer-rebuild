@@ -859,6 +859,30 @@ impl ViewmodelController {
         self.crawl_next = None;
         let Some(clip) = self.weapon.clip(slot).cloned() else {
             self.zero_dispatch_slots(goal_time);
+            // bo2mp: a gun without sprint animations (World at War's) keeps
+            // idling through the sprint (its pose is moved by its sprint
+            // offsets, `fpv_present`); with nothing playing it snapped to its
+            // bind pose, the gun jumping out of his hands.
+            if matches!(
+                slot,
+                WeaponAnimSlot::SprintIn
+                    | WeaponAnimSlot::SprintLoop
+                    | WeaponAnimSlot::SprintOut
+                    | WeaponAnimSlot::SprintInEmpty
+                    | WeaponAnimSlot::SprintLoopEmpty
+                    | WeaponAnimSlot::SprintOutEmpty
+            ) {
+                let empty = matches!(
+                    slot,
+                    WeaponAnimSlot::SprintInEmpty | WeaponAnimSlot::SprintLoopEmpty | WeaponAnimSlot::SprintOutEmpty
+                );
+                let idle = if empty && self.weapon.clip(WeaponAnimSlot::EmptyIdle).is_some() {
+                    WeaponAnimSlot::EmptyIdle
+                } else {
+                    WeaponAnimSlot::Idle
+                };
+                self.set_weight(idle, ACTIVE_GOAL_WEIGHT, goal_time);
+            }
             self.action = None;
             self.action_remaining = None;
             self.state = state;

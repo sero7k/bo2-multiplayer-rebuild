@@ -249,7 +249,16 @@ pub(crate) fn update_iris(
                 }
             })
     } else {
-        match weapons.0.overlay_image_of(viewmodel_index) {
+        // bo2mp: another game's gun whose overlay material was never
+        // resolved to its picture: the picture of the material's own name
+        // (their 2D scope materials and pictures mostly share one).
+        let named = weapons.0.overlay_image_of(viewmodel_index).or_else(|| {
+            weapons
+                .0
+                .overlay_material_of(viewmodel_index)
+                .filter(|m| !m.is_empty())
+        });
+        match named {
             None => Err(GapCause::AdsOverlayNamesNoImage {
                 material: weapons
                     .0

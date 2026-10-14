@@ -159,6 +159,21 @@ fn best(screen: &[OnScreen], range: f32, region: [f32; 2], scale: f32) -> Option
     })
 }
 
+/// One axis's turn rate this frame (degrees a second): a rate rising
+/// toward the stick's ramps up `step` a frame (BO2's
+/// aim_accel_turnrate_lerp); easing off the stick slows at once; a stick
+/// turned the other way ramps up again from a standstill.
+fn ramp_turn_rate(rate: f32, goal: f32, step: f32) -> f32 {
+    if goal == 0.0 {
+        return 0.0;
+    }
+    let from = if rate != 0.0 && rate.signum() == goal.signum() { rate.abs() } else { 0.0 };
+    if goal.abs() <= from {
+        return goal;
+    }
+    goal.signum() * (from + step).min(goal.abs())
+}
+
 pub fn pad_look_frame(
     input: &mut ClientActionInput,
     view: &AimView,
@@ -169,25 +184,25 @@ pub fn pad_look_frame(
     let ads_lerp = view.ads_lerp.clamp(0.0, 1.0);
     let sensitivity = input.pad_sensitivity * lerp(1.0, input.pad_ads_sensitivity, ads_lerp);
     let zoom = view.fov_scale.clamp(0.02, 2.0);
-    let max_yaw = lerp(TURN_YAW, TURN_YAW_ADS, ads_lerp) * zoom * sensitivity;
-    let max_pitch = lerp(TURN_PITCH, TURN_PITCH_ADS, ads_lerp) * zoom * sensitivity;
+    // The turn rates and their ramp are BO2's (aim_turnrate_*,
+    // aim_accel_turnrate_lerp); his Look Sensitivity (input_viewSensitivity)
+    // scales the turn that comes out, ramp and all, so a full-stick spin
+    // reaches its top speed in the same time (260 / 1200 s) at any
+    // sensitivity. (The ramp was 1200 deg/s/s against a top speed already
+    // scaled by sensitivity: at sensitivity 2.25 a spin took over twice as
+    // long to wind up, then ran on faster; and reversing the stick jumped
+    // straight to full speed the other way, with no ramp.)
+    let max_yaw = lerp(TURN_YAW, TURN_YAW_ADS, ads_lerp) * zoom;
+    let max_pitch = lerp(TURN_PITCH, TURN_PITCH_ADS, ads_lerp) * zoom;
     let wanted = [-input.pad_look[1] * max_pitch, -input.pad_look[0] * max_yaw];
-
+    let step = TURN_ACCEL * zoom * dt;
     for (rate, goal) in input.pad_turn_rate.iter_mut().zip(wanted) {
-        if (goal.abs() > rate.abs() && goal.signum() == rate.signum())
-            || (*rate == 0.0 && goal != 0.0)
-        {
-            let step = TURN_ACCEL * zoom * dt;
-            *rate = if goal > *rate {
-                (*rate + step).min(goal)
-            } else {
-                (*rate - step).max(goal)
-            };
-        } else {
-            *rate = goal;
-        }
+        *rate = ramp_turn_rate(*rate, goal, step);
     }
-    let mut delta = [input.pad_turn_rate[0] * dt, input.pad_turn_rate[1] * dt];
+    let mut delta = [
+        input.pad_turn_rate[0] * sensitivity * dt,
+        input.pad_turn_rate[1] * sensitivity * dt,
+    ];
 
     let mode = input.pad_aim_assist;
     if mode == 0 {

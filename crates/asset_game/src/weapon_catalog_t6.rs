@@ -508,6 +508,7 @@ fn t6_body_facts(w: &asset_t6::WeaponRef) -> WeaponBodyFacts {
             sprint_bob: pair(d::vSprintBob),
             ducked_sprint_bob: pair(d::vDuckedSprintBob),
             dtp_bob: pair(d::vDtpBob),
+            ..WeaponBobFacts::default()
         };
     }
     f

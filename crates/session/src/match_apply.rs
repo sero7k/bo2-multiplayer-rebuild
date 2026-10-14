@@ -564,7 +564,7 @@ pub fn apply_prepared_match(
             sim.start_gsc(&entry, sim::script::Value::level(), Vec::new())
                 .map_err(|e| script_refusal(&zone, gametype, "entry", &e))?;
         }
-        let load_hold = AuthorityLoadHold(sim.clip_brush_count() > 0);
+        let load_hold = AuthorityLoadHold(sim.has_world_clip());
         if let Some(glass) = scene.fx_glass.as_ref() {
             let panes = (0..glass.piece_places.len())
                 .filter_map(|i| {

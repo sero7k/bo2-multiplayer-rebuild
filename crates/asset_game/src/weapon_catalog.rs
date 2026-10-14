@@ -495,6 +495,12 @@ pub struct WeaponBobFacts {
     pub sprint_bob: [f32; 2],
     pub ducked_sprint_bob: [f32; 2],
     pub dtp_bob: [f32; 2],
+    /// bo2mp: World at War's sprint pose for a gun with no sprint
+    /// animations (its `sprintOfs`, forward/right/up, and `sprintRot`,
+    /// pitch/yaw/roll in degrees): the gun is moved there while he sprints.
+    /// Zero (none) for every gun that has its own sprint animations.
+    pub sprint_ofs: [f32; 3],
+    pub sprint_rot: [f32; 3],
 }
 
 impl Default for WeaponBobFacts {
@@ -506,6 +512,8 @@ impl Default for WeaponBobFacts {
             sprint_bob: [1.0; 2],
             ducked_sprint_bob: [1.0; 2],
             dtp_bob: [1.0; 2],
+            sprint_ofs: [0.0; 3],
+            sprint_rot: [0.0; 3],
         }
     }
 }
@@ -5602,6 +5610,24 @@ impl WeaponBuild {
         }
         self.registry.rebuild_name_maps();
         self.registry.revision = mint_weapon_revision();
+    }
+
+    /// bo2mp: the scope picture of each gun whose overlay material names
+    /// one (`image_of(material)`): another game's gun whose materials never
+    /// reach the match's material definitions (CoD4's and World at War's,
+    /// read from their own zones) - without it the HUD had no image for its
+    /// 2D scope and drew none.
+    pub fn resolve_overlay_images(&mut self, image_of: impl Fn(&str) -> Option<String>) -> usize {
+        let mut n = 0;
+        for row in &mut self.registry.rows {
+            if row.overlay_image.is_none()
+                && let Some(image) = row.overlay_material.as_deref().and_then(&image_of)
+            {
+                row.overlay_image = Some(image);
+                n += 1;
+            }
+        }
+        n
     }
 
     pub fn resolve_hud_material_edges(&mut self, materials: &crate::MaterialDefinitions) {

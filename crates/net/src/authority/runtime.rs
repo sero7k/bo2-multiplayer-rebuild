@@ -434,7 +434,7 @@ pub fn authority_should_tick(
     paused: Option<Res<frame::GamePaused>>,
 ) -> bool {
     role.runs_authority()
-        && world.is_some_and(|world| world.0.clip_brush_count() > 0)
+        && world.is_some_and(|world| world.0.has_world_clip())
         && !hold.is_some_and(|h| h.0)
         // bo2zm M4: a solo game's pause menu stops the server.
         && !(paused.is_some_and(|p| p.0) && *role == RuntimeRole::Listen)

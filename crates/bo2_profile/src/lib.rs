@@ -507,6 +507,27 @@ impl Profile {
         name
     }
 
+    /// bo2mp: the other game's gun (its item index) a class stats path
+    /// belongs to: the gun's own slot (`primary`), its attachments, camo,
+    /// reticle, emblem or tag, in any class set (`<set>.customclass.<n>.`,
+    /// a stored class set's too). BO2's own class scripts know only its own
+    /// guns: its CheckClasses (`CheckItems`, run as his stats arrive) puts
+    /// any weapon slot holding an item past its weapons back to the
+    /// default class's gun and clears the gun's attachments - so their
+    /// writes to these paths are refused; Create-a-Class writes the
+    /// profile itself.
+    pub fn guest_class_slot(&self, path: &str) -> Option<i32> {
+        let (prefix, rest) = path.split_once(".customclass.")?;
+        let (n, slot) = rest.split_once('.')?;
+        let weapon = ["primary", "secondary"].into_iter().find(|w| {
+            slot.strip_prefix(w).is_some_and(|tail| {
+                matches!(tail, "" | "camo" | "reticle" | "emblem" | "tag") || tail.starts_with("attachment")
+            })
+        })?;
+        let held = self.stat_num(&format!("{prefix}.customclass.{n}.{weapon}")) as i32;
+        (held >= guest::FIRST_INDEX).then_some(held)
+    }
+
     /// `getloadoutperks(class)`: the specialties of the class's perks
     /// (specialty1-6), each perk's `specialty_*` names in table order.
     pub fn loadout_perks(&self, class: i32) -> Vec<String> {
@@ -891,6 +912,27 @@ mod tests {
         let (name, why) = p.loadout_weapon_checked(5, "primary");
         assert_eq!(name, "hk416_mp");
         assert!(why.is_some_and(|w| w.contains("512")));
+    }
+
+    /// The paths BO2's class scripts may not write: a guest gun's slot and
+    /// its attachments / camo, in any set; a BO2 gun's, its grenades and
+    /// perks stay theirs.
+    #[test]
+    fn guest_class_slots_are_found() {
+        let mut p = Profile::default();
+        let key = |set: &str, c: i32, s: &str| Profile::class_key(set, c, s);
+        p.set_stat(key(LOCAL_MATCH_SET, 0, "primary"), StatValue::Num(611.0));
+        p.set_stat(key(LOCAL_MATCH_SET, 0, "secondary"), StatValue::Num(53.0));
+        p.set_stat("classsets.custommatchcacloadouts.2.customclass.1.secondary".to_owned(), StatValue::Num(310.0));
+        for slot in ["primary", "primaryattachment1", "primaryattachment3", "primarycamo", "primaryreticle", "primaryemblem", "primarytag"] {
+            assert_eq!(p.guest_class_slot(&key(LOCAL_MATCH_SET, 0, slot)), Some(611), "{slot}");
+        }
+        for slot in ["secondary", "secondaryattachment1", "primarygrenade", "primarygrenadecount", "specialty1", "bonuscard1"] {
+            assert_eq!(p.guest_class_slot(&key(LOCAL_MATCH_SET, 0, slot)), None, "{slot}");
+        }
+        assert_eq!(p.guest_class_slot(&key("cacloadouts", 0, "primary")), None);
+        assert_eq!(p.guest_class_slot("classsets.custommatchcacloadouts.2.customclass.1.secondaryattachment2"), Some(310));
+        assert_eq!(p.guest_class_slot("playerstatslist.rank.statvalue"), None);
     }
 
     /// Probe with BO2's own tables (`BO2MP_TABLES_DIR` holding

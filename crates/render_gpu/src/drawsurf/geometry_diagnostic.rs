@@ -2612,14 +2612,15 @@ fn prepare_world_textures(
         let bind_group = device.create_bind_group(
             "bo2zm_world_colour_map",
             &layout,
-            &BindGroupEntries::sequential((&view.view, &sampler)),
+            // bo2mp: colour maps as sRGB (`UploadedTextureView::colour_view`).
+            &BindGroupEntries::sequential((view.colour_view(), &sampler)),
         );
         textures.bind_groups.insert(slot, bind_group);
     }
     // Layered surfaces: colour map plus layer 1 and 2 maps.
     let layered_layout = cache.get_bind_group_layout(&pipeline.layered_texture_layout);
     let view_of = |slot: u32| match registry.material_images.get(slot as usize) {
-        Some(Some(Ok(view))) if view.dimension == TextureViewDimension::D2 => Some(view.view.clone()),
+        Some(Some(Ok(view))) if view.dimension == TextureViewDimension::D2 => Some(view.colour_view().clone()),
         _ => None,
     };
     for (i, &slot) in geometry.world_surface_color.iter().enumerate() {
@@ -2779,7 +2780,13 @@ fn prepare_world_shine(
         if colour == u32::MAX || textures.shine.contains_key(&key) {
             continue;
         }
-        let Some(base) = view_of(colour) else { continue };
+        // bo2mp: the colour map as sRGB; normal and specular maps as stored.
+        let Some(base) = (match registry.material_images.get(colour as usize) {
+            Some(Some(Ok(view))) if view.dimension == TextureViewDimension::D2 => Some(view.colour_view().clone()),
+            _ => None,
+        }) else {
+            continue;
+        };
         let normal = if n == u32::MAX { textures.flat_normal.clone() } else { view_of(n) };
         let specular = if s == u32::MAX { textures.no_specular.clone() } else { view_of(s) };
         let aux = if aux == u32::MAX { textures.no_specular.clone() } else { view_of(aux) };
