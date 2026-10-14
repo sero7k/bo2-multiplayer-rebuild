@@ -195,6 +195,10 @@ pub struct MapSources {
     /// Zones whose images (and materials) a map may name but not define
     /// (common zones), searched after the map's own.
     pub extra_zones: Vec<PathBuf>,
+    /// Zones whose models a map places but does not define (mp_hawkwar's
+    /// cluster grenades and debris are `common_core_mp`'s), each with its
+    /// material zone; read only when a placed model is missing.
+    pub model_zones: Vec<(PathBuf, Option<PathBuf>)>,
 }
 
 impl MapSources {
@@ -208,7 +212,12 @@ impl MapSources {
             .chain(stem.strip_prefix("iw7_").map(|s| format!("iw7_techsets_{s}.ff")))
             .map(|n| dir.join(n))
             .find(|p| p.is_file());
-        Self { zone: zone.to_owned(), techsets, pak_dir: dir, shared_ranges: None, extra_zones: Vec::new() }
+        let model_zones = ["common_core_mp"]
+            .into_iter()
+            .map(|z| (dir.join(format!("{z}.ff")), Some(dir.join(format!("techsets_{z}.ff"))).filter(|p| p.is_file())))
+            .filter(|(p, _)| p.is_file())
+            .collect();
+        Self { zone: zone.to_owned(), techsets, pak_dir: dir, shared_ranges: None, extra_zones: Vec::new(), model_zones }
     }
 }
 
@@ -298,8 +307,8 @@ fn walk_file(path: &Path) -> Result<Walked, String> {
 }
 
 /// The zone's shared ranges, read from the `assetfile` paks (or the copy).
-fn shared_data(src: &MapSources, header: &container::FileHeader) -> Result<crate::pak::SharedVirtual, String> {
-    let raw = match &src.shared_ranges {
+fn shared_data(src: &MapSources, header: &container::FileHeader, copy: Option<&Path>) -> Result<crate::pak::SharedVirtual, String> {
+    let raw = match copy {
         Some(p) => std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()))?,
         None => {
             let mut raw = Vec::new();
@@ -338,8 +347,42 @@ impl Iw7Map {
                 Err(e) => out.report.push(format!("extra zone: {e}")),
             }
         }
+        // Placed models the map zone names but does not hold (an XModel
+        // with no LOD surfaces): read the model zones for them, their
+        // materials and pictures with the map's.
+        let has_mesh = |cap: &Capture, name: &str| {
+            cap.xmodels.iter().any(|x| bare(&x.name) == name && x.lods.iter().any(|l| l.numsurfs > 0 && l.surfs.is_some()))
+        };
+        let wanted: std::collections::BTreeSet<String> = map
+            .cap
+            .gfx_worlds
+            .first()
+            .map(|g| g.smodel_models.iter().flatten().map(|&id| bare(map.cap.name_of(id)).to_owned()).collect())
+            .unwrap_or_default();
+        let missing: Vec<&String> = wanted.iter().filter(|n| !has_mesh(&map.cap, n)).collect();
+        let mut model_zones: Vec<Walked> = Vec::new();
+        if !missing.is_empty() {
+            for (z, techsets) in &src.model_zones {
+                match walk_file(z) {
+                    Ok(w) => {
+                        if !missing.iter().any(|n| has_mesh(&w.cap, n)) {
+                            continue;
+                        }
+                        if let Some(t) = techsets {
+                            match walk_file(t) {
+                                Ok(t) => zones.push(t),
+                                Err(e) => out.report.push(format!("model zone materials: {e}")),
+                            }
+                        }
+                        model_zones.push(w);
+                    }
+                    Err(e) => out.report.push(format!("model zone: {e}")),
+                }
+            }
+        }
+
         // Images by name: the map's first.
-        for w in std::iter::once(&map).chain(zones.iter()) {
+        for w in std::iter::once(&map).chain(zones.iter()).chain(model_zones.iter()) {
             for im in &w.cap.images {
                 if im.name.starts_with(',') || out.images.contains_key(&im.name) {
                     continue;
@@ -352,14 +395,14 @@ impl Iw7Map {
             }
         }
         let mut material_defs: HashMap<String, (usize, usize)> = HashMap::new();
-        for (z, w) in std::iter::once(&map).chain(zones.iter()).enumerate() {
+        for (z, w) in std::iter::once(&map).chain(zones.iter()).chain(model_zones.iter()).enumerate() {
             for (i, m) in w.cap.materials.iter().enumerate() {
                 if !m.name.starts_with(',') {
                     material_defs.entry(m.name.clone()).or_insert((z, i));
                 }
             }
         }
-        let all: Vec<&Walked> = std::iter::once(&map).chain(zones.iter()).collect();
+        let all: Vec<&Walked> = std::iter::once(&map).chain(zones.iter()).chain(model_zones.iter()).collect();
         let mut material_index: HashMap<String, Option<usize>> = HashMap::new();
         let mut missing_materials = Vec::new();
         let mut material_of = |out: &mut Iw7Map, cap: &Capture, id: Option<AssetId>| -> Option<usize> {
@@ -471,7 +514,7 @@ impl Iw7Map {
         out.maxs = std::array::from_fn(|k| mid[k] + half[k]);
 
         // Static models and their meshes (surfaces from the shared streams).
-        let shared = match shared_data(src, &map.zone.header) {
+        let shared = match shared_data(src, &map.zone.header, src.shared_ranges.as_deref()) {
             Ok(sv) => {
                 let (cap, stops) = walk::walk_shared(&sv);
                 if !stops.is_empty() {
@@ -484,22 +527,47 @@ impl Iw7Map {
                 None
             }
         };
-        let surfs_by_name: HashMap<&str, usize> = shared
-            .as_ref()
-            .map(|(_, c)| c.model_surfs.iter().enumerate().map(|(i, m)| (m.name.as_str(), i)).collect())
-            .unwrap_or_default();
-        // Model surfaces whose vertices are in the map zone itself (mp_riot's
-        // vista mountains, `ml/periph_*`), for those the shared streams lack.
-        let zone_surfs: HashMap<&str, usize> = map
-            .cap
-            .model_surfs
+        // Where models are: the map zone (its shared streams, else the
+        // zone itself: mp_riot's vista mountains, `ml/periph_*`), then the
+        // model zones read for what it lacks.
+        struct ModelSource<'a> {
+            cap: &'a Capture,
+            image: &'a [u8],
+            shared: Option<(crate::pak::SharedVirtual, Capture)>,
+        }
+        let mut sources = vec![ModelSource { cap: &map.cap, image: image.as_slice(), shared }];
+        for w in &model_zones {
+            let shared = match shared_data(src, &w.zone.header, None) {
+                Ok(sv) => {
+                    let (cap, _) = walk::walk_shared(&sv);
+                    Some((sv, cap))
+                }
+                Err(e) => {
+                    out.report.push(format!("model zone shared streams: {e}"));
+                    None
+                }
+            };
+            sources.push(ModelSource { cap: &w.cap, image: w.zone.image.as_slice(), shared });
+        }
+        let surfs_by_name: Vec<HashMap<&str, usize>> = sources
             .iter()
-            .enumerate()
-            .filter(|(_, m)| !m.name.starts_with(',') && m.surfs.iter().any(|s| s.verts.is_some()))
-            .map(|(i, m)| (m.name.as_str(), i))
+            .map(|s| s.shared.as_ref().map(|(_, c)| c.model_surfs.iter().enumerate().map(|(i, m)| (bare(&m.name), i)).collect()).unwrap_or_default())
+            .collect();
+        let zone_surfs: Vec<HashMap<&str, usize>> = sources
+            .iter()
+            .map(|s| {
+                s.cap
+                    .model_surfs
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, m)| !m.name.starts_with(',') && m.surfs.iter().any(|s| s.verts.is_some()))
+                    .map(|(i, m)| (m.name.as_str(), i))
+                    .collect()
+            })
             .collect();
         let mut model_index: HashMap<String, Option<usize>> = HashMap::new();
         let mut no_mesh = Vec::new();
+        let mut from_model_zones = 0usize;
         if let Some(at) = g.smodels {
             use L::GfxStaticModelDrawInst as D;
             for i in 0..g.smodel_count as usize {
@@ -509,21 +577,31 @@ impl Iw7Map {
                 let model = match model_index.get(&name) {
                     Some(m) => *m,
                     None => {
-                        let built = (|| {
-                            let x = map.cap.xmodels.iter().find(|x| x.name == name)?;
-                            // Where a LOD's surfaces are: the shared streams, else
-                            // the zone.
+                        // The first source whose XModel of that name (a
+                        // comma-named one too: mp_geneva's auto-LOD props
+                        // are held under their reference name) has a LOD
+                        // whose surfaces are found.
+                        let mut built = None;
+                        for (si, sr) in sources.iter().enumerate() {
+                            // Where a LOD's surfaces are: the shared streams,
+                            // else the zone.
                             let source = |l: &walk::LodRec| -> Option<(&walk::ModelSurfsRec, &[u8])> {
-                                let n = bare(map.cap.name_of(l.surfs?));
-                                if let (Some((sv, scap)), Some(&i)) = (shared.as_ref(), surfs_by_name.get(n)) {
-                                    return Some((&scap.model_surfs[i], sv.data.as_slice()));
+                                let n = bare(sr.cap.name_of(l.surfs?));
+                                if let (Some((sv, scap)), Some(&k)) = (sr.shared.as_ref(), surfs_by_name[si].get(n)) {
+                                    return Some((&scap.model_surfs[k], sv.data.as_slice()));
                                 }
-                                zone_surfs.get(n).map(|&i| (&map.cap.model_surfs[i], image.as_slice()))
+                                zone_surfs[si].get(n).map(|&k| (&sr.cap.model_surfs[k], sr.image))
+                            };
+                            let mut candidates: Vec<&walk::XModelRec> = sr.cap.xmodels.iter().filter(|x| bare(&x.name) == name).collect();
+                            candidates.sort_by_key(|x| x.name.starts_with(','));
+                            let Some((x, found)) = candidates.into_iter().find_map(|x| {
+                                let found: Vec<&walk::LodRec> = x.lods.iter().filter(|l| l.numsurfs > 0 && source(l).is_some()).collect();
+                                (!found.is_empty()).then_some((x, found))
+                            }) else {
+                                continue;
                             };
                             // The LODs whose surfaces were found: the first is
                             // drawn, the last is the collision's.
-                            let found: Vec<&walk::LodRec> = x.lods.iter().filter(|l| l.numsurfs > 0 && source(l).is_some()).collect();
-                            let lod = *found.first()?;
                             let mut read = |out: &mut Iw7Map, l: &walk::LodRec| -> Option<Vec<ModelSurface>> {
                                 let (ms, data) = source(l)?;
                                 let mut surfaces = Vec::new();
@@ -532,12 +610,12 @@ impl Iw7Map {
                                     let verts: Vec<[u8; 32]> = vs.get(data).chunks_exact(32).map(|c| c.try_into().unwrap()).collect();
                                     let tris: Vec<[u16; 3]> =
                                         ts.get(data).chunks_exact(6).map(|c| [u16_at(c, 0), u16_at(c, 2), u16_at(c, 4)]).collect();
-                                    let material = material_of(out, &map.cap, x.materials.get(usize::from(l.surf_index) + k).copied().flatten());
+                                    let material = material_of(out, sr.cap, x.materials.get(usize::from(l.surf_index) + k).copied().flatten());
                                     surfaces.push(ModelSurface { verts, tris, material });
                                 }
                                 Some(surfaces)
                             };
-                            let surfaces = read(&mut out, lod)?;
+                            let Some(surfaces) = read(&mut out, found[0]) else { continue };
                             let coarse = match found.last() {
                                 Some(l) if found.len() > 1 => read(&mut out, l).unwrap_or_default(),
                                 _ => Vec::new(),
@@ -550,12 +628,16 @@ impl Iw7Map {
                                 surfaces,
                                 coarse,
                             });
-                            Some(out.models.len() - 1)
-                        })();
+                            if si > 0 {
+                                from_model_zones += 1;
+                            }
+                            built = Some(out.models.len() - 1);
+                            break;
+                        }
                         if built.is_none() && no_mesh.len() < 8 {
                             // Why: no XModel of that name, or none of its
                             // LODs' surfaces in the shared streams.
-                            let why = match map.cap.xmodels.iter().find(|x| x.name == name) {
+                            let why = match map.cap.xmodels.iter().find(|x| bare(&x.name) == name) {
                                 None => "no xmodel".to_owned(),
                                 Some(x) => format!(
                                     "lods {:?}",
@@ -600,6 +682,9 @@ impl Iw7Map {
             out.models.len(),
             if no_mesh.is_empty() { String::new() } else { format!("; no mesh for {}", no_mesh.join(", ")) },
         ));
+        if from_model_zones > 0 {
+            out.report.push(format!("{from_model_zones} placed models' meshes from {} model zones", model_zones.len()));
+        }
 
         // The baked light: each `GfxLightMap`'s images by name.
         // (A reference that named no slot, mp_junk's and mp_desert's among
