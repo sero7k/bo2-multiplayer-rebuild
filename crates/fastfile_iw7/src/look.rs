@@ -83,7 +83,7 @@ pub struct Rgba {
 }
 
 /// Box-filters an RGBA8 level down by two (odd edges clamp).
-fn half_level(w: u32, h: u32, px: &[u8]) -> (u32, u32, Vec<u8>) {
+pub(crate) fn half_level(w: u32, h: u32, px: &[u8]) -> (u32, u32, Vec<u8>) {
     let (ow, oh) = ((w / 2).max(1), (h / 2).max(1));
     let mut out = vec![0u8; (ow * oh * 4) as usize];
     for y in 0..oh {
