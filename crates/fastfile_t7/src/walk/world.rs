@@ -168,10 +168,11 @@ const UMBRA_TOME: usize = 0x50;
 /// u32 probeCount; u32* probeGuids; u32 probeExploderCount;
 /// ComProbeExploder* (16: { hash; u32 n; triggers (28 each) });
 /// u32 umbraTomeCount; ComUmbraTome* (0x50: x64-zt's 0x40 and 16 zero
-/// bytes); u32 count; a second ComUmbraTome* (0x70, `zm_genesis`) }`,
-/// loaded in that order.
+/// bytes); u32 count; a second ComUmbraTome* (0x70, `zm_genesis`,
+/// `zm_stalingrad`); u32 count; umbra gates (0x80, 16 each) }`, loaded in
+/// that order.
 pub fn com_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
-    s.no_loads(h, AssetType::ComWorld.header_size(), &[0, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70])?;
+    s.no_loads(h, AssetType::ComWorld.header_size(), &[0, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80])?;
     let name = s.string(h)?;
     let n = count(s, h + 0xc)?;
     let lights = span(s, h + 0x10, n, PRIMARY_LIGHT, 3)?;
@@ -200,18 +201,28 @@ pub fn com_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
     // list at 0x28 null); null on the other maps read.
     let n = count(s, h + 0x68)?;
     umbra_tomes(s, h + 0x70, n, 24)?;
+    // Umbra gates (count at 0x78, 16 each, a name first: `zm_stalingrad`'s
+    // `umbragate1`); null on the other maps read.
+    let n = count(s, h + 0x78)?;
+    if let Some(t) = s.records(h + 0x80, n, 16, 7)? {
+        for i in 0..n {
+            s.no_loads(t + 16 * i, 16, &[0])?;
+            s.string(t + 16 * i)?;
+        }
+    }
     s.capture.world.com_worlds.push(ComWorldRec { name: name.clone().unwrap_or_default(), lights });
     Ok(name)
 }
 
 /// `n` `ComUmbraTome`s at `field`: each its name, its hulls (24 each), two
 /// lists (`first` bytes and 4 each, the count at 0x18; the second may be
-/// null) and its named groups (16 each, a string first).
+/// null), its named groups (16 each, a string first) and a list of u32s
+/// (count at 0x40).
 fn umbra_tomes(s: &mut Stream, field: usize, n: usize, first: usize) -> Result<()> {
     if let Some(t) = s.records(field, n, UMBRA_TOME, 7)? {
         for i in 0..n {
             let u = t + UMBRA_TOME * i;
-            s.no_loads(u, UMBRA_TOME, &[0, 0x10, 0x20, 0x28, 0x38])?;
+            s.no_loads(u, UMBRA_TOME, &[0, 0x10, 0x20, 0x28, 0x38, 0x48])?;
             s.string(u)?;
             let v = count(s, u + 8)?;
             s.records(u + 0x10, v, 24, 3)?;
@@ -224,6 +235,10 @@ fn umbra_tomes(s: &mut Stream, field: usize, n: usize, first: usize) -> Result<(
                     s.string(gt + 16 * j)?;
                 }
             }
+            // A list of u32s (count at 0x40: one on every `zm_stalingrad`
+            // tome, none elsewhere).
+            let k = count(s, u + 0x40)?;
+            s.records(u + 0x48, k, 4, 3)?;
         }
     }
     Ok(())

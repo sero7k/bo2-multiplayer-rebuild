@@ -39,9 +39,11 @@ pub fn xcam(s: &mut Stream, h: usize) -> Result<Option<String>> {
     }
     // (The count is the byte at 0x14 on `mp_nuketown_x`'s cameras, at 0x15
     // on `zm_factory`'s intro camera.)
-    let n = match s.u8_at(h + 0x14)? {
-        0 => s.u8_at(h + 0x15)? as usize,
-        n => n as usize,
+    // (`zm_stalingrad`'s `c_sta_outro_3rd_sh200_camera` has both bytes 0
+    // and its count, one, in the u32 at 0x18.)
+    let n = match (s.u8_at(h + 0x14)?, s.u8_at(h + 0x15)?) {
+        (0, 0) => count(s, h + 0x18)?,
+        (0, n) | (n, _) => n as usize,
     };
     if let Some(t) = s.records(h + 0x50, n, 32, 7)? {
         for i in 0..n {

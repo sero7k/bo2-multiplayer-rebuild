@@ -44,7 +44,10 @@ pub const SPECS: &[Spec] = &[
     Spec { ty: T::Objective, size: 0x70, fields: &[(0x30, A(T::Image)), (0x38, Str), (0x68, Records(0x60, 24))] },
     // Read on mp_common (no HydraX table): 0x218 is `-2` and loads no file
     // bytes and takes no VIRTUAL slot (runtime data).
-    Spec { ty: T::LightDescription, size: 0x240, fields: &[(0x218, Runtime)] },
+    // (`zm_stalingrad`'s light descriptions keep runtime values at 0x210
+    // to 0x230, a -1 among them, and load nothing for them: the name
+    // follows the header.)
+    Spec { ty: T::LightDescription, size: 0x240, fields: &[(0x210, Runtime), (0x218, Runtime), (0x220, Runtime), (0x228, Runtime), (0x230, Runtime)] },
     Spec { ty: T::SurfaceSoundDef, size: 0xa8, fields: &[] },
     Spec { ty: T::FootstepTable, size: 0x40, fields: &[(0x8, A(T::SurfaceSoundDef)), (0x10, A(T::SurfaceSoundDef)), (0x18, A(T::SurfaceSoundDef)), (0x20, A(T::SurfaceSoundDef)), (0x28, A(T::SurfaceSoundDef)), (0x30, A(T::SurfaceSoundDef)), (0x38, A(T::SurfaceSoundDef))] },
     Spec { ty: T::SurfaceFxTable, size: 0x148, fields: &[(0x8, A(T::Fx)), (0x10, A(T::Fx)), (0x18, A(T::Fx)), (0x20, A(T::Fx)), (0x28, A(T::Fx)), (0x30, A(T::Fx)), (0x38, A(T::Fx)), (0x40, A(T::Fx)), (0x48, A(T::Fx)), (0x50, A(T::Fx)), (0x58, A(T::Fx)), (0x60, A(T::Fx)), (0x68, A(T::Fx)), (0x70, A(T::Fx)), (0x78, A(T::Fx)), (0x80, A(T::Fx)), (0x88, A(T::Fx)), (0x90, A(T::Fx)), (0x98, A(T::Fx)), (0xa0, A(T::Fx)), (0xa8, A(T::Fx)), (0xb0, A(T::Fx)), (0xb8, A(T::Fx)), (0xc0, A(T::Fx)), (0xc8, A(T::Fx)), (0xd0, A(T::Fx)), (0xd8, A(T::Fx)), (0xe0, A(T::Fx)), (0xe8, A(T::Fx)), (0xf0, A(T::Fx)), (0xf8, A(T::Fx)), (0x100, A(T::Fx)), (0x108, A(T::Fx)), (0x110, A(T::Fx)), (0x118, A(T::Fx)), (0x120, A(T::Fx)), (0x128, A(T::Fx)), (0x130, A(T::Fx)), (0x138, A(T::Fx)), (0x140, A(T::Fx))] },
