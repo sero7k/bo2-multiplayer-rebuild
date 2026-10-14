@@ -114,3 +114,35 @@ pub(super) fn procedural_bones(w: &mut Walker, h: usize) -> Result<AssetId> {
     w.s.pop();
     Ok(w.name_only(AssetType::XAnimProceduralBones, name))
 }
+
+/// Physics FX pipelines: a name and 68-byte entries.
+pub(super) fn fx_pipeline(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::PhysicsFXPipeline as P;
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + P::name)?.unwrap_or_default();
+    let n = w.s.u32_at(h + P::unk__numUnk)? as usize;
+    w.blob(h + P::unk__unk, 68 * n, 3)?;
+    w.s.pop();
+    Ok(w.name_only(AssetType::PhysicsFxPipeline, name))
+}
+
+/// Physics FX shapes: a name and `size` vectors.
+pub(super) fn fx_shape(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::PhysicsFXShape as S;
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + S::name)?.unwrap_or_default();
+    let n = w.s.u32_at(h + S::size)? as usize;
+    w.blob(h + S::vecs, 12 * n, 3)?;
+    w.s.pop();
+    Ok(w.name_only(AssetType::PhysicsFxShape, name))
+}
+
+pub(super) fn library(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::PhysicsLibrary as P;
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + P::name)?.unwrap_or_default();
+    let n = w.s.u32_at(h + P::havokDataSize)? as usize;
+    w.blob(h + P::havokData, n, 15)?;
+    w.s.pop();
+    Ok(w.name_only(AssetType::PhysicsLibrary, name))
+}
