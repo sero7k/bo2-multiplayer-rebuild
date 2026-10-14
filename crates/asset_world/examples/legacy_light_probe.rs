@@ -35,7 +35,28 @@ fn main() {
         let main = asset_transport::game_root_for_zone(path).ok().map(|r| r.join("main"));
         materials(&zone, world, main.as_deref());
         if let Ok(n) = std::env::var("PROBE_SHADERS") {
-            shaders(&zone, world, n.parse().unwrap_or(2));
+            let n = n.parse().unwrap_or(2);
+            // The world's own techniques, then the placed models'.
+            let world_sets: Vec<_> = world.surfaces.iter().filter_map(|s| s.material).collect();
+            shaders(&zone, &world_sets, n);
+            let model_sets: Vec<_> = world
+                .static_models
+                .iter()
+                .filter_map(|m| m.model.and_then(|id| zone.xmodel(id)))
+                .flat_map(|m| m.materials.iter().flatten().copied())
+                .collect();
+            shaders(&zone, &model_sets, n);
+        }
+        println!("reflection probes: {}", world.reflection_probes.len());
+        for a in &zone.assets {
+            if let iw3::zone::Asset::RawFile(r) = a
+                && (r.name.contains("vision") || r.name.contains("createart"))
+            {
+                println!("rawfile {} ({} bytes)", r.name, r.data.len());
+                if std::env::var("PROBE_RAW").is_ok() {
+                    println!("{}", String::from_utf8_lossy(&r.data));
+                }
+            }
         }
     }
 }
@@ -219,13 +240,13 @@ fn swz(s: [u8; 4]) -> String {
     format!(".{}", s.iter().map(|&c| ['x', 'y', 'z', 'w'][usize::from(c)]).collect::<String>())
 }
 
-fn shaders(zone: &iw3::zone::Zone, world: &iw3::zone::GfxWorld, n: usize) {
+fn shaders(zone: &iw3::zone::Zone, materials: &[iw3::zone::AssetId], n: usize) {
     let mut done = std::collections::HashSet::new();
-    for s in &world.surfaces {
+    for &mid in materials {
         if done.len() >= n {
             break;
         }
-        let Some(m) = s.material.and_then(|m| zone.material(m)) else { continue };
+        let Some(m) = zone.material(mid) else { continue };
         let Some(ts) = m.technique_set.and_then(|t| zone.technique_set(t)) else { continue };
         if !done.insert(ts.name.clone()) {
             continue;
