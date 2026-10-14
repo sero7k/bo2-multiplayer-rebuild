@@ -380,7 +380,11 @@ pub struct ProbeArray {
 impl Iw7Map {
     /// The reflection probes' cube array (`*reflection_probe_array`: BC6H,
     /// 128 a side, 8 levels, a cube per probe), as RGBA8 (`ProbeArray`).
-    pub fn probe_array(&self, exposure: f32) -> Result<ProbeArray, String> {
+    /// `exposure` scales every probe; with `normalize` each probe is
+    /// scaled further so its top level's mean luminance is 1 (the form
+    /// Black Ops II's lit shaders expect: a reflection lit as the light
+    /// where it is seen).
+    pub fn probe_array(&self, exposure: f32, normalize: bool) -> Result<ProbeArray, String> {
         let name = self.probe_image.as_deref().ok_or("no reflection probe array")?;
         let rec = self.image_info(name).ok_or_else(|| format!("{name}: not in the zone"))?.clone();
         if !matches!(rec.format, 94..=96) {
@@ -396,7 +400,34 @@ impl Iw7Map {
         }
         let mut data = Vec::with_capacity(faces * face_bytes * 4);
         let mut tmp = [0f32; 48];
+        // Per probe, the scale: `exposure`, over its top level's mean
+        // luminance when normalising.
+        let lum = |c: &[f32]| 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+        let scales: Vec<f32> = (0..count as usize)
+            .map(|p| {
+                if !normalize {
+                    return exposure;
+                }
+                let (mut sum, mut n) = (0.0f64, 0usize);
+                for f in 6 * p..6 * p + 6 {
+                    let at = f * face_bytes;
+                    let bw = (size as usize).div_ceil(4);
+                    for b in l.data[at..at + bw * bw * 16].chunks_exact(16) {
+                        bcdec_rs::bc6h_float(b, &mut tmp, 12, rec.format == 96);
+                        for t in tmp.chunks_exact(3) {
+                            if t.iter().all(|v| v.is_finite()) {
+                                sum += f64::from(lum(t).max(0.0));
+                                n += 1;
+                            }
+                        }
+                    }
+                }
+                let mean = (sum / n.max(1) as f64) as f32;
+                if mean > 1e-5 { 1.0 / mean } else { 1.0 }
+            })
+            .collect();
         for f in 0..faces {
+            let exposure = scales[f / 6];
             let mut at = f * face_bytes;
             for level in 0..levels {
                 let d = (size >> level).max(1) as usize;

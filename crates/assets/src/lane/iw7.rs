@@ -27,7 +27,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use asset_core::{AssetEdge, AssetNamespace, AssetRef, T6Blend, T6Cull, T6Draw, ZoneOwner};
-use asset_material::{AuthoredImage, AuthoredMaterial, MaterialCatalog, MaterialTextureBinding, TS_COLOR_MAP};
+use asset_material::{AuthoredImage, AuthoredMaterial, MaterialCatalog, MaterialTextureBinding, TS_COLOR_MAP, TS_NORMAL_MAP, TS_SPECULAR_MAP};
 use asset_transport::progress::{LoadProgress, StageId};
 use asset_world::WorldDrawPolicy;
 use fastfile_iw7::map::{Iw7Map, MapSources};
@@ -46,6 +46,16 @@ const SUN_LIGHT_ROW: usize = 1;
 
 /// A placed model smaller than this (its radius, scaled) does not collide.
 const COLLIDE_MIN_RADIUS: f32 = 24.0;
+
+/// The largest specular map kept (half the colour map's at most: the
+/// specular colour and gloss vary slowly).
+const SPECULAR_MAX: u32 = 256;
+
+/// Whether materials get their normal and specular maps
+/// (`BO2MP_IW7_SHINE=0` draws colour maps only).
+fn shine_on() -> bool {
+    std::env::var("BO2MP_IW7_SHINE").map_or(true, |v| v.trim() != "0")
+}
 
 fn texture_max() -> u32 {
     std::env::var("BO2MP_IW7_MAP_TEXTURE")
@@ -146,9 +156,76 @@ struct Materials<'a> {
     decoded: usize,
     with_alpha: usize,
     failures: Vec<String>,
+    /// Material -> its (colour without metal, normal, specular) slots
+    /// (`fastfile_iw7::shine`).
+    shine: HashMap<usize, [Option<usize>; 3]>,
+    shine_on: bool,
+    with_shine: usize,
 }
 
 impl Materials<'_> {
+    /// Block-compressed levels into the catalog.
+    fn link_levels(&mut self, key: String, l: fastfile_iw7::texture::ImageLevels, semantic: u8) -> Option<usize> {
+        let px = fastfile_iw6::image::ImagePixels { width: l.width, height: l.height, levels: l.levels, dxgi_format: l.format, data: l.data };
+        let srgb = semantic != TS_NORMAL_MAP;
+        match super::iw6::gpu_image(&px, srgb) {
+            Ok(gpu) => Some(self.catalog.link_image(AuthoredImage {
+                namespace: AssetNamespace::T6,
+                name: AssetRef::Real(key),
+                map_type: 0,
+                semantic,
+                category: 0,
+                use_srgb_reads: srgb,
+                width: px.width as u16,
+                height: px.height as u16,
+                depth: 1,
+                level_count: px.levels as u8,
+                format: 0,
+                payload: Arc::new(Vec::new()),
+                decoded: Some(Arc::new(gpu)),
+                common_owned: false,
+                decoded_variant: None,
+                decoded_by: None,
+                pending_decode: None,
+            })),
+            Err(e) => {
+                if self.failures.len() < 64 {
+                    self.failures.push(format!("{key}: {e}"));
+                }
+                None
+            }
+        }
+    }
+
+    /// A lit opaque or cut-out material's colour without the metal's
+    /// diffuse, normal and specular maps (Black Ops II's form).
+    fn shine(&mut self, material: usize, colour: bool) -> [Option<usize>; 3] {
+        if let Some(s) = self.shine.get(&material) {
+            return *s;
+        }
+        let m = &self.map.materials[material];
+        let slots = match self.map.shine(m, self.max, SPECULAR_MAX.min(self.max), colour) {
+            Ok(sh) => {
+                let base = format!("iw7:{}#{}", m.name, self.max);
+                let c = sh.colour.and_then(|l| self.link_levels(format!("{base}#diffuse"), l, TS_COLOR_MAP));
+                let n = sh.normal.and_then(|l| self.link_levels(format!("{base}#normal"), l, TS_NORMAL_MAP));
+                let sp = sh.specular.and_then(|l| self.link_levels(format!("{base}#specular"), l, TS_SPECULAR_MAP));
+                if n.is_some() || sp.is_some() {
+                    self.with_shine += 1;
+                }
+                [c, n, sp]
+            }
+            Err(e) => {
+                if self.failures.len() < 64 {
+                    self.failures.push(format!("{} (shine): {e}", m.name));
+                }
+                [None; 3]
+            }
+        };
+        self.shine.insert(material, slots);
+        slots
+    }
+
     fn image(&mut self, name: &str) -> Option<usize> {
         if let Some(slot) = self.images.get(name) {
             return *slot;
@@ -275,11 +352,28 @@ impl Materials<'_> {
             // maps keep smoothness in alpha (`fastfile_iw7::look`).
             let has_alpha_map = m.textures.iter().any(|t| t.0 == fastfile_iw7::look::ALPHA_MAP_HASH);
             let wants_alpha = draw.alpha_test || matches!(draw.blend, T6Blend::Blend);
+            // A lit material's shine (`fastfile_iw7::shine`): its colour
+            // without the metal's diffuse (opaque ones), normal and
+            // specular maps.
+            let lit = self.shine_on && !draw.unlit && matches!(draw.blend, T6Blend::Opaque);
+            let shine = if lit { self.shine(index, !draw.alpha_test) } else { [None; 3] };
             let slot = if wants_alpha && (has_alpha_map || fastfile_iw7::look::colour_alpha_is_opacity(&name)) {
                 self.image_with_alpha(index).or_else(|| self.image(&name))
             } else {
-                self.image(&name)
+                shine[0].or_else(|| self.image(&name))
             };
+            for (semantic, image) in [(TS_NORMAL_MAP, shine[1]), (TS_SPECULAR_MAP, shine[2])] {
+                if let Some(image) = image {
+                    textures.push(MaterialTextureBinding {
+                        name_hash: if semantic == TS_NORMAL_MAP { 0x59d3_0d0f } else { 0x34ec_ccb3 },
+                        name_start: 0,
+                        name_end: 0,
+                        sampler_state: sampler,
+                        semantic,
+                        image: Some(image),
+                    });
+                }
+            }
             if let Some(slot) = slot {
                 textures.push(MaterialTextureBinding {
                     name_hash: hash,
@@ -318,6 +412,103 @@ impl Materials<'_> {
         self.linked.insert((index, model), Some(index_in_catalog));
         Some(index_in_catalog)
     }
+}
+
+/// The most reflection probes kept: a cube array of six layers a probe
+/// stays within the 256 layers every GPU allows.
+const MAX_PROBES: usize = 42;
+
+/// The map's reflection probes (`Iw7Map::probe_array`, each probe scaled
+/// to a mean of one: a reflection is lit as the light where it is seen) as
+/// Black Ops II's probe cube array (`t6_materials::T6_PROBES_SEMANTIC`).
+/// Returns the probes' lighting table (a flat one each) and the report
+/// line; `None` with the reason when there are none.
+/// Per reflection probe, its lighting (`WorldDraw::t6_probes`).
+type ProbeTable = Vec<[[f32; 4]; 3]>;
+
+fn link_probes(map: &Iw7Map, catalog: &mut MaterialCatalog, owner: ZoneOwner) -> Result<(ProbeTable, String), String> {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension};
+    let arr = map.probe_array(1.0, true)?;
+    let count = (arr.count as usize).min(MAX_PROBES);
+    let face_bytes: usize = (0..arr.levels).map(|l| ((arr.size >> l).max(1) as usize).pow(2) * 4).sum();
+    let data = arr.data[..face_bytes * 6 * count].to_vec();
+    let mut image = bevy::prelude::Image::new_uninit(
+        Extent3d { width: arr.size, height: arr.size, depth_or_array_layers: 6 * count as u32 },
+        TextureDimension::D2,
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.texture_descriptor.mip_level_count = arr.levels;
+    image.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::CubeArray), ..Default::default() });
+    image.data = Some(data);
+    let slot = catalog.link_image(AuthoredImage {
+        namespace: AssetNamespace::T6,
+        name: AssetRef::Real(format!("iw7:{}#probes", map.name)),
+        map_type: 5,
+        semantic: super::t6_materials::T6_PROBES_SEMANTIC,
+        category: 0,
+        use_srgb_reads: false,
+        width: arr.size as u16,
+        height: arr.size as u16,
+        depth: 1,
+        level_count: arr.levels as u8,
+        format: 0,
+        payload: Arc::new(Vec::new()),
+        decoded: Some(Arc::new(image)),
+        common_owned: false,
+        decoded_variant: None,
+        decoded_by: None,
+        pending_decode: None,
+    });
+    catalog.link_material(AuthoredMaterial {
+        name: AssetRef::Real(super::t6_materials::T6_PROBES_MATERIAL.to_owned()),
+        namespace: AssetNamespace::T6,
+        technique_set: AssetRef::default(),
+        technique_set_edge: AssetEdge::Absent,
+        draw_surf: 0,
+        sort_key: 0,
+        info_game_flags: 0,
+        texture_atlas: None,
+        surface_type_bits: None,
+        t5_layered_surface_types: None,
+        state_flags: 0,
+        camera_region: 0,
+        state_bits: Vec::new(),
+        state_bits_entry: None,
+        t5_state_bits_entry: None,
+        iw5_state_bits_entry: None,
+        technique_table: None,
+        route: None,
+        textures: vec![MaterialTextureBinding {
+            name_hash: 0,
+            name_start: 0,
+            name_end: 0,
+            sampler_state: 0,
+            semantic: super::t6_materials::T6_PROBES_SEMANTIC,
+            image: Some(slot),
+        }],
+        constants: Vec::new(),
+        zone: owner,
+        t6_draw: None,
+    });
+    // (A flat light of one: the shaders divide the reflection by the light
+    // the probe saw, which normalising made one.)
+    let table = vec![[[1.0, 1.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0], [0.0; 4]]; count];
+    Ok((table, format!("iw7 reflection probes: {count} of {} ({}px, {} levels, each to a mean of one)", arr.count, arr.size, arr.levels)))
+}
+
+/// The probe nearest a point among the first `MAX_PROBES`.
+fn nearest_probe(map: &Iw7Map, p: [f32; 3]) -> u8 {
+    map.probe_origins
+        .iter()
+        .take(MAX_PROBES)
+        .enumerate()
+        .min_by(|a, b| {
+            let d = |o: &[f32; 3]| (0..3).map(|k| (o[k] - p[k]).powi(2)).sum::<f32>();
+            d(a.1).total_cmp(&d(b.1))
+        })
+        .map_or(0, |(i, _)| i as u8)
 }
 
 /// The map's sun as CoD4's (angles toward the sun, colour, gamma-space
@@ -439,7 +630,7 @@ fn iw3_world(map: &Iw7Map, sun: ([f32; 3], [f32; 3], f32, &'static str)) -> iw3:
                 base_index: s.base_index as i32,
                 material: None,
                 lightmap_index: s.lightmap_index,
-                reflection_probe_index: 0,
+                reflection_probe_index: nearest_probe(map, std::array::from_fn(|k| (s.mins[k] + s.maxs[k]) * 0.5)),
                 primary_light_index: 0,
                 flags: s.flags,
                 bounds: [s.mins, s.maxs],
@@ -723,6 +914,9 @@ fn build_iw7_world(
         decoded: 0,
         with_alpha: 0,
         failures: Vec::new(),
+        shine: HashMap::new(),
+        shine_on: shine_on(),
+        with_shine: 0,
     };
     let surface_materials: Vec<Option<usize>> = map
         .surfaces
@@ -889,7 +1083,7 @@ fn build_iw7_world(
                 axis: sm.axis,
                 scale: sm.scale,
                 cull_dist: sm.cull_dist.clamp(0.0, f32::from(u16::MAX)) as u16,
-                reflection_probe_index: 0,
+                reflection_probe_index: nearest_probe(map, sm.lighting_origin),
                 primary_light_index: 0,
                 flags: 0,
                 // The floor's light under the model (linear, packed as the
@@ -928,8 +1122,20 @@ fn build_iw7_world(
         b.failures.len(),
         if b.failures.is_empty() { String::new() } else { format!(" (first: {})", b.failures.iter().take(4).cloned().collect::<Vec<_>>().join("; ")) },
     ));
+    report.push(format!("iw7 shine: {} materials with normal or specular maps{}", b.with_shine, if b.shine_on { "" } else { " (off: BO2MP_IW7_SHINE=0)" }));
     let mut materials = std::mem::take(&mut b.catalog);
+    let owner = b.owner;
     drop(b);
+    let probes = match link_probes(map, &mut materials, owner) {
+        Ok((table, line)) => {
+            report.push(line);
+            table
+        }
+        Err(e) => {
+            report.push(format!("iw7 reflection probes: none ({e}); surfaces draw without their normal and specular maps"));
+            Vec::new()
+        }
+    };
     stage.done();
 
     let sun = sun_of(map, &entities, exposure);
@@ -964,6 +1170,7 @@ fn build_iw7_world(
                 _ => report.push("iw7 fog: none (no vision in the zone)".to_owned()),
             }
             draw.t6_lights = fog.as_ref().map_or_else(|| vec![[0.0f32; 16]; 32], super::cod4::legacy_fog_table);
+            draw.t6_probes = probes;
             draw.t6_lights.resize(32, [0.0; 16]);
             draw.t6_lights[SUN_LIGHT_ROW][3] = 1.0;
             report.push(format!(
