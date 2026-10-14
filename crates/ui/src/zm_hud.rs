@@ -43,6 +43,73 @@ struct ZmHudValues {
     hint: String,
     /// His grenades and mines (`name:count` by `;`).
     offhand: String,
+    /// bo2mp: the other players' points, in their place's colour (0-3).
+    others: Vec<(usize, i32)>,
+}
+
+/// bo2mp: the four players' colours (as Black Ops gives them).
+const PLAYER_COLOURS: [Color; 4] = [
+    Color::srgb(0.95, 0.95, 0.95),
+    Color::srgb(0.35, 0.62, 1.0),
+    Color::srgb(0.98, 0.80, 0.25),
+    Color::srgb(0.40, 0.85, 0.40),
+];
+
+/// bo2mp: Zombies' classic HUD is on (see `hks_t6`'s `zm_classic_hud`).
+fn classic() -> bool {
+    hks_t6::host::zm_classic_hud() && crate::lui_hud::lui_enabled()
+}
+
+/// bo2mp: the blood splash behind his points (Black Ops' Zombies HUD): a
+/// dark red blot with a few drops, soft at its edges, made once.
+fn blood_splash() -> Image {
+    let (w, h) = (360usize, 150usize);
+    let mut px = vec![0u8; w * h * 4];
+    // (A fixed scatter: the same splash every run.)
+    let mut seed = 0x2545_f491_u32;
+    let mut rnd = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        (seed % 10_000) as f32 / 10_000.0
+    };
+    let mut blobs: Vec<(f32, f32, f32, f32)> = vec![(0.55, 0.52, 0.34, 0.30), (0.36, 0.55, 0.22, 0.24), (0.74, 0.46, 0.20, 0.22)];
+    for _ in 0..14 {
+        let (x, y) = (0.15 + rnd() * 0.75, 0.25 + rnd() * 0.55);
+        let r = 0.03 + rnd() * 0.09;
+        blobs.push((x, y, r, r * (0.8 + rnd() * 0.5)));
+    }
+    for _ in 0..10 {
+        let (x, y) = (0.05 + rnd() * 0.9, 0.08 + rnd() * 0.85);
+        let r = 0.01 + rnd() * 0.025;
+        blobs.push((x, y, r, r));
+    }
+    let aspect = w as f32 / h as f32;
+    for y in 0..h {
+        for x in 0..w {
+            let (u, v) = (x as f32 / w as f32, y as f32 / h as f32);
+            let mut field = 0.0f32;
+            for &(bx, by, rx, ry) in &blobs {
+                let dx = (u - bx) / rx;
+                let dy = (v - by) / (ry * aspect).max(1e-3);
+                field += (-(dx * dx + dy * dy) * 1.6).exp();
+            }
+            let a = ((field - 0.55) * 3.0).clamp(0.0, 1.0);
+            let shade = 0.75 + 0.25 * ((u * 37.0).sin() * (v * 23.0).cos()).abs();
+            let i = (y * w + x) * 4;
+            px[i] = (140.0 * shade) as u8;
+            px[i + 1] = (8.0 * shade) as u8;
+            px[i + 2] = (6.0 * shade) as u8;
+            px[i + 3] = (a * 225.0) as u8;
+        }
+    }
+    Image::new(
+        bevy::render::render_resource::Extent3d { width: w as u32, height: h as u32, depth_or_array_layers: 1 },
+        bevy::render::render_resource::TextureDimension::D2,
+        px,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::default(),
+    )
 }
 
 /// A clip from the player's clip table (rows of 12 bytes: the weapon, the
@@ -172,6 +239,19 @@ fn read_values(presented: &PresentedSnapshot, local: &LocalPresentClient) -> Opt
         stock: meta.ammo_stock,
         hint: dvars.string("bo2zm_hint").unwrap_or_default().to_owned(),
         offhand: dvars.string("bo2zm_offhand").unwrap_or_default().to_owned(),
+        others: dvars
+            .string("bo2zm_scoreboard")
+            .unwrap_or_default()
+            .split(';')
+            .filter(|r| !r.is_empty())
+            .enumerate()
+            .filter_map(|(i, r)| {
+                let mut f = r.split(':');
+                let client: u32 = f.next()?.trim().parse().ok()?;
+                let score = f.nth(1)?.trim().parse().ok()?;
+                (client != local.0.0).then_some((i.min(3), score))
+            })
+            .collect(),
     })
 }
 
@@ -215,6 +295,7 @@ fn zm_hud(
     hint: Query<Entity, With<ZmHint>>,
     mut shown: Local<Option<ZmHudValues>>,
     mut scale_shown: Local<f32>,
+    mut splash: Local<Option<Handle<Image>>>,
     (bo2, icons, mut images, mut chalk, lines, mut bo2_shown, mut offhand_imgs): (
         Option<Res<crate::bo2_font::Bo2Fonts>>,
         Option<Res<assets::T6HudIcons>>,
@@ -406,7 +487,10 @@ fn zm_hud(
         let round: u32 = values.round.parse().unwrap_or(0);
         // bo2zm M4: BO2's own HUD (unless BO2ZM_LUI=0) draws the round, the points
         // and the ammo.
-        let lui = crate::lui_hud::lui_enabled();
+        // bo2mp: the classic HUD draws them over BO2's (its round, points
+        // and ammo widgets left out).
+        let classic = classic();
+        let lui = crate::lui_hud::lui_enabled() && !classic;
         for (e, line) in &lines {
             commands.entity(e).despawn_related::<Children>();
             match line.0 {
@@ -436,6 +520,31 @@ fn zm_hud(
                             110.0 * scale,
                             3.0 * scale,
                         );
+                    });
+                }
+                1 if classic => {
+                    // Black Ops: the others' points above his, each in his
+                    // colour; his over the blood splash.
+                    let text = values.points.to_string();
+                    let splash = splash.get_or_insert_with(|| images.add(blood_splash())).clone();
+                    let others = values.others.clone();
+                    commands.entity(e).with_children(|c| {
+                        c.spawn(Node { flex_direction: FlexDirection::Column, align_items: AlignItems::FlexEnd, row_gap: Val::Px(2.0 * scale), ..default() })
+                            .with_children(|col| {
+                                for (i, pts) in others {
+                                    col.spawn(Node { margin: UiRect::right(Val::Px(30.0 * scale)), ..default() }).with_children(|r| {
+                                        bo2.spawn_line(r, "Default", &[(pts.to_string(), PLAYER_COLOURS[i])], 32.0 * scale, 2.0 * scale);
+                                    });
+                                }
+                                col.spawn(Node { width: Val::Px(250.0 * scale), height: Val::Px(104.0 * scale), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() })
+                                    .with_children(|b| {
+                                        b.spawn((
+                                            ImageNode::new(splash),
+                                            Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+                                        ));
+                                        bo2.spawn_line(b, "Default", &[(text, POINTS_WHITE)], 50.0 * scale, 2.5 * scale);
+                                    });
+                            });
                     });
                 }
                 1 => {

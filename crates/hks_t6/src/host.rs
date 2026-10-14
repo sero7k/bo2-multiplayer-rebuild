@@ -1979,6 +1979,7 @@ impl Host {
             let r = vm.call(f, vec![])?;
             allow_bots_in_every_mode(vm);
             hide_for_bo1_hud(vm);
+            hide_for_zm_classic(vm);
             extend_map_categories(vm);
             let v = r.into_iter().next().filter(Value::truthy).unwrap_or(Value::Bool(true));
             loaded.borrow_mut().set_str(&module, v.clone());
@@ -3043,6 +3044,81 @@ const BO1_HUD_REPLACES: [&str; 3] = ["AmmoArea", "ScoreBottomLeft", "RewardSelec
 /// bo2mp: Black Ops' HUD is on (the default; `BO2_HUD=bo2` turns it off).
 pub fn bo1_hud_on() -> bool {
     !std::env::var("BO2_HUD").is_ok_and(|v| v.trim().eq_ignore_ascii_case("bo2"))
+}
+
+/// bo2mp: Zombies' classic HUD (World at War's and Black Ops' look: the
+/// round in red chalk bottom-left, the points over a blood splash and the
+/// ammo bottom-right) is drawn by the game in place of these BO2 widgets:
+/// the round (`CoD.RoundStatus`), the players' points
+/// (`CoD.CompetitiveScoreboard`) and the ammo and d-pad area
+/// (`LUI.createMenu.AmmoAreaZombie`). The perks, power-ups and each map's
+/// own widgets (parts, Afterlife, the staffs) stay BO2's. `BO2ZM_HUD=bo2`
+/// keeps BO2's whole HUD.
+const ZM_CLASSIC_TABLES: [&str; 2] = ["RoundStatus", "CompetitiveScoreboard"];
+
+/// bo2mp: Zombies' classic HUD is on (the default; `BO2ZM_HUD=bo2` off).
+pub fn zm_classic_hud() -> bool {
+    !std::env::var("BO2ZM_HUD").is_ok_and(|v| v.trim().eq_ignore_ascii_case("bo2"))
+}
+
+/// Marks what `f` returns `bo1Hidden` (built and fed, never drawn) in a
+/// Zombies game.
+fn hiding(vm: &mut Vm, name: &'static str, f: Value) -> Value {
+    vm.native(name, move |vm, args| {
+        let out = vm.call(f.clone(), args)?;
+        let zombies = matches!(vm.global("CoD"), Value::Table(cod) if cod.borrow().get_str("isZombie").truthy());
+        if zombies {
+            for v in &out {
+                if let Some(u) = lui::element(v) {
+                    lui::with(&u, |e| e.fields.borrow_mut().set_str("bo1Hidden", Value::Bool(true)));
+                }
+            }
+        }
+        Ok(out)
+    })
+}
+
+/// See `ZM_CLASSIC_TABLES`: each table's functions (its constructors among
+/// them) are wrapped once, as soon as its script is in.
+fn hide_for_zm_classic(vm: &mut Vm) {
+    if !zm_classic_hud() {
+        return;
+    }
+    let Value::Table(cod) = vm.global("CoD") else {
+        return;
+    };
+    for t in ZM_CLASSIC_TABLES {
+        let Value::Table(table) = cod.borrow().get_str(t) else { continue };
+        if table.borrow().get_str("bo2mpClassic").truthy() {
+            continue;
+        }
+        let mut funcs = Vec::new();
+        let mut key = Value::Nil;
+        while let Some((k, v)) = table.borrow().next(&key) {
+            if matches!(v, Value::Func(_)) {
+                funcs.push((k.clone(), v));
+            }
+            key = k;
+        }
+        for (k, f) in funcs {
+            let wrapped = hiding(vm, t, f);
+            table.borrow_mut().set(k, wrapped);
+        }
+        table.borrow_mut().set_str("bo2mpClassic", Value::Bool(true));
+        eprintln!("bo2mp zombies hud: BO2's {t} hidden for the classic HUD");
+    }
+    let Value::Table(lui) = vm.global("LUI") else {
+        return;
+    };
+    let Value::Table(menus) = lui.borrow().get_str("createMenu") else {
+        return;
+    };
+    let original = menus.borrow().get_str("AmmoAreaZombie");
+    if matches!(original, Value::Func(_)) && !menus.borrow().get_str("bo2mpClassicAmmo").truthy() {
+        let wrapped = hiding(vm, "AmmoAreaZombie", original);
+        menus.borrow_mut().set_str("AmmoAreaZombie", wrapped);
+        menus.borrow_mut().set_str("bo2mpClassicAmmo", Value::Bool(true));
+    }
 }
 
 /// bo2mp: the widgets Black Ops' HUD replaces are still built and still get
