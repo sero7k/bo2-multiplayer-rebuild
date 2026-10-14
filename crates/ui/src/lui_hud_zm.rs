@@ -2386,7 +2386,8 @@ fn lui_hud(
     let scores_down = actions
         .as_deref()
         .is_some_and(|a| a.client.kb.scores.active);
-    let want_board = !hud.frontend && (scores_down || values.game_over);
+    // (With the shell on, its own scoreboard and Game Over show instead.)
+    let want_board = !hud.frontend && (scores_down || values.game_over) && !crate::shell::zm_board::board_ours();
     if want_board != hud.board_open {
         hud.board_open = want_board;
         let event = if want_board {

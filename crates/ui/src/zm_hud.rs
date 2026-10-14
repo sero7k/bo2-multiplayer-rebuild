@@ -684,6 +684,18 @@ fn zm_script_hud(
             v
         }
     });
+    // bo2mp: the shell draws the game over (GAME OVER / YOU SURVIVED) in
+    // its own look; the scripts' text for it is left out.
+    let value = value.map(|v| {
+        if crate::shell::zm_board::board_ours() {
+            v.split('\u{1e}')
+                .filter(|row| row.split('\u{1f}').nth(12).is_none_or(|t| !crate::shell::zm_board::is_game_over_text(t)))
+                .collect::<Vec<_>>()
+                .join("\u{1e}")
+        } else {
+            v
+        }
+    });
     let Some(value) = value else {
         for e in &roots {
             commands.entity(e).despawn();

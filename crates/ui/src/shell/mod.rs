@@ -26,6 +26,7 @@ pub(crate) mod cards;
 pub(crate) mod classes;
 pub(crate) mod ingame;
 pub(crate) mod zm_record;
+pub(crate) mod zm_board;
 mod loading;
 mod friends;
 mod lobbies;
@@ -1322,6 +1323,7 @@ pub(crate) fn register_shell(app: &mut App) {
                 zombies::zombies_watch,
                 zombies::zombies_exec,
                 zm_record::watch_games,
+                zm_board::zm_board,
             )
                 .chain()
                 .in_set(ClientSet::Ui),
