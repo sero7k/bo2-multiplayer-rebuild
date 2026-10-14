@@ -25,6 +25,7 @@ mod asd;
 mod audio_triggers;
 mod autoplay;
 mod bots;
+pub mod br;
 mod autoplay_prison;
 mod brushes;
 mod buried_egg;
@@ -874,6 +875,11 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
             vm.dvars.insert("scr_moab".to_owned(), "1".to_owned());
             vm.dvars.insert("scr_moab_kills".to_owned(), moab.to_string());
         }
+        // bo2mp: Resurgence (`bo2mp/resurgence`): the lobby's WARZONE, or
+        // BO2MP_BR=<squad size> with the free-for-all.
+        if let Some(rules) = br::rules() {
+            vm.dvars.extend(br::dvars(&rules));
+        }
         // bo2mp: BO2's own HUD asked for (`BO2_HUD=bo2`): its prematch
         // countdown shows instead of the modern HUD's.
         let bo2_hud = std::env::var("BO2_HUD").is_ok_and(|v| v.trim().eq_ignore_ascii_case("bo2"));
@@ -1428,6 +1434,7 @@ pub(crate) fn start(world: &mut World) {
         if mp_map {
             // bo2mp: the optional M.O.A.B. (off unless scr_moab 1).
             calls.push(("bo2mp/moab".to_owned(), "main", false));
+            calls.push(("bo2mp/resurgence".to_owned(), "main", false));
             calls.push(("bo2mp/debug".to_owned(), "main", false));
         }
         for (script, func, required) in calls {

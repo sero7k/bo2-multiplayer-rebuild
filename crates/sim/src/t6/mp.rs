@@ -147,6 +147,7 @@ pub(super) fn engine_scripts() -> Result<Vec<ScriptObject>, String> {
     let mut out = vec![
         gsc_t6::compile("maps/mp/gametypes/_globallogic", GLOBALLOGIC)?,
         gsc_t6::compile("bo2mp/moab", MOAB)?,
+        gsc_t6::compile("bo2mp/resurgence", super::br::SCRIPT)?,
     ];
     register_moab_visions();
     if let Ok(path) = std::env::var("BO2MP_DEBUG_GSC") {
