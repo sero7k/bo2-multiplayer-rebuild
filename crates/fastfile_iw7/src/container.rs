@@ -95,6 +95,9 @@ pub struct FileHeader {
     pub flags: [u8; 4],
     /// The image's size, and each block's size.
     pub size: u64,
+    /// `0x20`: the VIRTUAL bytes the zone's shared streams take ahead of its
+    /// own data (close to it: references are offset by about this much).
+    pub shared_virtual: u64,
     pub block_sizes: [u64; BLOCK_COUNT],
     pub shared_files: Vec<StreamFile>,
     pub stream_files: Vec<StreamFile>,
@@ -162,6 +165,7 @@ pub fn parse_file_header(file: &[u8]) -> Result<FileHeader, ContainerError> {
         version,
         flags: [file[12], file[13], file[14], file[15]],
         size: u64_at(file, 0x18),
+        shared_virtual: u64_at(file, 0x20),
         block_sizes,
         shared_files: (0..shared).map(read).collect(),
         stream_files: (shared..shared + images).map(read).collect(),

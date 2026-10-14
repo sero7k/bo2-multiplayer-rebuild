@@ -79,7 +79,7 @@ pub(super) fn xmodel(w: &mut Walker, h: usize) -> Result<AssetId> {
             rec.materials.push(m);
         }
     } else if let Some(v) = w.s.ptr_at(h + X::materialHandles)?.virtual_offset()
-        && let Some(at) = w.vmap.file_pos(v)
+        && let Some(at) = w.file_of(v)
     {
         for i in 0..ns {
             let m = w.s.ptr_at(at + 8 * i)?.virtual_offset().and_then(|v| w.resolve_slot(AssetType::Material, v));
@@ -158,7 +158,7 @@ fn surface(w: &mut Walker, s: usize) -> Result<SurfaceRec> {
             }
         }
     } else if let Some(v) = w.s.ptr_at(s + X::rigidVertLists)?.virtual_offset()
-        && let Some(at) = w.vmap.file_pos(v)
+        && let Some(at) = w.file_of(v)
     {
         for i in 0..rigid_n {
             let r = at + rv * i;

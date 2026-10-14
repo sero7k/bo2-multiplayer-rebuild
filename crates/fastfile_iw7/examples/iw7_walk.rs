@@ -22,8 +22,9 @@ fn main() {
             }
             continue;
         }
-        let mut w = fastfile_iw7::walk::Walker::new(&zone.image, &zone.assets, &zone.header.stream_files);
-        let stop = w.walk().err();
+        let t = std::time::Instant::now();
+        let (w, stop) = fastfile_iw7::walk::walk_fitted(&zone);
+        eprintln!("walked in {:?}; {} delta segments {:x?}", t.elapsed(), w.deltas.len(), &w.deltas[..w.deltas.len().min(8)]);
         println!(
             "{path}: walked {}/{} pos {:#x}/{:#x} VIRTUAL {:#x} (block {:#x}) unresolved {} forward {}/{} stop {:?}",
             w.cap.walked,
@@ -37,6 +38,22 @@ fn main() {
             w.forward.len(),
             stop
         );
+        if let Ok(spec) = std::env::var("IW7_DSCAN") {
+            let (a, b) = spec.split_once(',').unwrap();
+            let a = u64::from_str_radix(a, 16).unwrap();
+            let b = u64::from_str_radix(b, 16).unwrap();
+            let mut refs = w.string_refs.clone();
+            refs.sort();
+            refs.dedup();
+            let mut hits = w.delta_hits(&refs, a..b);
+            hits.sort_by_key(|h| std::cmp::Reverse(h.1));
+            println!("{} string refs; best deltas {:x?}", refs.len(), &hits[..hits.len().min(6)]);
+            for chunk in refs.chunks(refs.len().div_ceil(16).max(1)) {
+                let mut h = w.delta_hits(chunk, a..b);
+                h.sort_by_key(|h| std::cmp::Reverse(h.1));
+                println!("  refs {:#x}..{:#x} n {} best {:x?}", chunk[0], chunk[chunk.len() - 1], chunk.len(), &h[..3]);
+            }
+        }
         if std::env::var_os("IW7_IMG").is_some() {
             let l1: u64 = w.cap.images.iter().map(|i| i.data_len1 as u64).sum();
             let l2: u64 = w.cap.images.iter().map(|i| i.data_len2 as u64).sum();

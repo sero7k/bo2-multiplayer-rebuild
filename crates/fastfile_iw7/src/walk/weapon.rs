@@ -6,29 +6,51 @@ use crate::asset_type::AssetType;
 use crate::cursor::Result;
 use crate::layout as L;
 use crate::stream::VIRTUAL;
+use crate::walk::{AnimPackageRec, AttachmentRec, SfxPackageRec, Span, WeaponField, WeaponRec};
+use WeaponField::{Complete, Def};
 
 /// An `FxCombinedDef`: an effect pointer whose type byte says which kind.
-pub(super) fn fx_combined(w: &mut Walker, field: usize) -> Result<()> {
+pub(super) fn fx_combined(w: &mut Walker, field: usize) -> Result<Option<AssetId>> {
     let ty = if w.s.u8_at(field + 8)? == 1 { AssetType::Vfx } else { AssetType::Fx };
-    w.asset(ty, field)?;
-    Ok(())
+    w.asset(ty, field)
 }
 
-/// A pointer to `n` asset pointers (aligned 8).
-pub(super) fn asset_array(w: &mut Walker, ty: AssetType, field: usize, n: usize) -> Result<()> {
-    if let Some(table) = w.inline_array(field, 8 * n, 7)? {
-        for i in 0..n {
-            w.asset(ty, table + 8 * i)?;
-        }
+/// An asset pointer at `base + f`, recorded by field.
+fn put(w: &mut Walker, rec: &mut WeaponRec, ty: AssetType, base: usize, f: usize, at: fn(usize) -> WeaponField) -> Result<()> {
+    if let Some(id) = w.asset(ty, base + f)? {
+        rec.assets.push((at(f), id));
     }
     Ok(())
 }
 
-fn weapon_def(w: &mut Walker, d: usize, parent: usize) -> Result<()> {
+fn put_str(w: &mut Walker, rec: &mut WeaponRec, base: usize, f: usize, at: fn(usize) -> WeaponField) -> Result<()> {
+    if let Some(s) = w.xstr(base + f)? {
+        rec.strings.push((at(f), s));
+    }
+    Ok(())
+}
+
+fn put_fx(w: &mut Walker, rec: &mut WeaponRec, base: usize, f: usize, at: fn(usize) -> WeaponField) -> Result<()> {
+    if let Some(id) = fx_combined(w, base + f)? {
+        rec.assets.push((at(f), id));
+    }
+    Ok(())
+}
+
+/// A pointer to `n` asset pointers (aligned 8).
+pub(super) fn asset_array(w: &mut Walker, ty: AssetType, field: usize, n: usize) -> Result<Vec<Option<AssetId>>> {
+    let mut out = Vec::new();
+    if let Some(table) = w.inline_array(field, 8 * n, 7)? {
+        for i in 0..n {
+            out.push(w.asset(ty, table + 8 * i)?);
+        }
+    }
+    Ok(out)
+}
+
+fn weapon_def(w: &mut Walker, d: usize, parent: usize, rec: &mut WeaponRec) -> Result<()> {
     use AssetType as T;
     use L::WeaponDef as D;
-    let model = |w: &mut Walker, f: usize| w.asset(T::XModel, d + f).map(|_| ());
-    let material = |w: &mut Walker, f: usize| w.asset(T::Material, d + f).map(|_| ());
     if std::env::var_os("IW7_WDUMP").is_some() {
         for o in (0..D::SIZE).step_by(8) {
             let v = w.s.u64_at(d + o)?;
@@ -37,7 +59,7 @@ fn weapon_def(w: &mut Walker, d: usize, parent: usize) -> Result<()> {
             }
         }
     }
-    w.xstr(d + D::szOverlayName)?;
+    put_str(w, rec, d, D::szOverlayName, Def)?;
     for f in [
         D::gunXModel,
         D::gunXModelLeftHand,
@@ -54,7 +76,7 @@ fn weapon_def(w: &mut Walker, d: usize, parent: usize) -> Result<()> {
         D::playerShadowModelRightHand,
         D::handXModel,
     ] {
-        model(w, f)?;
+        put(w, rec, T::XModel, d, f, Def)?;
     }
     let complex = w.s.u32_at(d + D::numComplexModels)? as usize;
     for f in [
@@ -65,17 +87,21 @@ fn weapon_def(w: &mut Walker, d: usize, parent: usize) -> Result<()> {
         D::complexGunXModelLeftHand,
         D::complexGunXModelRightHand,
     ] {
-        asset_array(w, T::XModel, d + f, complex)?;
+        for (i, id) in asset_array(w, T::XModel, d + f, complex)?.into_iter().enumerate() {
+            if let Some(id) = id {
+                rec.assets.push((Def(f + 8 * i), id));
+            }
+        }
     }
     for f in [D::camoWorldModelMaterialOverride, D::camoViewModelMaterialOverride] {
         for i in 0..16 {
-            material(w, f + 8 * i)?;
+            put(w, rec, T::Material, d, f + 8 * i, Def)?;
         }
     }
     for f in [D::szXAnims, D::szXAnimsRightHanded, D::szXAnimsLeftHanded] {
-        w.asset(T::AnimPackage, d + f)?;
+        put(w, rec, T::AnimPackage, d, f, Def)?;
     }
-    w.xstr(d + D::szModeName)?;
+    put_str(w, rec, d, D::szModeName, Def)?;
     w.blob(d + D::notetrackRumbleMapKeys, 4 * 16, 3)?;
     w.blob(d + D::notetrackRumbleMapValues, 4 * 16, 3)?;
     w.blob(d + D::notetrackFXMapKeys, 4 * 16, 3)?;
@@ -86,59 +112,59 @@ fn weapon_def(w: &mut Walker, d: usize, parent: usize) -> Result<()> {
         }
     }
     w.blob(d + D::notetrackFXMapTagValues, 4 * 16, 3)?;
-    material(w, D::unkMaterial)?;
-    w.asset(T::VfxPackage, d + D::vfxPackage)?;
-    w.asset(T::SfxPackage, d + D::sfxPackage)?;
+    put(w, rec, T::Material, d, D::unkMaterial, Def)?;
+    put(w, rec, T::VfxPackage, d, D::vfxPackage, Def)?;
+    put(w, rec, T::SfxPackage, d, D::sfxPackage, Def)?;
     for f in [D::reticleCenter, D::reticleSide, D::reticleOnePiece] {
-        material(w, f)?;
+        put(w, rec, T::Material, d, f, Def)?;
     }
     for f in [D::worldClipModel, D::rocketModel, D::knifeModel, D::worldKnifeModel] {
-        model(w, f)?;
+        put(w, rec, T::XModel, d, f, Def)?;
     }
     for f in [D::hudIcon, D::pickupIcon, D::dangerIcon, D::throwBackIcon, D::ammoCounterIcon] {
-        material(w, f)?;
+        put(w, rec, T::Material, d, f, Def)?;
     }
-    w.xstr(d + D::szAmmoName)?;
-    w.xstr(d + D::szSharedAmmoCapName)?;
+    put_str(w, rec, d, D::szAmmoName, Def)?;
+    put_str(w, rec, d, D::szSharedAmmoCapName, Def)?;
     for f in [D::overlay__shader, D::overlay__shaderLowRes, D::overlay__shaderEMP, D::overlay__shaderEMPLowRes] {
-        material(w, f)?;
+        put(w, rec, T::Material, d, f, Def)?;
     }
-    model(w, D::projectileModel)?;
-    fx_combined(w, d + D::projExplosionEffect)?;
-    fx_combined(w, d + D::projDudEffect)?;
+    put(w, rec, T::XModel, d, D::projectileModel, Def)?;
+    put_fx(w, rec, d, D::projExplosionEffect, Def)?;
+    put_fx(w, rec, d, D::projDudEffect, Def)?;
     w.blob(d + D::parallelBounce, 4 * 64, 3)?;
     w.blob(d + D::perpendicularBounce, 4 * 64, 3)?;
     for f in [D::projBodyEffect, D::projTrailEffect, D::projBeaconEffect, D::projIgnitionEffect] {
-        fx_combined(w, d + f)?;
+        put_fx(w, rec, d, f, Def)?;
     }
     // The writer sizes the original knots by the complete def's counts.
     for i in 0..2 {
-        w.xstr(d + D::accuracyGraphName + 8 * i)?;
+        put_str(w, rec, d, D::accuracyGraphName + 8 * i, Def)?;
         let n = w.s.u16_at(parent + L::WeaponCompleteDef::accuracyGraphKnotCount + 2 * i)? as usize;
         w.blob(d + D::originalAccuracyGraphKnots + 8 * i, 8 * n, 3)?;
     }
-    w.xstr(d + D::szUseHintString)?;
-    w.xstr(d + D::dropHintString)?;
-    w.xstr(d + D::szScript)?;
+    put_str(w, rec, d, D::szUseHintString, Def)?;
+    put_str(w, rec, d, D::dropHintString, Def)?;
+    put_str(w, rec, d, D::szScript, Def)?;
     w.blob(d + D::locationDamageMultipliers, 4 * 22, 3)?;
     w.blob(d + D::hitLocPriorityMap, 22, 0)?;
-    w.asset(T::Rumble, d + D::fireRumble)?;
-    w.asset(T::Rumble, d + D::meleeImpactRumble)?;
-    w.asset(T::Tracer, d + D::tracerType)?;
-    w.asset(T::Tracer, d + D::overchargeTracerType)?;
-    w.asset(T::Laser, d + D::laserTypeFriendly)?;
-    w.asset(T::Laser, d + D::laserTypeEnemy)?;
-    w.xstr(d + D::turretOverheatSound)?;
-    fx_combined(w, d + D::turretOverheatEffect)?;
-    w.asset(T::Rumble, d + D::turretBarrelSpinRumble)?;
-    w.xstr(d + D::turretBarrelSpinMaxSnd)?;
+    put(w, rec, T::Rumble, d, D::fireRumble, Def)?;
+    put(w, rec, T::Rumble, d, D::meleeImpactRumble, Def)?;
+    put(w, rec, T::Tracer, d, D::tracerType, Def)?;
+    put(w, rec, T::Tracer, d, D::overchargeTracerType, Def)?;
+    put(w, rec, T::Laser, d, D::laserTypeFriendly, Def)?;
+    put(w, rec, T::Laser, d, D::laserTypeEnemy, Def)?;
+    put_str(w, rec, d, D::turretOverheatSound, Def)?;
+    put_fx(w, rec, d, D::turretOverheatEffect, Def)?;
+    put(w, rec, T::Rumble, d, D::turretBarrelSpinRumble, Def)?;
+    put_str(w, rec, d, D::turretBarrelSpinMaxSnd, Def)?;
     for f in [D::turretBarrelSpinUpSnd, D::turretBarrelSpinDownSnd] {
         for i in 0..4 {
-            w.xstr(d + f + 8 * i)?;
+            put_str(w, rec, d, f + 8 * i, Def)?;
         }
     }
-    w.xstr(d + D::missileConeSoundAlias)?;
-    w.xstr(d + D::missileConeSoundAliasAtBase)?;
+    put_str(w, rec, d, D::missileConeSoundAlias, Def)?;
+    put_str(w, rec, d, D::missileConeSoundAliasAtBase, Def)?;
     for f in [
         D::shieldDeployGesture,
         D::shieldFireWeapGesture,
@@ -146,18 +172,18 @@ fn weapon_def(w: &mut Walker, d: usize, parent: usize) -> Result<()> {
         D::shieldRetractWhileFiring,
         D::shieldBashGesture,
     ] {
-        w.asset(T::Gesture, d + f)?;
+        put(w, rec, T::Gesture, d, f, Def)?;
     }
-    fx_combined(w, d + D::shieldMeleeFx)?;
-    w.asset(T::Rumble, d + D::shieldHitRumble)?;
-    w.asset(T::Rumble, d + D::shieldMissRumble)?;
+    put_fx(w, rec, d, D::shieldMeleeFx, Def)?;
+    put(w, rec, T::Rumble, d, D::shieldHitRumble, Def)?;
+    put(w, rec, T::Rumble, d, D::shieldMissRumble, Def)?;
     for f in [D::gestureAnimation, D::gesturePullback, D::gestureThrow, D::gestureDetonate] {
-        w.asset(T::Gesture, d + f)?;
+        put(w, rec, T::Gesture, d, f, Def)?;
     }
-    w.xstr(d + D::unknownString1)?;
-    w.xstr(d + D::unknownString2)?;
-    fx_combined(w, d + D::cameraFireEffect)?;
-    fx_combined(w, d + D::chargeMeterEffect)?;
+    put_str(w, rec, d, D::unknownString1, Def)?;
+    put_str(w, rec, d, D::unknownString2, Def)?;
+    put_fx(w, rec, d, D::cameraFireEffect, Def)?;
+    put_fx(w, rec, d, D::chargeMeterEffect, Def)?;
     for f in [
         D::chargeUpSound,
         D::chargeDownSound,
@@ -170,19 +196,19 @@ fn weapon_def(w: &mut Walker, d: usize, parent: usize) -> Result<()> {
         D::chargeMaxSound,
         D::chargeMaxSoundPlayer,
     ] {
-        w.xstr(d + f)?;
+        put_str(w, rec, d, f, Def)?;
     }
-    w.asset(T::Rumble, d + D::chargeRumble)?;
-    model(w, D::stowOffsetModel)?;
-    fx_combined(w, d + D::deployEffect)?;
+    put(w, rec, T::Rumble, d, D::chargeRumble, Def)?;
+    put(w, rec, T::XModel, d, D::stowOffsetModel, Def)?;
+    put_fx(w, rec, d, D::deployEffect, Def)?;
     for (base, ty) in [
         (D::animOverrides, T::AnimPackage),
         (D::sfxOverrides, T::SfxPackage),
         (D::vfxOverrides, T::VfxPackage),
     ] {
         for i in 0..21 {
-            w.asset(ty, d + base + 24 * i + 8)?;
-            w.asset(ty, d + base + 24 * i + 16)?;
+            put(w, rec, ty, d, base + 24 * i + 8, Def)?;
+            put(w, rec, ty, d, base + 24 * i + 16, Def)?;
         }
     }
     Ok(())
@@ -208,40 +234,58 @@ pub(super) fn weapon(w: &mut Walker, h: usize) -> Result<AssetId> {
     use L::WeaponCompleteDef as C;
     w.s.push(VIRTUAL);
     let name = w.xstr(h + C::name)?.unwrap_or_default();
-    if let Some(d) = w.inline_array(h + C::weapDef, L::WeaponDef::SIZE, 7)? {
-        weapon_def(w, d, h)?;
+    if std::env::var_os("IW7_WNAME").is_some() {
+        let p = w.s.u64_at(h + C::name)?;
+        let r = p & 0xFFFF_FFFF;
+        let l = w.local(r.wrapping_sub(1));
+        eprintln!("weapon name ptr {p:#x} local {l:#x} file {:?} name {name:?} display {:?}", w.vmap.file_pos(l), w.s.u64_at(h + C::szDisplayName)?);
     }
-    w.xstr(h + C::szDisplayName)?;
-    w.xstr(h + C::szLootTable)?;
-    w.blob(h + C::hideTags, 4 * 32, 3)?;
-    for (count, field) in [
+    let mut rec = WeaponRec {
+        name: name.clone(),
+        complete: Span { pos: h, len: C::SIZE },
+        ..Default::default()
+    };
+    if let Some(d) = w.inline_array(h + C::weapDef, L::WeaponDef::SIZE, 7)? {
+        rec.def = Some(Span { pos: d, len: L::WeaponDef::SIZE });
+        weapon_def(w, d, h, &mut rec)?;
+    }
+    rec.display_name = w.xstr(h + C::szDisplayName)?.unwrap_or_default();
+    put_str(w, &mut rec, h, C::szLootTable, Complete)?;
+    if let Some(at) = w.blob(h + C::hideTags, 4 * 32, 3)? {
+        rec.hide_tags = (0..32).map(|i| w.s.u32_at(at + 4 * i)).collect::<Result<_>>()?;
+    }
+    for (k, (count, field)) in [
         (C::numAttachments, C::attachments),
         (C::numAttachments2, C::attachments2),
         (C::numAttachments3, C::attachments3),
         (C::numAttachments4, C::attachments4),
         (C::numAttachments5, C::attachments5),
         (C::numAttachments6, C::attachments6),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let n = w.s.u32_at(h + count)? as usize;
-        asset_array(w, T::Attachment, h + field, n)?;
+        rec.attachments[k] = asset_array(w, T::Attachment, h + field, n)?;
     }
     let n = w.s.u32_at(h + C::numNotetrackSoundMappings)? as usize;
     w.blob(h + C::notetrackSoundMapKeys, 4 * n, 3)?;
     w.blob(h + C::notetrackSoundMapValues, 4 * n, 3)?;
     notetrack_entries(w, h + C::numNotetrackOverrides, h + C::notetrackOverrides)?;
     notetrack_entries(w, h + C::numNotetrackSuitEntries, h + C::notetrackSuitEntries)?;
-    w.xstr(h + C::szAltWeaponName)?;
-    w.asset(T::Material, h + C::killIcon)?;
-    w.asset(T::Material, h + C::dpadIcon)?;
+    put_str(w, &mut rec, h, C::szAltWeaponName, Complete)?;
+    put(w, &mut rec, T::Material, h, C::killIcon, Complete)?;
+    put(w, &mut rec, T::Material, h, C::dpadIcon, Complete)?;
     for i in 0..2 {
         let n = w.s.u16_at(h + C::accuracyGraphKnotCount + 2 * i)? as usize;
         w.blob(h + C::accuracyGraphKnots + 8 * i, 8 * n, 3)?;
     }
     for f in [C::szAdsrBaseSetting, C::szLUIWeaponInfoWidgetName, C::szLUIWeaponInfoWidgetTag, C::szLUICrosshairWidget] {
-        w.xstr(h + f)?;
+        put_str(w, &mut rec, h, f, Complete)?;
     }
     w.s.pop();
-    Ok(w.name_only(T::Weapon, name))
+    w.cap.weapons.push(rec);
+    Ok(AssetId { ty: T::Weapon, index: (w.cap.weapons.len() - 1) as u32 })
 }
 
 /// `NUM_WEAP_ANIMS`.
@@ -251,11 +295,15 @@ pub(super) fn anim_package(w: &mut Walker, h: usize) -> Result<AssetId> {
     use L::WeaponAnimPackage as P;
     w.s.push(VIRTUAL);
     let name = w.xstr(h + P::name)?.unwrap_or_default();
-    asset_array(w, AssetType::XAnimParts, h + P::anims, WEAPON_ANIMS)?;
+    if std::env::var_os("IW7_APDUMP").is_some() {
+        eprintln!("anim package {name} pos {:#x} header {:x?}", w.s.pos(), (0..8).map(|i| w.s.u64_at(h + 8 * i).unwrap_or(0)).collect::<Vec<_>>());
+    }
+    let anims = asset_array(w, AssetType::XAnimParts, h + P::anims, WEAPON_ANIMS)?;
     w.blob(h + P::timers, L::WeaponAnimPackageStateTimers::SIZE, 3)?;
     w.blob(h + P::footstep, L::FootstepAnims::SIZE, 3)?;
     w.s.pop();
-    Ok(w.name_only(AssetType::AnimPackage, name))
+    w.cap.anim_packages.push(AnimPackageRec { name, anims });
+    Ok(AssetId { ty: AssetType::AnimPackage, index: (w.cap.anim_packages.len() - 1) as u32 })
 }
 
 pub(super) fn sfx_package(w: &mut Walker, h: usize) -> Result<AssetId> {
@@ -263,15 +311,19 @@ pub(super) fn sfx_package(w: &mut Walker, h: usize) -> Result<AssetId> {
     w.s.push(VIRTUAL);
     let name = w.xstr(h + P::name)?.unwrap_or_default();
     let len = L::WeaponSFXPackageSounds::SIZE;
+    let mut sounds = Vec::new();
     if let Some(s) = w.inline_array(h + P::sounds, len, 7)? {
         for o in (0..len).step_by(8) {
-            w.xstr(s + o)?;
+            if let Some(t) = w.xstr(s + o)? {
+                sounds.push((o, t));
+            }
         }
     }
     w.xstr(h + P::szAdsrBaseSetting)?;
     w.xstr(h + P::szWeapSndReflectionClass)?;
     w.s.pop();
-    Ok(w.name_only(AssetType::SfxPackage, name))
+    w.cap.sfx_packages.push(SfxPackageRec { name, sounds });
+    Ok(AssetId { ty: AssetType::SfxPackage, index: (w.cap.sfx_packages.len() - 1) as u32 })
 }
 
 pub(super) fn vfx_package(w: &mut Walker, h: usize) -> Result<AssetId> {
@@ -311,20 +363,52 @@ pub(super) fn attachment(w: &mut Walker, h: usize) -> Result<AssetId> {
             }
         }
     }
-    w.xstr(h + A::szDisplayName)?;
-    w.asset(T::XModel, h + A::worldModelCamo)?;
-    w.asset(T::XModel, h + A::viewModelCamo)?;
+    let mut rec = AttachmentRec {
+        name: name.clone(),
+        record: Span { pos: h, len: A::SIZE },
+        ..Default::default()
+    };
+    rec.display_name = w.xstr(h + A::szDisplayName)?.unwrap_or_default();
+    for f in [A::worldModelCamo, A::viewModelCamo] {
+        if let Some(id) = w.asset(T::XModel, h + f)? {
+            rec.assets.push((f, id));
+        }
+    }
     let variations = w.s.u32_at(h + A::numModelVariations)? as usize;
-    asset_array(w, T::XModel, h + A::worldModelVariations, variations)?;
-    asset_array(w, T::XModel, h + A::viewModelVariations, variations)?;
+    for (i, id) in asset_array(w, T::XModel, h + A::worldModelVariations, variations)?.into_iter().enumerate() {
+        if let Some(id) = id {
+            rec.assets.push((A::worldModelVariations + 8 * i, id));
+        }
+    }
+    for (i, id) in asset_array(w, T::XModel, h + A::viewModelVariations, variations)?.into_iter().enumerate() {
+        if let Some(id) = id {
+            rec.assets.push((A::viewModelVariations + 8 * i, id));
+        }
+    }
     let n = w.s.u32_at(h + A::numWorldModelCamoMaterials)? as usize;
-    asset_array(w, T::Material, h + A::worldModelCamoMaterials, n)?;
+    for (i, id) in asset_array(w, T::Material, h + A::worldModelCamoMaterials, n)?.into_iter().enumerate() {
+        if let Some(id) = id {
+            rec.assets.push((A::worldModelCamoMaterials + 8 * i, id));
+        }
+    }
     let n = w.s.u32_at(h + A::numViewModelCamoMaterials)? as usize;
-    asset_array(w, T::Material, h + A::viewModelCamoMaterials, n)?;
+    for (i, id) in asset_array(w, T::Material, h + A::viewModelCamoMaterials, n)?.into_iter().enumerate() {
+        if let Some(id) = id {
+            rec.assets.push((A::viewModelCamoMaterials + 8 * i, id));
+        }
+    }
     let n = w.s.u32_at(h + A::numReticles)? as usize;
-    asset_array(w, T::Reticle, h + A::reticles, n)?;
+    for (i, id) in asset_array(w, T::Reticle, h + A::reticles, n)?.into_iter().enumerate() {
+        if let Some(id) = id {
+            rec.assets.push((A::reticles + 8 * i, id));
+        }
+    }
     let n = w.s.u32_at(h + A::numAltReticles)? as usize;
-    asset_array(w, T::Reticle, h + A::altReticles, n)?;
+    for (i, id) in asset_array(w, T::Reticle, h + A::altReticles, n)?.into_iter().enumerate() {
+        if let Some(id) = id {
+            rec.assets.push((A::altReticles + 8 * i, id));
+        }
+    }
     let m = |f| Asset(T::Material, f);
     // The sections in the writer's order: field, size, alignment, pointers.
     let sections: Vec<(usize, usize, u64, Vec<Ref>)> = vec![
@@ -431,19 +515,30 @@ pub(super) fn attachment(w: &mut Walker, h: usize) -> Result<AssetId> {
         for r in refs {
             match r {
                 Asset(ty, o) => {
-                    w.asset(ty, s + o)?;
+                    if let Some(id) = w.asset(ty, s + o)? {
+                        rec.assets.push((field + o, id));
+                    }
                 }
                 Str(o) => {
-                    w.xstr(s + o)?;
+                    if let Some(t) = w.xstr(s + o)? {
+                        rec.strings.push((field + o, t));
+                    }
                 }
-                Fx(o) => fx_combined(w, s + o)?,
+                Fx(o) => {
+                    if let Some(id) = fx_combined(w, s + o)? {
+                        rec.assets.push((field + o, id));
+                    }
+                }
             }
         }
     }
     w.blob(h + A::locationDamage, 4 * 22, 3)?;
-    w.xstr(h + A::szAltModeName)?;
-    w.xstr(h + A::szLUIWeaponInfoWidgetName)?;
-    w.xstr(h + A::szLUIWeaponInfoWidgetTag)?;
+    for f in [A::szAltModeName, A::szLUIWeaponInfoWidgetName, A::szLUIWeaponInfoWidgetTag] {
+        if let Some(t) = w.xstr(h + f)? {
+            rec.strings.push((f, t));
+        }
+    }
     w.s.pop();
-    Ok(w.name_only(T::Attachment, name))
+    w.cap.attachments.push(rec);
+    Ok(AssetId { ty: T::Attachment, index: (w.cap.attachments.len() - 1) as u32 })
 }

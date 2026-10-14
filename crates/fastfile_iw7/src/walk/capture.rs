@@ -196,76 +196,50 @@ pub struct DeltaRec {
     pub quat: Option<(u16, Span)>,
 }
 
+/// Where a weapon's field is: in its `WeaponDef` or `WeaponCompleteDef`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum WeaponField {
+    Def(usize),
+    Complete(usize),
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct WeaponRec {
     pub name: String,
     pub display_name: String,
-    /// The WeaponDef's bytes, as stored.
-    pub def: Span,
-    pub gun_models: Vec<Option<AssetId>>,
-    pub world_models: Vec<Option<AssetId>>,
-    pub hand_model: Option<AssetId>,
-    pub anims: Vec<Option<AssetId>>,
-    pub anims_right: Vec<Option<AssetId>>,
-    pub anims_left: Vec<Option<AssetId>>,
+    /// The `WeaponDef`'s and `WeaponCompleteDef`'s bytes, as stored.
+    pub def: Option<Span>,
+    pub complete: Span,
+    /// Every asset the weapon points at, by field.
+    pub assets: Vec<(WeaponField, AssetId)>,
+    /// Every string (sound aliases, names, hint strings), by field.
+    pub strings: Vec<(WeaponField, String)>,
+    /// The six attachment lists.
+    pub attachments: [Vec<Option<AssetId>>; 6],
     pub hide_tags: Vec<u32>,
-    pub attachments: Vec<Option<AssetId>>,
-    /// (field offset in WeaponDef, alias name)
-    pub sounds: Vec<(usize, String)>,
-    /// (field offset in WeaponDef, effect)
-    pub fx: Vec<(usize, AssetId)>,
-    /// (field offset in WeaponDef, model)
-    pub models: Vec<(usize, AssetId)>,
-    /// (field offset in WeaponDef or WeaponCompleteDef, material)
-    pub materials: Vec<(usize, AssetId)>,
-    /// (field offset in WeaponDef, string)
-    pub strings: Vec<(usize, String)>,
-    pub notetrack_sound_keys: Vec<u32>,
-    pub notetrack_sound_values: Vec<u32>,
-    pub alt_weapon_name: String,
-    pub tracer: Option<AssetId>,
-    pub anim_overrides: Vec<AnimOverride>,
-    pub sound_overrides: Vec<(u32, u32, Option<String>, Option<String>)>,
-    pub location_damage: Option<Span>,
-    pub accuracy_graph: [Vec<[f32; 2]>; 2],
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct AttachmentField {
-    pub index: u8,
-    pub ty: u8,
-    pub code: u8,
-    pub text: Option<String>,
-    pub raw: u64,
-    /// `fieldOffsets[i]`: where the field is in the WeaponDef.
-    pub offset: u16,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct AnimOverride {
-    pub attachment1: u32,
-    pub attachment2: u32,
-    pub anim_index: u32,
-    pub override_anim: Option<AssetId>,
-    pub altmode_anim: Option<AssetId>,
-    pub anim_time: i32,
-    pub altmode_time: i32,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct AttachmentRec {
     pub name: String,
     pub display_name: String,
-    pub ty: i32,
-    pub weap_type: i32,
-    pub weap_class: i32,
     pub record: Span,
-    pub world_models: Vec<Option<AssetId>>,
-    pub view_models: Vec<Option<AssetId>>,
-    pub reticle_view_models: Vec<Option<AssetId>>,
-    /// The weapon fields the attachment changes: (field index, type, op,
-    /// the value's text for strings and asset names; else the raw 8 bytes).
-    pub fields: Vec<AttachmentField>,
+    pub assets: Vec<(usize, AssetId)>,
+    pub strings: Vec<(usize, String)>,
+}
+
+/// `WeaponAnimPackage`: the 260 animation slots.
+#[derive(Clone, Debug, Default)]
+pub struct AnimPackageRec {
+    pub name: String,
+    pub anims: Vec<Option<AssetId>>,
+}
+
+/// `WeaponSFXPackage`: its sound aliases by offset in the sounds struct.
+#[derive(Clone, Debug, Default)]
+pub struct SfxPackageRec {
+    pub name: String,
+    pub sounds: Vec<(usize, String)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -361,6 +335,8 @@ pub struct Capture {
     pub model_surfs: Vec<ModelSurfsRec>,
     pub xanims: Vec<XAnimRec>,
     pub weapons: Vec<WeaponRec>,
+    pub anim_packages: Vec<AnimPackageRec>,
+    pub sfx_packages: Vec<SfxPackageRec>,
     pub attachments: Vec<AttachmentRec>,
     pub fx: Vec<FxRec>,
     pub raw_files: Vec<RawFileRec>,
@@ -400,6 +376,8 @@ impl Capture {
             T::XAnimParts => self.xanims.get(i).map(|r| r.name.as_str()),
             T::Weapon => self.weapons.get(i).map(|r| r.name.as_str()),
             T::Attachment => self.attachments.get(i).map(|r| r.name.as_str()),
+            T::AnimPackage => self.anim_packages.get(i).map(|r| r.name.as_str()),
+            T::SfxPackage => self.sfx_packages.get(i).map(|r| r.name.as_str()),
             T::Fx => self.fx.get(i).map(|r| r.name.as_str()),
             T::RawFile => self.raw_files.get(i).map(|r| r.name.as_str()),
             T::ComWorld => self.com_worlds.get(i).map(|r| r.name.as_str()),
@@ -422,6 +400,8 @@ impl Capture {
             AssetType::XAnimParts => self.xanims.len(),
             AssetType::Weapon => self.weapons.len(),
             AssetType::Attachment => self.attachments.len(),
+            AssetType::AnimPackage => self.anim_packages.len(),
+            AssetType::SfxPackage => self.sfx_packages.len(),
             AssetType::Fx => self.fx.len(),
             AssetType::RawFile => self.raw_files.len(),
             AssetType::ComWorld => self.com_worlds.len(),

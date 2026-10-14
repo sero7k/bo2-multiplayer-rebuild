@@ -19,7 +19,11 @@ mod material;
 mod misc;
 mod model;
 mod physics;
+mod playeranim;
 mod scriptable;
+mod spaceship;
+mod suit;
+mod vehicle;
 mod vfx;
 mod weapon;
 
@@ -112,6 +116,13 @@ pub struct Walker<'a> {
     /// References past what has been read so far: pointers are only
     /// offsets, so a zone may name data (even asset headers) it loads later.
     pub forward: Vec<(u64, AssetType)>,
+    /// Debug: every VIRTUAL string reference seen (real offsets).
+    pub string_refs: Vec<u64>,
+    /// How references' (real) VIRTUAL offsets map to the walk's own:
+    /// (first real offset, delta) segments, sorted. Retail zones place
+    /// data in VIRTUAL that the walk does not see (the shared streams), so
+    /// real = ours + delta, the delta fitted from string references.
+    pub deltas: Vec<(u64, u64)>,
     pub first_unresolved: std::cell::Cell<Option<(usize, usize, u64)>>,
     pub last_resolved: std::cell::Cell<Option<(usize, u64)>>,
     pub slot_pos: HashMap<u64, usize>,
@@ -156,6 +167,8 @@ impl<'a> Walker<'a> {
             unresolved: Default::default(),
             first_unresolved: Default::default(),
             forward: Vec::new(),
+            string_refs: Vec::new(),
+            deltas: Vec::new(),
             last_resolved: Default::default(),
             slot_pos: HashMap::new(),
             good_until: Default::default(),
@@ -244,25 +257,10 @@ impl<'a> Walker<'a> {
                 block: VIRTUAL,
                 offset,
             } => {
-                if let Some(t) = self.str_slots.get(&(offset as u64)) {
+                if let Some(t) = self.str_slots.get(&self.local(offset as u64)) {
                     return Ok(Some(t.clone()));
                 }
-                if let Ok(d) = std::env::var("IW7_D") {
-                    let d = u64::from_str_radix(&d, 16).unwrap_or(0);
-                    let v = (offset as u64).wrapping_sub(d);
-                    let ok = self.vmap.file_pos(v).map(|at| at > 0 && self.s.data()[at - 1] == 0 && self.s.data()[at] != 0);
-                    let mut near = None;
-                    if ok != Some(true) {
-                        for k in 1..64u64 {
-                            for c in [v.wrapping_sub(k), v + k] {
-                                if near.is_none() && self.vmap.file_pos(c).is_some_and(|at| at > 0 && self.s.data()[at - 1] == 0 && self.s.data()[at] != 0) {
-                                    near = Some(c as i64 - v as i64);
-                                }
-                            }
-                        }
-                    }
-                    eprintln!("DSTR asset {} virt {:#x} ok {:?} near {:?} {:?}", self.cap.walked, self.s.offset(VIRTUAL), ok, near, self.string_at(v));
-                }
+                self.string_refs.push(offset as u64);
                 Ok(Some(
                     self.string_at(offset as u64)
                         .unwrap_or_else(|| format!("<ref {offset:#x}>")),
@@ -274,8 +272,9 @@ impl<'a> Walker<'a> {
     }
 
     /// The string read earlier at VIRTUAL `virt`.
+    /// The string at a reference's (real) VIRTUAL offset.
     pub fn string_at(&self, virt: u64) -> Option<String> {
-        let at = self.vmap.file_pos(virt)?;
+        let at = self.file_of(virt)?;
         let data = self.s.data();
         if at > 0 && (0x21..0x7f).contains(&data[at - 1]) && (0x21..0x7f).contains(&data[at]) {
             self.suspect.set(self.suspect.get() + 1);
@@ -301,7 +300,7 @@ impl<'a> Walker<'a> {
             Ptr::Ref {
                 block: VIRTUAL,
                 offset,
-            } => Ok(self.vmap.file_pos(offset as u64)),
+            } => Ok(self.file_of(offset as u64)),
             _ => Ok(None),
         }
     }
@@ -362,7 +361,7 @@ impl<'a> Walker<'a> {
                 offset,
             } => {
                 let r = self.resolve_slot(ty, offset as u64);
-                if r.is_none() && offset as u64 >= self.s.offset(VIRTUAL) {
+                if r.is_none() && self.local(offset as u64) >= self.s.offset(VIRTUAL) {
                     if std::env::var_os("IW7_FWD").is_some() {
                         eprintln!("FWD asset {} pos {:#x} virt {:#x} want {:#x} {:?}", self.cap.walked, self.s.pos(), self.s.offset(VIRTUAL), offset, ty);
                     }
@@ -423,6 +422,9 @@ impl<'a> Walker<'a> {
 
     /// The asset a reference to a pointer slot names.
     pub(crate) fn resolve_slot(&self, ty: AssetType, virt: u64) -> Option<AssetId> {
+        if let Some(id) = self.slots.get(&self.local(virt)) {
+            return Some(*id);
+        }
         if let Some(id) = self.slots.get(&virt) {
             return Some(*id);
         }
@@ -503,6 +505,10 @@ impl<'a> Walker<'a> {
             T::Attachment => weapon::attachment(self, h),
             T::Vfx => vfx::vfx(self, h),
             T::Scriptable => scriptable::scriptable(self, h),
+            T::PlayerAnim => playeranim::playeranim(self, h),
+            T::Suit => suit::suit(self, h),
+            T::Vehicle => vehicle::vehicle(self, h),
+            T::SpaceshipTarget => spaceship::spaceship(self, h),
             T::Rumble => misc::rumble(self, h),
             T::RumbleGraph => misc::name_only(self, ty, h),
             T::Laser => misc::laser(self, h),
@@ -575,6 +581,88 @@ impl<'a> Walker<'a> {
         Ok(())
     }
 
+    /// A reference's offset in the walk's own VIRTUAL numbering.
+    pub fn local(&self, real: u64) -> u64 {
+        let i = self.deltas.partition_point(|&(r, _)| r <= real);
+        match i {
+            0 => real,
+            _ => real.wrapping_sub(self.deltas[i - 1].1),
+        }
+    }
+
+    /// The file offset of data a (real) VIRTUAL reference names.
+    pub fn file_of(&self, real: u64) -> Option<usize> {
+        self.vmap.file_pos(self.local(real))
+    }
+
+    /// Whether `ours` is the first byte of a string read in VIRTUAL.
+    fn is_string_start(&self, ours: u64) -> bool {
+        let data = self.s.data();
+        self.vmap.file_pos(ours).is_some_and(|at| at > 0 && data[at - 1] == 0 && data[at] != 0)
+    }
+
+    /// Fits `deltas` from the string references of a finished walk: the
+    /// delta near `hint` that most references agree on, then a sweep that
+    /// switches to a nearby delta where a run of references needs one.
+    pub fn fit_deltas(&self, hint: u64) -> Vec<(u64, u64)> {
+        let mut refs = self.string_refs.clone();
+        refs.sort_unstable();
+        refs.dedup();
+        if refs.is_empty() || hint == 0 {
+            return Vec::new();
+        }
+        let sample: Vec<u64> = refs.iter().step_by((refs.len() / 256).max(1)).take(256).copied().collect();
+        let lo = hint.saturating_sub(0x10000);
+        let hits = |d: u64, rs: &[u64]| rs.iter().filter(|&&r| r >= d && self.is_string_start(r - d)).count();
+        let Some(best) = (lo..hint + 0x1000).max_by_key(|&d| hits(d, &sample[..sample.len().min(32)])) else {
+            return Vec::new();
+        };
+        let mut out = vec![(0u64, best)];
+        let mut d = best;
+        let mut i = 0;
+        while i < refs.len() {
+            let r = refs[i];
+            if r >= d && self.is_string_start(r - d) {
+                i += 1;
+                continue;
+            }
+            // A run of misses: try the deltas nearby against the next refs.
+            let next = &refs[i..(i + 6).min(refs.len())];
+            let cand = (d.saturating_sub(0x800)..d + 0x800)
+                .step_by(1)
+                .filter(|&c| r >= c && self.is_string_start(r - c))
+                .max_by_key(|&c| (hits(c, next), std::cmp::Reverse(c.abs_diff(d))));
+            if let Some(c) = cand
+                && hits(c, next) * 2 > next.len()
+                && hits(c, next) > hits(d, next)
+            {
+                d = c;
+                out.push((r, d));
+            }
+            i += 1;
+        }
+        out
+    }
+
+    /// Debug: for each delta in `range`, how many string references land
+    /// on a string start when shifted back by it.
+    pub fn delta_hits(&self, refs: &[u64], range: std::ops::Range<u64>) -> Vec<(u64, usize)> {
+        let data = self.s.data();
+        range
+            .map(|d| {
+                let hits = refs
+                    .iter()
+                    .filter(|&&r| {
+                        r.checked_sub(d)
+                            .and_then(|v| self.vmap.file_pos(v))
+                            .is_some_and(|at| at > 0 && data[at - 1] == 0 && data[at] != 0)
+                    })
+                    .count();
+                (d, hits)
+            })
+            .collect()
+    }
+
     /// Forward references that never named an asset by the walk's end.
     pub fn unresolved_forward(&self) -> usize {
         self.forward.iter().filter(|(v, ty)| self.resolve_slot(*ty, *v).is_none()).count()
@@ -597,7 +685,24 @@ impl<'a> Walker<'a> {
 
 /// Walks a whole zone: the capture, and where it stopped if it did.
 pub fn walk_zone(zone: &crate::Zone) -> (Capture, Option<WalkStop>) {
+    let w = walk_fitted(zone);
+    let stop = w.1;
+    (w.0.cap, stop)
+}
+
+/// Walks a zone; when its references are offset from the walk's VIRTUAL
+/// numbering (retail zones with shared streams), fits the offsets from a
+/// first walk and walks again with them.
+pub fn walk_fitted(zone: &crate::Zone) -> (Walker<'_>, Option<WalkStop>) {
     let mut w = Walker::new(&zone.image, &zone.assets, &zone.header.stream_files);
     let stop = w.walk().err();
-    (w.cap, stop)
+    let hint = zone.header.shared_virtual;
+    if hint == 0 {
+        return (w, stop);
+    }
+    let deltas = w.fit_deltas(hint);
+    let mut w2 = Walker::new(&zone.image, &zone.assets, &zone.header.stream_files);
+    w2.deltas = deltas;
+    let stop = w2.walk().err();
+    (w2, stop)
 }

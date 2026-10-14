@@ -92,6 +92,12 @@ pub(super) fn streaming_info(w: &mut Walker, h: usize) -> Result<AssetId> {
     for (count, field) in [(S::forcedStubAssetCount, S::forcedStubAssets), (S::transientFileCount, S::transientFiles), (S::transientAssetCount, S::transientAssets)] {
         let n = w.s.u32_at(h + count)? as usize;
         if let Some(table) = w.inline_array(h + field, 16 * n, 7)? {
+            if std::env::var_os("IW7_DEBUG").is_some() {
+                eprintln!("si table field {field} n {n} at {table:#x} virt {:#x}", w.vmap.virt_of(table).unwrap_or(0));
+                for i in 0..n.min(4) {
+                    eprintln!("   {:#018x} {:#018x}", w.s.u64_at(table + 16 * i)?, w.s.u64_at(table + 16 * i + 8)?);
+                }
+            }
             for i in 0..n {
                 w.xstr(table + 16 * i)?;
             }

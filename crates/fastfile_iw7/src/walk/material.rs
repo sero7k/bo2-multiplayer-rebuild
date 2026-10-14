@@ -58,7 +58,7 @@ pub(super) fn technique_set(w: &mut Walker, h: usize) -> Result<AssetId> {
                 }
                 Ptr::Ref { block: VIRTUAL, offset } => {
                     // A technique shared with an earlier set: its name.
-                    let at = w.vmap.file_pos(offset as u64);
+                    let at = w.file_of(offset as u64);
                     let name = at
                         .and_then(|at| w.s.ptr_at(at + L::MaterialTechniqueHeader::name).ok())
                         .and_then(|p| p.virtual_offset())
@@ -161,7 +161,7 @@ pub(super) fn material(w: &mut Walker, h: usize) -> Result<AssetId> {
     let table = match w.inline_array(h + M::textureTable, td * tex_n, 7)? {
         Some(table) => Some((table, true)),
         None => match w.s.ptr_at(h + M::textureTable)? {
-            Ptr::Ref { block: VIRTUAL, offset } => w.vmap.file_pos(offset as u64).map(|t| (t, false)),
+            Ptr::Ref { block: VIRTUAL, offset } => w.file_of(offset as u64).map(|t| (t, false)),
             _ => None,
         },
     };
