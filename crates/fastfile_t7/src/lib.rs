@@ -6,17 +6,21 @@
 //! every asset's data in table order, packed with no padding. Pointers are
 //! 8 bytes: `-1` data follows, `-2` data follows ("insert"), `block << 60 |
 //! offset + 1` data loaded earlier (`ptr`). Asset types and the x64 header
-//! sizes are in `asset_type`; `walk` steps over the assets whose layout is
-//! known, in table order, and reports where it has to stop.
+//! sizes are in `asset_type`; `walk` reads the assets whose layout is
+//! known, in table order, the way the loader does (`stream`: block by
+//! block, with the loader's alignment), checks every reference against what
+//! it has read, and reports where it has to stop.
 //!
-//! Images are not in the zones: their pixels live in `.xpak` files (LZ4 per
-//! block), which this crate does not read yet.
+//! Streamed images and meshes keep their data in `.xpak` files (LZ4 per
+//! block; the zone has the entries' key/offset/size, `walk::image`), which
+//! this crate does not read yet; small images have their pixels in the zone.
 #![forbid(unsafe_code)]
 
 pub mod asset_type;
 pub mod container;
 pub mod cursor;
 pub mod ptr;
+pub mod stream;
 pub mod walk;
 pub mod xfile;
 pub mod zone;

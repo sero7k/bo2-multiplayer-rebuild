@@ -205,6 +205,22 @@ pub fn from_registry(
     rows
 }
 
+/// bo2mp: under Black Ops II's rules every gun's `playerAnimType` is BO2's
+/// (its place in BO2's playeranimtypes.txt, as BO2's script reads it): a
+/// gun from a Modern Warfare-numbered game (MW2's riot shield is its 15,
+/// BO2's "rearclip") takes BO2's type of the same name.
+pub fn bo2_player_anim_types(
+    combat: &mut [WeaponCombatFacts],
+    weapons: &WeaponRegistry,
+    script: &sim::t6_playeranim::T6PlayerAnims,
+) {
+    for (i, facts) in combat.iter_mut().enumerate().skip(1) {
+        if facts.is_usable() && weapons.player_anim_type_iw_numbered(i as u32) {
+            facts.player_anim_type = script.guest_anim_type(facts.player_anim_type);
+        }
+    }
+}
+
 const T5_WEAPTYPE_MELEE: i32 = 7;
 /// bo2zm: Black Ops II's `WEAPTYPE_MELEE` (its knives: `knife_zm`,
 /// `bowie_knife_zm`, `tazer_knuckles_zm`), kept raw since `weap_type` is

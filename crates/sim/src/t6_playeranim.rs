@@ -546,6 +546,14 @@ impl T6PlayerAnims {
             .map_or("default", String::as_str)
     }
 
+    /// A gun from a Modern Warfare-numbered game: BO2's type number for its
+    /// `playerAnimType` (see [`t6_guest_anim_type_name`]).
+    pub fn guest_anim_type(&self, iw_type: i32) -> i32 {
+        let name = t6_guest_anim_type_name(iw_type);
+        let place = |n: &str| self.anim_types.iter().position(|t| t == n);
+        place(name).or_else(|| place("default")).map_or(1, |i| i as i32)
+    }
+
     pub fn has_move(&self, movetype: &str) -> bool {
         self.moves.iter().any(|(m, _)| m == movetype)
     }
@@ -667,6 +675,24 @@ pub fn t6_anim_index(packed: i32) -> Option<u16> {
     (n != 0).then(|| (n - 1) as u16)
 }
 
+/// A guest gun's `playerAnimType` in Modern Warfare's numbering (IW4's
+/// list) as the name BO2's playeranimtypes.txt gives that type. Pistols,
+/// SMGs, rifles, MGs, launchers and grenades are all "default" there (BO2's
+/// script tells them apart by weapon class); a planted charge is carried in
+/// the hand as BO2's satchel and claymore are ("hold").
+pub fn t6_guest_anim_type_name(iw_type: i32) -> &'static str {
+    let name = usize::try_from(iw_type)
+        .ok()
+        .and_then(|i| weapon_iw4::PLAYER_ANIM_TYPE_NAMES.get(i))
+        .copied()
+        .unwrap_or("default");
+    match name {
+        "none" | "other" | "sniper" | "m203" | "hold" | "briefcase" | "riotshield" => name,
+        "explosive" | "c4" => "hold",
+        _ => "default",
+    }
+}
+
 /// A weapon's class (the engine's IW4-numbered class) in the script's words.
 pub fn t6_weapon_class_name(iw4_class: i32) -> &'static str {
     match iw4_class {
@@ -751,6 +777,19 @@ mod tests {
         assert_eq!(t6_offhand(o), Some(200));
         assert_eq!(t6_anim_index(o), Some(3));
         assert_eq!(t6_anim_duration(o), Some(2.52));
+    }
+
+    #[test]
+    fn guest_guns_take_bo2_anim_types_by_name() {
+        let s = T6PlayerAnims::parse(SCRIPT, "none\ndefault\nother\nsniper\nm203\nhold\nbriefcase\nriotshield").unwrap();
+        // MW2's riot shield (its 15) is BO2's riotshield, not BO2's 15th.
+        assert_eq!(t6_guest_anim_type_name(15), "riotshield");
+        assert_eq!(s.guest_anim_type(15), 7);
+        // MW2's machine gun (5) and assault rifle (4): BO2's default.
+        assert_eq!(s.guest_anim_type(5), 1);
+        assert_eq!(s.guest_anim_type(4), 1);
+        assert_eq!(s.guest_anim_type(13), 5);
+        assert_eq!(s.guest_anim_type(99), 1);
     }
 
     #[test]

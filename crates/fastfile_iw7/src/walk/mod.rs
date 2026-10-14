@@ -14,6 +14,8 @@
 //! models, materials, images, animations and weapons phase 2 uses.
 
 mod anim;
+mod anim_class;
+mod behavior_tree;
 mod capture;
 mod material;
 mod misc;
@@ -21,6 +23,7 @@ mod model;
 mod physics;
 mod playeranim;
 mod scriptable;
+mod sound_bank;
 mod spaceship;
 mod suit;
 mod vehicle;
@@ -517,6 +520,9 @@ impl<'a> Walker<'a> {
             T::Gesture => misc::gesture(self, h),
             T::SfxPackage => weapon::sfx_package(self, h),
             T::VfxPackage => weapon::vfx_package(self, h),
+            T::AnimClass => anim_class::anim_class(self, h),
+            T::SoundBank => sound_bank::sound_bank(self, h),
+            T::BehaviorTree => behavior_tree::behavior_tree(self, h),
             _ => Err(ReadError::Invalid(ty.name(), h)),
         }
     }
@@ -538,7 +544,6 @@ impl<'a> Walker<'a> {
     /// Walks every asset in table order; stops at the first one it cannot
     /// read (the capture keeps what came before).
     pub fn walk(&mut self) -> std::result::Result<(), WalkStop> {
-        let table = self.list.asset_table_virtual;
         // Debug: `IW7_START=<index>,<hex file offset>` starts the walk at a
         // table entry whose data begins at that offset (references made
         // before it will not resolve).
@@ -546,6 +551,15 @@ impl<'a> Walker<'a> {
             let (i, p) = v.split_once(',')?;
             Some((i.parse::<usize>().ok()?, usize::from_str_radix(p.trim_start_matches("0x"), 16).ok()?))
         });
+        self.walk_from(start)
+    }
+
+    /// `walk`, starting at table entry `start.0` whose data begins at file
+    /// offset `start.1` (to read past an asset type the walk cannot read
+    /// when the next asset's position is known; references to what was
+    /// skipped will not resolve).
+    pub fn walk_from(&mut self, start: Option<(usize, usize)>) -> std::result::Result<(), WalkStop> {
+        let table = self.list.asset_table_virtual;
         if let Some((_, p)) = start {
             self.s.seek(p);
         }

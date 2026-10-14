@@ -1140,9 +1140,15 @@ fn build_body(
         let base = parts.len();
         // BO2 holds the riot shield on the left arm (its riotshield
         // animations brace it there); every other weapon in the right hand.
-        let shield = registry
-            .facts_of(weapon)
-            .is_some_and(|f| script.anim_type_name(f.player_anim_type) == "riotshield");
+        // (Another game's gun names its type in that game's numbering.)
+        let shield = registry.facts_of(weapon).is_some_and(|f| {
+            let name = if registry.player_anim_type_iw_numbered(weapon) {
+                sim::t6_playeranim::t6_guest_anim_type_name(f.player_anim_type)
+            } else {
+                script.anim_type_name(f.player_anim_type)
+            };
+            name == "riotshield"
+        });
         let tag = if shield {
             "tag_weapon_left"
         } else {
@@ -2028,15 +2034,30 @@ fn collect_t6_bodies(
                 clips.push((clip, tracks, t, weight, torso_part));
             }
         }
-        if clips.is_empty() && !settled {
-            // Never a bind pose: the script's idle.
-            if let Some(clip) = part_clip(foreign.as_ref(), &xanims, &script, fallback) {
-                let tracks = built.tracks_for(&clip);
-                clips.push((clip, tracks, 0.0, 1.0, false));
-            } else {
+        // Never a bind pose: the torso's animation only moves the upper body,
+        // so legs with no animation drawn (none named yet, or one that is not
+        // loaded: logged above) stand in the script's idle, running on its
+        // own time, not held at its first frame; with no idle loaded either,
+        // the torso's animation moves all of him.
+        if !settled && !clips.iter().any(|c| !c.4) {
+            let idle = part_clip(foreign.as_ref(), &xanims, &script, fallback);
+            if idle.is_none() && let Some(name) = script.name_of(fallback) {
+                note_once(&mut locals, format!("bo2mp body: the script's idle {name} is not loaded either"));
+            }
+            let stand_in = idle
+                .map(|clip| {
+                    let duration = clip.duration().max(1e-3);
+                    let t = track.legs.cur.phase.max(0.0);
+                    let t = if clip.looping { t.rem_euclid(duration) } else { t.min(duration) };
+                    (clip, t)
+                })
+                .or_else(|| clips.first().map(|c| (c.0.clone(), c.2)));
+            let Some((clip, t)) = stand_in else {
                 locals.built.insert(number, built);
                 continue;
-            }
+            };
+            let tracks = built.tracks_for(&clip);
+            clips.push((clip, tracks, t, 1.0, false));
         }
         let (dobj, parts) = (&built.dobj, &built.parts);
         let instances: Vec<xmodel_runtime::AnimInstance<'_>> = clips

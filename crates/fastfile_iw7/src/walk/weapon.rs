@@ -6,7 +6,7 @@ use crate::asset_type::AssetType;
 use crate::cursor::Result;
 use crate::layout as L;
 use crate::stream::VIRTUAL;
-use crate::walk::{AnimPackageRec, AttachmentRec, SfxPackageRec, Span, WeaponField, WeaponRec};
+use crate::walk::{AnimPackageRec, AttachmentRec, SfxPackageRec, Span, VfxPackageRec, WeaponField, WeaponRec};
 use WeaponField::{Complete, Def};
 
 /// An `FxCombinedDef`: an effect pointer whose type byte says which kind.
@@ -89,7 +89,7 @@ fn weapon_def(w: &mut Walker, d: usize, parent: usize, rec: &mut WeaponRec) -> R
     ] {
         for (i, id) in asset_array(w, T::XModel, d + f, complex)?.into_iter().enumerate() {
             if let Some(id) = id {
-                rec.assets.push((Def(f + 8 * i), id));
+                rec.assets.push((WeaponField::DefArray(f, i), id));
             }
         }
     }
@@ -332,13 +332,17 @@ pub(super) fn vfx_package(w: &mut Walker, h: usize) -> Result<AssetId> {
     let name = w.xstr(h + P::name)?.unwrap_or_default();
     let len = L::WeaponVFXPackageDefs::SIZE;
     let fx = L::FxCombinedDef::SIZE;
+    let mut effects = Vec::new();
     if let Some(d) = w.inline_array(h + P::vfx, len, 7)? {
         for o in (0..len).step_by(fx) {
-            fx_combined(w, d + o)?;
+            if let Some(id) = fx_combined(w, d + o)? {
+                effects.push((o, id));
+            }
         }
     }
     w.s.pop();
-    Ok(w.name_only(AssetType::VfxPackage, name))
+    w.cap.vfx_packages.push(VfxPackageRec { name, effects });
+    Ok(AssetId { ty: AssetType::VfxPackage, index: (w.cap.vfx_packages.len() - 1) as u32 })
 }
 
 /// What one attachment section (`Att*`) points at.
@@ -377,36 +381,36 @@ pub(super) fn attachment(w: &mut Walker, h: usize) -> Result<AssetId> {
     let variations = w.s.u32_at(h + A::numModelVariations)? as usize;
     for (i, id) in asset_array(w, T::XModel, h + A::worldModelVariations, variations)?.into_iter().enumerate() {
         if let Some(id) = id {
-            rec.assets.push((A::worldModelVariations + 8 * i, id));
+            rec.arrays.push((A::worldModelVariations, i, id));
         }
     }
     for (i, id) in asset_array(w, T::XModel, h + A::viewModelVariations, variations)?.into_iter().enumerate() {
         if let Some(id) = id {
-            rec.assets.push((A::viewModelVariations + 8 * i, id));
+            rec.arrays.push((A::viewModelVariations, i, id));
         }
     }
     let n = w.s.u32_at(h + A::numWorldModelCamoMaterials)? as usize;
     for (i, id) in asset_array(w, T::Material, h + A::worldModelCamoMaterials, n)?.into_iter().enumerate() {
         if let Some(id) = id {
-            rec.assets.push((A::worldModelCamoMaterials + 8 * i, id));
+            rec.arrays.push((A::worldModelCamoMaterials, i, id));
         }
     }
     let n = w.s.u32_at(h + A::numViewModelCamoMaterials)? as usize;
     for (i, id) in asset_array(w, T::Material, h + A::viewModelCamoMaterials, n)?.into_iter().enumerate() {
         if let Some(id) = id {
-            rec.assets.push((A::viewModelCamoMaterials + 8 * i, id));
+            rec.arrays.push((A::viewModelCamoMaterials, i, id));
         }
     }
     let n = w.s.u32_at(h + A::numReticles)? as usize;
     for (i, id) in asset_array(w, T::Reticle, h + A::reticles, n)?.into_iter().enumerate() {
         if let Some(id) = id {
-            rec.assets.push((A::reticles + 8 * i, id));
+            rec.arrays.push((A::reticles, i, id));
         }
     }
     let n = w.s.u32_at(h + A::numAltReticles)? as usize;
     for (i, id) in asset_array(w, T::Reticle, h + A::altReticles, n)?.into_iter().enumerate() {
         if let Some(id) = id {
-            rec.assets.push((A::altReticles + 8 * i, id));
+            rec.arrays.push((A::altReticles, i, id));
         }
     }
     let m = |f| Asset(T::Material, f);

@@ -290,13 +290,11 @@ pub fn apply_prepared_match(
         stage_resource(&mut install, facts.t6_hud_fonts);
         stage_resource(&mut install, facts.t6_ui);
         // bo2mp: other players' third-person animations (BO2's script).
-        stage_resource(
-            &mut install,
-            sim::t6_playeranim::T6PlayerAnimsRes::from_text(
-                facts.t6_playeranim.as_ref(),
-                &facts.t6_anim_speeds,
-            ),
+        let t6_player_anims = sim::t6_playeranim::T6PlayerAnimsRes::from_text(
+            facts.t6_playeranim.as_ref(),
+            &facts.t6_anim_speeds,
         );
+        stage_resource(&mut install, t6_player_anims.clone());
         // bo2mp: how a dead body goes limp (ragdoll definition 0).
         stage_resource(
             &mut install,
@@ -319,7 +317,15 @@ pub fn apply_prepared_match(
         // bo2mp: under Black Ops II's rules, its own global location table
         // (the zone's table under the other games' rules).
         let lochit_table = if assets::t6_rules() { Some(asset_game::bo2_lochit_table()) } else { lochit_table };
-        let combat = combat_table::from_registry(&weapons.0, lochit_table);
+        let mut combat = combat_table::from_registry(&weapons.0, lochit_table);
+        // bo2mp: BO2's script reads a weapon's playerAnimType as its place in
+        // BO2's playeranimtypes.txt; the other games' guns carry their own
+        // game's numbering, so each is given BO2's type of the same name.
+        if assets::t6_rules()
+            && let Some(script) = t6_player_anims.0.as_deref()
+        {
+            combat_table::bo2_player_anim_types(&mut combat, &weapons.0, script);
+        }
         content.set_weapon_combat_table(combat.clone());
         content.set_weapon_runnable_table(weapons.0.runnable_table());
         content.set_weapon_transition_groups(weapons.0.configuration_transition_groups());
@@ -481,7 +487,16 @@ pub fn apply_prepared_match(
         stage_resource(&mut install, world_weapons);
         stage_resource(&mut install, projectile_meshes);
         stage_resource(&mut install, xmodel_walk);
-        if let Some(Ok(parsed)) = player_anim_sources.parsed_script() {
+        // Modern Warfare 2's player animation script (from MW2's common zone,
+        // the runtime zone of an MW2 map) writes MW2 animation-tree numbers
+        // into legs_anim / torso_anim. Under Black Ops II's rules those
+        // values are BO2's own script picks (t6::playeranim), which every
+        // client reads as places in BO2's mp/playeranim.script: MW2's script
+        // must not run there, or its numbers reach the clients as random BO2
+        // animations.
+        if !assets::t6_rules()
+            && let Some(Ok(parsed)) = player_anim_sources.parsed_script()
+        {
             let tree = player_anim_sources
                 .compiled()
                 .and_then(|c| c.as_ref().ok())

@@ -22,6 +22,7 @@ fn main() {
             let at = match field {
                 WeaponField::Def(o) => format!("def+{o}"),
                 WeaponField::Complete(o) => format!("complete+{o}"),
+                WeaponField::DefArray(o, i) => format!("def+{o}[{i}]"),
             };
             println!("  {at:<14} {:<14} {}", id.ty.name(), cap.name_of(*id));
             if id.ty == AssetType::AnimPackage

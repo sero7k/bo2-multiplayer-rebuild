@@ -201,6 +201,9 @@ pub struct DeltaRec {
 pub enum WeaponField {
     Def(usize),
     Complete(usize),
+    /// Element `.1` of the array a `WeaponDef` pointer field names (the
+    /// complex models).
+    DefArray(usize, usize),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -224,7 +227,10 @@ pub struct AttachmentRec {
     pub name: String,
     pub display_name: String,
     pub record: Span,
+    /// Asset pointers in the record (and its sections), by offset.
     pub assets: Vec<(usize, AssetId)>,
+    /// Elements of the arrays the record points at: (field, index, asset).
+    pub arrays: Vec<(usize, usize, AssetId)>,
     pub strings: Vec<(usize, String)>,
 }
 
@@ -240,6 +246,13 @@ pub struct AnimPackageRec {
 pub struct SfxPackageRec {
     pub name: String,
     pub sounds: Vec<(usize, String)>,
+}
+
+/// `WeaponVFXPackage`: its effects by offset in `WeaponVFXPackageDefs`.
+#[derive(Clone, Debug, Default)]
+pub struct VfxPackageRec {
+    pub name: String,
+    pub effects: Vec<(usize, AssetId)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -260,6 +273,24 @@ pub struct FxElemRec {
     pub models: Vec<AssetId>,
     pub effects: Vec<String>,
     pub sounds: Vec<String>,
+}
+
+/// A sound alias list: per alias, its sound file name (in the zone's
+/// `.sabl`/`.sabs` sound asset banks), its `SndAliasType` (0 loaded,
+/// 1 hybrid PCM, 2 streamed, 3 primed) and asset id.
+#[derive(Clone, Debug, Default)]
+pub struct SndAliasRec {
+    pub name: String,
+    pub entries: Vec<(Option<String>, u8, u32)>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SoundBankRec {
+    pub name: String,
+    pub zone: String,
+    pub game_language: String,
+    pub sound_language: String,
+    pub aliases: Vec<SndAliasRec>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -337,6 +368,7 @@ pub struct Capture {
     pub weapons: Vec<WeaponRec>,
     pub anim_packages: Vec<AnimPackageRec>,
     pub sfx_packages: Vec<SfxPackageRec>,
+    pub vfx_packages: Vec<VfxPackageRec>,
     pub attachments: Vec<AttachmentRec>,
     pub fx: Vec<FxRec>,
     pub raw_files: Vec<RawFileRec>,
@@ -344,6 +376,7 @@ pub struct Capture {
     pub gfx_worlds: Vec<GfxWorldRec>,
     pub map_ents: Vec<MapEntsRec>,
     pub clip_maps: Vec<ClipMapRec>,
+    pub sound_banks: Vec<SoundBankRec>,
     /// Everything else, by name.
     pub others: Vec<OtherRec>,
     /// The table index -> what it loaded.
@@ -378,12 +411,14 @@ impl Capture {
             T::Attachment => self.attachments.get(i).map(|r| r.name.as_str()),
             T::AnimPackage => self.anim_packages.get(i).map(|r| r.name.as_str()),
             T::SfxPackage => self.sfx_packages.get(i).map(|r| r.name.as_str()),
+            T::VfxPackage => self.vfx_packages.get(i).map(|r| r.name.as_str()),
             T::Fx => self.fx.get(i).map(|r| r.name.as_str()),
             T::RawFile => self.raw_files.get(i).map(|r| r.name.as_str()),
             T::ComWorld => self.com_worlds.get(i).map(|r| r.name.as_str()),
             T::GfxWorld => self.gfx_worlds.get(i).map(|r| r.name.as_str()),
             T::MapEnts => self.map_ents.get(i).map(|r| r.name.as_str()),
             T::ClipMap => self.clip_maps.get(i).map(|r| r.name.as_str()),
+            T::SoundBank => self.sound_banks.get(i).map(|r| r.name.as_str()),
             _ => self.others.get(i).map(|r| r.name.as_str()),
         };
         s.unwrap_or("")
@@ -402,12 +437,14 @@ impl Capture {
             AssetType::Attachment => self.attachments.len(),
             AssetType::AnimPackage => self.anim_packages.len(),
             AssetType::SfxPackage => self.sfx_packages.len(),
+            AssetType::VfxPackage => self.vfx_packages.len(),
             AssetType::Fx => self.fx.len(),
             AssetType::RawFile => self.raw_files.len(),
             AssetType::ComWorld => self.com_worlds.len(),
             AssetType::GfxWorld => self.gfx_worlds.len(),
             AssetType::MapEnts => self.map_ents.len(),
             AssetType::ClipMap => self.clip_maps.len(),
+            AssetType::SoundBank => self.sound_banks.len(),
             _ => {
                 return self
                     .others

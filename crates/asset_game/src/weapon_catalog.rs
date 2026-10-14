@@ -7484,6 +7484,17 @@ impl WeaponRegistry {
         self.rows.get(index as usize).map(|row| row.namespace)
     }
 
+    /// Whether this weapon's `player_anim_type` is in Modern Warfare's
+    /// numbering (IW4's list; CoD4's and World at War's guns are read into
+    /// it, and MW3's, Ghosts' and Advanced Warfare's are taken to share its
+    /// first entries) rather than Treyarch's (Black Ops and Black Ops II,
+    /// playeranimtypes.txt).
+    pub fn player_anim_type_iw_numbered(&self, index: u32) -> bool {
+        use crate::AssetNamespace as Ns;
+        self.namespace_of(index)
+            .is_some_and(|ns| !matches!(ns, Ns::T6 | Ns::T5))
+    }
+
     pub fn revision(&self) -> u64 {
         self.revision
     }

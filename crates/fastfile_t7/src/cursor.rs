@@ -16,6 +16,8 @@ pub enum ReadError {
     BadString(usize),
     /// A value the structure cannot have (`what`, at file offset).
     Invalid(&'static str, usize),
+    /// An inline asset of a type the walk cannot read yet (its name, at file offset).
+    NoWalker(&'static str, usize),
 }
 
 impl std::fmt::Display for ReadError {
@@ -24,6 +26,7 @@ impl std::fmt::Display for ReadError {
             Self::Eof(at) => write!(f, "zone ends at {at:#x}"),
             Self::BadString(at) => write!(f, "unterminated string at {at:#x}"),
             Self::Invalid(what, at) => write!(f, "invalid {what} at {at:#x}"),
+            Self::NoWalker(ty, at) => write!(f, "no walker for inline {ty} at {at:#x}"),
         }
     }
 }

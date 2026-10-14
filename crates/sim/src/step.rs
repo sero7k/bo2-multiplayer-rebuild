@@ -542,7 +542,15 @@ fn run_players_system(ecs: &mut World) {
             if let Some(event) = stance_event {
                 crate::combat::apply_player_anim_event(&mut world, *id, event);
             }
-            if reset_torso && let Some(ps) = world.player_mut(*id) {
+            // The torso restart on a stance change or a sprint start is the
+            // MW2 script's (its own animation-tree numbering): without that
+            // script the values are Black Ops II's picks, which it would
+            // overwrite with an MW2-numbered "none" (to BO2's script a stray
+            // animation, entry 0x200, on his torso as each sprint starts).
+            if reset_torso
+                && script.is_some()
+                && let Some(ps) = world.player_mut(*id)
+            {
                 crate::player_anim_script::reset_stance_torso(ps);
             }
             if let Some(movetype) = anim_movetype {

@@ -12,7 +12,10 @@
 //!   map_ents, gfxworld;
 //! * read on retail zones (name string right after the header): localize
 //!   (16), rawfile (24), scriptparsetree (24), sound (0x220b0: a large
-//!   inline part, the four names follow it), ttf (0x20020).
+//!   inline part, the four names follow it), ttf (0x20020), fonticon
+//!   (0x20), stringtable (0x20), keyvaluepairs (0x18), texturecombo (0x80),
+//!   bitfield (0x20), and from "," placeholders lightdescription (0x240),
+//!   fx (0x90), tagfx (0x18), vehicle (0xaa8).
 
 macro_rules! asset_types {
     ($($variant:ident = $value:literal, $name:literal, $size:literal;)*) => {
@@ -71,7 +74,7 @@ asset_types! {
     LensFlareDef = 0x12, "lensflaredef", 0x0;
     UiMap = 0x13, "ui_map", 0x0;
     Font = 0x14, "font", 0x0;
-    FontIcon = 0x15, "fonticon", 0x0;
+    FontIcon = 0x15, "fonticon", 0x20;
     Localize = 0x16, "localize", 0x10;
     Weapon = 0x17, "weapon", 0x0;
     WeaponDef = 0x18, "weapondef", 0x0;
@@ -88,8 +91,8 @@ asset_types! {
     CustomizationTableFeImages = 0x23, "customizationtable_feimages", 0x0;
     CustomizationTableColor = 0x24, "customizationtablecolor", 0x0;
     SndDriverGlobals = 0x25, "snddriverglobals", 0x0;
-    Fx = 0x26, "fx", 0x0;
-    TagFx = 0x27, "tagfx", 0x0;
+    Fx = 0x26, "fx", 0x90;
+    TagFx = 0x27, "tagfx", 0x18;
     NewLensFlareDef = 0x28, "klf", 0x0;
     ImpactFx = 0x29, "impactsfxtable", 0x0;
     ImpactSound = 0x2a, "impactsoundstable", 0x0;
@@ -98,15 +101,15 @@ asset_types! {
     Character = 0x2d, "character", 0x0;
     XModelAlias = 0x2e, "xmodelalias", 0x0;
     RawFile = 0x2f, "rawfile", 0x18;
-    StringTable = 0x30, "stringtable", 0x0;
+    StringTable = 0x30, "stringtable", 0x20;
     StructuredTable = 0x31, "structuredtable", 0x0;
     Leaderboard = 0x32, "leaderboard", 0x0;
     Ddl = 0x33, "ddl", 0x0;
     Glasses = 0x34, "glasses", 0x0;
     TextureList = 0x35, "texturelist", 0x0;
     ScriptParseTree = 0x36, "scriptparsetree", 0x18;
-    KeyValuePairs = 0x37, "keyvaluepairs", 0x0;
-    VehicleDef = 0x38, "vehicle", 0x0;
+    KeyValuePairs = 0x37, "keyvaluepairs", 0x18;
+    VehicleDef = 0x38, "vehicle", 0xaa8;
     AddonMapEnts = 0x39, "addon_map_ents", 0x0;
     Tracer = 0x3a, "tracer", 0x0;
     Slug = 0x3b, "slug", 0x0;
@@ -132,13 +135,13 @@ asset_types! {
     BehaviorStateMachine = 0x4f, "behaviorstatemachine", 0x0;
     Ttf = 0x50, "ttf", 0x20020;
     SAnim = 0x51, "sanim", 0x0;
-    LightDescription = 0x52, "lightdescription", 0x0;
+    LightDescription = 0x52, "lightdescription", 0x240;
     Shellshock = 0x53, "shellshock", 0x0;
     XCam = 0x54, "xcam", 0x0;
     BgCache = 0x55, "bgcache", 0x0;
-    TextureCombo = 0x56, "texturecombo", 0x0;
+    TextureCombo = 0x56, "texturecombo", 0x80;
     FlameTable = 0x57, "flametable", 0x0;
-    Bitfield = 0x58, "bitfield", 0x0;
+    Bitfield = 0x58, "bitfield", 0x20;
     AttachmentCosmeticVariant = 0x59, "attachmentcosmeticvariant", 0x0;
     MapTable = 0x5a, "maptable", 0x0;
     MapTableLoadingImages = 0x5b, "maptable_loading_images", 0x0;

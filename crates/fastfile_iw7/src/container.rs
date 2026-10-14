@@ -77,15 +77,16 @@ impl From<std::io::Error> for ContainerError {
     }
 }
 
-/// One streamed image (or shared asset) of a zone (`XStreamFile`): bytes
-/// `offset..offset_end` of `imagefile<file_index>.pak`.
+/// One streamed image (or shared asset) of a zone (`XStreamFile`, x64-zt
+/// `iw7/structs.hpp`): bytes `offset..offset_end` of
+/// `imagefile<file_index>.pak` (image streams) or `assetfile<file_index>.pak`
+/// (shared assets); `localized` files are the language's copies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StreamFile {
-    pub word0: u16,
-    pub file_index: u16,
-    pub flags: u32,
     pub offset: u64,
     pub offset_end: u64,
+    pub file_index: u16,
+    pub localized: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -153,11 +154,10 @@ pub fn parse_file_header(file: &[u8]) -> Result<FileHeader, ContainerError> {
     let read = |i: usize| {
         let o = HEADER_FIXED_LEN + i * STREAM_FILE_LEN;
         StreamFile {
-            word0: u16_at(file, o),
-            file_index: u16_at(file, o + 2),
-            flags: u32_at(file, o + 4),
-            offset: u64_at(file, o + 8),
-            offset_end: u64_at(file, o + 16),
+            offset: u64_at(file, o),
+            offset_end: u64_at(file, o + 8),
+            file_index: u16_at(file, o + 16),
+            localized: file[o + 18] != 0,
         }
     };
     Ok(FileHeader {
