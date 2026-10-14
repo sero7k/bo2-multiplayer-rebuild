@@ -1222,6 +1222,11 @@ pub(crate) fn with_vm<R>(
 /// "popup_leavegame" "endround", ...) reaches the scripts as his
 /// `menuresponse` notify. False when no BO2 map runs.
 pub(crate) fn menu_response(world: &mut World, client: u32, menu: &str, response: &str) -> bool {
+    // bo2mp: choosing a class reads his classes again (he may have changed
+    // them since the match began).
+    if response.starts_with("custom") {
+        stats::refresh_classes(world, client);
+    }
     with_vm(world, |vm, world| {
         let Some(p) = world.resource::<Zm>().players.get(&client).map(|p| p.obj) else {
             return;

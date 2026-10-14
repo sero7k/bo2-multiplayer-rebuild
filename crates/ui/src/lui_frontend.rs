@@ -406,10 +406,12 @@ pub(crate) fn tick(
         let all = bo2_profile::SaveJob::Whole(all);
         bo2_profile::save_in_background(&front.stats_path, all, Some(done));
     }
-    // ZOMBIES: our Nuketown Zombies, swapped in as START MATCH swaps a map.
-    if mp.borrow().zombies_requested {
+    // ZOMBIES: our Nuketown Zombies (BO2's own menu), or the map the shell's
+    // Zombies screen started, swapped in as START MATCH swaps a map.
+    let shell_zone = crate::shell::zombies::take_pending_zone();
+    if mp.borrow().zombies_requested || shell_zone.is_some() {
         mp.borrow_mut().zombies_requested = false;
-        let zone = "t6:zm_nuked".to_owned();
+        let zone = shell_zone.unwrap_or_else(|| "t6:zm_nuked".to_owned());
         diag::info!(Ui, "bo2mp front end: ZOMBIES");
         commands.remove_resource::<Bo2mpFrontend>();
         match swap {

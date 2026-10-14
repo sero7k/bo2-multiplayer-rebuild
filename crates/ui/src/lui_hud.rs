@@ -1514,6 +1514,27 @@ fn lui_hud(
     // (His classes for the shell's Create-a-Class and Choose Class.)
     if crate::shell::enabled() {
         crate::shell::classes::class_side(&hud.host, hud.mp.as_ref());
+        // bo2mp: classes changed during a match (Create-a-Class from the
+        // match's menu) are his: written to his stats file at once, the
+        // classes alone (the match's other stats are the server's).
+        if hud.match_mp
+            && let Some(mp) = hud.mp.as_ref()
+            && mp.borrow_mut().take_dirty()
+        {
+            let classes: Vec<(String, bo2_profile::StatValue)> = mp
+                .borrow()
+                .profile
+                .stats
+                .iter()
+                .filter(|(k, _)| k.contains("customclass") || k.starts_with("classsets."))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            if !classes.is_empty() {
+                let path = crate::lui_frontend::stats_path(io.identity.as_deref());
+                diag::info!(Ui, "bo2mp match: his classes saved ({} stats) to {}", classes.len(), path.display());
+                bo2_profile::save_in_background(&path, bo2_profile::SaveJob::Merge(classes), None);
+            }
+        }
         for (menu, response) in crate::shell::ingame::take_responses() {
             hud.host.push_call(hks_t6::host::EngineCall::MenuResponse(menu, response));
         }

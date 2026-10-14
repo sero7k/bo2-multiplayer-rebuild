@@ -182,6 +182,25 @@ pub(crate) fn local_profile(world: &mut World, client: u32) -> Option<&Profile> 
     p.file.is_some().then_some(&p.profile)
 }
 
+/// His classes as his stats file holds them now (Create-a-Class during the
+/// match writes them there): read again into the match's copy.
+pub(crate) fn refresh_classes(world: &mut World, client: u32) {
+    let Some(file) = player(world, client).file.clone() else { return };
+    bo2_profile::wait_saved(std::time::Duration::from_secs(2));
+    let saved = Profile::read_stats_file(&file);
+    let p = player(world, client);
+    let mut n = 0;
+    for (k, v) in saved {
+        if k.contains("customclass") && p.profile.stat(&k) != Some(&v) {
+            p.profile.set_stat(k, v);
+            n += 1;
+        }
+    }
+    if n > 0 {
+        diag::info!(Sim, "bo2mp stats: player {client}'s classes read again ({n} changed)");
+    }
+}
+
 fn get(world: &mut World, client: u32, path: &str) -> Option<StatValue> {
     player(world, client).profile.stat(path).cloned()
 }

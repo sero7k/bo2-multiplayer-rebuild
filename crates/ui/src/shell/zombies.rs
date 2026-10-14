@@ -321,6 +321,14 @@ static PREVIEW: AtomicBool = AtomicBool::new(false);
 /// bo2 merge: the `map` command START left for `zombies_exec`.
 static PENDING_MAP: Mutex<Option<String>> = Mutex::new(None);
 
+/// bo2 merge: START's map, for the front end to start (`take_pending_zone`).
+static PENDING_ZONE: Mutex<Option<String>> = Mutex::new(None);
+
+/// The Zombies map START asked for (`t6:zm_transit`), once.
+pub(crate) fn take_pending_zone() -> Option<String> {
+    PENDING_ZONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
+}
+
 /// bo2 merge: START's `map` command, run by the console.
 pub(crate) fn zombies_exec(mut exec: MessageWriter<frame::UiExecCommand>) {
     if let Some(text) = PENDING_MAP.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
@@ -458,7 +466,10 @@ pub(crate) fn start(shell: &Shell) -> Result<(), String> {
         sim::set_t6_party_size(0);
         sim::set_t6_game_settings(if round > 1 { vec![("startround".to_owned(), round as i32)] } else { Vec::new() });
         diag::info!(Ui, "bo2mp zombies: starting {line} here ({zone}, round {round})");
-        *PENDING_MAP.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("map {zone}"));
+        // (Started as the front end starts a match: the front end is put
+        // away and the session swaps the map in, so its screens do not stay
+        // over the game.)
+        *PENDING_ZONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(zone);
         return Ok(());
     }
     let mut cmd = std::process::Command::new(&install.exe);
