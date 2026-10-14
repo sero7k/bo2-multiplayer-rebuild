@@ -2820,6 +2820,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastfile_iw7"
+version = "0.1.0"
+dependencies = [
+ "bcdec_rs",
+ "lz4_flex",
+]
+
+[[package]]
 name = "fastfile_s1"
 version = "0.1.0"
 dependencies = [

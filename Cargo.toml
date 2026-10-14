@@ -50,6 +50,7 @@ members = [
     "crates/fastfile_iw5",
     "crates/fastfile_iw6", # Ghosts zones (phase 1: sounds, menu music)
     "crates/fastfile_s1", # Advanced Warfare zones (guns)
+    "crates/fastfile_iw7", # Infinite Warfare zones (guns)
     "crates/frame",
     "crates/fx",
     "crates/fx_iw4",
@@ -163,6 +164,7 @@ sab_t6 = { path = "crates/sab_t6" } # bo2zm
 fastfile_iw5 = { path = "crates/fastfile_iw5" }
 fastfile_iw6 = { path = "crates/fastfile_iw6" }
 fastfile_s1 = { path = "crates/fastfile_s1" }
+fastfile_iw7 = { path = "crates/fastfile_iw7" }
 lz4_flex = { version = "0.11", default-features = false, features = ["safe-decode"] }
 frame = { path = "crates/frame" }
 fx = { path = "crates/fx" }
