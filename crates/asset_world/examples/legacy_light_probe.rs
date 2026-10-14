@@ -37,6 +37,16 @@ fn main() {
                 }
             }
         }
+        for a in &zone.assets {
+            if let iw3::zone::Asset::RawFile(r) = a
+                && (r.name.contains("vision") || r.name.contains("createart"))
+            {
+                println!("rawfile {} ({} bytes)", r.name, r.data.len());
+                if std::env::var("PROBE_RAW").is_ok() {
+                    println!("{}", String::from_utf8_lossy(&r.data));
+                }
+            }
+        }
         let Some(world) = zone.gfx_world() else {
             println!("no GfxWorld");
             continue;
@@ -80,16 +90,6 @@ fn main() {
                     img.height,
                     img.load_def.as_ref().map(|d| (d.format, d.level_count, d.dimensions, d.data.len()))
                 );
-            }
-        }
-        for a in &zone.assets {
-            if let iw3::zone::Asset::RawFile(r) = a
-                && (r.name.contains("vision") || r.name.contains("createart"))
-            {
-                println!("rawfile {} ({} bytes)", r.name, r.data.len());
-                if std::env::var("PROBE_RAW").is_ok() {
-                    println!("{}", String::from_utf8_lossy(&r.data));
-                }
             }
         }
     }
@@ -191,6 +191,7 @@ fn materials(zone: &iw3::zone::Zone, world: &iw3::zone::GfxWorld, main: Option<&
     let mut techs: BTreeMap<String, usize> = BTreeMap::new();
     let mut sems: BTreeMap<String, usize> = BTreeMap::new();
     let mut samples = Vec::new();
+    let mut consts: BTreeMap<String, usize> = BTreeMap::new();
     for s in &world.surfaces {
         let Some(mid) = s.material else { continue };
         if !seen.insert(mid) {
@@ -198,6 +199,9 @@ fn materials(zone: &iw3::zone::Zone, world: &iw3::zone::GfxWorld, main: Option<&
         }
         let Some(m) = zone.material(mid) else { continue };
         let tech = m.technique_set.and_then(|t| zone.technique_set(t)).map_or("?".into(), |t| t.name.clone());
+        for c in &m.constants {
+            *consts.entry(format!("{} {:?}", c.name, c.literal)).or_default() += 1;
+        }
         *techs.entry(tech).or_default() += 1;
         for t in &m.textures {
             *sems.entry(format!("{:?}", t.semantic)).or_default() += 1;
@@ -216,6 +220,7 @@ fn materials(zone: &iw3::zone::Zone, world: &iw3::zone::GfxWorld, main: Option<&
         println!("  {n:4} {t}");
     }
     println!("  texture semantics: {sems:?}");
+    println!("  material constants: {consts:?}");
     let Some(main) = main else { return };
     let Ok(index) = asset_transport::IwdIndex::open(main) else { return };
     for (sem, name) in samples {
