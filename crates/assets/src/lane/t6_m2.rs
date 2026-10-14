@@ -1673,6 +1673,53 @@ fn script_model_names(
     named
 }
 
+/// bo2mp: the mod's zone made ready for the match (`IW4L_T6_MOD`): what
+/// would change the game left out (`asset_t6::t6_mod::sanitize_capture`),
+/// and the animations its guns name that neither it nor the zones before
+/// it (`earlier`) carry read from its archive's raw files (`xanim/<name>`).
+pub(crate) fn complete_mod_capture(c: &mut ZoneCapture, earlier: &[ZoneCapture], report: &mut Vec<String>) {
+    let info = asset_transport::t6_mod::info().unwrap_or_default();
+    let left_out = asset_t6::t6_mod::sanitize_capture(c);
+    report.push(format!(
+        "bo2mp mod {} {} by {} ({}): {} weapons, {} attachments, {} camos, {} models, {} materials, {} pictures, {} sound banks; left out: {}",
+        info.name,
+        info.version,
+        info.author,
+        asset_transport::t6_mod::root().map_or_else(String::new, |r| r.display().to_string()),
+        c.weapons.len(),
+        c.attachment_uniques.len(),
+        c.weapon_camos.len(),
+        c.xmodels.len(),
+        c.materials.len(),
+        c.images.len(),
+        c.sound_banks.len(),
+        if left_out.is_empty() { "nothing".to_owned() } else { left_out.join("; ") }
+    ));
+    let have: std::collections::HashSet<String> =
+        earlier.iter().flat_map(|e| e.xanims.iter()).map(|x| x.name.to_ascii_lowercase()).collect();
+    let missing = asset_t6::t6_mod::missing_xanims(c, &have);
+    let (mut read, mut gaps) = (0usize, Vec::new());
+    for name in &missing {
+        let Some(bytes) = asset_transport::t6_mod::xanim(name) else {
+            // (Black Ops II's own, from a zone after this one, or none.)
+            continue;
+        };
+        match asset_t6::t6_mod::raw_xanim(name, &bytes) {
+            Ok(a) => {
+                c.xanims.push(a);
+                read += 1;
+            }
+            Err(e) => gaps.push(e),
+        }
+    }
+    report.push(format!(
+        "bo2mp mod animations: {} in its zone, {read} of {} more read from its archive{}",
+        c.xanims.len() - read,
+        missing.len(),
+        if gaps.is_empty() { String::new() } else { format!("; gaps: {}", gaps.join("; ")) }
+    ));
+}
+
 /// The zones around the map zone, in load order, that exist beside it.
 fn zone_paths(map_path: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
     // bo2zm: a map from an extra folder (`IW4L_T6_EXTRA`) still loads the
@@ -1696,6 +1743,12 @@ fn zone_paths(map_path: &Path) -> (Vec<PathBuf>, Vec<PathBuf>) {
     // intro's sound bank.
     if stem == "zm_nuked" {
         pre.push(dir.join("dlczm0_load_zm.ff"));
+    }
+    // bo2mp: the mod's zone (`IW4L_T6_MOD`: its guns, their models,
+    // pictures, animations and sounds), after Black Ops II's shared zones,
+    // winning a name it shares with them.
+    if let Some(zone) = asset_transport::t6_mod::zone() {
+        pre.push(zone);
     }
     // A map from an extra folder (a map pack) loads its mod's
     // zones (weapons, string tables, menus) before the map, as its game does.
@@ -2228,8 +2281,19 @@ pub(crate) fn load_t6_combat(
             None
         }
     };
-    let mut pre_caps: Vec<ZoneCapture> =
-        pre.iter().filter_map(|p| capture(p, &mut report)).collect();
+    let mod_zone = asset_transport::t6_mod::zone();
+    let mut pre_caps: Vec<ZoneCapture> = Vec::with_capacity(pre.len());
+    for path in &pre {
+        let Some(mut c) = capture(path, &mut report) else {
+            continue;
+        };
+        // bo2mp: the mod's zone without what would change the game (its
+        // string tables and scripts), with the animations its archive holds.
+        if mod_zone.as_ref() == Some(path) {
+            complete_mod_capture(&mut c, &pre_caps, &mut report);
+        }
+        pre_caps.push(c);
+    }
     let map_stem = map_path
         .file_stem()
         .map_or_else(String::new, |s| s.to_string_lossy().into_owned());

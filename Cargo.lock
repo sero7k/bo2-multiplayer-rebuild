@@ -405,6 +405,7 @@ dependencies = [
  "asset_transport",
  "fastfile_t6",
  "ipak_t6",
+ "xmodel_runtime",
 ]
 
 [[package]]

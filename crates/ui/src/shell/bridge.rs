@@ -135,6 +135,16 @@ pub(crate) struct StartSpec {
     pub bot_friends: u32,
     pub bot_enemies: u32,
     pub bot_difficulty: u32,
+    /// bo2mp: a public match (FIND A MATCH), not a Custom Game.
+    pub public: bool,
+}
+
+/// bo2mp: whether the shell's last START was a public match (FIND A
+/// MATCH), read by the match start (`sim::set_local_match_public`).
+static PUBLIC_START: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn public_start() -> bool {
+    PUBLIC_START.load(Ordering::Relaxed)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -455,6 +465,7 @@ pub(crate) fn lui_side(host: &mut Host, mp: Option<&Mp>) {
     for r in with(|b| std::mem::take(&mut b.requests)) {
         match r {
             Request::Start(spec) => {
+                PUBLIC_START.store(spec.public, Ordering::Relaxed);
                 {
                     let mut v = host.values.borrow_mut();
                     for (k, x) in [

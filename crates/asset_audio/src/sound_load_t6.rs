@@ -40,6 +40,9 @@ impl T6BankIndex {
         // bo2zm: then the extra folders' banks (`IW4L_T6_EXTRA`).
         paths.extend(asset_transport::t6_extra::extra_files("sabl"));
         paths.extend(asset_transport::t6_extra::extra_files("sabs"));
+        // bo2mp: then the mod's (`IW4L_T6_MOD`: `leetin_pt1.all.sabl`, ...).
+        paths.extend(asset_transport::t6_mod::files("sabl"));
+        paths.extend(asset_transport::t6_mod::files("sabs"));
         for bank in banks {
             for path in &paths {
                 let Some(file) = path.file_name().and_then(|n| n.to_str()) else {

@@ -50,6 +50,7 @@ mod t6_scripts;
 
 // bo2zm M4: Black Ops II's front end (no map).
 pub use t6_m2::{T6Frontend, load_t6_frontend};
+pub use t6_materials::mod_picture_rgba;
 
 use std::path::Path;
 

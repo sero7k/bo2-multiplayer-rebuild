@@ -285,6 +285,10 @@ pub(crate) struct Shell {
     pub vote_maps: Vec<String>,
     pub vote: Option<usize>,
     pub leaderboard: bool,
+    /// bo2mp: he is setting up a public match (FIND A MATCH: searching or
+    /// hosting for searchers), not a Custom Game: the mod's Zombies weapons
+    /// are not listed and its START is a public match.
+    pub public: bool,
     /// A yes / no question up, and YES (0) or NO (1) in focus.
     pub ask: Option<Ask>,
     pub ask_focus: usize,
@@ -325,6 +329,7 @@ impl Default for Shell {
             vote_maps: Vec::new(),
             vote: None,
             leaderboard: false,
+            public: false,
             ask: None,
             ask_focus: 1,
         }
@@ -687,12 +692,14 @@ impl Shell {
                 self.go(Screen::Lobbies);
             }
             Act::FindMatch => {
+                self.public = true;
                 self.go(Screen::MatchFilter);
                 self.page = 0;
             }
             Act::FilterMode(i) => matchmaking::toggle(self, c, i),
             Act::Brainrot => self.brainrot = !self.brainrot,
             Act::SearchMatches => {
+                self.public = true;
                 self.searching = true;
                 self.search_started = now;
                 self.join_at = None;
@@ -707,6 +714,7 @@ impl Shell {
             Act::HostMatch => {
                 // (His own lobby in the mode searched for: START opens it on
                 // the server, where the next search finds it.)
+                self.public = true;
                 self.mode = matchmaking::host_mode(self);
                 if self.brainrot
                     && let Some(m) = matchmaking::shipment(c)
@@ -756,6 +764,7 @@ impl Shell {
                 exit.write(AppExit::Success);
             }
             Act::CustomGame => {
+                self.public = false;
                 self.go(Screen::Lobby);
                 self.tab = Tab::Lobby;
             }
@@ -771,6 +780,7 @@ impl Shell {
                     bot_friends: self.friends,
                     bot_enemies: self.enemies,
                     bot_difficulty: self.difficulty,
+                    public: self.public,
                 }));
             }
             Act::PickMap => {

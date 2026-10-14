@@ -294,6 +294,15 @@ pub(crate) fn link_reflection_probes(
 
 /// Decode one captured image from the packs.
 pub(crate) fn decode(packs: &PackSet, image: &ImageRef) -> Result<Image, String> {
+    // bo2mp: the mod's archive wins a picture name it holds (`IW4L_T6_MOD`),
+    // as the game reads a mod's pictures over the packs'.
+    if image.embedded.is_none()
+        && image.streamed_parts > 0
+        && asset_transport::t6_mod::has_entry(&format!("images/{}.iwi", image.name.trim_start_matches(',')))
+        && let Some(found) = mod_iwd_image(&image.name)
+    {
+        return found;
+    }
     match packs.locate(image) {
         Some(ImageSource::Pack(i, entry)) => {
             let bytes = packs.packs[i].read(entry)?;
@@ -302,8 +311,57 @@ pub(crate) fn decode(packs: &PackSet, image: &ImageRef) -> Result<Image, String>
         }
         Some(ImageSource::Embedded) => embedded_image(image),
         Some(ImageSource::Empty) => Err("no pixels".to_owned()),
-        None => legacy_iwd_image(&image.name).unwrap_or_else(|| Err("in no pack".to_owned())),
+        None => mod_iwd_image(&image.name)
+            .or_else(|| legacy_iwd_image(&image.name))
+            .unwrap_or_else(|| Err("in no pack".to_owned())),
     }
+}
+
+/// bo2mp: a picture the mod's zone streams that no Black Ops II pack holds,
+/// from the mod's archive (`IW4L_T6_MOD`: `images/<name>.iwi`, Black Ops
+/// II's own picture format, normal maps included).
+fn mod_iwd_image(name: &str) -> Option<Result<Image, String>> {
+    let mut bytes = asset_transport::t6_mod::image(name)?;
+    mend_plain_iwi(&mut bytes);
+    Some(
+        ipak_t6::parse_iwi(&bytes)
+            .map_err(|e| format!("{name} in the mod's archive: {e}"))
+            .and_then(|iwi| gpu_image(&iwi)),
+    )
+}
+
+/// bo2mp: a mod picture written with no format and no level size in its
+/// header (the @leetinservers mod's `scav_c`: one level of 32-bit pixels
+/// after the 64-byte header) is read as the RGBA8 picture it is.
+fn mend_plain_iwi(bytes: &mut [u8]) {
+    const HEADER: usize = 64;
+    if bytes.len() < HEADER || &bytes[..4] != b"IWi\x1b" || bytes[4] != 0 || bytes[5] & 0x02 == 0 {
+        return;
+    }
+    let (w, h) = (u16::from_le_bytes([bytes[6], bytes[7]]) as usize, u16::from_le_bytes([bytes[8], bytes[9]]) as usize);
+    if bytes.len() != HEADER + w * h * 4 {
+        return;
+    }
+    let total = (bytes.len() as u32).to_le_bytes();
+    bytes[4] = 0x01;
+    bytes[32..36].copy_from_slice(&total);
+}
+
+/// bo2mp: a picture of the mod's archive as RGBA (`IW4L_T6_MOD`), else from
+/// Black Ops II's packs beside `zone_dir` by name: the mod's
+/// Create-a-Class pictures (`menu_mp_weapons_cheytac`).
+pub fn mod_picture_rgba(name: &str, zone_dir: Option<&std::path::Path>) -> Option<(u32, u32, Vec<u8>)> {
+    let img = match mod_iwd_image(name) {
+        Some(Ok(img)) => img,
+        _ => {
+            let packs = asset_t6::PackSet::open_dir(zone_dir?).ok()?;
+            let (i, entry) = packs.locate_name(name)?;
+            let bytes = packs.packs[i].read(entry).ok()?;
+            gpu_image(&ipak_t6::parse_iwi(&bytes).ok()?).ok()?
+        }
+    };
+    let (w, h, rgba) = top_level_rgba8(&img)?;
+    Some((w as u32, h as u32, rgba))
 }
 
 /// bo2zm: a picture no Black Ops II pack holds, from Black Ops' or World at

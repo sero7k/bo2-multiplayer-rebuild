@@ -390,6 +390,18 @@ pub(super) async fn walk_prepared_match(
                 report.push(format!("bo2mp guest guns: {game}: {loaded} of {wanted} listed guns loaded"));
             }
         }
+        // (The mod's guns, `IW4L_T6_MOD`: Black Ops II weapons from its zone.)
+        if asset_transport::t6_mod::zone().is_some() {
+            let wanted = bo2_profile::guest::MOD.len();
+            let loaded = bo2_profile::guest::MOD
+                .iter()
+                .filter(|g| weapons.resolve_index(&bo2_profile::guest::script_name(g)).ok().flatten().is_some_and(|i| i != 0))
+                .count();
+            bo2_profile::guest::set_available(bo2_profile::guest::MOD_GAME, loaded > 0);
+            report.push(format!("bo2mp mod guns: {loaded} of {wanted} listed guns loaded"));
+        } else {
+            bo2_profile::guest::set_available(bo2_profile::guest::MOD_GAME, false);
+        }
         report.push(format!(
             "bo2mp guest guns: {} other games' weapons named for BO2's scripts ({} base guns): {}",
             (1..weapons.len() as u32)
@@ -1095,7 +1107,9 @@ fn guest_zm_upgrades(weapons: &mut asset_game::WeaponBuild, report: &mut Vec<Str
     for gun in guns {
         let base = guest::script_name(gun);
         let base_id = index(weapons, &base);
-        let real = Ns::parse(gun.game)
+        // (The mod's guns are Black Ops II weapons.)
+        let ns = if gun.game == guest::MOD_GAME { Some(Ns::T6) } else { Ns::parse(gun.game) };
+        let real = ns
             .filter(|_| guest::has_own_pack_a_punch(gun.game))
             .and_then(|ns| {
                 guest::zm_upgrade_assets(gun.game, gun.gun).into_iter().find_map(|name| {

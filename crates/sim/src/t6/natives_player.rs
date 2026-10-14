@@ -184,6 +184,12 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     m!("giveweapon", |vm, world, s, a| {
         let id = client(vm, world, s)?;
         let name = text(vm, a, 0);
+        // bo2mp: the mod's Zombies weapons are Custom Games only: a public
+        // multiplayer match never gives one (whatever asks).
+        if world.resource::<Zm>().mp && super::stats::public_match() && bo2_profile::guest::is_custom_only(&name) {
+            diag::warn!(Sim, "bo2mp: `{name}` is for Custom Games only; not given in a public match");
+            return Ok(Value::Undefined);
+        }
         let w = weapon(world, &name)?;
         if w == 0 {
             return Ok(Value::Undefined);

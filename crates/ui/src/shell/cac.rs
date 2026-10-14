@@ -51,7 +51,8 @@ fn camo_choices(book: &ClassBook, gun: i32) -> Option<Vec<(i32, String, String)>
     if gun <= 0 {
         return None;
     }
-    if gun < bo2_profile::guest::FIRST_INDEX {
+    // (The mod's guns are Black Ops II weapons with camo sets of their own.)
+    if gun < bo2_profile::guest::FIRST_INDEX || bo2_profile::guest::game_for_index(gun) == Some(bo2_profile::guest::MOD_GAME) {
         return (!book.camos.is_empty()).then(|| book.camos.iter().map(|k| (k.index, k.name.to_uppercase(), k.image.clone())).collect());
     }
     let list: &[(u8, &str, &str)] = match bo2_profile::guest::game_for_index(gun)? {
@@ -206,6 +207,11 @@ pub(crate) fn picks(s: &Shell, book: &ClassBook) -> (Vec<String>, Vec<Pick>) {
         return (vec!["ATTACHMENTS".to_owned()], v);
     }
     let mut items: Vec<&ClassItem> = book.for_slot(slot);
+    // bo2mp: the mod's Zombies weapons are Custom Games only: not listed
+    // while he sets up a public match (FIND A MATCH).
+    if s.public {
+        items.retain(|i| !bo2_profile::guest::is_custom_only_index(i.index));
+    }
     // Overkill: a second primary as the secondary.
     if slot == "secondary" && has_card(book, c, "overkill") {
         items.extend(book.for_slot("primary"));

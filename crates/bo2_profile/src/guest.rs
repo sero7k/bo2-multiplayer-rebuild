@@ -522,6 +522,164 @@ pub const COD4: &[GuestGun] = &[
 /// `MW3_FIRST_INDEX`).
 pub const COD4_FIRST_INDEX: i32 = 700;
 
+/// bo2mp: the game name of the mod's guns (`IW4L_T6_MOD`). They are Black
+/// Ops II weapons from the mod's own zone, so their references have no
+/// prefix (`cheytac`, given as `cheytac_mp`).
+pub const MOD_GAME: &str = "t6mod";
+
+const fn md(
+    gun: &'static str,
+    name: &'static str,
+    group: &'static str,
+    slot: &'static str,
+    attachments: &'static str,
+    icon: &'static str,
+) -> GuestGun {
+    GuestGun { game: MOD_GAME, gun, name, group, slot, attachments, icon }
+}
+
+const GRENADE: &str = "weapon_grenade";
+
+/// bo2mp: the @leetinservers mod's guns (`mod.ff`, `IW4L_T6_MOD`): its
+/// statstable rows for the weapons Black Ops II lacks, with its names,
+/// groups, slots, attachments (Black Ops II's own words) and
+/// Create-a-Class pictures (`icon`, in its archive). Its rows are numbered
+/// from `MOD_FIRST_INDEX`. Every one is listed while the mod is loaded;
+/// another game's copy of the same gun is not (`MOD_SUPERSEDES`).
+pub const MOD: &[GuestGun] = &[
+    md("deagle", "Gold Desert Eagle", PISTOL, S, "", "menu_mp_weapons_deagle"),
+    md("mauser", "Mauser C96", PISTOL, S, "", "menu_mp_weapons_mc96"),
+    md("boomhilda", "Boomhilda", PISTOL, S, "", "menu_mp_weapons_bh"),
+    md("glock", "G18", PISTOL, S, "", "menu_mp_weapons_glock"),
+    md("magnum", ".44 Magnum", PISTOL, S, "tacknife", "menu_mp_weapons_magnum"),
+    md("mp5k", "MP5K", SMG, P, "reflex silencer_smg fastads_smg extbarrel extclip dualclip", "menu_mp_weapons_mp5"),
+    md("ak47", "AK-47", AR, P, "acog extclip dualclip reflex gl sf", "menu_mp_weapons_ak47"),
+    md("galil", "Galil", AR, P, "acog extclip dualclip reflex gl sf", "menu_mp_weapons_galil"),
+    md("m16", "M16", AR, P, "acog extclip dualclip reflex gl sf", "menu_mp_weapons_m16"),
+    md("fn_scar", "SCAR", AR, P, "", "menu_mp_weapons_fnscar"),
+    md("koshka", "Koshka", SNIPER, P, "", "menu_mp_weapons_koshka"),
+    md("svg", "SVG-100", SNIPER, P, "", "menu_mp_weapons_svg"),
+    md("katt", "KATT-AMR", SNIPER, P, "", "menu_mp_weapons_katt"),
+    md("k98", "KAR98K", SNIPER, P, "fmj extclip_sniper", "menu_mp_weapons_k98"),
+    md("halo_sniper", "SRS99-AM", SNIPER, P, "", "menu_mp_weapons_halo_sniper"),
+    md("scav", "Scavenger", SNIPER, P, "", "menu_mp_weapons_scav"),
+    md("iw5_as50", "AS50", SNIPER, P, "dualclip steadyaim_smg fmj", "menu_mp_weapons_iw5_as50"),
+    md("usr", "USR", SNIPER, P, "dualclip steadyaim_smg fmj", "menu_mp_weapons_usr"),
+    md("ebr", "M21 EBR", SNIPER, P, "dualclip steadyaim_smg fmj", "menu_mp_weapons_ebr"),
+    md("m40a3", "M40A3", SNIPER, P, "steadyaim_smg fmj", "menu_mp_weapons_m40a3"),
+    md("awp", "AWP | Dragon Lore", SNIPER, P, "fmj", "menu_mp_weapons_awp"),
+    md("psg", "PSG1", SNIPER, P, "dualclip steadyaim_smg fmj", "menu_mp_weapons_psg"),
+    md("barret", "Barrett .50cal", SNIPER, P, "dualclip steadyaim_smg fmj", "menu_mp_weapons_m82a"),
+    md("drag", "SVO", SNIPER, P, "dualclip steadyaim_smg fmj", "menu_mp_weapons_drag"),
+    md("cheytac", "Intervention", SNIPER, P, "dualclip steadyaim_smg acog_sniper ir fmj", "menu_mp_weapons_cheytac"),
+    md("msr", "MSR", SNIPER, P, "dualclip steadyaim_smg acog_sniper fmj", "menu_mp_weapons_msr"),
+    md("l96a", "L96A1", SNIPER, P, "dualclip steadyaim_smg fmj", "menu_mp_weapons_l96a"),
+    md("locus", "Locus", SNIPER, P, "dualclip steadyaim_smg fmj", "menu_mp_weapons_locus"),
+    md("lynx", "Lynx", SNIPER, P, "dualclip steadyaim_smg fmj", "menu_mp_weapons_lynx"),
+    md("kbs", "KBS Longbow", SNIPER, P, "dualclip steadyaim_smg fmj", "menu_mp_weapons_kbs"),
+    md("wa2000", "CNG", SNIPER, P, "fmj", "menu_mp_weapons_w2k"),
+    md("mors", "Mors", SNIPER, P, "is ir fmj", "menu_mp_weapons_mors"),
+    md("ptrs", "PTRS-41", SNIPER, P, "steadyaim_smg fmj", "menu_mp_weapons_ptrs"),
+    md("spas", "SPAS 12", CQB, P, "reflex mms dualclip_segmented steadyaim fastads", "menu_mp_weapons_spas"),
+    md("stake", "Stakeout", CQB, P, "dualclip_segmented steadyaim fastads", "menu_mp_weapons_stake"),
+    md("m1887", "Model 1887", CQB, P, "dualclip_segmented steadyaim fastads", "menu_mp_weapons_1887"),
+    md("freedom_qcb", "Freedom", CQB, P, "", "menu_mp_weapons_freedom"),
+    md("fn_tacshotty", "Tactical Shotgun", CQB, P, "", "menu_mp_weapons_fntac"),
+    md("mgl", "MGL", LAUNCHER, S, "", "menu_mp_weapons_mm1"),
+    md("china_lake", "China Lake", LAUNCHER, S, "", "menu_mp_weapons_china"),
+    md("slipgun", "Sliquifier", SPECIAL, P, "", "menu_mp_weapons_slip"),
+    md("slowgun", "Paralyzer", SPECIAL, P, "", "menu_mp_weapons_slow"),
+    md("raygun_mark2", "Ray Gun Mark II", SPECIAL, P, "", "menu_mp_weapons_rgunmk2"),
+    md("lightstaff", "Staff of Lightning", SPECIAL, S, "", "menu_mp_lightstaff"),
+    md("icestaff", "Staff of Ice", SPECIAL, S, "", "menu_mp_icestaff"),
+    md("windstaff", "Staff of Wind", SPECIAL, S, "", "menu_mp_windstaff"),
+    md("firestaff", "Staff of Fire", SPECIAL, S, "", "menu_mp_firestaff"),
+    md("bk", "Butterfly Knife", SPECIAL, S, "", "menu_mp_weapons_bk"),
+    md("karambit", "Karambit | Lore", SPECIAL, S, "", "menu_mp_weapons_karambit"),
+    md("barber", "Barber", SPECIAL, S, "", "menu_mp_weapons_barber"),
+    md("rpgdud", "Danger Close", SPECIAL, S, "", "menu_mp_weapons_rpgd"),
+    md("m9", "M9 Bayonet | Marble Fade", SPECIAL, S, "", "menu_mp_weapons_m9"),
+    md("diamond_pickaxe", "Diamond Pickaxe", SPECIAL, S, "", "menu_mp_weapons_pickaxe"),
+    md("exo_launcher", "Exo Launcher", GRENADE, "primarygrenade", "", "hud_s1_semtex"),
+    md("iw5_jammer", "Scrambler", GRENADE, "specialgrenade", "", "hud_iw5_jammer"),
+    md("iw5_trophy", "Trophy System IW5", GRENADE, "specialgrenade", "", "hud_iw5_trophy"),
+];
+
+/// The first statstable index of the mod's guns.
+pub const MOD_FIRST_INDEX: i32 = 1100;
+
+/// bo2mp: the other games' guns each of the mod's guns leaves out of
+/// Create-a-Class and the Mystery Box while the mod is loaded: the same real
+/// gun (`family`), whatever it is called there. (mod gun, the guns left out
+/// as their references, `mw2_cheytac`.)
+#[must_use]
+pub fn mod_supersedes() -> Vec<(&'static GuestGun, Vec<String>)> {
+    MOD.iter()
+        .map(|m| {
+            let f = family(m.game, m.gun);
+            let out = all().filter(|g| g.game != MOD_GAME && family(g.game, g.gun) == f).map(GuestGun::reference).collect();
+            (m, out)
+        })
+        .filter(|(_, out): &(&GuestGun, Vec<String>)| !out.is_empty())
+        .collect()
+}
+
+/// bo2mp: the mod's Zombies weapons (wonder weapons, Origins' pistol and
+/// its upgrade, the staffs): Custom Games only in multiplayer, never in a
+/// public match (Create-a-Class hides them there and the server refuses to
+/// give them). By weapon name without `_mp` (`lightstaff_pap` has no row).
+pub const MOD_CUSTOM_ONLY: &[&str] = &[
+    "raygun_mark2",
+    "slipgun",
+    "slowgun",
+    "lightstaff",
+    "lightstaff_pap",
+    "icestaff",
+    "windstaff",
+    "firestaff",
+    "mauser",
+    "boomhilda",
+    "scav",
+];
+
+/// Whether a weapon (`raygun_mark2_mp+...`) or a statstable reference
+/// (`raygun_mark2`) is one of the mod's Zombies weapons (`MOD_CUSTOM_ONLY`).
+#[must_use]
+pub fn is_custom_only(name: &str) -> bool {
+    let name = name.split('+').next().unwrap_or(name).to_ascii_lowercase();
+    let name = name.strip_suffix("_mp").unwrap_or(&name);
+    MOD_CUSTOM_ONLY.contains(&name)
+}
+
+/// Whether the statstable item numbered `index` is one of the mod's
+/// Zombies weapons.
+#[must_use]
+pub fn is_custom_only_index(index: i32) -> bool {
+    reference_for_index(index).is_some_and(|r| game_for_index(index) == Some(MOD_GAME) && is_custom_only(&r))
+}
+
+/// bo2mp: now and then a bot carries one of the mod's guns instead of the
+/// gun its class script picked (Black Ops II's bot scripts list only items
+/// numbered below 256): a third of its weapons, by `seed` (bot, class and
+/// slot), one of the loaded mod guns of the same group and slot; none of
+/// the Zombies weapons in a public match.
+pub fn bot_mod_gun(
+    group: &str,
+    slot: &str,
+    seed: u32,
+    public: bool,
+    loaded: impl Fn(&GuestGun) -> bool,
+) -> Option<&'static GuestGun> {
+    if !available(MOD_GAME) || seed % 3 != 0 || group == GRENADE || group == SPECIAL {
+        return None;
+    }
+    let pick: Vec<&'static GuestGun> = MOD
+        .iter()
+        .filter(|g| g.group == group && g.slot == slot && !(public && is_custom_only(g.gun)) && loaded(g))
+        .collect();
+    (!pick.is_empty()).then(|| pick[(seed / 3) as usize % pick.len()])
+}
+
 /// Attachments the guest guns have and BO2's table lacks: reference, slot,
 /// name, picture.
 const EXTRA_ATTACHMENTS: &[(&str, &str, &str, &str)] = &[
@@ -593,8 +751,15 @@ fn bit(game: &str) -> u8 {
     GAMES.iter().position(|g| *g == game).map_or(0, |i| 1 << i)
 }
 
-/// Whether `game`'s guns are listed (`t5`, `iw4`, `iw5`, `iw6`).
+static MOD_AVAILABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether `game`'s guns are listed (`t5`, `iw4`, `iw5`, `iw6`; the mod's,
+/// `t6mod`).
 pub fn set_available(game: &str, on: bool) {
+    if game == MOD_GAME {
+        MOD_AVAILABLE.store(on, Ordering::Relaxed);
+        return;
+    }
     if on {
         AVAILABLE.fetch_or(bit(game), Ordering::Relaxed);
     } else {
@@ -604,12 +769,15 @@ pub fn set_available(game: &str, on: bool) {
 
 #[must_use]
 pub fn available(game: &str) -> bool {
+    if game == MOD_GAME {
+        return MOD_AVAILABLE.load(Ordering::Relaxed);
+    }
     AVAILABLE.load(Ordering::Relaxed) & bit(game) != 0
 }
 
 /// Every guest gun, available or not, in table order.
 pub fn all() -> impl Iterator<Item = &'static GuestGun> {
-    BO1.iter().chain(MW2.iter()).chain(GHOSTS.iter()).chain(MW3.iter()).chain(WAW.iter()).chain(COD4.iter()).chain(AW.iter()).chain(BO3.iter())
+    BO1.iter().chain(MW2.iter()).chain(GHOSTS.iter()).chain(MW3.iter()).chain(WAW.iter()).chain(COD4.iter()).chain(AW.iter()).chain(BO3.iter()).chain(MOD.iter())
 }
 
 /// The statstable index of the guest gun at `position` in `all()`: a
@@ -623,6 +791,7 @@ fn stats_index(position: usize, gun: &GuestGun) -> i32 {
         (GHOSTS, GHOSTS_FIRST_INDEX),
         (AW, AW_FIRST_INDEX),
         (BO3, BO3_FIRST_INDEX),
+        (MOD, MOD_FIRST_INDEX),
     ];
     for (roster, first) in own {
         if let Some(k) = roster.iter().position(|g| g.game == gun.game && g.gun == gun.gun) {
@@ -641,6 +810,10 @@ impl GuestGun {
     }
 
     fn key(&self) -> String {
+        // (The mod's own keys name its guns in its text; ours are apart.)
+        if self.game == MOD_GAME {
+            return format!("WEAPON_T6MOD_{}", self.gun.to_ascii_uppercase());
+        }
         format!("WEAPON_{}", self.reference().to_ascii_uppercase())
     }
 
@@ -654,6 +827,7 @@ impl GuestGun {
             "iw3" => "Call of Duty 4",
             "s1" => "Call of Duty: Advanced Warfare",
             "t7" => "Call of Duty: Black Ops III",
+            MOD_GAME => "the @leetinservers mod",
             _ => "another game",
         }
     }
@@ -688,6 +862,8 @@ impl GuestGun {
             // (Black Ops III's are its weapon icons in core_common: the
             // pick-up icon, then the kill icon.)
             "t7" => format!("t7:t7_icon_weapon_{gun}_pu|t7_icon_weapon_{gun}_kf"),
+            // (The mod's are in its archive, else Black Ops II's packs.)
+            MOD_GAME => format!("{MOD_GAME}:{}|{}_big", self.icon, self.icon),
             _ => {
                 let mut p = format!("{}:menu_mp_weapons_{gun}", self.game);
                 if !self.icon.is_empty() {
@@ -747,6 +923,23 @@ const FAMILIES: &[(&str, &str, &str)] = &[
     ("", "usrpg", "rpg"),
     // (AW's `lsat` is the Pytaek, not Ghosts' LSAT.)
     ("s1", "lsat", "pytaek"),
+    // bo2mp: the mod's guns, by the real gun (MOD_SUPERSEDES lists what
+    // each one leaves out).
+    ("t6mod", "barret", "barrett"),
+    ("t6mod", "k98", "kar98k"),
+    ("t6mod", "ptrs", "ptrs41"),
+    ("t6mod", "psg", "psg1"),
+    ("t6mod", "l96a", "l96"),
+    ("t6mod", "stake", "ithaca"),
+    ("t6mod", "m1887", "1887"),
+    ("t6mod", "ebr", "m21"),
+    ("t6mod", "svg", "svg100"),
+    ("t7", "sniper_powerbolt", "svg100"),
+    ("t7", "sniper_fastbolt", "locus"),
+    ("t6mod", "lynx", "gm6"),
+    ("t6mod", "fn_scar", "scar"),
+    // (The M9 Bayonet is a knife, not Beretta's M9.)
+    ("t6mod", "m9", "m9bayonet"),
 ];
 
 /// A gun's family: the same gun from any game has the same one.
@@ -770,6 +963,9 @@ pub fn family_of_reference(reference: &str) -> String {
             return family(game, name);
         }
     }
+    if MOD.iter().any(|g| g.gun == reference) {
+        return family(MOD_GAME, reference);
+    }
     family("t6", reference)
 }
 
@@ -792,6 +988,14 @@ pub fn reference_for_index(index: i32) -> Option<String> {
 fn listed(bo2: &std::collections::HashSet<String>) -> Vec<usize> {
     let mut taken: std::collections::HashSet<String> = bo2.clone();
     let mut keep = Vec::new();
+    // bo2mp: every one of the mod's guns, first: another game's copy of
+    // the same gun is left out (Black Ops II's own stay).
+    if available(MOD_GAME) {
+        for (k, gun) in all().enumerate().filter(|(_, g)| g.game == MOD_GAME) {
+            taken.insert(family(gun.game, gun.gun));
+            keep.push(k);
+        }
+    }
     for game in PRIORITY {
         if !available(game) {
             continue;
@@ -861,7 +1065,7 @@ pub fn extend_stats_rows(rows: &mut Vec<Vec<String>>) -> bool {
         row[2] = gun.group.to_owned();
         row[3] = gun.key();
         row[4] = reference;
-        if gun.group == LAUNCHER {
+        if gun.group == LAUNCHER || (gun.game == MOD_GAME && matches!(gun.group, SPECIAL | GRENADE)) {
             row[5] = "1".to_owned();
         }
         row[6] = gun.picture();
@@ -937,9 +1141,10 @@ pub fn zm_box_guns(
 ) -> Vec<&'static GuestGun> {
     let mut taken = bo2.clone();
     let mut keep = Vec::new();
-    for game in PRIORITY {
+    // (The mod's guns first: its copy of a gun is the one in the box.)
+    for game in std::iter::once(MOD_GAME).chain(PRIORITY) {
         for gun in all().filter(|g| g.game == game) {
-            if gun.group == SPECIAL || NO_ZOMBIES.contains(&(gun.game, gun.gun)) || !loaded(gun) {
+            if gun.group == SPECIAL || gun.group == GRENADE || NO_ZOMBIES.contains(&(gun.game, gun.gun)) || !loaded(gun) {
                 continue;
             }
             if taken.insert(family(gun.game, gun.gun)) {
@@ -975,7 +1180,7 @@ pub const ZM_PAP_CAMO_OPTION: u32 = 1039;
 /// weapons are in its zombies zones). Black Ops II's (`t6`) are the map's.
 #[must_use]
 pub fn has_own_pack_a_punch(game: &str) -> bool {
-    matches!(game, "t4" | "t5" | "t6" | "s1" | "iw7" | "t7")
+    matches!(game, "t4" | "t5" | "t6" | "s1" | "iw7" | "t7" | MOD_GAME)
 }
 
 /// The names (as the catalog names its game's rows: lower case, no `_mp`,
@@ -1046,6 +1251,9 @@ pub fn zm_upgrade_assets(game: &str, gun: &str) -> Vec<String> {
             vec![format!("{gun}_zm+pap1"), format!("iw7_{gun}_zm+pap1"), format!("{gun}_zm_pap1")]
         }
         "t7" => vec![format!("{gun}_upgraded"), format!("{gun}_upgraded_zm")],
+        // (The mod's one upgraded gun: Origins' Mauser is Boomhilda; the
+        // others are made Black Ops II-style.)
+        MOD_GAME if gun == "mauser" => vec!["boomhilda_mp".to_owned(), "boomhilda".to_owned()],
         _ => Vec::new(),
     }
 }
@@ -1069,6 +1277,8 @@ pub fn zm_upgrade_key(gun: &GuestGun) -> String {
 /// Ops' Pack-a-Punch), and Black Ops II-style ones for Ghosts' guns, which
 /// never had one. (game, gun, name).
 const UPGRADED_NAMES: &[(&str, &str, &str)] = &[
+    // The mod (Origins' upgrade).
+    (MOD_GAME, "mauser", "Boomhilda"),
     // Black Ops.
     ("t5", "ak74u", "AK74fu2"),
     ("t5", "commando", "Predator"),
@@ -1302,7 +1512,7 @@ mod tests {
         assert!(atts.iter().any(|r| r[4] == "elbit" && r[2] == "attachment"));
         // Every guest gun's attachment is BO2's or one added here.
         let bo2 = ["acog", "reflex", "ir", "extclip", "dualclip", "gl", "mk", "grip", "rf", "silencer", "vzoom", "fmj"];
-        for gun in all() {
+        for gun in all().filter(|g| g.game != MOD_GAME) {
             for a in gun.attachments.split_whitespace() {
                 assert!(bo2.contains(&a) || atts.iter().any(|r| r[4] == a), "{} {a}", gun.gun);
             }
@@ -1373,6 +1583,92 @@ mod tests {
         families.dedup();
         assert_eq!(families.len(), n, "each family once");
         assert_eq!(zm_vox(guns.iter().find(|g| g.gun == "m4").unwrap()), "assault");
+    }
+
+    /// bo2mp: the mod's guns are listed whole while the mod is loaded, each
+    /// leaving out the other games' copies of the same real gun (Black Ops
+    /// II's own stay); its Zombies weapons are known as Custom Games only.
+    #[test]
+    fn the_mod_supersedes_the_same_guns() {
+        let _games = TEST_GAMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let table = mod_supersedes();
+        for (m, out) in &table {
+            eprintln!("{:<14} {:<26} {}", m.gun, m.name, out.join(" "));
+        }
+        let left_out = |gun: &str| table.iter().find(|(m, _)| m.gun == gun).map(|(_, o)| o.clone()).unwrap_or_default();
+        for (gun, guests) in [
+            ("cheytac", &["mw2_cheytac"][..]),
+            ("barret", &["mw2_barrett", "mw3_barrett", "cod4_barrett"][..]),
+            ("spas", &["bo1_spas", "mw2_spas12", "mw3_spas12"][..]),
+            ("m1887", &["mw2_model1887", "mw3_1887"][..]),
+            ("l96a", &["bo1_l96a1", "mw3_l96a1", "gh_l115a3"][..]),
+            ("deagle", &["mw2_deserteagle", "mw3_deserteagle", "cod4_deserteagle"][..]),
+            ("glock", &["mw2_glock", "mw3_g18"][..]),
+            ("magnum", &["mw2_coltanaconda", "mw3_44magnum", "gh_magnum"][..]),
+            ("ak47", &["bo1_ak47", "mw2_ak47", "mw3_ak47", "cod4_ak47"][..]),
+            ("svg", &["bo3_sniper_powerbolt"][..]),
+            ("locus", &["bo3_sniper_fastbolt"][..]),
+            ("lynx", &["gh_gm6", "aw_gm6"][..]),
+            ("k98", &["waw_kar98k"][..]),
+            ("ptrs", &["waw_ptrs41"][..]),
+            ("stake", &["bo1_ithaca"][..]),
+            ("mors", &["aw_mors"][..]),
+        ] {
+            let out = left_out(gun);
+            for g in guests {
+                assert!(out.iter().any(|o| o == g), "{gun} leaves out {g}: {out:?}");
+            }
+        }
+        // (The M9 Bayonet is no Beretta.)
+        assert!(left_out("m9").is_empty());
+        for game in GAMES {
+            set_available(game, true);
+        }
+        set_available(MOD_GAME, true);
+        let bo2 = |r: &str| {
+            let mut row = vec![String::new(); 19];
+            row[0] = "10".to_owned();
+            row[2] = "weapon_assault".to_owned();
+            row[4] = r.to_owned();
+            row
+        };
+        let mut rows = vec![bo2("scar"), bo2("as50")];
+        extend_stats_rows(&mut rows);
+        let refs: Vec<&str> = rows.iter().map(|r| r[4].as_str()).collect();
+        for m in MOD {
+            assert!(refs.contains(&m.gun), "{} listed", m.gun);
+        }
+        for gone in ["mw2_cheytac", "bo1_ak47", "mw2_spas12", "bo3_sniper_powerbolt", "gh_usr", "mw3_msr", "waw_kar98k"] {
+            assert!(!refs.contains(&gone), "{gone} superseded");
+        }
+        let row = rows.iter().find(|r| r[4] == "cheytac").unwrap();
+        assert_eq!(row[0], (MOD_FIRST_INDEX + MOD.iter().position(|g| g.gun == "cheytac").unwrap() as i32).to_string());
+        assert_eq!(row[3], "WEAPON_T6MOD_CHEYTAC");
+        assert!(row[6].starts_with("t6mod:menu_mp_weapons_cheytac"));
+        let idx: i32 = row[0].parse().unwrap();
+        assert_eq!(game_for_index(idx), Some(MOD_GAME));
+        assert_eq!(family_of_reference("cheytac"), family_of_reference("mw2_cheytac"));
+        // Custom Games only.
+        assert!(is_custom_only("raygun_mark2_mp") && is_custom_only("lightstaff_pap_mp+x") && is_custom_only("scav"));
+        assert!(!is_custom_only("cheytac_mp") && !is_custom_only("tar21_mp"));
+        let ray = rows.iter().find(|r| r[4] == "raygun_mark2").unwrap()[0].parse().unwrap();
+        assert!(is_custom_only_index(ray) && !is_custom_only_index(idx));
+        // Bots: a third of their weapons, none of the Zombies ones in public.
+        let picks: Vec<_> = (0..30).filter_map(|s| bot_mod_gun(SNIPER, P, s, true, |_| true)).collect();
+        assert_eq!(picks.len(), 10);
+        assert!(picks.iter().all(|g| !is_custom_only(g.gun)));
+        assert!((0..300).filter_map(|s| bot_mod_gun(SNIPER, P, s, false, |_| true)).any(|g| g.gun == "scav"));
+        // The box: the mod's copy, no knives or equipment.
+        let zm = std::collections::HashSet::new();
+        let box_guns = zm_box_guns(&zm, |_| true);
+        assert!(box_guns.iter().any(|g| g.game == MOD_GAME && g.gun == "cheytac"));
+        assert!(!box_guns.iter().any(|g| g.game == "iw4" && g.gun == "cheytac"));
+        assert!(!box_guns.iter().any(|g| g.gun == "karambit" || g.gun == "iw5_trophy"));
+        assert_eq!(zm_upgrade_assets(MOD_GAME, "mauser")[0], "boomhilda_mp");
+        set_available(MOD_GAME, false);
+        let mut rows = vec![bo2("scar")];
+        extend_stats_rows(&mut rows);
+        assert!(rows.iter().any(|r| r[4] == "mw2_cheytac") && !rows.iter().any(|r| r[4] == "cheytac"));
     }
 
     /// One of each gun: Black Ops II's own first, then MW2's, MW3's, ...;

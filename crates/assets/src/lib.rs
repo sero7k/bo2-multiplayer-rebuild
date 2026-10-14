@@ -36,6 +36,8 @@ pub use lane::t6_frontend::{T6Frontend, load_t6_frontend, load_t6_zm_pictures, p
 // bo2zm M4: the Zombies front end (no map), a Resource kept for the run;
 // renamed here so it sits beside the multiplayer front end.
 pub use lane::{T6Frontend as T6ZmFrontend, load_t6_frontend as load_t6_zm_frontend};
+/// bo2mp: the mod's Create-a-Class pictures (`IW4L_T6_MOD`).
+pub use lane::mod_picture_rgba as t6_mod_picture_rgba;
 pub use lane_capability::{LaneStatus, PreparedCapability, lane_status};
 pub use lighting_iw4::MODEL_LIGHTING_TILE_BYTES;
 pub use loading_screen::{LoadingPreviewSource, LoadingScreen};

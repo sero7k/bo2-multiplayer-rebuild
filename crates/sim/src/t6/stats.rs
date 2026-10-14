@@ -56,6 +56,22 @@ pub fn set_local_class_set(set: Option<&str>) {
     }
 }
 
+/// bo2mp: whether the next match is a public one (FIND A MATCH: a lobby
+/// hosted for searchers or found by a search; Black Ops II's own public
+/// playlists), not a Custom Game; `BO2MP_PUBLIC=1` for a match started from
+/// the command line. Not `ranked`: the shell's Custom Games are ranked for
+/// XP. The mod's Zombies weapons (`bo2_profile::guest::MOD_CUSTOM_ONLY`)
+/// are Custom Games only.
+static PUBLIC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_local_match_public(public: bool) {
+    PUBLIC.store(public, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn public_match() -> bool {
+    PUBLIC.load(std::sync::atomic::Ordering::Relaxed) || std::env::var("BO2MP_PUBLIC").is_ok_and(|v| v == "1")
+}
+
 pub fn ranked() -> bool {
     RANKED.load(std::sync::atomic::Ordering::Relaxed) || std::env::var("BO2MP_RANKED").is_ok_and(|v| v == "1")
 }

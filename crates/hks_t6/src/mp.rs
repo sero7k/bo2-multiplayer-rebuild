@@ -2183,7 +2183,15 @@ pub fn install(host: &mut Host) -> Mp {
         let group = arg(&a, 0).to_string();
         let t = Table::new_ref();
         let mut n = 0;
-        for it in m.items().iter().filter(|it| it.cost >= 0 && it.group == group && !it.slot.is_empty()) {
+        // bo2mp: the mod's Zombies weapons only in a Custom Game's classes
+        // (`bo2_profile::guest::MOD_CUSTOM_ONLY`), never a public match's.
+        let private = m.game_modes.contains(&1);
+        for it in m
+            .items()
+            .iter()
+            .filter(|it| it.cost >= 0 && it.group == group && !it.slot.is_empty())
+            .filter(|it| private || !bo2_profile::guest::is_custom_only_index(it.index))
+        {
             n += 1;
             t.borrow_mut().set(Value::Num(n as f32), Value::Num(it.index as f32));
         }

@@ -5,6 +5,7 @@ pub mod load_jobs;
 pub mod namespace_trees;
 pub mod progress;
 pub mod t6_extra;
+pub mod t6_mod;
 pub mod zone;
 
 pub use artifact_cache::{

@@ -7,6 +7,7 @@ pub mod entities;
 pub mod gsc;
 pub mod images;
 pub mod legacy_images;
+pub mod t6_mod;
 pub mod m2;
 
 pub use capture::{

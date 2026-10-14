@@ -844,6 +844,14 @@ pub(crate) fn guest_guns_available() {
         });
     bo2_profile::guest::set_available("t7", bo3);
     diag::info!(Ui, "bo2mp guest guns: Black Ops III {}", say(bo3));
+    // (The mod's guns: its folder has its zone, `IW4L_T6_MOD`. Its guns
+    // leave out the other games' copies of the same guns.)
+    let modded = asset_transport::t6_mod::zone().is_some();
+    bo2_profile::guest::set_available(bo2_profile::guest::MOD_GAME, modded);
+    match asset_transport::t6_mod::info().filter(|_| modded) {
+        Some(m) => diag::info!(Ui, "bo2mp mod guns: {} {} by {} listed ({})", m.name, m.version, m.author, asset_transport::t6_mod::root().map_or_else(String::new, |r| r.display().to_string())),
+        None => diag::info!(Ui, "bo2mp mod guns: no mod ({} unset and no {})", asset_transport::t6_mod::ENV, asset_transport::t6_mod::DEFAULT_FOLDER),
+    }
 }
 
 /// bo2mp: Black Ops III's weapon icons (`t7_icon_weapon_*` in core_common),
@@ -888,6 +896,15 @@ fn namespace_of(prefix: &str) -> Option<asset_core::AssetNamespace> {
 
 /// An image from a game's own IWDs (the first of `names` it has).
 pub(crate) fn read_game_image(prefix: &str, names: &[String]) -> Option<(u32, u32, Vec<u8>)> {
+    // bo2mp: the mod's Create-a-Class pictures (`IW4L_T6_MOD`): its
+    // archive's, else Black Ops II's packs by name.
+    if prefix == bo2_profile::guest::MOD_GAME {
+        let zone_all = asset_transport::games_root_from_env()
+            .ok()
+            .and_then(|root| asset_transport::find_zone_file(&root, "t6:patch_mp").ok())
+            .and_then(|z| z.path.parent().map(std::path::Path::to_path_buf));
+        return names.iter().find_map(|n| assets::t6_mod_picture_rgba(n, zone_all.as_deref()));
+    }
     // bo2mp: Ghosts' pictures are in its zones (ui_mp), not in IWDs.
     if prefix == "iw6" {
         let install = ghosts_install(asset_transport::games_root_from_env().ok().as_ref())?;

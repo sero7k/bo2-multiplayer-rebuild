@@ -1225,6 +1225,10 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         let n = entnum(vm, s).unwrap_or(u32::MAX);
         let class = arg(a, 0).as_int().unwrap_or(0);
         let item = text(vm, a, 1);
+        // bo2mp: now and then one of the mod's guns instead (its scripts
+        // list only Black Ops II's items).
+        let seed = n.wrapping_mul(31).wrapping_add(class as u32 * 7).wrapping_add(item.bytes().map(u32::from).sum::<u32>());
+        let item = super::loadout::bot_item_swap(world, &item, seed).unwrap_or(item);
         if let Some(mut zm) = bot_mut(world, n) {
             zm.bots.get_mut(&n).unwrap().classes.entry(class).or_default().items.push(item);
         }

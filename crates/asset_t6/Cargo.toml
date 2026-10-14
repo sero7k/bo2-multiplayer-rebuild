@@ -11,5 +11,8 @@ asset_transport.workspace = true
 fastfile_t6.workspace = true
 ipak_t6.workspace = true
 
+[dev-dependencies]
+xmodel_runtime.workspace = true
+
 [lints]
 workspace = true

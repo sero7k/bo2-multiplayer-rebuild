@@ -504,6 +504,12 @@ pub(crate) fn tick(
     // (bo2mp: the shell has no Combat Training, so its Custom Games earn
     // XP too - or the levels and prestiges could never be reached.)
     sim::set_local_match_ranked(training.is_some() || crate::shell::enabled());
+    // bo2mp: a public match (Black Ops II's own public playlists, the
+    // shell's FIND A MATCH) or a Custom Game: the mod's Zombies weapons are
+    // Custom Games only (`bo2_profile::guest::MOD_CUSTOM_ONLY`).
+    let public = training.is_some() || (crate::shell::enabled() && crate::shell::bridge::public_start());
+    sim::set_local_match_public(public);
+    diag::info!(Ui, "bo2mp front end: {} match", if public { "public" } else { "custom" });
     // His classes come from the set the Create-a-Class he used edited: the
     // shell's always edits the custom match set (its matches are ranked
     // above only for XP), BO2's own menus the set they chose.

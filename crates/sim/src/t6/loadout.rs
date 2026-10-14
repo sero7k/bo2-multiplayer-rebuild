@@ -33,6 +33,8 @@ struct Item {
     index: i32,
     name: String,
     reference: String,
+    /// Its statstable group (`weapon_sniper`).
+    group: String,
     attachments: Vec<String>,
     /// Default classes it is in, each with its extra words (a count).
     classes: Vec<(String, Vec<String>)>,
@@ -87,6 +89,7 @@ fn read_items(t: &super::T6Table) -> Vec<Item> {
             index,
             name: cell(r, 3).to_owned(),
             reference: cell(r, 4).to_owned(),
+            group: cell(r, 2).to_owned(),
             attachments: cell(r, 8).split_whitespace().map(str::to_owned).collect(),
             classes,
             slot: cell(r, 13).to_owned(),
@@ -303,6 +306,30 @@ fn log_loadout_weapon(world: &mut World, client: u32, class: i32, slot: &str, na
     }
 }
 
+/// bo2mp: the item a bot's class takes instead of the one its script
+/// added (`botclassadditem`), now and then one of the mod's guns of the
+/// same group and slot (`bo2_profile::guest::bot_mod_gun`: Black Ops II's
+/// bot scripts list only items numbered below 256); `seed` is the bot's,
+/// class's and item's. None: the item as added.
+pub(super) fn bot_item_swap(world: &mut World, item: &str, seed: u32) -> Option<String> {
+    let all = items(world);
+    let it = all.iter().find(|i| i.name.eq_ignore_ascii_case(item) || i.reference == item)?;
+    if !matches!(it.slot.as_str(), "primary" | "secondary") {
+        return None;
+    }
+    let public = super::stats::public_match();
+    let f = super::frame(world);
+    let gun = bo2_profile::guest::bot_mod_gun(&it.group, &it.slot, seed, public, |g| {
+        f.weapon_index_by_script_name(&bo2_profile::guest::script_name(g)).is_some_and(|w| w != 0)
+    })?;
+    all.iter().find(|i| i.reference == gun.gun).map(|i| i.name.clone())
+}
+
+/// bo2mp: the guns a public match gives for a class slot holding one of the
+/// mod's Zombies weapons (the first default class's, CLASS_SMG).
+const PUBLIC_STAND_IN_PRIMARY: &str = "mp7_mp";
+const PUBLIC_STAND_IN_SECONDARY: &str = "fiveseven_mp";
+
 pub(super) fn bind(vm: &mut Vm<World>) {
     macro_rules! f {
         ($name:literal, $body:expr) => {
@@ -336,6 +363,14 @@ pub(super) fn bind(vm: &mut Vm<World>) {
                 }
             }
             (name, None)
+        };
+        // bo2mp: in a public match a class holding one of the mod's Zombies
+        // weapons (Custom Games only) gets the default class's gun instead.
+        let (name, why) = if world.resource::<Zm>().mp && super::stats::public_match() && bo2_profile::guest::is_custom_only(&name) {
+            let stand_in = if slot == "secondary" { PUBLIC_STAND_IN_SECONDARY } else { PUBLIC_STAND_IN_PRIMARY };
+            (stand_in.to_owned(), Some(format!("`{name}` is for Custom Games only; `{stand_in}` in a public match")))
+        } else {
+            (name, why)
         };
         log_loadout_weapon(world, client, class, &slot, &name, why);
         Ok(vm.string(&name))
