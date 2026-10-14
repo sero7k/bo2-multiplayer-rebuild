@@ -21,6 +21,22 @@ fn main() {
             iw3::zone::Zone::parse(&data, iw3::zone::ParseOptions::default()).unwrap()
         };
         println!("== {} (version {version:#x})", path.display());
+        // Any technique set by name (`PROBE_SETS=l_sm_r0c0n0s0,...`): the
+        // placed models' and the guns' sets live in common_mp.
+        if let Ok(names) = std::env::var("PROBE_SETS") {
+            for a in &zone.assets {
+                if let iw3::zone::Asset::TechniqueSet(ts) = a
+                {
+                    let name = ts.name.trim_start_matches(',');
+                    if names == "list" {
+                        let lit = ts.techniques.get(7).is_some_and(Option::is_some);
+                        println!("set {name} (lit technique inline: {lit})");
+                    } else if names.split(',').any(|n| name == n) {
+                        dump_set(ts);
+                    }
+                }
+            }
+        }
         let Some(world) = zone.gfx_world() else {
             println!("no GfxWorld");
             continue;
@@ -46,17 +62,6 @@ fn main() {
                 .flat_map(|m| m.materials.iter().flatten().copied())
                 .collect();
             shaders(&zone, &model_sets, n);
-        }
-        // Any technique set by name (`PROBE_SETS=l_sm_r0c0n0s0,...`): the
-        // placed models' and the guns' sets live in common_mp.
-        if let Ok(names) = std::env::var("PROBE_SETS") {
-            for a in &zone.assets {
-                if let iw3::zone::Asset::TechniqueSet(ts) = a
-                    && names.split(',').any(|n| ts.name.trim_start_matches(',') == n)
-                {
-                    dump_set(ts);
-                }
-            }
         }
         if let Some(com) = zone.com_world() {
             for (i, l) in com.primary_lights.iter().enumerate().take(3) {
