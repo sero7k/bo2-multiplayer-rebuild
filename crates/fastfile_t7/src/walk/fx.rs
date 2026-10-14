@@ -69,6 +69,8 @@ fn visual(s: &mut Stream, field: usize, ty: u8, second: bool) -> Result<()> {
         TYPE_MODEL => s.asset(AssetType::XModel, field).map(drop),
         TYPE_LIGHT => s.asset(AssetType::LightDescription, field).map(drop),
         TYPE_NAMED => s.string(field).map(drop),
+        // A lens flare element's visuals hold hashes, not a pointer.
+        TYPE_LENS_FLARE => Ok(()),
         _ if !s.ptr_at(field)?.is_inline() => s.asset(AssetType::Material, field).map(drop),
         _ => Err(ReadError::Invalid("effect visual of an unknown element type", field)),
     }
@@ -145,5 +147,65 @@ pub fn fx(s: &mut Stream, h: usize) -> Result<Option<String>> {
         }
     }
     s.string(h + 0x58)?;
+    Ok(name)
+}
+
+/// `NewLensFlareDef` (`klf`, 0xa8), read on retail `mp_common` (no public
+/// layout):
+///
+/// ```text
+/// 0x00 char* name; 0x08 LensFlareElement* elements; 0x10 u8* curves (PHYSICAL);
+/// 0x18 u8* (the first buffer's data again); 0x20 LensFlareBuffer;
+/// 0x50 u8*; 0x58 LensFlareBuffer (the curves); 0x90 u16 elementCount, bufferCount;
+/// 0x98 GfxImage* (a `-2` pointer); 0xa0 u32
+/// LensFlareBuffer 0x30: 0x00 u8* data (PHYSICAL); 0x08 u32 size; 0x0c u32 count
+/// LensFlareElement 0x1f0: 0x1a8 LensFlareBuffer; 0x1e0 GfxImage* image
+/// ```
+///
+/// Stream order: the name, the elements (VIRTUAL, aligned 16), per element
+/// its buffer's data (`size * count` bytes, PHYSICAL, aligned 256) and its
+/// image (an asset; later elements name an earlier one's by reference),
+/// then the curves (the second buffer's `size * count` bytes, PHYSICAL,
+/// aligned 16), then the image at 0x98. The header's buffers name the
+/// asset's own PHYSICAL data (the first element's buffer and the curves)
+/// ahead of loading it: forward references, checked at the end of the walk.
+pub fn lens_flare(s: &mut Stream, h: usize) -> Result<Option<String>> {
+    const ELEMENT: usize = 0x1f0;
+    s.no_loads(
+        h,
+        AssetType::NewLensFlareDef.header_size(),
+        &[0, 8, 0x10, 0x98],
+    )?;
+    let name = s.string(h)?;
+    let buffer = |s: &mut Stream, b: usize, mask: u64| -> Result<()> {
+        let size = s.u32_at(b + 8)? as usize * s.u32_at(b + 0xc)? as usize;
+        s.push(crate::stream::PHYSICAL);
+        let r = s.array(b, size, mask);
+        s.pop();
+        r.map(drop)
+    };
+    for f in [0x18, 0x50] {
+        s.push(crate::stream::PHYSICAL);
+        let r = s.array(h + f, 0, 0);
+        s.pop();
+        r?;
+    }
+    buffer(s, h + 0x20, 255)?;
+    let n = s.u16_at(h + 0x90)? as usize;
+    if let Some(t) = s.records(h + 8, n, ELEMENT, 15)? {
+        for i in 0..n {
+            let e = t + ELEMENT * i;
+            s.no_loads(e, ELEMENT, &[0x1a0, 0x1a8, 0x1e0])?;
+            buffer(s, e + 0x1a8, 255)?;
+            s.asset(AssetType::Image, e + 0x1e0)?;
+        }
+    }
+    let curves = s.u32_at(h + 0x60)? as usize * s.u32_at(h + 0x64)? as usize;
+    s.push(crate::stream::PHYSICAL);
+    let r = s.array(h + 0x10, curves, 15);
+    s.pop();
+    r?;
+    s.array(h + 0x58, 0, 0)?;
+    s.asset(AssetType::Image, h + 0x98)?;
     Ok(name)
 }

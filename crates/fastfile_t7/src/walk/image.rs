@@ -18,6 +18,7 @@
 //! pixels in the zone: their parts name the `.xpak` entries (key, offset,
 //! size) that hold each mip range.
 
+use super::capture::ImageRec;
 use crate::cursor::{ReadError, Result};
 use crate::stream::{PHYSICAL, STREAMER, Stream};
 
@@ -70,13 +71,32 @@ pub fn image(s: &mut Stream, h: usize) -> Result<Option<String>> {
     // A streamed image's pixels (its mips from the `.xpak`) take STREAMER
     // space, with no file bytes; its fallback (lowest mips) is in the file.
     let streamed = s.u8_at(h + 0xa0)? > 0;
+    let total = s.u32_at(h + 0xe8)? as usize;
+    let fallback = s.u32_at(h + 0xec)? as usize;
     s.push(if streamed { STREAMER } else { PHYSICAL });
-    let r = s.array(h + 0xd8, s.u32_at(h + 0xe8)? as usize, PIXEL_ALIGN);
+    let r = s.array(h + 0xd8, total, PIXEL_ALIGN);
     s.pop();
-    r?;
+    let pixels = r?;
     s.push(PHYSICAL);
-    let r = s.array(h + 0xe0, s.u32_at(h + 0xec)? as usize, PIXEL_ALIGN);
+    let r = s.array(h + 0xe0, fallback, PIXEL_ALIGN);
     s.pop();
-    r?;
+    let fallback_at = r?;
+    let rec = ImageRec {
+        name: name.clone().unwrap_or_else(String::new),
+        width: s.u16_at(h + 0xc4)?,
+        height: s.u16_at(h + 0xc6)?,
+        depth: s.u16_at(h + 0xc8)?,
+        levels: s.u8_at(h + 0xd0)?,
+        format: s.u32_at(h + 0xf0)?,
+        pixels: pixels.map(|at| (at, total)),
+        fallback: fallback_at.map(|at| (at, fallback)),
+        pixels_len: total,
+        xpak: if streamed {
+            streamed_parts(s, h)?
+        } else {
+            Vec::new()
+        },
+    };
+    s.capture.add_image(rec);
     Ok(name)
 }

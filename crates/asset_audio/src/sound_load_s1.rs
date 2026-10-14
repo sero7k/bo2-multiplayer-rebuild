@@ -19,7 +19,7 @@ use crate::{AssetNamespace, ZoneGame, ZoneOwner};
 
 /// The alias name prefixes kept (weapons' fire, reload, handling and
 /// melee sounds, and what their notetracks play), with every alias they
-/// chain to.
+/// chain to (and the aliases weapons and effects name, below).
 const KEEP_PREFIXES: &[&str] = &["weap_", "wpn_", "melee_", "gear_", "foly_", "mvmt_", "pc_exo_punch", "npc_exo_punch"];
 
 /// The RIFF header before a raw PCM clip's samples in a sound pak.
@@ -87,9 +87,22 @@ pub fn load_sound_catalog_s1(path: &Path) -> Result<SoundCatalog, String> {
         .map(|(i, l)| (l.name.as_str(), i))
         .collect();
     let mut keep: BTreeSet<usize> = BTreeSet::new();
+    // bo2mp: and every alias a weapon names (its projectile's bounces and
+    // explosion, whatever its prefix) or an effect plays (shell casings
+    // landing, a flash's crack): a guest gun keeps its own sounds.
+    let named: BTreeSet<&str> = cap
+        .weapons
+        .iter()
+        .flat_map(|w| w.sounds.iter().map(|(_, n)| n.as_str()))
+        .chain(
+            cap.fx
+                .iter()
+                .flat_map(|f| f.elems.iter().flat_map(|e| e.sounds.iter().map(String::as_str))),
+        )
+        .collect();
     let mut todo: Vec<usize> = by_name
         .iter()
-        .filter(|(n, _)| KEEP_PREFIXES.iter().any(|p| n.starts_with(p)))
+        .filter(|(n, _)| KEEP_PREFIXES.iter().any(|p| n.starts_with(p)) || named.contains(*n))
         .map(|(_, &i)| i)
         .collect();
     while let Some(i) = todo.pop() {

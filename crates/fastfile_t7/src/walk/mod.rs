@@ -12,13 +12,20 @@
 //! fonticon, stringtable, texturecombo, bitfield), `sound` (SndBank),
 //! `model` (xmodelmesh, xmodel; physpreset/physconstraints as placeholders),
 //! `material` (material, techset), `image`, `anim` (xanim), `placeholder`
-//! ("," stand-ins of types without a real walker yet). `weapon` has none.
+//! ("," stand-ins of types without a real walker yet), `fx` (effects,
+//! lens flares), `bundle`, `tables`, `ai`, `weapon` (weapons, captured).
 //!
 //! Debug hooks (environment): `T7_TRACE=<hex from>,<hex to>` prints every
 //! allocation in that file range, `T7_REFLOG=<hex from>,<hex to>` every
 //! reference read there, `T7_MISSES=1` the first unresolved references,
 //! `T7_VIRT=<hex file offset>,v<hex VIRTUAL offset>,...` maps offsets both
-//! ways at the end of the walk.
+//! ways at the end of the walk, `T7_DRIFT=1` groups the unresolved
+//! references by the shift that lands them. To bracket a drift:
+//! `T7_INJECT=<hex file offset>:<bytes>;...` moves VIRTUAL at those file
+//! offsets (where a correction makes every later reference land),
+//! `T7_SITE=<file.rs>:<line>=<mask>` (with `T7_SITERANGE`) tries another
+//! alignment for one walker line and `T7_SITESTAT=<from>,<to>` lists the
+//! lines that allocate in a range (`stream`).
 
 pub mod ai;
 pub mod anim;
@@ -144,7 +151,7 @@ fn walker(ty: AssetType) -> Option<AssetFn> {
         T::AttachmentCosmeticVariant => bundle::attachment_cosmetic_variant,
         T::VehicleDef => tables::vehicle,
         T::TagFx => bundle::tag_fx,
-        T::NewLensFlareDef => placeholder::lens_flare,
+        T::NewLensFlareDef => fx::lens_flare,
         T::AimTable => placeholder::aim_table,
         T::XCam => placeholder::xcam,
         T::CustomizationTable => placeholder::customization_table,
@@ -175,6 +182,7 @@ fn no_walker(ty: AssetType, at: usize) -> ReadError {
 impl<'a> Stream<'a> {
     /// The string a pointer field names: read here (current block) when it
     /// follows, the earlier string when it is a reference.
+    #[track_caller]
     pub fn string(&mut self, field: usize) -> Result<Option<String>> {
         match self.ptr_at(field)? {
             Ptr::Null => Ok(None),
@@ -195,6 +203,7 @@ impl<'a> Stream<'a> {
     /// Data a pointer field loads here: `len` bytes aligned to `mask + 1`
     /// in the current block; its file offset when it followed (`None` when
     /// null or a reference).
+    #[track_caller]
     pub fn array(&mut self, field: usize, len: usize, mask: u64) -> Result<Option<usize>> {
         match self.ptr_at(field)? {
             Ptr::Null => Ok(None),
@@ -213,6 +222,7 @@ impl<'a> Stream<'a> {
     }
 
     /// `array` of `count` records of `size` bytes.
+    #[track_caller]
     pub fn records(&mut self, field: usize, count: usize, size: usize, mask: u64) -> Result<Option<usize>> {
         let len = count.checked_mul(size).ok_or(ReadError::Invalid("record count", field))?;
         self.array(field, len, mask)
@@ -225,13 +235,15 @@ impl<'a> Stream<'a> {
         match self.ptr_at(field)? {
             Ptr::Null => Ok(None),
             p @ (Ptr::Follow | Ptr::Insert) => {
-                if p == Ptr::Insert {
-                    self.insert_slot();
-                }
+                let slot = (p == Ptr::Insert).then(|| self.insert_slot());
                 self.mark_slot(field);
                 let name = self.load_asset(ty)?;
                 if let Some(n) = &name {
                     self.name_slot(field, ty, n);
+                    // Later references to an inserted asset name its slot.
+                    if let Some(v) = slot {
+                        self.named.insert(v, (ty, n.clone()));
+                    }
                 }
                 Ok(name)
             }
@@ -261,6 +273,7 @@ impl<'a> Stream<'a> {
     }
 
     /// `string`, but a reference whose text is not found reads `<ref ...>`.
+    #[track_caller]
     pub fn string_named(&mut self, field: usize) -> Result<Option<String>> {
         let p = self.ptr_at(field)?;
         let s = self.string(field)?;
@@ -351,11 +364,10 @@ pub struct Skip {
 }
 
 /// Types whose layout is not read yet but whose assets the walk steps over
-/// by finding the next asset (always, not only with `Options::resync`):
-/// lens flares (`klf`: elements of 0x1f0 with chained sub-structs and
-/// curve keys, PHYSICAL constant buffers; see the module docs).
-pub fn is_opaque(ty: AssetType) -> bool {
-    matches!(ty, AssetType::NewLensFlareDef)
+/// by finding the next asset (always, not only with `Options::resync`).
+/// None any more: lens flares have a walker (`fx::lens_flare`).
+pub fn is_opaque(_ty: AssetType) -> bool {
+    false
 }
 
 /// File offset of the name pointer in an asset's header.
@@ -441,7 +453,8 @@ pub fn walk_with(zone: &Zone, options: Options) -> Walk {
     let mut s = Stream::new(&zone.image);
     let mut walked = Vec::new();
     let mut skipped: Vec<Skip> = Vec::new();
-    let finish = |s: &Stream, walked, skipped, stop| {
+    let finish = |s: &mut Stream, walked, skipped, stop| {
+        s.settle_forward();
         if std::env::var_os("T7_DRIFT").is_some() {
             s.print_drift();
         }
@@ -473,7 +486,7 @@ pub fn walk_with(zone: &Zone, options: Options) -> Walk {
         Ok(t) => t,
         Err(error) => {
             let stop = Stop::Failed { index: 0, ty: AssetType::Localize, at: 0, error };
-            return finish(&s, walked, skipped, stop);
+            return finish(&mut s, walked, skipped, stop);
         }
     };
     let assets = &zone.assets.assets;
@@ -490,13 +503,14 @@ pub fn walk_with(zone: &Zone, options: Options) -> Walk {
         let result = match a.asset_type().filter(|t| is_walkable(*t)) {
             None => Err(Stop::Unknown { index, raw_type: a.raw_type, at }),
             Some(ty) => {
-                if a.header == Ptr::Insert {
-                    s.insert_slot();
-                }
+                let slot = (a.header == Ptr::Insert).then(|| s.insert_slot());
                 match s.load_asset(ty) {
                     Ok(name) => {
                         if let Some(n) = &name {
                             s.name_slot(field, ty, n);
+                            if let Some(v) = slot {
+                                s.named.insert(v, (ty, n.clone()));
+                            }
                         }
                         walked.push(Walked { index, ty, start: at, end: s.pos(), name });
                         Ok(())
@@ -510,7 +524,7 @@ pub fn walk_with(zone: &Zone, options: Options) -> Walk {
             Err(stop) => {
                 let opaque = a.asset_type().is_some_and(is_opaque);
                 let resume = if options.resync || opaque { resync_point(zone, index, at + 8) } else { None };
-                let Some((j, p)) = resume else { return finish(&s, walked, skipped, stop) };
+                let Some((j, p)) = resume else { return finish(&mut s, walked, skipped, stop) };
                 let why = match &stop {
                     Stop::Failed { error, .. } => error.to_string(),
                     _ => "no walker".to_string(),
@@ -532,5 +546,5 @@ pub fn walk_with(zone: &Zone, options: Options) -> Walk {
         }
     }
     let stop = Stop::Done { end: s.pos() };
-    finish(&s, walked, skipped, stop)
+    finish(&mut s, walked, skipped, stop)
 }

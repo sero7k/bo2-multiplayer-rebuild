@@ -5,7 +5,7 @@ use crate::asset_type::AssetType;
 use crate::cursor::Result;
 use crate::layout as L;
 use crate::stream::VIRTUAL;
-use crate::walk::{ClipMapRec, ComWorldRec, GfxWorldRec, MapEntsRec, Span};
+use crate::walk::{ClipInfoRec, ClipMapRec, ComWorldRec, GfxWorldRec, MapEntsRec, Span};
 
 pub(super) fn com_world(w: &mut Walker, h: usize) -> Result<AssetId> {
     use L::ComWorld as C;
@@ -47,11 +47,12 @@ pub(super) fn com_world(w: &mut Walker, h: usize) -> Result<AssetId> {
 /// piece states and geometry follow in VIRTUAL (x64-zt's `fx_world::write`
 /// order).
 ///
-/// Retail `FxGlassDef` holds its physics preset where x64-zt has the
-/// material (then material, shattered material): read that way, retail
+/// A `FxGlassDef`'s sub-assets load physics preset first, then material,
+/// then shattered material (fields as x64-zt lays them out): retail
 /// mp_prisonbreak's four defs load `,glass_chunk`, `m/pbk_window_01`,
 /// `m/com_glass_clear_shattered`, three effects and three sounds, and the
-/// zone walks to its exact end.
+/// zone walks to its exact end; mp_strikezone's references resolve to a
+/// material in `material` and the preset in `physPreset`.
 pub(super) fn fx_world(w: &mut Walker, h: usize) -> Result<AssetId> {
     use L::FxGlassSystem as G;
     use L::FxWorld as F;
@@ -68,26 +69,41 @@ pub(super) fn fx_world(w: &mut Walker, h: usize) -> Result<AssetId> {
     let geo_limit = u(w, G::geoDataLimit)?;
     let init_geo = u(w, G::initGeoDataCount)?;
     let d = L::FxGlassDef::SIZE;
+    let trace = std::env::var_os("IW6_TRACE_FXWORLD").is_some();
+    if trace {
+        eprintln!("FXWORLD {name} at {h:#x}: defs {defs} pieceLimit {piece_limit} words {words} initPieces {init_pieces} cells {cells} geoLimit {geo_limit} initGeo {init_geo}; ptrs {:?}", (0..13).map(|k| w.s.ptr_at(g + G::defs + 8 * k)).collect::<Vec<_>>());
+    }
     if let Some(at) = w.inline_array(g + G::defs, d * defs, 3)? {
         for i in 0..defs {
             let def = at + d * i;
             use L::FxGlassDef as D;
-            // Retail order: the physics preset first, then the two
-            // materials (x64-zt's header has the materials first; retail
-            // data reads `,glass_chunk` there).
+            // The loader's order: the physics preset first, then the two
+            // materials (each in its own field, x64-zt's layout; x64-zt's
+            // writer has the materials first). A walk in field order read
+            // Prison Break only because all three load there (Strikezone's
+            // third def loads only its material, which a physics preset's
+            // read swallowed).
             for (ty, f) in [
-                (AssetType::PhysPreset, D::material),
+                (AssetType::PhysPreset, D::physPreset),
+                (AssetType::Material, D::material),
                 (AssetType::Material, D::materialShattered),
-                (AssetType::Material, D::physPreset),
                 (AssetType::Fx, D::pieceBreakEffect),
                 (AssetType::Fx, D::shatterEffect),
                 (AssetType::Fx, D::shatterSmallEffect),
                 (AssetType::Fx, D::crackDecalEffect),
             ] {
-                w.asset(ty, def + f)?;
+                let raw = w.s.ptr_at(def + f)?;
+                let before = w.s.pos();
+                let id = w.asset(ty, def + f)?;
+                if trace {
+                    eprintln!("FXWORLD def {i} field {f} {ty:?} {raw:?} -> {:?} {:?} pos {before:#x}->{:#x}", id, id.map(|id| w.cap.name_of(id).to_owned()), w.s.pos());
+                }
             }
             for snd in [D::damagedSound, D::destroyedSound, D::destroyedQuietSound] {
-                super::misc::sound_custom(w, def + snd)?;
+                let n = super::misc::sound_custom(w, def + snd)?;
+                if trace {
+                    eprintln!("FXWORLD def {i} sound {snd} -> {n:?} pos {:#x}", w.s.pos());
+                }
             }
         }
     }
@@ -105,6 +121,9 @@ pub(super) fn fx_world(w: &mut Walker, h: usize) -> Result<AssetId> {
     w.blob(g + G::lightingHandles, 2 * init_pieces, 1)?;
     w.blob(g + G::initPieceStates, L::FxGlassInitPieceState::SIZE * init_pieces, 3)?;
     w.blob(g + G::initGeoData, L::FxGlassGeometryData::SIZE * init_geo, 3)?;
+    if trace {
+        eprintln!("FXWORLD end pos {:#x}", w.s.pos());
+    }
     w.s.pop();
     Ok(w.name_only(AssetType::FxWorld, name))
 }
@@ -133,7 +152,8 @@ pub(super) fn gfx_world(w: &mut Walker, h: usize) -> Result<AssetId> {
         for i in 0..sky_count {
             let s = at + sk * i;
             let n = w.s.u32_at(s + L::GfxSky::skySurfCount)? as usize;
-            w.blob(s + L::GfxSky::skyStartSurfs, 4 * n, 3)?;
+            let surfs = w.blob(s + L::GfxSky::skyStartSurfs, 4 * n, 3)?;
+            rec.sky_surfaces.push(surfs.map(|pos| Span { pos, len: 4 * n }));
             let img = w.asset(AssetType::Image, s + L::GfxSky::skyImage)?;
             rec.sky_images.push(img);
         }
@@ -342,7 +362,7 @@ pub(super) fn gfx_world(w: &mut Walker, h: usize) -> Result<AssetId> {
             rec.surface_materials.push(m);
         }
     }
-    w.blob(h + G::dpvs__surfacesBounds, L::GfxSurfaceBounds::SIZE * surface_count, 3)?;
+    rec.surface_bounds = w.blob(h + G::dpvs__surfacesBounds, L::GfxSurfaceBounds::SIZE * surface_count, 3)?;
     let sd = L::GfxStaticModelDrawInst::SIZE;
     rec.smodel_count = smodels as u32;
     rec.smodels = w.inline_array(h + G::dpvs__smodelDrawInsts, sd * smodels, 3)?;
@@ -383,15 +403,23 @@ pub(super) fn gfx_world(w: &mut Walker, h: usize) -> Result<AssetId> {
     Ok(AssetId { ty: AssetType::GfxWorld, index: (w.cap.gfx_worlds.len() - 1) as u32 })
 }
 
-fn map_triggers(w: &mut Walker, t: usize) -> Result<()> {
+/// A `MapTriggers`' arrays: (models, hulls, slabs) as file spans.
+type TriggerSpans = [Option<Span>; 3];
+
+fn map_triggers(w: &mut Walker, t: usize) -> Result<TriggerSpans> {
     use L::MapTriggers as T;
     let count = w.s.u32_at(t + T::count)? as usize;
     let hulls = w.s.u32_at(t + T::hullCount)? as usize;
     let slabs = w.s.u32_at(t + T::slabCount)? as usize;
-    w.blob(t + T::models, L::TriggerModel::SIZE * count, 3)?;
-    w.blob(t + T::hulls, L::TriggerHull::SIZE * hulls, 3)?;
-    w.blob(t + T::slabs, L::TriggerSlab::SIZE * slabs, 3)?;
-    Ok(())
+    let span = |pos: Option<usize>, len: usize| pos.map(|pos| Span { pos, len });
+    let m = w.blob(t + T::models, L::TriggerModel::SIZE * count, 3)?;
+    let h = w.blob(t + T::hulls, L::TriggerHull::SIZE * hulls, 3)?;
+    let s = w.blob(t + T::slabs, L::TriggerSlab::SIZE * slabs, 3)?;
+    Ok([
+        span(m, L::TriggerModel::SIZE * count),
+        span(h, L::TriggerHull::SIZE * hulls),
+        span(s, L::TriggerSlab::SIZE * slabs),
+    ])
 }
 
 /// `MapEnts`: the entity string, triggers, client triggers, spawns and
@@ -409,7 +437,7 @@ pub(super) fn map_ents(w: &mut Walker, h: usize) -> Result<AssetId> {
         }
         None => String::new(),
     };
-    map_triggers(w, h + M::trigger)?;
+    let triggers = map_triggers(w, h + M::trigger)?;
     map_triggers(w, h + M::clientTrigger__trigger)?;
     let ct = h + M::clientTrigger;
     use L::ClientTriggers as C;
@@ -447,7 +475,12 @@ pub(super) fn map_ents(w: &mut Walker, h: usize) -> Result<AssetId> {
         }
     }
     w.s.pop();
-    w.cap.map_ents.push(MapEntsRec { name, entity_string, spawns: spawn_at.map(|pos| Span { pos, len: L::SpawnPointEntityRecord::SIZE * spawns }) });
+    w.cap.map_ents.push(MapEntsRec {
+        name,
+        entity_string,
+        spawns: spawn_at.map(|pos| Span { pos, len: L::SpawnPointEntityRecord::SIZE * spawns }),
+        triggers,
+    });
     Ok(AssetId { ty: AssetType::MapEnts, index: (w.cap.map_ents.len() - 1) as u32 })
 }
 
@@ -475,54 +508,85 @@ pub(super) fn glass_world(w: &mut Walker, h: usize) -> Result<AssetId> {
 }
 
 /// A `ClipInfo`'s arrays (x64-zt's `clip_map::write_info`).
-fn clip_info(w: &mut Walker, c: usize) -> Result<()> {
+/// The file offset a pointer field names when it refers to VIRTUAL data
+/// read earlier (no read: `inline_array` reads what follows).
+fn ref_pos(w: &Walker, field: usize) -> Result<Option<usize>> {
+    Ok(match w.s.ptr_at(field)? {
+        crate::ptr::Ptr::Ref { block: VIRTUAL, offset } => w.vmap.file_pos(offset as u64),
+        _ => None,
+    })
+}
+
+fn clip_info(w: &mut Walker, c: usize) -> Result<ClipInfoRec> {
     use L::ClipInfo as I;
+    let mut rec = ClipInfoRec::default();
     let n = |w: &Walker, off: usize| -> Result<usize> { Ok(w.s.u32_at(c + off)? as usize) };
     let planes = n(w, I::planeCount)?;
-    w.blob(c + I::planes, L::cplane_s::SIZE * planes, 3)?;
+    rec.plane_count = planes as u32;
+    rec.planes = w.blob(c + I::planes, L::cplane_s::SIZE * planes, 3)?;
     let mats = n(w, I::numMaterials)?;
     let cm = L::ClipMaterial::SIZE;
     if let Some(at) = w.inline_array(c + I::materials, cm * mats, 3)? {
         for i in 0..mats {
-            w.xstr(at + cm * i + L::ClipMaterial::name)?;
+            let m = at + cm * i;
+            let name = w.xstr(m + L::ClipMaterial::name)?.unwrap_or_default();
+            let flags = w.s.i32_at(m + L::ClipMaterial::surfaceFlags)?;
+            let contents = w.s.i32_at(m + L::ClipMaterial::contents)?;
+            rec.materials.push((name, flags, contents));
         }
     }
     let sides = n(w, I::numBrushSides)?;
     let bs = L::cbrushside_t::SIZE;
     if let Some(at) = w.inline_array(c + I::brushsides, bs * sides, 3)? {
         for i in 0..sides {
-            w.blob(at + bs * i + L::cbrushside_t::plane, L::cplane_s::SIZE, 3)?;
+            if let Some(p) = w.blob(at + bs * i + L::cbrushside_t::plane, L::cplane_s::SIZE, 3)? {
+                rec.side_planes.insert(at + bs * i, p);
+            }
         }
     }
     let edges = n(w, I::numBrushEdges)?;
     w.blob(c + I::brushEdges, edges, 0)?;
     let lbn = n(w, I::leafbrushNodesCount)?;
+    rec.leaf_brush_node_count = lbn as u32;
     let ln = L::cLeafBrushNode_s::SIZE;
-    if let Some(at) = w.inline_array(c + I::leafbrushNodes, ln * lbn, 3)? {
+    rec.leaf_brush_nodes = w.inline_array(c + I::leafbrushNodes, ln * lbn, 3)?;
+    if let Some(at) = rec.leaf_brush_nodes {
         for i in 0..lbn {
             let node = at + ln * i;
             let count = w.s.u16_at(node + L::cLeafBrushNode_s::leafBrushCount)? as i16;
-            if count > 0 {
-                w.blob(node + L::cLeafBrushNode_s::data, 2 * count as usize, 1)?;
-            }
+            rec.leaf_brush_lists.push(if count > 0 {
+                w.blob(node + L::cLeafBrushNode_s::data, 2 * count as usize, 1)?
+            } else {
+                None
+            });
         }
     }
     let leaf_brushes = n(w, I::numLeafBrushes)?;
     w.blob(c + I::leafbrushes, 2 * leaf_brushes, 1)?;
     let brushes = w.s.u16_at(c + I::numBrushes)? as usize;
+    rec.brush_count = brushes as u32;
     let b = L::cbrush_t::SIZE;
-    if let Some(at) = w.inline_array(c + I::brushes, b * brushes, 127)? {
+    rec.brushes = w.inline_array(c + I::brushes, b * brushes, 127)?;
+    if let Some(at) = rec.brushes {
         for i in 0..brushes {
             let br = at + b * i;
-            if let Some(side) = w.inline_array(br + L::cbrush_t::sides, bs, 3)? {
-                w.blob(side + L::cbrushside_t::plane, L::cplane_s::SIZE, 3)?;
-            }
+            let referred = ref_pos(w, br + L::cbrush_t::sides)?;
+            let side = match w.inline_array(br + L::cbrush_t::sides, bs, 3)? {
+                Some(side) => {
+                    if let Some(p) = w.blob(side + L::cbrushside_t::plane, L::cplane_s::SIZE, 3)? {
+                        rec.side_planes.insert(side, p);
+                    }
+                    Some(side)
+                }
+                None => referred,
+            };
+            rec.brush_sides.push(side);
             w.blob(br + L::cbrush_t::baseAdjacentSide, 1, 0)?;
         }
     }
-    w.blob(c + I::brushBounds, 24 * brushes, 127)?;
-    w.blob(c + I::brushContents, 4 * brushes, 3)?;
-    Ok(())
+    rec.brush_bounds = w.blob(c + I::brushBounds, 24 * brushes, 127)?;
+    rec.brush_contents = w.blob(c + I::brushContents, 4 * brushes, 3)?;
+    Ok(rec)
 }
 
 /// `clipMap_t` offsets (MSVC x64; the struct is `alignas(128)`, 640 bytes).
@@ -572,18 +636,20 @@ pub(super) fn clip_map(w: &mut Walker, h: usize) -> Result<AssetId> {
     let n32 = |w: &Walker, off: usize| -> Result<usize> { Ok(w.s.u32_at(h + off)? as usize) };
     w.s.push(VIRTUAL);
     let name = w.xstr(h + cm::NAME)?.unwrap_or_default();
-    clip_info(w, h + cm::INFO)?;
+    let info = clip_info(w, h + cm::INFO)?;
     w.s.push(TEMP);
     if let Some(at) = w.inline_array(h + cm::P_INFO, L::ClipInfo::SIZE, 3)? {
         clip_info(w, at)?;
     }
     w.s.pop();
-    let mut rec = ClipMapRec { name: name.clone(), header: h, ..Default::default() };
+    let mut rec = ClipMapRec { name: name.clone(), header: h, info, ..Default::default() };
     let smodels = n32(w, cm::NUM_STATIC_MODELS)?;
     let sm = L::cStaticModel_s::SIZE;
-    if let Some(at) = w.inline_array(h + cm::STATIC_MODEL_LIST, sm * smodels, 3)? {
+    rec.static_models = w.inline_array(h + cm::STATIC_MODEL_LIST, sm * smodels, 3)?;
+    if let Some(at) = rec.static_models {
         for i in 0..smodels {
-            w.asset(AssetType::XModel, at + sm * i + L::cStaticModel_s::xmodel)?;
+            let m = w.asset(AssetType::XModel, at + sm * i + L::cStaticModel_s::xmodel)?;
+            rec.static_model_models.push(m);
         }
     }
     let nodes = n32(w, cm::NUM_NODES)?;
@@ -606,20 +672,27 @@ pub(super) fn clip_map(w: &mut Walker, h: usize) -> Result<AssetId> {
     w.blob(h + cm::BORDERS, L::CollisionBorder::SIZE * borders, 3)?;
     let parts = n32(w, cm::PARTITION_COUNT)?;
     let cp = L::CollisionPartition::SIZE;
-    if let Some(at) = w.inline_array(h + cm::PARTITIONS, cp * parts, 3)? {
+    rec.partition_count = parts as u32;
+    rec.partitions = w.inline_array(h + cm::PARTITIONS, cp * parts, 3)?;
+    if let Some(at) = rec.partitions {
         for i in 0..parts {
             w.blob(at + cp * i + L::CollisionPartition::borders, L::CollisionBorder::SIZE, 3)?;
         }
     }
     let trees = n32(w, cm::AABB_TREE_COUNT)?;
-    w.blob(h + cm::AABB_TREES, L::CollisionAabbTree::SIZE * trees, 15)?;
+    rec.aabb_tree_count = trees as u32;
+    rec.aabb_trees = w.blob(h + cm::AABB_TREES, L::CollisionAabbTree::SIZE * trees, 15)?;
     let subs = n32(w, cm::NUM_SUB_MODELS)?;
     let cmo = L::cmodel_t::SIZE;
-    if let Some(at) = w.inline_array(h + cm::CMODELS, cmo * subs, 3)? {
+    rec.cmodel_count = subs as u32;
+    rec.cmodels = w.inline_array(h + cm::CMODELS, cmo * subs, 3)?;
+    if let Some(at) = rec.cmodels {
         for i in 0..subs {
-            if let Some(info) = w.inline_array(at + cmo * i + L::cmodel_t::info, L::ClipInfo::SIZE, 3)? {
+            let own = w.inline_array(at + cmo * i + L::cmodel_t::info, L::ClipInfo::SIZE, 3)?;
+            if let Some(info) = own {
                 clip_info(w, info)?;
             }
+            rec.cmodel_own_info.push(own.is_some());
         }
     }
     let smn = w.s.u16_at(h + cm::SMODEL_NODE_COUNT)? as usize;
@@ -636,10 +709,13 @@ pub(super) fn clip_map(w: &mut Walker, h: usize) -> Result<AssetId> {
     let dyn_counts = [w.s.u16_at(h + cm::DYN_ENT_COUNT)? as usize, w.s.u16_at(h + cm::DYN_ENT_COUNT + 2)? as usize];
     let de = L::DynEntityDef::SIZE;
     for (k, &count) in dyn_counts.iter().enumerate() {
-        if let Some(at) = w.inline_array(h + cm::DYN_ENT_DEF_LIST + 8 * k, de * count, 3)? {
+        rec.dyn_ent_counts[k] = count as u32;
+        rec.dyn_ent_defs[k] = w.inline_array(h + cm::DYN_ENT_DEF_LIST + 8 * k, de * count, 3)?;
+        if let Some(at) = rec.dyn_ent_defs[k] {
             for i in 0..count {
                 let d = at + de * i;
-                w.asset(AssetType::XModel, d + L::DynEntityDef::baseModel)?;
+                let m = w.asset(AssetType::XModel, d + L::DynEntityDef::baseModel)?;
+                rec.dyn_ent_models[k].push(m);
                 w.asset(AssetType::Fx, d + L::DynEntityDef::destroyFx)?;
                 w.asset(AssetType::PhysPreset, d + L::DynEntityDef::physPreset)?;
                 w.blob(d + L::DynEntityDef::hinge, L::DynEntityHingeDef::SIZE, 3)?;
@@ -669,7 +745,11 @@ pub(super) fn clip_map(w: &mut Walker, h: usize) -> Result<AssetId> {
             let inst = at + si * i;
             let def_ptr = w.s.ptr_at(inst + L::ScriptableInstance::def)?;
             let Some(def) = w.asset(AssetType::Scriptable, inst + L::ScriptableInstance::def)? else { continue };
-            let Some(dh) = w.header_of(def).or_else(|| def_ptr.virtual_offset().and_then(|v| w.vmap.file_pos(v as u64))) else {
+            let Some(dh) = w
+                .header_of(def)
+                .or_else(|| w.cap.scriptable_headers.get(&def.index).copied())
+                .or_else(|| def_ptr.virtual_offset().and_then(|v| w.vmap.file_pos(v as u64)))
+            else {
                 return Err(crate::cursor::ReadError::Invalid("scriptable instance def not found", inst));
             };
             let constants = w.s.u8_at(dh + L::ScriptableDef::eventConstantsSize)? as usize;
@@ -692,4 +772,131 @@ pub(super) fn clip_map(w: &mut Walker, h: usize) -> Result<AssetId> {
     w.s.pop();
     w.cap.clip_maps.push(rec);
     Ok(AssetId { ty: AssetType::ClipMap, index: (w.cap.clip_maps.len() - 1) as u32 })
+}
+
+/// `ScriptableEventType`: which member of an event's data union it uses
+/// (the kinds with a pointer; the others hold numbers only).
+mod scriptable_event {
+    pub const MODEL: u32 = 0;
+    pub const FX: u32 = 1;
+    pub const STOP_FX: u32 = 2;
+    pub const SOUND: u32 = 3;
+    pub const ANIMATION: u32 = 4;
+    pub const PHYSICS_LAUNCH: u32 = 6;
+    /// (Retail: a light flicker's event 7 names its `noteworthy`.)
+    pub const LIGHT_SETTINGS: u32 = 7;
+    pub const SHAKE: u32 = 9;
+}
+
+/// A stop-effect event's handle: stored as a sound alias is
+/// (`misc::sound_custom`): one that follows is an 8-byte slot holding the
+/// effect's name (read right there, or a reference to an earlier string),
+/// not the effect. (Retail mp_strikezone's and mp_dart's; a play-effect
+/// event's effect loads as an asset: mp_fahrenheit's security camera loads
+/// a name-only `FxEffectDef` there.)
+fn fx_name_slot(w: &mut Walker, field: usize) -> Result<Option<String>> {
+    super::misc::sound_custom(w, field)
+}
+
+/// `ScriptableDef` (a map's scriptable objects: destructible cars, lights,
+/// fans), loaded inline by `clipMap_t::scriptableMapEnts` instances: its
+/// name, base model, collision brush names, parts (states, each state's
+/// on-enter events with the asset or name each event's kind points at) and
+/// notetracks, in x64-zt's `scriptable::write` order.
+pub(super) fn scriptable(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::ScriptableDef as S;
+    let trace = std::env::var_os("IW6_TRACE_SCRIPTABLE").is_some();
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + S::name)?.unwrap_or_default();
+    if trace {
+        eprintln!("SCRIPTABLE {name} header at {h:#x}, name read to {:#x}; parts {} notetracks {} ptrs {:?}", w.s.pos(), w.s.u8_at(h + S::partCount)?, w.s.u8_at(h + S::notetrackCount)?, (0..6).map(|k| w.s.ptr_at(h + 8 * k)).collect::<Vec<_>>());
+    }
+    w.asset(AssetType::XModel, h + S::baseModel)?;
+    w.xstr(h + S::baseCollisionBrush)?;
+    w.xstr(h + S::destroyedCollisionBrush)?;
+    let parts = usize::from(w.s.u8_at(h + S::partCount)?);
+    let pd = L::ScriptablePartDef::SIZE;
+    if let Some(at) = w.inline_array(h + S::parts, pd * parts, 3)? {
+        for p in 0..parts {
+            let part = at + pd * p;
+            let states = usize::from(w.s.u8_at(part + L::ScriptablePartDef::stateCount)?);
+            let sd = L::ScriptableStateDef::SIZE;
+            let Some(sat) = w.inline_array(part + L::ScriptablePartDef::states, sd * states, 3)? else { continue };
+            if trace {
+                eprintln!("SCRIPTABLE part {p} at {part:#x}: {states} states at {sat:#x}");
+            }
+            for s in 0..states {
+                let state = sat + sd * s;
+                let events = usize::from(w.s.u8_at(state + L::ScriptableStateDef::onEnterEventCount)?);
+                let ed = L::ScriptableEventDef::SIZE;
+                let Some(eat) = w.inline_array(state + L::ScriptableStateDef::onEnterEvents, ed * events, 3)? else {
+                    continue;
+                };
+                for e in 0..events {
+                    let ev = eat + ed * e;
+                    let ty = w.s.u32_at(ev + L::ScriptableEventDef::r#type)?;
+                    let data = ev + L::ScriptableEventDef::data;
+                    if trace {
+                        eprintln!(
+                            "SCRIPTABLE {name} part {p} state {s} event {e} type {ty} data {:?} {:?} pos {:#x}",
+                            w.s.ptr_at(data),
+                            w.s.ptr_at(data + 16),
+                            w.s.pos()
+                        );
+                    }
+                    use scriptable_event as T;
+                    match ty {
+                        T::MODEL | T::PHYSICS_LAUNCH => {
+                            w.asset(AssetType::XModel, data)?;
+                        }
+                        T::FX => {
+                            w.asset(AssetType::Fx, data)?;
+                        }
+                        T::STOP_FX => {
+                            fx_name_slot(w, data)?;
+                        }
+                        // The alias's name itself (retail mp_dart: a name
+                        // that follows is right there; mp_strikezone's refer
+                        // to earlier strings).
+                        T::SOUND => {
+                            w.xstr(data)?;
+                        }
+                        T::ANIMATION | T::SHAKE => {
+                            w.xstr(data)?;
+                        }
+                        T::LIGHT_SETTINGS => {
+                            w.xstr(data + L::ScriptableEventLightSettingsDef::noteworthy)?;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    let notes = usize::from(w.s.u8_at(h + S::notetrackCount)?);
+    let nd = L::ScriptableNotetrackDef::SIZE;
+    if let Some(at) = w.inline_array(h + S::notetracks, nd * notes, 3)? {
+        for n in 0..notes {
+            let note = at + nd * n;
+            let data = note + L::ScriptableNotetrackDef::data;
+            match w.s.u32_at(note + L::ScriptableNotetrackDef::r#type)? {
+                0 => {
+                    w.asset(AssetType::Fx, data)?;
+                }
+                1 => {
+                    w.xstr(data)?;
+                }
+                _ => {}
+            }
+        }
+    }
+    w.s.pop();
+    if trace {
+        eprintln!("SCRIPTABLE {name} end pos {:#x}", w.s.pos());
+    }
+    let id = w.name_only(AssetType::Scriptable, name);
+    // (Instances read their part and event counts from it, also when it
+    // was loaded inline by an earlier instance.)
+    w.cap.scriptable_headers.insert(id.index, h);
+    Ok(id)
 }

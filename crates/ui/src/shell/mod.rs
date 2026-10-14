@@ -189,6 +189,15 @@ pub(crate) enum Act {
     /// players by rank.
     Vote(usize),
     Leaderboard,
+    /// The main menu's modes that are not built yet: a notice, nothing else.
+    Soon(Soon),
+}
+
+/// The main menu's modes still to come (WARZONE, SPEC OPS).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Soon {
+    Warzone,
+    SpecOps,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -336,6 +345,11 @@ pub(crate) fn pages(c: &Catalog) -> Vec<(String, Vec<usize>)> {
     out
 }
 
+/// A main-menu row's place (for coming back to it).
+fn main_row(act: Act) -> usize {
+    rows(&Shell::default(), &Catalog::default()).iter().position(|r| r.act == act).unwrap_or(0)
+}
+
 fn rows_len(s: &Shell, c: &Catalog) -> usize {
     rows(s, c).len()
 }
@@ -346,6 +360,8 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
         Screen::Main => vec![
             Row::new("MULTIPLAYER", "Find a match, or a custom game with bots on every map.", Act::Multiplayer),
             Row::new("ZOMBIES", "Survive the undead.", Act::Zombies),
+            Row::new("WARZONE", "Coming soon.", Act::Soon(Soon::Warzone)),
+            Row::new("SPEC OPS", "Coming soon.", Act::Soon(Soon::SpecOps)),
             Row::new("OPTIONS", "Graphics, sound and controls.", Act::Options),
             Row::new("FRIENDS", "Add friends by their code and see where they are.", Act::Friends),
             Row::new("QUIT", "Back to the desktop.", Act::Quit),
@@ -460,12 +476,24 @@ pub(crate) fn look_kind(screen: Screen) -> cards::Kind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Ask {
     Prestige,
+    /// A notice with OK alone: a main-menu mode that is not built yet.
+    Soon(Soon),
 }
 
 impl Ask {
     pub(crate) fn text(self) -> (&'static str, &'static str) {
         match self {
             Ask::Prestige => ("ENTER PRESTIGE?", "You go back to level 1 with the next prestige icon. Your unlocks start over."),
+            Ask::Soon(Soon::Warzone) => ("WARZONE", "Coming soon."),
+            Ask::Soon(Soon::SpecOps) => ("SPEC OPS", "Coming soon."),
+        }
+    }
+
+    /// Its buttons: YES / NO, or OK for a notice.
+    pub(crate) fn buttons(self) -> &'static [&'static str] {
+        match self {
+            Ask::Prestige => &["YES", "NO"],
+            Ask::Soon(_) => &["OK"],
         }
     }
 }
@@ -478,6 +506,7 @@ impl Shell {
                 bridge::request(Request::Prestige);
                 self.note("Prestige entered.", now);
             }
+            Ask::Soon(_) => {}
         }
     }
 
@@ -498,7 +527,7 @@ impl Shell {
                 self.go(from);
                 self.page = 0;
                 self.focus = match (from, was) {
-                    (Screen::Main, _) => 2,
+                    (Screen::Main, _) => main_row(Act::Options),
                     (Screen::Multiplayer, Screen::Barracks) => 3,
                     (Screen::Multiplayer, _) => 4,
                     (Screen::Zombies, _) => 4,
@@ -537,7 +566,7 @@ impl Shell {
             Screen::Main => {}
             Screen::Friends => {
                 self.go(Screen::Main);
-                self.focus = 3;
+                self.focus = main_row(Act::Friends);
             }
             Screen::Lobbies if self.searching => {
                 self.searching = false;
@@ -558,7 +587,7 @@ impl Shell {
             Screen::Multiplayer => self.go(Screen::Main),
             Screen::Zombies => {
                 self.go(Screen::Main);
-                self.focus = 1;
+                self.focus = main_row(Act::Zombies);
             }
             Screen::ZmMapPick | Screen::ZmStartPick => {
                 let from = self.screen;
@@ -718,6 +747,10 @@ impl Shell {
                     self.ask = Some(Ask::Prestige);
                     self.ask_focus = 1;
                 }
+            }
+            Act::Soon(which) => {
+                self.ask = Some(Ask::Soon(which));
+                self.ask_focus = 0;
             }
             Act::Quit => {
                 exit.write(AppExit::Success);
@@ -1081,7 +1114,8 @@ fn shell_input(
     let back = keys.just_pressed(KeyCode::Escape) || keys.just_pressed(KeyCode::Backspace) || pad(GamepadButton::East);
     // A yes / no question is up: it has the keys until it is answered.
     if let Some(kind) = shell.ask {
-        if dir.1 != 0 {
+        let n = kind.buttons().len();
+        if dir.1 != 0 && n > 1 {
             shell.ask_focus ^= 1;
         }
         let mut pick = confirm;

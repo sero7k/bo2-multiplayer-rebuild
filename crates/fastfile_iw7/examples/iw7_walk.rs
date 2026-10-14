@@ -54,6 +54,30 @@ fn main() {
                 println!("  refs {:#x}..{:#x} n {} best {:x?}", chunk[0], chunk[chunk.len() - 1], chunk.len(), &h[..3]);
             }
         }
+        if let Ok(v) = std::env::var("IW7_NEAR") {
+            let v = u64::from_str_radix(v.trim_start_matches("0x"), 16).unwrap();
+            let mut slots: Vec<(u64, fastfile_iw7::walk::AssetId)> = w.slot_list();
+            slots.sort_by_key(|s| s.0.abs_diff(v));
+            for (k, id) in slots.iter().take(6) {
+                println!("slot {k:#x} (off {:+}) {:?} {}", *k as i64 - v as i64, id.ty, w.cap.name_of(*id));
+            }
+        }
+        if let Ok(v) = std::env::var("IW7_VIRT") {
+            // Which table entry's data holds this local VIRTUAL offset.
+            let v = u64::from_str_radix(v.trim_start_matches("0x"), 16).unwrap();
+            let mut best = None;
+            for (i, &pos) in w.cap.starts.iter().enumerate() {
+                if let Some(at) = w.virtual_map().virt_of(pos) {
+                    if at <= v {
+                        best = Some((i, at, pos));
+                    }
+                }
+            }
+            if let Some((i, at, pos)) = best {
+                let name = w.cap.by_table.get(&i).map(|id| w.cap.name_of(*id).to_owned()).unwrap_or_default();
+                println!("local {v:#x}: in table entry {i} {:?} {name} (starts at virt {at:#x}, file {pos:#x})", zone.assets.assets[i].asset_type());
+            }
+        }
         if std::env::var_os("IW7_IMG").is_some() {
             let l1: u64 = w.cap.images.iter().map(|i| i.data_len1 as u64).sum();
             let l2: u64 = w.cap.images.iter().map(|i| i.data_len2 as u64).sum();

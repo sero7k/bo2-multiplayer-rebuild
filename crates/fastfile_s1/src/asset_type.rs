@@ -77,11 +77,11 @@ asset_types! {
     Font = 0x22, "font", 40;
     MenuList = 0x23, "menulist", 24;
     Menu = 0x24, "menu", 200;
-    AnimClass = 0x25, "animclass", 0;
+    AnimClass = 0x25, "animclass", 88;
     LocalizeEntry = 0x26, "localize", 16;
     Attachment = 0x27, "attachment", 120;
     Weapon = 0x28, "weapon", 3560;
-    SndDriverGlobals = 0x29, "snddriverglobals", 0;
+    SndDriverGlobals = 0x29, "snddriverglobals", 32;
     Fx = 0x2a, "fx", 64;
     ImpactFx = 0x2b, "impactfx", 16;
     SurfaceFx = 0x2c, "surfacefx", 16;
@@ -98,7 +98,7 @@ asset_types! {
     Vehicle = 0x37, "vehicle", 2256;
     AddonMapEnts = 0x38, "addon_map_ents", 136;
     NetConstStrings = 0x39, "netconststrings", 32;
-    ReverbPreset = 0x3a, "reverbpreset", 0;
+    ReverbPreset = 0x3a, "reverbpreset", 72;
     LuaFile = 0x3b, "luafile", 24;
     Scriptable = 0x3c, "scriptable", 64;
     EquipmentSndTable = 0x3d, "equipsndtable", 88;

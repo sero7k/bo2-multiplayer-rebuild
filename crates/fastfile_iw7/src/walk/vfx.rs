@@ -172,3 +172,23 @@ pub(super) fn vfx(w: &mut Walker, h: usize) -> Result<AssetId> {
     w.s.pop();
     Ok(w.name_only(AssetType::Vfx, name))
 }
+
+/// A particle simulation (x64-zt `iw7/assets/fxparticlesimanimation.cpp`):
+/// its material, particle data (aligned 32), 3-D orientations, indices,
+/// frames and colour table.
+pub(super) fn particle_sim(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::FxParticleSimAnimation as P;
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + P::name)?.unwrap_or_default();
+    w.asset(AssetType::Material, h + P::material)?;
+    let n = w.s.u32_at(h + P::header__particleDataCount)? as usize;
+    w.blob(h + P::particleData, L::FxParticleSimAnimationParticleData::SIZE * n, 31)?;
+    w.blob(h + P::particleDataOrientation3D, L::FxParticleSimAnimationParticleDataOrientation3D::SIZE * n, 7)?;
+    w.blob(h + P::particleDataIndex, L::FxParticleSimAnimationParticleDataIndex::SIZE * n, 1)?;
+    let frames = w.s.u32_at(h + P::header__frameCount)? as usize;
+    w.blob(h + P::frames, L::FxParticleSimAnimationFrame::SIZE * frames, 3)?;
+    let colours = w.s.u32_at(h + P::header__colorTableSize)? as usize;
+    w.blob(h + P::colorTable, 16 * colours, 3)?;
+    w.s.pop();
+    Ok(w.name_only(AssetType::ParticleSimAnimation, name))
+}

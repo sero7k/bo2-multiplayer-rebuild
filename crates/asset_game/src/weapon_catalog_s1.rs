@@ -40,6 +40,9 @@ pub struct S1WeaponView {
     /// `locationDamageMultipliers`: one per hit location.
     pub location_damage: Option<Vec<f32>>,
     pub tracer: Option<String>,
+    /// bo2mp: the gun's own impact effects (`WeaponCombatFx::impact_row`),
+    /// for an impact Black Ops II has nothing like; empty for none.
+    pub impact_row: Vec<String>,
 }
 
 impl S1WeaponView {
@@ -174,6 +177,37 @@ fn remap_s1_fire_type(raw: i32) -> i32 {
     }
 }
 
+/// AW `ImpactType` -> Black Ops II's (the numbering its impact table and
+/// the match's hit events read: none, bullet small, large, armour
+/// piercing, extreme, shotgun, grenade bounce, grenade explode, rifle
+/// grenade, rocket explode, ...). AW's own numbering (its impact table's
+/// rows, measured on common_mp: row effects named `small_*`, `large_*`,
+/// `20mm_*`, `expround_*`, `shotgun_*`, `energy_shotgun_*`, footsteps,
+/// `frag_grenade_*`, `rocket_explosion_*`, `laser_small_*`) is IW's with
+/// the energy shotgun (the Tac-19) and the laser (the EM1) added. Taken as
+/// it was, the Tac-19's 7 read as Black Ops II's rifle grenade: every
+/// pellet hit played a grenade explosion; the EM1's 12 a mortar shell.
+pub fn remap_s1_impact_type(raw: i32) -> i32 {
+    match raw {
+        // Small, large, armour piercing.
+        1..=3 => raw,
+        // Explosive rounds (MORS, EPM3): Black Ops II's extreme bullet.
+        4 => 4,
+        // Shotgun, explosive shotgun, energy shotgun (Tac-19).
+        5..=7 => 5,
+        // Grenade bounce, grenade explode (frag, crossbow bolt, micro
+        // drone), rocket (MAAWS, MAHEM), dud.
+        8 => 6,
+        9 => 7,
+        10 => 9,
+        11 => 11,
+        // Laser (EM1), grapple and the rest: bullets.
+        12 | 13 => 1,
+        14.. => 2,
+        _ => 0,
+    }
+}
+
 fn s1_body_facts(w: &S1WeaponView) -> WeaponBodyFacts {
     let ads_in = w.def_i32(d::adsTransInTime);
     let ads_out = w.def_i32(d::adsTransOutTime);
@@ -181,7 +215,7 @@ fn s1_body_facts(w: &S1WeaponView) -> WeaponBodyFacts {
         body_resolved: !w.def.is_empty(),
         clip_size: w.def_i32(d::clipSize),
         fire_time_ms: w.def_i32(d::stateTimers__fireTime),
-        impact_type: w.def_i32(d::impactType),
+        impact_type: remap_s1_impact_type(w.def_i32(d::impactType)),
         alternate_raise_time_ms: w.def_i32(d::stateTimers__altRaiseTime),
         ads_zoom_fov: w.def_f32(d::adsZoomFov),
         ads_in_rate: if ads_in > 0 { 1.0 / ads_in as f32 } else { 0.0 },
@@ -474,6 +508,7 @@ impl WeaponCatalog {
             world_last_shot_eject_hint: w.effect(d::worldLastShotEjectEffect),
             explosion_hint: w.effect(d::projExplosionEffect),
             tracer_hint: w.tracer.clone(),
+            impact_row: w.impact_row.clone(),
             ..WeaponCombatFx::default()
         };
         let reticle = WeaponReticleAssets {

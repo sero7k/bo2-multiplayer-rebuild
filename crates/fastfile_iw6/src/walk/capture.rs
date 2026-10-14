@@ -151,6 +151,9 @@ pub struct XModelRec {
     pub bounds: ([f32; 3], [f32; 3]),
     pub phys_preset: Option<AssetId>,
     pub phys_collmap: Option<AssetId>,
+    /// bo2mp: `XModelCollSurf_s[numCollSurfs]` (bounds, bone, contents,
+    /// surface flags: Ghosts keeps no collision triangles in them).
+    pub coll_surfs: Option<Span>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -319,6 +322,10 @@ pub struct GfxWorldRec {
     pub model_count: u32,
     pub lightmaps: Vec<(Option<super::AssetId>, Option<super::AssetId>)>,
     pub sky_images: Vec<Option<super::AssetId>>,
+    /// bo2mp: `GfxSurfaceBounds[surfaceCount]`.
+    pub surface_bounds: Option<usize>,
+    /// bo2mp: each sky's start surfaces (`skyStartSurfs`).
+    pub sky_surfaces: Vec<Option<Span>>,
 }
 
 /// A `MapEnts`: the entity string and the spawn points' records.
@@ -327,9 +334,11 @@ pub struct MapEntsRec {
     pub name: String,
     pub entity_string: String,
     pub spawns: Option<Span>,
+    /// bo2mp: the trigger models (`"model" "?N"`): models, hulls, slabs.
+    pub triggers: [Option<Span>; 3],
 }
 
-/// A `clipMap_t`: its terrain triangles (brushes are not captured yet).
+/// A `clipMap_t`: where its collision is in the file (see `crate::map`).
 #[derive(Clone, Debug, Default)]
 pub struct ClipMapRec {
     pub name: String,
@@ -338,6 +347,46 @@ pub struct ClipMapRec {
     pub vert_count: u32,
     pub tri_indices: Option<usize>,
     pub tri_count: u32,
+    /// bo2mp: the world's `ClipInfo` (brushes, planes, materials).
+    pub info: ClipInfoRec,
+    pub partitions: Option<usize>,
+    pub partition_count: u32,
+    pub aabb_trees: Option<usize>,
+    pub aabb_tree_count: u32,
+    /// `cmodel_t[numSubModels]`.
+    pub cmodels: Option<usize>,
+    pub cmodel_count: u32,
+    /// Sub-models whose `ClipInfo` is their own (inline), by index.
+    pub cmodel_own_info: Vec<bool>,
+    /// `cStaticModel_s[numStaticModels]` and their models.
+    pub static_models: Option<usize>,
+    pub static_model_models: Vec<Option<super::AssetId>>,
+    /// `DynEntityDef[dynEntCount[k]]` (clutter, destructibles) and their
+    /// base models.
+    pub dyn_ent_defs: [Option<usize>; 2],
+    pub dyn_ent_counts: [u32; 2],
+    pub dyn_ent_models: [Vec<Option<super::AssetId>>; 2],
+}
+
+/// bo2mp: a `ClipInfo`'s arrays, by file offset.
+#[derive(Clone, Debug, Default)]
+pub struct ClipInfoRec {
+    pub planes: Option<usize>,
+    pub plane_count: u32,
+    /// (name, surface flags, contents).
+    pub materials: Vec<(String, i32, i32)>,
+    /// A brush side's file offset -> its plane's file offset.
+    pub side_planes: HashMap<usize, usize>,
+    pub leaf_brush_nodes: Option<usize>,
+    pub leaf_brush_node_count: u32,
+    /// Per leaf brush node, its brush list's file offset (leaves only).
+    pub leaf_brush_lists: Vec<Option<usize>>,
+    pub brushes: Option<usize>,
+    pub brush_count: u32,
+    /// Per brush, its first side's file offset.
+    pub brush_sides: Vec<Option<usize>>,
+    pub brush_bounds: Option<usize>,
+    pub brush_contents: Option<usize>,
 }
 
 #[derive(Default, Debug)]
@@ -371,6 +420,9 @@ pub struct Capture {
     pub walked: usize,
     /// Where each walked table entry's header was read (file offset).
     pub starts: Vec<usize>,
+    /// bo2mp: each scriptable's header (file offset), by its index in
+    /// `others` (scriptables load inline, where no table entry points).
+    pub scriptable_headers: HashMap<u32, usize>,
 }
 
 impl Capture {

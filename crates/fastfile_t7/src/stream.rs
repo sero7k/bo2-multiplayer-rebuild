@@ -15,18 +15,27 @@
 //!   0x220e0 = 0x30 + SndBank's 0x220b0), also for sub-assets loaded
 //!   through a pointer; everything they point to is in VIRTUAL, the script
 //!   string and asset tables included;
-//! * PHYSICAL holds GPU data with file bytes: image pixels (aligned 256),
-//!   material constant buffer init data (aligned 256), non-streamed mesh
-//!   vertex/index data; STREAMER (no file bytes) streamed images' pixels;
+//! * PHYSICAL holds GPU data with file bytes: image pixels, material
+//!   constant buffer init data, non-streamed mesh vertex/index data and
+//!   lens flare buffers (all aligned 256; lens flare curves 16); STREAMER
+//!   (no file bytes) streamed images' pixels (its total is not exact yet);
 //! * strings take no alignment; most arrays their element's natural x64
-//!   one, with type-specific exceptions in the walkers (rawfile buffers 16,
-//!   techniques 16, ...);
-//! * an "insert" pointer (`-2`) first takes an 8-byte, 8-aligned VIRTUAL
-//!   slot (no file bytes) that later references name (inline technique
-//!   sets in materials, LOD meshes in models); a `-1` asset pointer in a
-//!   VIRTUAL struct is itself what later references name;
+//!   one, with type-specific exceptions in the walkers (rawfile buffers
+//!   16, script buffers 32, sampler tables, brushes, collision geoms, FX
+//!   lens flare elements 16, sound snapshots 32, ...); an empty array
+//!   (`-1`, count 0) still aligns (but an empty sound snapshot array);
+//! * an "insert" pointer (`-2`) to an asset first takes an 8-byte,
+//!   8-aligned VIRTUAL slot (no file bytes) that later references name
+//!   (inline technique sets in materials, LOD meshes in models); a `-1`
+//!   asset pointer in a VIRTUAL struct is itself what later references
+//!   name; a `-2` to runtime data (a light description's 0x218) takes none;
 //! * references to PHYSICAL data (`6 << 60 | offset + 1`) occur too
-//!   (shared constant buffer init data) and are checked the same way.
+//!   (shared constant buffer init data; a lens flare's header naming its
+//!   own buffers before loading them, checked at the end of the walk).
+//!
+//! With these rules, `mp_common`, `mp_patch`, `core_post_gfx`,
+//! `en_core_common`, `en_mp_common` and `en_mp_patch` end VIRTUAL and
+//! PHYSICAL exactly at the header's sizes with every reference landing.
 
 use std::collections::{HashMap, HashSet};
 
@@ -103,7 +112,10 @@ pub struct RefStats {
     pub resolved: usize,
     /// References into data read earlier that land elsewhere (drift).
     pub unresolved: usize,
-    /// References past what has been read (the zone may name data it loads later).
+    /// References past what has been read by the end of the walk (a
+    /// reference to data the same asset loads later, like a lens flare's
+    /// buffers, is checked once the walk is done and counted as resolved
+    /// or unresolved).
     pub forward: usize,
     /// References to blocks other than VIRTUAL and PHYSICAL.
     pub other_block: usize,
@@ -142,6 +154,9 @@ pub struct Stream<'a> {
     pub misses: Vec<(usize, u64)>,
     /// What the walk keeps (weapons).
     pub capture: crate::walk::capture::Capture,
+    injected: usize,
+    /// Forward references, checked by `settle_forward`: (field, block, offset).
+    pending: Vec<(usize, u8, u64)>,
 }
 
 impl<'a> Stream<'a> {
@@ -157,6 +172,8 @@ impl<'a> Stream<'a> {
             named: HashMap::new(),
             misses: Vec::new(),
             capture: Default::default(),
+            injected: 0,
+            pending: Vec::new(),
             refs: RefStats::default(),
             first_unresolved: None,
         }
@@ -199,7 +216,17 @@ impl<'a> Stream<'a> {
 
     /// Takes `len` bytes in the current block after aligning to `mask + 1`;
     /// the file offset (`None` in a block without file bytes).
+    #[track_caller]
     pub fn alloc(&mut self, len: usize, mask: u64) -> Result<Option<usize>> {
+        let mask = site_mask(std::panic::Location::caller(), mask, self.pos);
+        if self.block() == VIRTUAL {
+            let list = inject();
+            while self.injected < list.len() && self.pos >= list[self.injected].0 {
+                let n = list[self.injected].1;
+                self.off[VIRTUAL as usize] = (self.off[VIRTUAL as usize] as i64 + n) as u64;
+                self.injected += 1;
+            }
+        }
         self.align(mask);
         let b = self.block();
         let v = self.off[b as usize];
@@ -228,12 +255,14 @@ impl<'a> Stream<'a> {
     }
 
     /// `alloc` of data that must be in the file.
+    #[track_caller]
     pub fn load(&mut self, len: usize, mask: u64) -> Result<usize> {
         let at = self.pos;
         self.alloc(len, mask)?.ok_or(ReadError::Invalid("file data in a block without file bytes", at))
     }
 
     /// A NUL-terminated string in the current block: (bytes, file offset).
+    #[track_caller]
     pub fn cstr(&mut self) -> Result<(&'a [u8], usize)> {
         let at = self.pos;
         let window = self.data.get(at..).unwrap_or(&[]);
@@ -263,6 +292,34 @@ impl<'a> Stream<'a> {
         self.off[VIRTUAL as usize] = v + 8;
         self.starts.insert(v);
         v
+    }
+
+    /// Checks the forward references against what the walk read after
+    /// them: those that now land on a start count as resolved, those that
+    /// land mid-data as unresolved; the rest stay forward.
+    pub fn settle_forward(&mut self) {
+        for (field, block, offset) in std::mem::take(&mut self.pending) {
+            if offset >= self.off[block as usize] {
+                continue;
+            }
+            self.refs.forward -= 1;
+            let hit = if block == PHYSICAL {
+                self.phys_starts.contains(&offset)
+            } else {
+                self.starts.contains(&offset)
+            };
+            if hit {
+                self.refs.resolved += 1;
+            } else {
+                self.refs.unresolved += 1;
+                if std::env::var_os("T7_MISSES").is_some() {
+                    eprintln!("MISS forward field {field:#x} block {block} want {offset:#x}");
+                }
+                if self.first_unresolved.is_none() {
+                    self.first_unresolved = Some((field, offset));
+                }
+            }
+        }
     }
 
     /// Marks the pointer field at file offset `field` as a slot later
@@ -320,6 +377,7 @@ impl<'a> Stream<'a> {
         if block == PHYSICAL {
             if offset >= self.off[PHYSICAL as usize] {
                 self.refs.forward += 1;
+                self.pending.push((field, block, offset));
             } else if self.phys_starts.contains(&offset) {
                 self.refs.resolved += 1;
             } else {
@@ -337,6 +395,7 @@ impl<'a> Stream<'a> {
             }
         } else if offset >= self.off[VIRTUAL as usize] {
             self.refs.forward += 1;
+            self.pending.push((field, block, offset));
         } else if self.starts.contains(&offset) {
             self.refs.resolved += 1;
         } else {
@@ -425,4 +484,91 @@ mod tests {
         s.note_ref(0, Ptr::Ref { block: VIRTUAL, offset: 40 });
         assert_eq!(s.refs, RefStats { resolved: 1, unresolved: 1, forward: 1, other_block: 0 });
     }
+}
+
+/// Debug: `T7_SITE=file:line=mask;...` overrides the alignment
+/// of the allocations made at a walker line; `T7_SITESTAT=<hex from>,<hex to>`
+/// counts the allocations per line in that file range, and
+/// `T7_SITERANGE=<hex from>,<hex to>` limits `T7_SITE` to that range.
+/// For finding which allocation rule a drift comes from.
+fn site_mask(loc: &std::panic::Location, mask: u64, pos: usize) -> u64 {
+    use std::sync::{Mutex, OnceLock};
+    static MAP: OnceLock<HashMap<String, u64>> = OnceLock::new();
+    static STAT: OnceLock<Option<(usize, usize)>> = OnceLock::new();
+    static COUNTS: Mutex<Vec<(String, u64, usize)>> = Mutex::new(Vec::new());
+    let m = MAP.get_or_init(|| {
+        std::env::var("T7_SITE")
+            .unwrap_or_else(|_| String::new())
+            .split(';')
+            .filter_map(|kv| {
+                let (k, v) = kv.rsplit_once('=')?;
+                Some((k.to_string(), v.parse().ok()?))
+            })
+            .collect()
+    });
+    let key = || {
+        format!(
+            "{}:{}",
+            loc.file().rsplit('/').next().unwrap_or(""),
+            loc.line()
+        )
+    };
+    if let Some((a, b)) = *STAT.get_or_init(|| {
+        let v = std::env::var("T7_SITESTAT").ok()?;
+        let (a, b) = v.split_once(',')?;
+        Some((
+            usize::from_str_radix(a, 16).ok()?,
+            usize::from_str_radix(b, 16).ok()?,
+        ))
+    }) {
+        if (a..b).contains(&pos) {
+            let k = key();
+            let mut c = COUNTS.lock().unwrap();
+            match c.iter_mut().find(|x| x.0 == k && x.1 == mask) {
+                Some(x) => x.2 += 1,
+                None => c.push((k, mask, 1)),
+            }
+        } else if pos >= b {
+            let mut c = COUNTS.lock().unwrap();
+            for (k, m, n) in c.drain(..) {
+                eprintln!("SITE {k} mask {m} count {n}");
+            }
+        }
+    }
+    if m.is_empty() {
+        return mask;
+    }
+    static RANGE: OnceLock<Option<(usize, usize)>> = OnceLock::new();
+    if let Some((a, b)) = *RANGE.get_or_init(|| {
+        let v = std::env::var("T7_SITERANGE").ok()?;
+        let (a, b) = v.split_once(',')?;
+        Some((
+            usize::from_str_radix(a, 16).ok()?,
+            usize::from_str_radix(b, 16).ok()?,
+        ))
+    }) && !(a..b).contains(&pos)
+    {
+        return mask;
+    }
+    m.get(&key()).copied().unwrap_or(mask)
+}
+
+/// Debug: `T7_INJECT=<hex file offset>:<signed decimal bytes>;...`
+/// (sorted) moves VIRTUAL by that many bytes at the first VIRTUAL
+/// allocation from each file offset on.
+fn inject() -> &'static [(usize, i64)] {
+    use std::sync::OnceLock;
+    static V: OnceLock<Vec<(usize, i64)>> = OnceLock::new();
+    V.get_or_init(|| {
+        let mut v: Vec<(usize, i64)> = std::env::var("T7_INJECT")
+            .unwrap_or_else(|_| String::new())
+            .split(';')
+            .filter_map(|kv| {
+                let (a, b) = kv.split_once(':')?;
+                Some((usize::from_str_radix(a, 16).ok()?, b.parse().ok()?))
+            })
+            .collect();
+        v.sort();
+        v
+    })
 }

@@ -1,6 +1,12 @@
-//! What a walk keeps besides the asset list: the weapons' records.
+//! What a walk keeps besides the asset list: the weapons' records, and
+//! for following a weapon to its art, the models (LOD meshes and their
+//! materials), materials (technique set and images) and images (size,
+//! format, where the pixels are: in the zone or the `.xpak` entries).
+
+use std::collections::HashMap;
 
 use crate::asset_type::AssetType;
+use crate::walk::image::XPakEntry;
 
 /// What a weapon field names.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -23,7 +29,10 @@ pub struct WeaponRec {
     /// File offsets of the variant header and of the `WeaponDef` struct.
     pub header_at: usize,
     pub def_at: Option<usize>,
-    /// Every non-null pointer field, in stream order: (field name, value).
+    /// When the `WeaponDef` is a reference to another variant's: that variant.
+    pub def_shared_with: Option<String>,
+    /// Every non-null pointer field (but empty strings), in stream order:
+    /// (field name, value).
     /// Unnamed fields read as `def+0x...`/`variant+0x...`; arrays as
     /// `field[i]`.
     pub fields: Vec<(String, FieldValue)>,
@@ -40,7 +49,142 @@ impl WeaponRec {
     }
 }
 
+/// One LOD of a model: its mesh and the materials of its surfaces.
+#[derive(Clone, Debug, Default)]
+pub struct LodRec {
+    pub mesh: String,
+    pub materials: Vec<String>,
+}
+
+/// An `XModel` loaded in the zone.
+#[derive(Clone, Debug, Default)]
+pub struct ModelRec {
+    pub name: String,
+    /// File offset of the model's header.
+    pub header_at: usize,
+    pub bones: usize,
+    pub lods: Vec<LodRec>,
+    /// The collision LOD mesh and the physics preset, when named.
+    pub collision_mesh: Option<String>,
+    pub phys_preset: Option<String>,
+}
+
+/// One surface of a mesh (`XSurface`).
+#[derive(Clone, Debug, Default)]
+pub struct SurfaceRec {
+    pub name: String,
+    pub vert_count: u16,
+    pub tri_count: u16,
+    /// Where its vertices and indices start in the mesh's shared data.
+    pub base_vert: u32,
+    pub base_index: u32,
+}
+
+/// An `XModelMesh` (one LOD's geometry) loaded in the zone.
+#[derive(Clone, Debug, Default)]
+pub struct MeshRec {
+    pub name: String,
+    pub surfaces: Vec<SurfaceRec>,
+    /// `XSurfaceShared`: flags (bit 0: streamed), counts, and the byte
+    /// offsets of each stream in the data.
+    pub shared_flags: u32,
+    pub vert_count: u32,
+    pub skin_vert_count: u32,
+    pub index_count: u32,
+    pub data_size: u32,
+    /// (positions, vertices, indices, skin weights) offsets in the data.
+    pub offsets: [u32; 4],
+    /// The vertex/index data in the zone (file offset, bytes), when not streamed.
+    pub data: Option<(usize, usize)>,
+    /// The mesh's `.xpak` entry (streamed data).
+    pub xpak: Option<XPakEntry>,
+}
+
+/// A `Material` loaded in the zone.
+#[derive(Clone, Debug, Default)]
+pub struct MaterialRec {
+    pub name: String,
+    pub techset: Option<String>,
+    /// The texture table: (name hash, image).
+    pub textures: Vec<(u32, String)>,
+}
+
+/// A `GfxImage` loaded in the zone.
+#[derive(Clone, Debug, Default)]
+pub struct ImageRec {
+    pub name: String,
+    pub width: u16,
+    pub height: u16,
+    pub depth: u16,
+    pub levels: u8,
+    /// `DXGI_FORMAT`.
+    pub format: u32,
+    /// Pixels in the zone: (file offset, bytes) when not streamed; the
+    /// fallback (lowest mips) of a streamed image likewise.
+    pub pixels: Option<(usize, usize)>,
+    pub fallback: Option<(usize, usize)>,
+    /// `totalSize`: the pixel bytes (all mips).
+    pub pixels_len: usize,
+    /// The streamed parts' `.xpak` entries (empty when the pixels are in the zone).
+    pub xpak: Vec<XPakEntry>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Capture {
     pub weapons: Vec<WeaponRec>,
+    pub models: Vec<ModelRec>,
+    pub materials: Vec<MaterialRec>,
+    pub images: Vec<ImageRec>,
+    pub meshes: Vec<MeshRec>,
+    by_name: HashMap<(AssetType, String), usize>,
+}
+
+impl Capture {
+    pub(crate) fn add_model(&mut self, r: ModelRec) {
+        self.by_name
+            .insert((AssetType::XModel, r.name.clone()), self.models.len());
+        self.models.push(r);
+    }
+    pub(crate) fn add_mesh(&mut self, r: MeshRec) {
+        self.by_name
+            .insert((AssetType::XModelMesh, r.name.clone()), self.meshes.len());
+        self.meshes.push(r);
+    }
+    pub fn mesh(&self, name: &str) -> Option<&MeshRec> {
+        self.by_name
+            .get(&(AssetType::XModelMesh, name.to_string()))
+            .map(|&i| &self.meshes[i])
+    }
+    pub(crate) fn add_material(&mut self, r: MaterialRec) {
+        self.by_name
+            .insert((AssetType::Material, r.name.clone()), self.materials.len());
+        self.materials.push(r);
+    }
+    pub(crate) fn add_image(&mut self, r: ImageRec) {
+        self.by_name
+            .insert((AssetType::Image, r.name.clone()), self.images.len());
+        self.images.push(r);
+    }
+    /// The model called `name` (the last one loaded under that name).
+    pub fn model(&self, name: &str) -> Option<&ModelRec> {
+        self.by_name
+            .get(&(AssetType::XModel, name.to_string()))
+            .map(|&i| &self.models[i])
+    }
+    pub fn material(&self, name: &str) -> Option<&MaterialRec> {
+        self.by_name
+            .get(&(AssetType::Material, name.to_string()))
+            .map(|&i| &self.materials[i])
+    }
+    pub fn image(&self, name: &str) -> Option<&ImageRec> {
+        self.by_name
+            .get(&(AssetType::Image, name.to_string()))
+            .map(|&i| &self.images[i])
+    }
+    /// The weapon whose variant or `WeaponDef` is called `name`.
+    pub fn weapon(&self, name: &str) -> Option<&WeaponRec> {
+        self.weapons
+            .iter()
+            .find(|r| r.name == name || r.base_name == name)
+    }
 }

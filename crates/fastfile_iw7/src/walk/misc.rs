@@ -206,3 +206,35 @@ pub(super) fn gesture(w: &mut Walker, h: usize) -> Result<AssetId> {
     w.s.pop();
     Ok(w.name_only(AssetType::Gesture, name))
 }
+
+/// A localized string: its text, then its key.
+pub(super) fn localize(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::LocalizeEntry as E;
+    w.s.push(VIRTUAL);
+    let value = w.xstr(h + E::value)?.unwrap_or_default();
+    let name = w.xstr(h + E::name)?.unwrap_or_default();
+    w.s.pop();
+    w.cap.localize.push((name.clone(), value));
+    Ok(w.name_only(AssetType::LocalizeEntry, name))
+}
+
+/// A string table: its name, its cells (column-major per row: `values[row *
+/// columns + column]`), then each cell's string.
+pub(super) fn string_table(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::StringTable as T;
+    use L::StringTableCell as C;
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + T::name)?.unwrap_or_default();
+    let columns = w.s.u32_at(h + T::columnCount)? as usize;
+    let rows = w.s.u32_at(h + T::rowCount)? as usize;
+    let n = columns * rows;
+    let mut cells = Vec::with_capacity(n);
+    if let Some(at) = w.inline_array(h + T::values, C::SIZE * n, 7)? {
+        for i in 0..n {
+            cells.push(w.xstr(at + C::SIZE * i + C::string)?.unwrap_or_default());
+        }
+    }
+    w.s.pop();
+    w.cap.string_tables.push(crate::walk::StringTableRec { name: name.clone(), columns, rows, cells });
+    Ok(w.name_only(AssetType::StringTable, name))
+}

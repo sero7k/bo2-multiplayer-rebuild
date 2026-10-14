@@ -4,9 +4,16 @@
 // Each gun is registered the way a map registers its box guns
 // (_zm_weapons::include_zombie_weapon, then add_zombie_weapon): a box gun's
 // price (50, as Black Ops II's box-only guns), its ammo price from it, the
-// voice line of its kind, and no upgraded weapon, so the Pack-a-Punch
-// refuses it (Black Ops II's can_upgrade_weapon: no upgrade_name). The
-// engine gives them Zombies' damage and reserve ammo.
+// voice line of its kind, and its upgraded weapon (the map includes its
+// own upgraded guns the same way, out of the box), which the Pack-a-Punch
+// gives (Black Ops II's can_upgrade_weapon / get_upgrade_weapon: the gun's
+// upgrade_name; is_weapon_upgraded / get_base_weapon_name:
+// level.zombie_weapons_upgraded). The upgrade is the gun's own game's
+// upgraded weapon when that game has a Pack-a-Punch and it is loaded,
+// else a Black Ops II-style one the engine makes (bo2_profile::guest);
+// a gun with none listed cannot be upgraded. The engine gives them
+// Zombies' damage and reserve ammo, and the made upgrades the map's
+// Pack-a-Punch proportions and camo.
 //
 // Black Ops II's box picks evenly among the guns in it (marked is_in_box)
 // that the player can take. The custom guns are many (well over a hundred)
@@ -16,8 +23,9 @@
 // gun comes up about as often as six of the map's guns together, and each
 // of them is as likely as any other.
 //
-// The list comes from the engine (`bo2mp_zm_guest_list`: `name:vox`, the
-// loaded custom guns, each kind of gun once and none the map already has);
+// The list comes from the engine (`bo2mp_zm_guest_list`: `name:vox:upgrade`,
+// the loaded custom guns, each kind of gun once and none the map already
+// has, and each one's upgraded weapon);
 // Custom Games' CUSTOM WEAPONS turns them off (`bo2mp_zm_guest_guns` 0).
 
 main()
@@ -47,10 +55,14 @@ main()
         if ( parts.size > 1 )
             vox = parts[ 1 ];
 
+        upgrade = "";
+        if ( parts.size > 2 )
+            upgrade = parts[ 2 ];
+
         if ( isdefined( level.zombie_weapons[ name ] ) )
             continue;
 
-        if ( !register_gun( name, vox ) )
+        if ( !register_gun( name, vox, upgrade ) )
             continue;
 
         level.bo2mp_guest_guns[ level.bo2mp_guest_guns.size ] = name;
@@ -61,11 +73,15 @@ main()
         level thread box_slots();
 }
 
-// One gun as a map registers a box gun; not in the box until box_slots
-// puts it there. True when it is registered.
-register_gun( name, vox )
+// One gun as a map registers a box gun (with its upgraded weapon, out of
+// the box); not in the box until box_slots puts it there. True when it is
+// registered.
+register_gun( name, vox, upgrade )
 {
     maps/mp/zombies/_zm_weapons::include_zombie_weapon( name, 0 );
+    if ( upgrade != "" )
+        maps/mp/zombies/_zm_weapons::include_zombie_weapon( upgrade, 0 );
+
     if ( !isdefined( level.zombie_include_weapons ) )
         level.zombie_include_weapons = [];
 
@@ -73,7 +89,10 @@ register_gun( name, vox )
     if ( isdefined( level.weapon_weighting_funcs ) && !isdefined( level.weapon_weighting_funcs[ name ] ) )
         level.weapon_weighting_funcs[ name ] = ::guest_weight;
 
-    maps/mp/zombies/_zm_weapons::add_zombie_weapon( name, undefined, &"ZOMBIE_WEAPONCOSTAMMO", 50, vox, "", undefined );
+    if ( upgrade != "" )
+        maps/mp/zombies/_zm_weapons::add_zombie_weapon( name, upgrade, &"ZOMBIE_WEAPONCOSTAMMO", 50, vox, "", undefined );
+    else
+        maps/mp/zombies/_zm_weapons::add_zombie_weapon( name, undefined, &"ZOMBIE_WEAPONCOSTAMMO", 50, vox, "", undefined );
 
     // (The fields add_zombie_weapon sets, should it not have.)
     if ( !isdefined( level.zombie_weapons[ name ] ) )
@@ -89,7 +108,19 @@ register_gun( name, vox )
         level.zombie_weapons[ name ] = s;
     }
 
-    level.zombie_weapons[ name ].upgrade_name = undefined;
+    // (Its upgrade both ways, as add_zombie_weapon records it, should it
+    // not have.)
+    if ( upgrade != "" )
+    {
+        level.zombie_weapons[ name ].upgrade_name = upgrade;
+        if ( !isdefined( level.zombie_weapons_upgraded ) )
+            level.zombie_weapons_upgraded = [];
+
+        level.zombie_weapons_upgraded[ upgrade ] = name;
+    }
+    else
+        level.zombie_weapons[ name ].upgrade_name = undefined;
+
     level.zombie_weapons[ name ].is_in_box = 0;
     return 1;
 }

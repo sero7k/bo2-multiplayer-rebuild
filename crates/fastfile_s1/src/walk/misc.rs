@@ -20,6 +20,67 @@ pub(super) fn named_only(
     Ok(w.name_only(ty, name))
 }
 
+/// `PhysWaterPreset`: a name and seven effects (splashes, wakes), as
+/// x64-zt's S1 layout (`code_post_gfx_mp` has them before its effects).
+pub(super) fn phys_water_preset(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::PhysWaterPreset as P;
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + P::name)?.unwrap_or_default();
+    for f in [P::fx0, P::fx1, P::fx2, P::fx3, P::fx4, P::fx5, P::fx6] {
+        w.asset(AssetType::Fx, h + f)?;
+    }
+    w.s.pop();
+    Ok(w.name_only(AssetType::PhysWaterPreset, name))
+}
+
+/// `Clut` (a colour lookup volume): width x height x depth RGBA8 texels,
+/// then its name (x64-zt's S1 member order).
+pub(super) fn clut(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::Clut as C;
+    w.s.push(VIRTUAL);
+    let n = [C::width, C::height, C::depth]
+        .iter()
+        .map(|&f| w.s.u32_at(h + f).map(|v| v as usize))
+        .collect::<Result<Vec<_>>>()?
+        .iter()
+        .product::<usize>();
+    w.blob(h + C::pixels, n * 4, 0)?;
+    let name = w.xstr(h + C::name)?.unwrap_or_default();
+    w.s.pop();
+    Ok(w.name_only(AssetType::Clut, name))
+}
+
+/// bo2mp: a `MenuList` (its menus' layout is not read here): the name,
+/// then its menus taken as one VIRTUAL run up to the next asset, found by
+/// that asset's shape (as `equipment_snd_table`). Only a run ending at a
+/// technique set or a raw file is taken.
+pub(super) fn menu_list(w: &mut Walker, h: usize) -> Result<AssetId> {
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h)?.unwrap_or_default();
+    let start = w.s.pos();
+    let end = find_next_techset(w, start)
+        .or_else(|| find_next_asset(w, start))
+        .ok_or(ReadError::Invalid("menu list end", start))?;
+    if end > start {
+        w.take(end - start)?;
+    }
+    w.s.pop();
+    Ok(w.name_only(AssetType::MenuList, name))
+}
+
+/// bo2mp: a header that names only itself: every pointer after the name
+/// (`ptrs`, field offsets) null. Anything more is refused (its layout is
+/// not read here): `code_post_gfx_mp`'s empty `ScriptableDef` and its
+/// `AnimClass` (88 bytes, measured) are of this kind.
+pub(super) fn name_only_header(w: &mut Walker, ty: AssetType, h: usize, ptrs: &[usize]) -> Result<AssetId> {
+    for &p in ptrs {
+        if w.s.u64_at(h + p)? != 0 {
+            return Err(ReadError::Invalid(ty.name(), h + p));
+        }
+    }
+    named_only(w, ty, h, 0)
+}
+
 pub(super) fn net_const_strings(w: &mut Walker, h: usize) -> Result<AssetId> {
     use L::NetConstStrings as N;
     w.s.push(VIRTUAL);
@@ -151,8 +212,14 @@ pub(super) fn tracer(w: &mut Walker, h: usize) -> Result<AssetId> {
     use L::TracerDef as T;
     w.s.push(VIRTUAL);
     let name = w.xstr(h + T::name)?.unwrap_or_default();
-    w.asset(AssetType::Material, h + T::material)?;
+    let material = w.asset(AssetType::Material, h + T::material)?;
     w.s.pop();
+    // bo2mp: kept for the guest guns' tracers.
+    w.cap.tracers.push(super::TracerRec {
+        name: name.clone(),
+        material,
+        record: Span { pos: h, len: T::SIZE },
+    });
     Ok(w.name_only(AssetType::Tracer, name))
 }
 
@@ -285,16 +352,24 @@ pub(super) fn fx_table(w: &mut Walker, ty: AssetType, h: usize, effects: usize) 
     let effects = table_size(ty, effects);
     w.s.push(VIRTUAL);
     let name = w.xstr(h)?.unwrap_or_default();
+    let mut cells = Vec::new();
     if let Some(table) = w.inline_array(h + 8, 8 * effects, 3)? {
         for i in 0..effects {
             #[cfg(test)]
             if matches!(w.s.ptr_at(table + 8 * i)?, crate::Ptr::Other(_)) {
                 eprintln!("FXTABLE {} entry {i} is not a pointer", ty.name());
             }
-            w.asset(AssetType::Fx, table + 8 * i)?;
+            cells.push(w.asset(AssetType::Fx, table + 8 * i)?);
         }
     }
     w.s.pop();
+    // bo2mp: the impact table's cells, for the guest guns' own impacts.
+    if ty == AssetType::ImpactFx {
+        w.cap.impact_tables.push(super::FxTableRec {
+            name: name.clone(),
+            cells,
+        });
+    }
     Ok(w.name_only(ty, name))
 }
 

@@ -450,6 +450,8 @@ impl<'a> Walker<'a> {
             T::LuaFile => misc::lua_file(self, h),
             T::LocalizeEntry => misc::localize(self, h),
             T::PhysPreset => misc::phys_preset(self, h),
+            T::PhysWaterPreset => misc::phys_water_preset(self, h),
+            T::Clut => misc::clut(self, h),
             T::PhysCollmap => misc::phys_collmap(self, h),
             T::Tracer => misc::tracer(self, h),
             T::DopplerPreset => misc::named_only(self, ty, h, 0),
@@ -480,6 +482,20 @@ impl<'a> Walker<'a> {
             T::Laser => misc::laser(self, h),
             T::VectorField => misc::vector_field(self, h),
             T::PhysConstraint => misc::named_only(self, ty, h, 0),
+            // bo2mp: measured on code_post_gfx_mp (no reference layout): a
+            // name then floats (32 and 72 bytes), the name following.
+            T::SndDriverGlobals | T::ReverbPreset => misc::named_only(self, ty, h, 0),
+            T::MenuList => misc::menu_list(self, h),
+            T::Scriptable => {
+                use crate::layout::ScriptableDef as S;
+                misc::name_only_header(
+                    self,
+                    ty,
+                    h,
+                    &[S::baseModel, S::baseCollisionBrush, S::destroyedCollisionBrush, S::parts, S::notetracks],
+                )
+            }
+            T::AnimClass => misc::name_only_header(self, ty, h, &(1..11).map(|k| 8 * k).collect::<Vec<_>>()),
             T::EquipmentSndTable => misc::equipment_snd_table(self, h),
             _ => Err(ReadError::Invalid(ty.name(), h)),
         }

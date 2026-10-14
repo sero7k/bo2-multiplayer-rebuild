@@ -492,6 +492,7 @@ impl<'a> Walker<'a> {
             T::MapEnts => world::map_ents(self, h),
             T::GlassWorld => world::glass_world(self, h),
             T::ClipMap => world::clip_map(self, h),
+            T::Scriptable => world::scriptable(self, h),
             T::MenuList => menu::menu_list(self, h),
             T::EquipmentSndTable => misc::equipment_snd_table(self, h),
             T::Font => misc::font(self, h),

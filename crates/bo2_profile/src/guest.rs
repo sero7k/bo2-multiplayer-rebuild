@@ -762,6 +762,8 @@ pub fn localize() -> Vec<(String, String)> {
     for gun in all() {
         out.push((gun.key(), gun.name.to_owned()));
         out.push((format!("{}_DESC", gun.key()), format!("The {} from {}.", gun.name, gun.game_title())));
+        // (Its Pack-a-Punch upgrade in Zombies.)
+        out.push((zm_upgrade_key(gun), zm_upgraded_name(gun)));
     }
     for (reference, _, name, _) in EXTRA_ATTACHMENTS {
         let key = format!("MPUI_BO2MP_{}", reference.to_ascii_uppercase());
@@ -896,6 +898,274 @@ pub fn zm_box_guns(
     keep
 }
 
+// ---------------------------------------------------------------------------
+// bo2mp: Pack-a-Punch for the guest guns in Zombies.
+//
+// Black Ops II's `_zm_weapons` upgrades a gun into its `upgrade_name`
+// weapon. A guest gun's upgrade is, in order:
+//
+// 1. its own game's upgraded weapon, when that game has a Pack-a-Punch
+//    (World at War, Black Ops, Advanced Warfare's Exo Zombies, Infinite
+//    Warfare's and Black Ops III's zombies) and the asset is among the
+//    weapons loaded (`zm_upgrade_assets`: its names in that game's zones);
+// 2. otherwise a Black Ops II-style upgrade made here: a copy of the gun
+//    (`<gun>_upgraded_zm`, `bo1_ak74u_upgraded_zm_mp`) with the map's own
+//    Pack-a-Punch proportions (damage, magazine, reserve), Black Ops II's
+//    Pack-a-Punch camo and an upgraded name. Ghosts, Modern Warfare 2 and 3
+//    and Call of Duty 4 have no Pack-a-Punch, so theirs are always made.
+
+/// The camo option (as `bo2mp_camos` carries it) that draws Black Ops II's
+/// Pack-a-Punch camo on another game's gun; outside the weapon options'
+/// range (0-255), so no camo of `mp/weaponoptions.csv` is taken for it.
+pub const ZM_PAP_CAMO_OPTION: u32 = 1039;
+
+/// Whether a game has a Pack-a-Punch of its own (its guns' upgraded
+/// weapons are in its zombies zones). Black Ops II's (`t6`) are the map's.
+#[must_use]
+pub fn has_own_pack_a_punch(game: &str) -> bool {
+    matches!(game, "t4" | "t5" | "t6" | "s1" | "iw7" | "t7")
+}
+
+/// The names (as the catalog names its game's rows: lower case, no `_mp`,
+/// AW's and Ghosts' without `iw5_`/`iw6_`) that `game`'s own upgraded
+/// weapon of `gun` has in its zombies zones, most likely first. Empty when
+/// the game has no Pack-a-Punch.
+///
+/// - Black Ops: `<gun>_upgraded_zm` (`ak74u_upgraded_zm`), the guns that
+///   came with an attachment in its box named with it (`m16_gl_upgraded_zm`).
+/// - World at War: the zombies copy's name with `_upgraded`
+///   (`zombie_mp40_upgraded`, `ppsh_upgraded`, `ptrs41_zombie_upgraded`).
+/// - Advanced Warfare (Exo Zombies): the zombies copy of the gun, upgraded
+///   (`iw5_bal27zm_mp` and its upgrade, read as `bal27zm...`).
+/// - Infinite Warfare (once its guns are guest guns): its zombies gun with
+///   the Pack-a-Punch attachment (`iw7_ar57_zm+pap1`).
+/// - Black Ops III (once its guns are guest guns): `<gun>_upgraded`
+///   (`ar_standard_upgraded`).
+#[must_use]
+pub fn zm_upgrade_assets(game: &str, gun: &str) -> Vec<String> {
+    let gun = gun.to_ascii_lowercase();
+    match game {
+        "t5" => {
+            let own: &[&str] = match gun.as_str() {
+                "m16" => &["m16_gl_upgraded_zm"],
+                "aug" => &["aug_acog_mk_upgraded_zm", "aug_acog_upgraded_zm"],
+                "g11" => &["g11_lps_upgraded_zm"],
+                "cz75" => &["cz75_upgraded_zm", "cz75dw_upgraded_zm"],
+                "crossbow_explosive" => &["crossbow_explosive_upgraded_zm"],
+                _ => &[],
+            };
+            let mut out: Vec<String> = own.iter().map(|s| (*s).to_owned()).collect();
+            out.push(format!("{gun}_upgraded_zm"));
+            out.dedup();
+            out
+        }
+        "t4" => {
+            // (The zombies copies' names: `zombie_<gun>`, or the gun's own,
+            // or `<gun>_zombie`; a few are named apart.)
+            let zm = match gun.as_str() {
+                "type100smg" => "type100_smg",
+                "type99rifle" => "type99_rifle",
+                "type99lmg" => "type99_lmg",
+                "doublebarreledshotgun" => "doublebarrel",
+                "357magnum" => "sw_357",
+                other => other,
+            };
+            let mut out = vec![
+                format!("zombie_{zm}_upgraded"),
+                format!("{zm}_upgraded"),
+                format!("{zm}_zombie_upgraded"),
+            ];
+            if gun == "kar98k" {
+                out.push("kar98k_scoped_zombie_upgraded".to_owned());
+            }
+            if gun == "doublebarreledshotgun" {
+                out.push("zombie_doublebarrel_sawed_upgraded".to_owned());
+            }
+            out
+        }
+        "s1" => vec![
+            format!("{gun}zm_upgraded"),
+            format!("{gun}zmup"),
+            format!("{gun}_zm_upgraded"),
+            format!("{gun}_upgraded_zm"),
+        ],
+        "iw7" => {
+            let gun = gun.strip_prefix("iw7_").unwrap_or(&gun);
+            vec![format!("{gun}_zm+pap1"), format!("iw7_{gun}_zm+pap1"), format!("{gun}_zm_pap1")]
+        }
+        "t7" => vec![format!("{gun}_upgraded"), format!("{gun}_upgraded_zm")],
+        _ => Vec::new(),
+    }
+}
+
+/// The name of the Black Ops II-style upgrade made of a gun's row
+/// (`ak74u` -> `ak74u_upgraded_zm`; its guest name `bo1_ak74u_upgraded_zm_mp`).
+#[must_use]
+pub fn zm_upgrade_copy_name(row_name: &str) -> String {
+    let n = row_name.to_ascii_lowercase();
+    let n = n.strip_suffix("_mp").unwrap_or(&n);
+    format!("{n}_upgraded_zm")
+}
+
+/// The text key of a guest gun's upgraded name (`WEAPON_BO1_AK74U_UPGRADED`).
+#[must_use]
+pub fn zm_upgrade_key(gun: &GuestGun) -> String {
+    format!("{}_UPGRADED", gun.key())
+}
+
+/// Their own games' names for the upgraded guns (World at War's and Black
+/// Ops' Pack-a-Punch), and Black Ops II-style ones for Ghosts' guns, which
+/// never had one. (game, gun, name).
+const UPGRADED_NAMES: &[(&str, &str, &str)] = &[
+    // Black Ops.
+    ("t5", "ak74u", "AK74fu2"),
+    ("t5", "commando", "Predator"),
+    ("t5", "famas", "G16-GL35"),
+    ("t5", "galil", "Lamentation"),
+    ("t5", "fnfal", "WN"),
+    ("t5", "m14", "Mnesia"),
+    ("t5", "m16", "Skullcrusher"),
+    ("t5", "aug", "AUG-50M3"),
+    ("t5", "g11", "G115 Generator"),
+    ("t5", "mp5k", "MP115 Kollider"),
+    ("t5", "mpl", "MPL-LF"),
+    ("t5", "pm63", "Tokyo & Rose"),
+    ("t5", "spectre", "Phantom"),
+    ("t5", "uzi", "Uncle Gal"),
+    ("t5", "hs10", "Typhoid & Mary"),
+    ("t5", "ithaca", "Raid"),
+    ("t5", "spas", "SPAZ-24"),
+    ("t5", "rottweil72", "Hades"),
+    ("t5", "hk21", "H115 Oscillator"),
+    ("t5", "rpk", "R115 Resonator"),
+    ("t5", "dragunov", "D115 Disassembler"),
+    ("t5", "l96a1", "L115 Isolator"),
+    ("t5", "m1911", "Mustang & Sally"),
+    ("t5", "python", "Cobra"),
+    ("t5", "cz75", "Calamity"),
+    ("t5", "m72_law", "M72 Anarchy"),
+    ("t5", "china_lake", "China Beach"),
+    // World at War.
+    ("t4", "thompson", "Gibs-O-Matic"),
+    ("t4", "mp40", "The Afterburner"),
+    ("t4", "type100smg", "1001 Samurais"),
+    ("t4", "ppsh", "The Reaper"),
+    ("t4", "stg44", "Spatz-447 +"),
+    ("t4", "m1carbine", "Widdershins RC-1"),
+    ("t4", "m1garand", "M1000"),
+    ("t4", "gewehr43", "G115 Compressor"),
+    ("t4", "bar", "The Widow Maker"),
+    ("t4", "fg42", "420 Impeller"),
+    ("t4", "mg42", "Barracuda FU-A11"),
+    ("t4", "30cal", "B115 Accelerator"),
+    ("t4", "kar98k", "Armageddon"),
+    ("t4", "ptrs41", "The Penetrator"),
+    ("t4", "shotgun", "Gut Shot"),
+    ("t4", "doublebarreledshotgun", "24 Bore Long Range"),
+    // Ghosts (no Pack-a-Punch of its own: Black Ops II-style names).
+    ("iw6", "ak12", "Kalashni-Kill 12"),
+    ("iw6", "sc2010", "SC-2010 Sundowner"),
+    ("iw6", "honeybadger", "Venom Badger"),
+    ("iw6", "bren", "Bren-Gunner 115"),
+    ("iw6", "msbs", "MSBS Mauler"),
+    ("iw6", "arx160", "ARX-1600 Arkhangel"),
+    ("iw6", "fads", "Fade to Black"),
+    ("iw6", "r5rgp", "R5 Revenant"),
+    ("iw6", "kriss", "Vector Vindicator"),
+    ("iw6", "pp19", "Biz-Zone"),
+    ("iw6", "vepr", "Vepr Viper"),
+    ("iw6", "microtar", "MTAR-X Microwave"),
+    ("iw6", "cbjms", "Cerebral Jackhammer"),
+    ("iw6", "k7", "K7 Killcount"),
+    ("iw6", "m27", "M27 Infinite Assault"),
+    ("iw6", "ameli", "Ameli-orator"),
+    ("iw6", "lsat", "LSAT Last Stand"),
+    ("iw6", "kac", "Chain Reaction"),
+    ("iw6", "vks", "VKS Vanquisher"),
+    ("iw6", "gm6", "Lynxinator"),
+    ("iw6", "usr", "USR Usurper"),
+    ("iw6", "l115a3", "L115 Lacerator"),
+    ("iw6", "imbel", "IA-115 Immolator"),
+    ("iw6", "svu", "SVU Sanguine"),
+    ("iw6", "g28", "MR-115 Mortician"),
+    ("iw6", "mk14", "MK14 Mnemonic"),
+    ("iw6", "mts255", "MTS-255 Meat Grinder"),
+    ("iw6", "fp6", "FP6 Flesh Peeler"),
+    ("iw6", "maul", "Maul-115"),
+    ("iw6", "uts15", "Hound of Hell"),
+    ("iw6", "p226", "P226 Punisher"),
+    ("iw6", "m9a1", "M9A1 Mangler"),
+    ("iw6", "mp443", "Grach Graverobber"),
+    ("iw6", "magnum", ".44 Mega Magnum"),
+    ("iw6", "pdw", "PDW Persuader"),
+    ("iw6", "panzerfaust3", "Panzer Fiend"),
+    ("iw6", "mk32", "MK32 Mayhem Maker"),
+    ("iw6", "maaws", "Jaws of MAAWS"),
+    ("iw6", "rgm", "Kastet Kaboom"),
+];
+
+/// A guest gun's upgraded name: its own game's where it had one (and for
+/// Ghosts' guns, the Black Ops II-style ones above), else Black Ops II's
+/// manner of naming its 115-charged guns (`M4A1-115`).
+#[must_use]
+pub fn zm_upgraded_name(gun: &GuestGun) -> String {
+    UPGRADED_NAMES
+        .iter()
+        .find(|(game, g, _)| *game == gun.game && *g == gun.gun)
+        .map_or_else(|| format!("{}-115", gun.name), |(_, _, n)| (*n).to_owned())
+}
+
+/// A guest gun's upgrade in this Zombies game: the gun's script name
+/// (`bo1_ak74u_mp`), its upgrade's (`bo1_ak74u_upgraded_zm_mp`), whether
+/// the upgrade was made here (Black Ops II-style) rather than its own
+/// game's, and whether it wears Black Ops II's Pack-a-Punch camo.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ZmUpgrade {
+    pub base: String,
+    pub upgraded: String,
+    pub made: bool,
+    pub bo2_camo: bool,
+}
+
+/// Whether an upgraded weapon from its own game wears Black Ops II's
+/// Pack-a-Punch camo: Black Ops' upgrades wore its own camo option
+/// (its models are the plain gun's; Black Ops II's camo stands in for it);
+/// World at War's wore none; the later games' upgrades carry their look in
+/// their own models.
+#[must_use]
+pub fn own_upgrade_wears_bo2_camo(game: &str) -> bool {
+    game == "t5"
+}
+
+static ZM_UPGRADES: std::sync::RwLock<Vec<ZmUpgrade>> = std::sync::RwLock::new(Vec::new());
+
+/// The match load's guest upgrades (empty off a Zombies map).
+pub fn set_zm_upgrades(list: Vec<ZmUpgrade>) {
+    if let Ok(mut u) = ZM_UPGRADES.write() {
+        *u = list;
+    }
+}
+
+/// Every guest upgrade of this match.
+#[must_use]
+pub fn zm_upgrades() -> Vec<ZmUpgrade> {
+    ZM_UPGRADES.read().map(|u| u.clone()).unwrap_or_default()
+}
+
+/// The upgrade of a guest gun (by its script name, `bo1_ak74u_mp`).
+#[must_use]
+pub fn zm_upgrade_of(base: &str) -> Option<ZmUpgrade> {
+    let base = base.to_ascii_lowercase();
+    ZM_UPGRADES.read().ok()?.iter().find(|u| u.base == base).cloned()
+}
+
+/// The guest upgrade a weapon is (by its script name), if it is one.
+#[must_use]
+pub fn zm_upgraded(name: &str) -> Option<ZmUpgrade> {
+    let name = name.to_ascii_lowercase();
+    ZM_UPGRADES.read().ok()?.iter().find(|u| u.upgraded == name).cloned()
+}
+
 /// mp/attachmentTable.csv: the guest attachments BO2's table lacks.
 pub fn extend_attachment_rows(rows: &mut Vec<Vec<String>>) -> bool {
     if !GAMES.iter().any(|g| available(g)) {
@@ -984,6 +1254,49 @@ mod tests {
                 assert!(bo2.contains(&a) || atts.iter().any(|r| r[4] == a), "{} {a}", gun.gun);
             }
         }
+    }
+
+    /// Pack-a-Punch: the games with their own look for their upgraded
+    /// weapons by their zombies names; the others are made here, named as
+    /// Black Ops II names its upgraded guns, and every gun has a name.
+    #[test]
+    fn the_guest_upgrades_map_per_game() {
+        assert_eq!(zm_upgrade_assets("t5", "ak74u"), vec!["ak74u_upgraded_zm"]);
+        assert_eq!(zm_upgrade_assets("t5", "m16")[0], "m16_gl_upgraded_zm");
+        assert!(zm_upgrade_assets("t4", "mp40").contains(&"zombie_mp40_upgraded".to_owned()));
+        assert!(zm_upgrade_assets("t4", "ptrs41").contains(&"ptrs41_zombie_upgraded".to_owned()));
+        assert!(zm_upgrade_assets("t4", "type100smg").contains(&"zombie_type100_smg_upgraded".to_owned()));
+        assert!(!zm_upgrade_assets("s1", "bal27").is_empty());
+        assert_eq!(zm_upgrade_assets("t7", "ar_standard")[0], "ar_standard_upgraded");
+        assert_eq!(zm_upgrade_assets("iw7", "iw7_ar57")[0], "ar57_zm+pap1");
+        for game in ["iw3", "iw4", "iw5", "iw6"] {
+            assert!(!has_own_pack_a_punch(game) && zm_upgrade_assets(game, "ak47").is_empty(), "{game}");
+        }
+        assert_eq!(zm_upgrade_copy_name("ak74u"), "ak74u_upgraded_zm");
+        assert_eq!(zm_upgrade_copy_name("iw5_acr_mp"), "iw5_acr_upgraded_zm");
+        let gun = |game: &str, name: &str| all().find(|g| g.game == game && g.gun == name).unwrap();
+        assert_eq!(zm_upgraded_name(gun("t5", "ak74u")), "AK74fu2");
+        assert_eq!(zm_upgraded_name(gun("t4", "mp40")), "The Afterburner");
+        assert_eq!(zm_upgraded_name(gun("iw4", "m4")), "M4A1-115");
+        assert_eq!(zm_upgrade_key(gun("iw6", "ak12")), "WEAPON_GH_AK12_UPGRADED");
+        // Every Ghosts gun has its own Black Ops II-style name.
+        for g in GHOSTS {
+            assert!(UPGRADED_NAMES.iter().any(|(game, n, _)| *game == "iw6" && *n == g.gun), "{}", g.gun);
+        }
+        // Each upgraded name is a text key.
+        let keys = localize();
+        assert!(keys.iter().any(|(k, t)| k == "WEAPON_BO1_AK74U_UPGRADED" && t == "AK74fu2"));
+        assert!(own_upgrade_wears_bo2_camo("t5") && !own_upgrade_wears_bo2_camo("t4"));
+        set_zm_upgrades(vec![ZmUpgrade {
+            base: "gh_ak12_mp".into(),
+            upgraded: "gh_ak12_upgraded_zm_mp".into(),
+            made: true,
+            bo2_camo: true,
+        }]);
+        assert!(zm_upgrade_of("GH_AK12_MP").is_some_and(|u| u.made));
+        assert!(zm_upgraded("gh_ak12_upgraded_zm_mp").is_some_and(|u| u.bo2_camo));
+        set_zm_upgrades(Vec::new());
+        assert!(zm_upgrades().is_empty());
     }
 
     /// The Mystery Box: each family once, none the map's Zombies guns

@@ -291,13 +291,21 @@ pub(super) const IMPACT_FX_EFFECTS: usize = 15 * 38;
 pub(super) const SURFACE_FX_EFFECTS: usize = 6 * 31;
 
 /// An effect table (`ImpactFx`, `SurfaceFx`): name, then a pointer to
-/// `effects` effect pointers.
+/// `effects` effect pointers, aligned to 4 (retail mp_snow's and
+/// mp_skeleton's own impact tables, named "", sit 4 bytes past an 8-byte
+/// boundary: their later references name them so).
 pub(super) fn fx_table(w: &mut Walker, ty: AssetType, h: usize, effects: usize) -> Result<AssetId> {
     w.s.push(VIRTUAL);
     let name = w.xstr(h)?.unwrap_or_default();
-    if let Some(table) = w.inline_array(h + 8, 8 * effects, 7)? {
+    let trace = std::env::var_os("IW6_TRACE_FXTABLE").is_some();
+    if let Some(table) = w.inline_array(h + 8, 8 * effects, 3)? {
         for i in 0..effects {
-            w.asset(AssetType::Fx, table + 8 * i)?;
+            let p = w.s.ptr_at(table + 8 * i)?;
+            let before = w.s.pos();
+            let id = w.asset(AssetType::Fx, table + 8 * i)?;
+            if trace && p != crate::Ptr::Null {
+                eprintln!("FXTABLE {name:?} {i} ({}, {}) field virt {:?} {p:?} -> {:?} pos {before:#x}->{:#x} unresolved {}", i / 38, i % 38, w.vmap.virt_of(table + 8 * i), id.map(|id| w.cap.name_of(id).to_owned()), w.s.pos(), w.unresolved.get());
+            }
         }
     }
     w.s.pop();

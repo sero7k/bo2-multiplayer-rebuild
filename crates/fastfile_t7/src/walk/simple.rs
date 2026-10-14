@@ -6,7 +6,8 @@
 //! RawFile         { char* name; i32 len; pad; char* buffer; }         24
 //!                 name, then buffer (len + 1 bytes, NUL included; aligned 16)
 //! ScriptParseTree { char* name; i32 len; pad; u8* buffer; }           24
-//!                 name, then buffer (len + 1: the compiled "\x80GSC\r\n" script and a NUL)
+//!                 name, then buffer (len + 1: the compiled "\x80GSC\r\n" script and a NUL;
+//!                 aligned 32: `mp_patch` and `mp_common` resolve with it)
 //! TTFDef          { char* name; i32 len; pad; u8* file; 0x20008 bytes inline } 0x20020
 //!                 name, then file (len + 1 bytes, a NUL after the font); most retail fonts are
 //!                 "," placeholders (len 0, no file)
@@ -20,7 +21,7 @@
 
 use crate::asset_type::AssetType;
 use crate::cursor::{ReadError, Result};
-use crate::stream::{Stream, TEMP};
+use crate::stream::Stream;
 
 pub fn localize(s: &mut Stream, h: usize) -> Result<Option<String>> {
     s.string(h)?;
@@ -29,12 +30,16 @@ pub fn localize(s: &mut Stream, h: usize) -> Result<Option<String>> {
 
 /// A name and a `len + 1`-byte buffer (rawfile, scriptparsetree, ttf).
 fn named_buffer(s: &mut Stream, h: usize) -> Result<Option<String>> {
+    named_buffer_aligned(s, h, 15)
+}
+
+fn named_buffer_aligned(s: &mut Stream, h: usize, mask: u64) -> Result<Option<String>> {
     let name = s.string(h)?;
     let len = s.i32_at(h + 8)?;
     if s.ptr_at(h + 16)?.is_inline() && len < 0 {
         return Err(ReadError::Invalid("buffer length", h + 8));
     }
-    s.array(h + 16, len.max(0) as usize + 1, 15)?;
+    s.array(h + 16, len.max(0) as usize + 1, mask)?;
     Ok(name)
 }
 
@@ -43,7 +48,7 @@ pub fn rawfile(s: &mut Stream, h: usize) -> Result<Option<String>> {
 }
 
 pub fn script_parse_tree(s: &mut Stream, h: usize) -> Result<Option<String>> {
-    named_buffer(s, h)
+    named_buffer_aligned(s, h, 31)
 }
 
 pub fn ttf(s: &mut Stream, h: usize) -> Result<Option<String>> {
@@ -69,23 +74,10 @@ pub fn key_value_pairs(s: &mut Stream, h: usize) -> Result<Option<String>> {
 /// FontIconAlias* }` (32): name, the entries (40 each: `{ char* name;
 /// u32 hash; Material*; i32 size; f32 xScale, yScale }`), each entry's name
 /// and material, then the aliases (12 each: three u32 hashes, aligned 4).
-///
-/// A font icon without entries keeps its name out of VIRTUAL (in TEMP with
-/// the struct): read on `core_post_gfx`'s `fonticon/defaultfonticon.csv`,
-/// where the references after it only land with the name left out, while
-/// `fonticon/buttons.csv` and `fonticon/weapons.csv` (with entries) need
-/// theirs in VIRTUAL.
 pub fn font_icon(s: &mut Stream, h: usize) -> Result<Option<String>> {
     s.no_loads(h, AssetType::FontIcon.header_size(), &[0, 16, 24])?;
     let entries = s.u32_at(h + 8)? as usize;
-    let name = if entries == 0 {
-        s.push(TEMP);
-        let n = s.string(h);
-        s.pop();
-        n?
-    } else {
-        s.string(h)?
-    };
+    let name = s.string(h)?;
     if let Some(t) = s.records(h + 16, entries, 40, 7)? {
         for i in 0..entries {
             let e = t + 40 * i;

@@ -313,6 +313,54 @@ pub struct ComWorldRec {
     pub record: Span,
     pub primary_lights: Option<Span>,
     pub primary_light_count: u32,
+    /// The primary lights, read (index order).
+    pub lights: Vec<ComLightRec>,
+}
+
+/// One `ComPrimaryLight`.
+#[derive(Clone, Debug, Default)]
+pub struct ComLightRec {
+    pub kind: u8,
+    pub color: [f32; 3],
+    pub dir: [f32; 3],
+    pub origin: [f32; 3],
+    pub radius: f32,
+    pub cos_half_fov_outer: f32,
+    pub cos_half_fov_inner: f32,
+    pub def_name: Option<String>,
+}
+
+/// A `GfxWorldTransientZone`: one part of the world's vertices.
+#[derive(Clone, Debug, Default)]
+pub struct GfxWorldTrRec {
+    pub name: String,
+    pub header: usize,
+    pub index: u32,
+    pub vertices: Option<usize>,
+    pub vertex_count: u32,
+    pub layer_data: Option<Span>,
+}
+
+/// A string table: `cells[row * columns + column]`.
+#[derive(Clone, Debug, Default)]
+pub struct StringTableRec {
+    pub name: String,
+    pub columns: usize,
+    pub rows: usize,
+    pub cells: Vec<String>,
+}
+
+impl StringTableRec {
+    pub fn cell(&self, row: usize, column: usize) -> &str {
+        self.cells.get(row * self.columns + column).map_or("", String::as_str)
+    }
+}
+
+/// A `GfxLightMap`: its three textures.
+#[derive(Clone, Debug, Default)]
+pub struct GfxLightMapRec {
+    pub name: String,
+    pub textures: [Option<super::AssetId>; 3],
 }
 
 /// A `GfxWorld`: where its arrays are in the file (`None`: not inline).
@@ -336,6 +384,16 @@ pub struct GfxWorldRec {
     pub model_count: u32,
     pub lightmaps: Vec<(Option<super::AssetId>, Option<super::AssetId>)>,
     pub sky_images: Vec<Option<super::AssetId>>,
+    /// IW7: the 32 transient zone slots (`draw.transientZones`).
+    pub transient_zones: Vec<Option<super::AssetId>>,
+    /// IW7: `GfxLightMap` assets (`draw.lightMaps`).
+    pub light_maps: Vec<Option<super::AssetId>>,
+    /// IW7: per sky, its start surfaces.
+    pub sky_surfs: Vec<Vec<i32>>,
+    pub surface_bounds: Option<usize>,
+    pub smodel_insts: Option<usize>,
+    /// IW7: images the world names (outdoor, ies lookup, probes).
+    pub images: Vec<(&'static str, super::AssetId)>,
 }
 
 /// A `MapEnts`: the entity string and the spawn points' records.
@@ -344,6 +402,23 @@ pub struct MapEntsRec {
     pub name: String,
     pub entity_string: String,
     pub spawns: Option<Span>,
+    pub spawn_count: u32,
+    /// IW7: `SpawnerList` records (Spawner, 56 bytes each).
+    pub spawners: Option<Span>,
+    pub spawner_count: u32,
+    /// IW7: brush sub-models (`cmodel_t`, 56 bytes each).
+    pub cmodels: Option<Span>,
+    pub cmodel_count: u32,
+    /// IW7: scriptable instances (`ScriptableInstance`, 464 bytes each) and
+    /// the scriptable each names.
+    pub scriptables: Option<Span>,
+    pub scriptable_count: u32,
+    pub scriptable_defs: Vec<Option<super::AssetId>>,
+    pub scriptable_models: Vec<Option<super::AssetId>>,
+    /// IW7: dynamic entities (`DynEntityDef`, 112 bytes each) per list,
+    /// and each one's model.
+    pub dyn_ents: [Option<Span>; 2],
+    pub dyn_ent_models: [Vec<Option<super::AssetId>>; 2],
 }
 
 /// A `clipMap_t`: its terrain triangles (brushes are not captured yet).
@@ -355,6 +430,13 @@ pub struct ClipMapRec {
     pub vert_count: u32,
     pub tri_indices: Option<usize>,
     pub tri_count: u32,
+    /// IW7: the static models (`cStaticModel_s`, 64 bytes each) and their
+    /// models.
+    pub static_models: Option<Span>,
+    pub static_model_count: u32,
+    pub static_model_models: Vec<Option<super::AssetId>>,
+    /// IW7: the world's collision as Havok shape data.
+    pub havok_world_shape: Option<Span>,
 }
 
 #[derive(Default, Debug)]
@@ -377,6 +459,12 @@ pub struct Capture {
     pub map_ents: Vec<MapEntsRec>,
     pub clip_maps: Vec<ClipMapRec>,
     pub sound_banks: Vec<SoundBankRec>,
+    /// IW7: world vertex parts (in the shared streams).
+    pub gfx_world_trs: Vec<GfxWorldTrRec>,
+    pub light_maps: Vec<GfxLightMapRec>,
+    /// Localized strings: (key, text).
+    pub localize: Vec<(String, String)>,
+    pub string_tables: Vec<StringTableRec>,
     /// Everything else, by name.
     pub others: Vec<OtherRec>,
     /// The table index -> what it loaded.
@@ -419,6 +507,8 @@ impl Capture {
             T::MapEnts => self.map_ents.get(i).map(|r| r.name.as_str()),
             T::ClipMap => self.clip_maps.get(i).map(|r| r.name.as_str()),
             T::SoundBank => self.sound_banks.get(i).map(|r| r.name.as_str()),
+            T::GfxWorldTransientZone => self.gfx_world_trs.get(i).map(|r| r.name.as_str()),
+            T::GfxLightMap => self.light_maps.get(i).map(|r| r.name.as_str()),
             _ => self.others.get(i).map(|r| r.name.as_str()),
         };
         s.unwrap_or("")
@@ -445,6 +535,8 @@ impl Capture {
             AssetType::MapEnts => self.map_ents.len(),
             AssetType::ClipMap => self.clip_maps.len(),
             AssetType::SoundBank => self.sound_banks.len(),
+            AssetType::GfxWorldTransientZone => self.gfx_world_trs.len(),
+            AssetType::GfxLightMap => self.light_maps.len(),
             _ => {
                 return self
                     .others

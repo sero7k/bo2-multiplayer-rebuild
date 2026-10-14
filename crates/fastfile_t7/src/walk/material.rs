@@ -11,8 +11,8 @@
 //! MaterialShaderArgument 16: u16 type, location, size, buffer; union { float* literalConst (vec4); hashes }
 //! ```
 //!
-//! Stream order of a technique (read, not x64-zt's): an 8-byte VIRTUAL
-//! slot (no file bytes), the technique struct aligned 16, then per draw
+//! Stream order of a technique (read, not x64-zt's): the technique struct
+//! (aligned 8, no slot of its own), then per draw
 //! method its vertex shader (struct, name, extraDef, program aligned 4),
 //! **then** its vertex declaration (aligned 4), the pixel shader, the other
 //! stages, the arguments (a literal's vec4 follows only when its union
@@ -20,13 +20,11 @@
 //! map (112 bytes, aligned 4). A draw method's vertex declaration is often
 //! a reference to the one an earlier method loaded.
 //!
-//! Open question: the slot + 16-alignment before a technique is what makes
-//! every reference of `core_post_gfx` (8 inline technique sets) land and
-//! its VIRTUAL end exactly at the header's size; `en_core_common`'s two
-//! technique sets instead only resolve with the technique 8-aligned right
-//! after the set's name (no slot), the same structs in both zones. One of
-//! the two zones has another miscounted allocation before its techniques
-//! that the other rule compensates; the walk keeps the `core_post_gfx` one.
+//! (The slot + 16-alignment an earlier version used only made up for
+//! two miscounts before `core_post_gfx`'s technique sets: its sound
+//! bank's snapshots are 32-aligned and an empty font icon's name is in
+//! VIRTUAL like any other; with those, every zone resolves with plain
+//! 8-alignment.)
 //!
 //! ```text
 //! Material 0x2a0: 0x00 MaterialInfo (char* name; flags; sort key; surface bits; contents) 0x30
@@ -41,13 +39,14 @@
 //! Order: name, the constant buffers (each: struct, initData in PHYSICAL
 //! aligned 256, name), the technique set (an asset, struct in TEMP; its
 //! pointer is `-2` when inline, so it takes an 8-byte VIRTUAL slot first),
-//! the texture table then each texture's image (an asset), VIRTUAL aligned
-//! 16 after them, the sampler table, the constant table, the enemy
+//! the texture table then each texture's image (an asset), the sampler
+//! table (aligned 16, also when empty), the constant table, the enemy
 //! material. Later references to an image name its texture def's `image`
 //! field. (Read on retail `core_post_gfx`, `en_mp_common`, `mp_patch`:
 //! every reference resolves and VIRTUAL and PHYSICAL end at the header's
 //! sizes.)
 
+use super::capture::MaterialRec;
 use crate::asset_type::AssetType;
 use crate::cursor::Result;
 use crate::stream::{PHYSICAL, Stream};
@@ -84,10 +83,7 @@ fn technique(s: &mut Stream, field: usize) -> Result<()> {
     if !s.ptr_at(field)?.is_inline() {
         return s.array(field, 0, 0).map(drop);
     }
-    // An 8-byte VIRTUAL slot (no file bytes) before each technique, which
-    // is aligned 16.
-    s.insert_slot();
-    let Some(t) = s.array(field, TECHNIQUE, 15)? else { return Ok(()) };
+    let Some(t) = s.array(field, TECHNIQUE, 7)? else { return Ok(()) };
     for m in 0..DRAW_METHODS {
         let d = t + 8 + DRAW_METHOD * m;
         s.no_loads(d, DRAW_METHOD, &[0x08, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40, 0x50])?;
@@ -136,19 +132,26 @@ pub fn material(s: &mut Stream, h: usize) -> Result<Option<String>> {
             s.string(c + 0x38)?;
         }
     }
-    s.asset(AssetType::TechniqueSet, h + 0x278)?;
+    let mut rec = MaterialRec {
+        name: name.clone().unwrap_or_else(String::new),
+        ..Default::default()
+    };
+    rec.techset = s.asset_named(AssetType::TechniqueSet, h + 0x278)?;
     let textures = s.u8_at(h + 0x270)? as usize;
     if let Some(t) = s.records(h + 0x280, textures, TEXTURE_DEF, 7)? {
         for i in 0..textures {
-            s.asset(AssetType::Image, t + TEXTURE_DEF * i)?;
+            let def = t + TEXTURE_DEF * i;
+            if let Some(img) = s.asset_named(AssetType::Image, def)? {
+                rec.textures.push((s.u32_at(def + 8)?, img));
+            }
         }
-        // VIRTUAL is left 16-aligned after the textures.
-        s.align(15);
     }
     let samplers = s.u8_at(h + 0x271)? as usize;
-    s.records(h + 0x288, samplers, SAMPLER_DEF, 7)?;
+    // The sampler table is 16-aligned.
+    s.records(h + 0x288, samplers, SAMPLER_DEF, 15)?;
     let constants = s.u8_at(h + 0x272)? as usize;
     s.records(h + 0x290, constants, CONSTANT_DEF, 15)?;
     s.asset(AssetType::Material, h + 0x298)?;
+    s.capture.add_material(rec);
     Ok(name)
 }

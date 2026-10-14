@@ -14,7 +14,7 @@ use crate::stream::Stream;
 pub enum F {
     Str,
     A(AssetType),
-    /// A `-2` pointer to data in a block without file bytes: the slot only.
+    /// A `-2` pointer to runtime data: no file bytes and no VIRTUAL slot.
     Runtime,
     /// An array of records without pointers: (u32 count field, record size).
     Records(usize, usize),
@@ -43,7 +43,7 @@ pub const SPECS: &[Spec] = &[
     // at 0x60 records of 24 at 0x68.
     Spec { ty: T::Objective, size: 0x70, fields: &[(0x30, A(T::Image)), (0x38, Str), (0x68, Records(0x60, 24))] },
     // Read on mp_common (no HydraX table): 0x218 is `-2` and loads no file
-    // bytes (runtime data: only the 8-byte VIRTUAL slot).
+    // bytes and takes no VIRTUAL slot (runtime data).
     Spec { ty: T::LightDescription, size: 0x240, fields: &[(0x218, Runtime)] },
     Spec { ty: T::SurfaceSoundDef, size: 0xa8, fields: &[] },
     Spec { ty: T::FootstepTable, size: 0x40, fields: &[(0x8, A(T::SurfaceSoundDef)), (0x10, A(T::SurfaceSoundDef)), (0x18, A(T::SurfaceSoundDef)), (0x20, A(T::SurfaceSoundDef)), (0x28, A(T::SurfaceSoundDef)), (0x30, A(T::SurfaceSoundDef)), (0x38, A(T::SurfaceSoundDef))] },
@@ -105,9 +105,8 @@ pub fn flat(s: &mut Stream, h: usize, spec: &Spec) -> Result<Option<String>> {
                 }
             }
             Runtime => {
-                if s.ptr_at(h + off)? == crate::ptr::Ptr::Insert {
-                    s.insert_slot();
-                }
+                // `-2` there takes no VIRTUAL slot and loads nothing (read
+                // on mp_common's light descriptions); other values are data.
             }
         }
     }

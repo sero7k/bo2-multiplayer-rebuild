@@ -297,6 +297,7 @@ pub fn play_pellet_segment(
     };
     play_impact_table_cell(
         impact_type,
+        weapons.and_then(|w| w.0.combat_fx_of(weapon)),
         seg_end,
         normal,
         surf_type,
@@ -314,6 +315,10 @@ pub fn play_pellet_segment(
 
 pub fn play_impact_table_cell(
     impact_type: i32,
+    // bo2mp: the weapon's own impact effects (a guest gun's, for an impact
+    // the table has nothing like: `WeaponCombatFx::impact_row`), played in
+    // place of the table's cell.
+    own: Option<&asset_game::WeaponCombatFx>,
     origin: [f32; 3],
     normal: [f32; 3],
     surf_type: u8,
@@ -332,6 +337,28 @@ pub fn play_impact_table_cell(
         .get(surf_type as usize)
         .map(|name| (*name).to_owned());
     let exit = surface_flags & FX_IMPACT_EXIT_SURFACE_FLAG != 0;
+    let surf = surf_type as usize;
+    let flesh_slot = (surf == FX_SURF_TYPE_FLESH).then(|| flesh_effect_index(flesh_flags));
+    if let (Some(name), Some(catalog)) = (own.and_then(|fx| fx.own_impact(surf, flesh_slot)), catalog) {
+        cache.sync(&catalog.0);
+        if let Some(PlayResult::PlayedReleased { .. } | PlayResult::Held { .. }) = play_named_oriented_in_world(
+            &mut host.0,
+            &catalog.0,
+            cache,
+            name,
+            origin,
+            axis_from_hit_normal(normal),
+            scene,
+        ) {
+            combat.last_impact_def = Some(name.name.to_owned());
+            combat.last_impact_miss_why = None;
+            cursor.impact_played = cursor.impact_played.saturating_add(1);
+            combat.impact_msec = Some(host.0.msec_now);
+            log_combat_fx_gaps(cursor, combat);
+            sync_combat_dump(cursor, combat);
+            return;
+        }
+    }
     let table = impact_fx.and_then(|fx| fx.0.as_ref());
     let Some(row) = table.map_or_else(
         || impact_table_row(impact_type, exit),
@@ -343,8 +370,6 @@ pub fn play_impact_table_cell(
         return;
     };
     combat.last_row = Some(row as i64);
-    let surf = surf_type as usize;
-    let flesh_slot = (surf == FX_SURF_TYPE_FLESH).then(|| flesh_effect_index(flesh_flags));
     combat.last_impact_cell_empty = table.and_then(|t| {
         let entry = t.entries.get(row)?;
         if let Some(slot) = flesh_slot {

@@ -449,19 +449,19 @@ pub(crate) fn iw6_anim_check(xanims: &XAnimBuild) -> String {
     )
 }
 
-struct Builder<'a> {
-    cap: &'a Capture,
-    image: &'a [u8],
-    strings: &'a [Option<String>],
-    paks: fastfile_iw6::image::ImagePaks,
-    catalog: MaterialCatalog,
-    owner: ZoneOwner,
+pub(super) struct Builder<'a> {
+    pub(super) cap: &'a Capture,
+    pub(super) image: &'a [u8],
+    pub(super) strings: &'a [Option<String>],
+    pub(super) paks: fastfile_iw6::image::ImagePaks,
+    pub(super) catalog: MaterialCatalog,
+    pub(super) owner: ZoneOwner,
     /// Capture material index -> catalog material index.
-    materials: HashMap<usize, usize>,
+    pub(super) materials: HashMap<usize, usize>,
     /// (capture image index, size cap) -> catalog image slot.
-    images: HashMap<(usize, u32), Option<usize>>,
-    image_failures: Vec<String>,
-    decoded: usize,
+    pub(super) images: HashMap<(usize, u32), Option<usize>>,
+    pub(super) image_failures: Vec<String>,
+    pub(super) decoded: usize,
 }
 
 pub(super) fn le_u16s(b: &[u8]) -> Vec<u16> {
@@ -645,7 +645,122 @@ pub(super) fn gpu_image(px: &fastfile_iw6::image::ImagePixels, colour: bool) -> 
     Ok(image)
 }
 
-impl Builder<'_> {
+impl<'a> Builder<'a> {
+    /// bo2mp: a builder over a walked zone (a Ghosts map's: `iw6_map`),
+    /// its streamed pictures read from the paks in `zone_dir`.
+    pub(super) fn new(
+        cap: &'a Capture,
+        zone: &'a fastfile_iw6::Zone,
+        zone_path: &Path,
+        catalog: MaterialCatalog,
+    ) -> Self {
+        Self {
+            cap,
+            image: &zone.image,
+            strings: &zone.assets.script_strings,
+            paks: fastfile_iw6::image::ImagePaks::new(zone_path.parent().unwrap_or(Path::new("."))),
+            catalog,
+            owner: ZoneOwner::from_zone_path(zone_path),
+            materials: HashMap::new(),
+            images: HashMap::new(),
+            image_failures: Vec::new(),
+            decoded: 0,
+        }
+    }
+
+    /// bo2mp: a world surface's material (a Ghosts map's `GfxWorld`): drawn
+    /// as its technique set names it (`l_sm_r0c0..` lit, `b1c1` layers with
+    /// the vertex colour as their weights, `t0` alpha tested, `b0` blended),
+    /// with its colour map and its layers' (`colorMap1`, `colorMap2`).
+    /// `None` when the material is not in the zone.
+    pub(super) fn world_material(&mut self, index: usize, max: u32) -> Option<usize> {
+        // (World materials keep their own key space apart from models'.)
+        const WORLD: usize = 1 << 40;
+        if let Some(&i) = self.materials.get(&(index | WORLD)) {
+            return Some(i);
+        }
+        let m: &MaterialRec = self.cap.materials.get(index)?;
+        let technique_set = m.techset.map(|t| self.cap.name_of(t).to_owned()).unwrap_or_default();
+        let name = technique_set.trim_start_matches(',');
+        let mut draw = T6Draw::from_technique_set(name, m.sort_key, None);
+        // A replacing base layer (`r0c0`) is opaque whatever the sort key.
+        let base = name.split('_').find(|t| {
+            let b = t.as_bytes();
+            b.len() >= 4 && matches!(b[0], b'r' | b'b' | b't') && b[1] == b'0' && (b[2] == b'c' || b[2] == b'h')
+        });
+        match base.map(|t| t.as_bytes()[0]) {
+            Some(b'r') if draw.blend == T6Blend::Blend => draw.blend = T6Blend::Opaque,
+            Some(b't') => {
+                draw.alpha_test = true;
+                if draw.blend == T6Blend::Blend {
+                    draw.blend = T6Blend::Opaque;
+                }
+            }
+            _ => {}
+        }
+        let mut textures = Vec::new();
+        let colour = m
+            .textures
+            .iter()
+            .find(|t| t.name_hash == COLOR_MAP_HASH && t.image.is_some())
+            .or_else(|| m.textures.iter().find(|t| t.semantic == 2 && t.image.is_some()));
+        let mut wanted: Vec<(u32, u8, u8, usize)> = Vec::new();
+        if let Some(t) = colour
+            && let Some(img) = t.image
+        {
+            wanted.push((t.name_hash, t.sampler_state, TS_COLOR_MAP, img.index as usize));
+        }
+        if draw.layered {
+            for (hash, semantic) in super::t6_materials::LAYER_MAPS {
+                if let Some(t) = m.textures.iter().find(|t| t.name_hash == hash)
+                    && let Some(img) = t.image
+                {
+                    wanted.push((hash, t.sampler_state, semantic, img.index as usize));
+                }
+            }
+        }
+        for (hash, sampler_state, semantic, image) in wanted {
+            // Layer pictures are colour pictures (sRGB) too.
+            let read_as = if semantic == TS_NORMAL_MAP || semantic == TS_SPECULAR_MAP { semantic } else { TS_COLOR_MAP };
+            if let Some(slot) = self.image(image, max, read_as) {
+                textures.push(MaterialTextureBinding {
+                    name_hash: hash,
+                    name_start: 0,
+                    name_end: 0,
+                    sampler_state,
+                    semantic,
+                    image: Some(slot),
+                });
+            }
+        }
+        let index_in_catalog = self.catalog.link_material(AuthoredMaterial {
+            name: AssetRef::Real(format!("iw6:{}", m.name)),
+            namespace: AssetNamespace::T6,
+            technique_set: AssetRef::default(),
+            technique_set_edge: AssetEdge::Absent,
+            draw_surf: 0,
+            sort_key: m.sort_key,
+            info_game_flags: 0,
+            texture_atlas: None,
+            surface_type_bits: None,
+            t5_layered_surface_types: None,
+            state_flags: 0,
+            camera_region: 0,
+            state_bits: Vec::new(),
+            state_bits_entry: None,
+            t5_state_bits_entry: None,
+            iw5_state_bits_entry: None,
+            technique_table: None,
+            route: None,
+            textures,
+            constants: Vec::new(),
+            zone: self.owner,
+            t6_draw: Some(draw),
+        });
+        self.materials.insert(index | WORLD, index_in_catalog);
+        Some(index_in_catalog)
+    }
+
     fn string(&self, index: u32) -> String {
         self.strings
             .get(index as usize)
@@ -660,7 +775,7 @@ impl Builder<'_> {
 
     /// A model's first LOD in Black Ops II's captured form, and the capture
     /// materials its surfaces use.
-    fn model_ref(&self, m: &XModelRec) -> Option<(asset_t6::XModelRef, Vec<usize>)> {
+    pub(super) fn model_ref(&self, m: &XModelRec) -> Option<(asset_t6::XModelRef, Vec<usize>)> {
         let lod = m.lods.first()?;
         let surfs = self.cap.model_surfs.get(lod.surfs?.index as usize)?;
         let material_key = |k: usize| asset_t6::AssetKey {
@@ -787,7 +902,7 @@ impl Builder<'_> {
 
     /// One material into the catalog, with its colour, normal and specular
     /// maps.
-    fn material(&mut self, index: usize, max: u32) -> Option<usize> {
+    pub(super) fn material(&mut self, index: usize, max: u32) -> Option<usize> {
         if let Some(&i) = self.materials.get(&index) {
             return Some(i);
         }

@@ -184,7 +184,7 @@ mod moab_tests {
     #[test]
     fn the_zombies_bots_compile() {
         let s = gsc_t6::compile("bo2mp/zm_bots", super::ZM_BOTS).expect("zm_bots.gsc compiles");
-        for f in ["main", "bot_life", "bot_revive", "bot_fight", "bot_rebuild", "bot_spend", "bot_follow"] {
+        for f in ["main", "bot_life", "bot_revive", "bot_fight", "bot_rebuild", "bot_spend", "bot_follow", "can_upgrade"] {
             assert!(s.functions.iter().any(|x| x.name == f), "{f}");
         }
     }
@@ -195,6 +195,8 @@ mod moab_tests {
         for f in ["main", "register_gun", "box_slots"] {
             assert!(s.functions.iter().any(|x| x.name == f), "{f}");
         }
+        // (A gun is registered with its Pack-a-Punch upgrade.)
+        assert!(s.functions.iter().any(|x| x.name == "register_gun" && x.params == 3));
     }
 
     #[test]

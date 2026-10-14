@@ -1179,7 +1179,8 @@ pub(crate) fn shell_view(
 }
 
 /// A yes / no question over the screen: the screen dimmed, a box in the
-/// middle with the question, what it means, and YES / NO.
+/// middle with the question, what it means, and YES / NO (or OK alone for
+/// a notice).
 pub(crate) fn question(c: &mut Kids, cx: &mut Ctx, ask: super::Ask, focus: usize) {
     let (title, body) = ask.text();
     let [r, g, b] = cx.pal.shade;
@@ -1207,7 +1208,7 @@ pub(crate) fn question(c: &mut Kids, cx: &mut Ctx, ask: super::Ask, focus: usize
         p.spawn((Text::new(title), cx.bold(56.0), TextColor(WHITE)));
         p.spawn((Text::new(body), cx.regular(23.0), TextColor(TEXT)));
         p.spawn(Node { flex_grow: 1.0, min_height: cx.px(24.0), ..default() });
-        for (i, label) in ["YES", "NO"].into_iter().enumerate() {
+        for (i, &label) in ask.buttons().iter().enumerate() {
             let on = i == focus;
             let mut e = p.spawn((
                 Hit::Ask(i),

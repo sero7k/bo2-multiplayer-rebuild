@@ -16,7 +16,11 @@
 //! arrays, the delta part `{ trans; quat2; quat }` (24) and its parts, then
 //! the data arrays in field order: dataByte, dataShort, dataInt,
 //! randomDataShort, randomDataByte, randomDataInt, extraChannelData,
-//! indices, IK pitch layers, IK pitch bones.
+//! indices, IK pitch layers, IK pitch bones, each at its element's natural
+//! alignment. A delta part's frames: small translations (3 bytes) are
+//! unaligned, the others (6-byte translations, both quaternion kinds)
+//! 4-aligned. (Every reference of `mp_common`'s 4088 animations' zone
+//! lands with these.)
 //!
 //! Delta parts (indices u8 when `numframes < 256`, else u16):
 //! ```text
@@ -62,7 +66,10 @@ fn delta_component(s: &mut Stream, field: usize, index: usize, still: usize, hea
             }
         };
         let frames_at = if frame.is_none() { 0x20 } else { 8 };
-        s.array(t + frames_at, (size + 1) * per, 1)?;
+        // Small translations (byte vectors) are unaligned; short vectors
+        // and both quaternion kinds are 4-aligned.
+        let mask = if per == 3 { 0 } else { 3 };
+        s.array(t + frames_at, (size + 1) * per, mask)?;
     }
     Ok(())
 }

@@ -108,7 +108,11 @@ fn field(s: &mut Stream, rec: &mut WeaponRec, field: usize, kind: Kind, name: &s
         eprintln!("WFIELD {name} at {:#x}", s.pos());
     }
     let value = match kind.asset_type() {
-        None => s.string_named(field)?.map(FieldValue::Str),
+        // An empty string (the zone's shared "") names nothing.
+        None => s
+            .string_named(field)?
+            .filter(|v| !v.is_empty())
+            .map(FieldValue::Str),
         Some(ty) => s.asset_named(ty, field)?.map(|name| FieldValue::Asset { ty, name }),
     };
     if let Some(v) = value {
@@ -191,13 +195,20 @@ pub fn weapon(s: &mut Stream, h: usize) -> Result<Option<String>> {
     s.no_loads(h, VARIANT, &known)?;
     let mut rec = WeaponRec { header_at: h, ..Default::default() };
     let name = s.string(h)?;
-    rec.name = name.clone().unwrap_or_default();
-    rec.base_name = s.string_named(h + 8)?.unwrap_or_default();
+    rec.name = name.clone().unwrap_or_else(String::new);
+    rec.base_name = s.string_named(h + 8)?.unwrap_or_else(String::new);
     rec.def_at = s.array(h + 0x18, DEF, 7)?;
     if let Some(d) = rec.def_at {
         weapon_def(s, &mut rec, d)?;
     } else if let Ptr::Ref { offset, .. } = s.ptr_at(h + 0x18)? {
-        rec.fields.push(("weaponDef".into(), FieldValue::Str(format!("<shared {offset:#x}>"))));
+        // A `WeaponDef` another variant loaded: name that variant.
+        let owner = s
+            .vmap
+            .file_pos(offset)
+            .and_then(|at| s.capture.weapons.iter().find(|w| w.def_at == Some(at)))
+            .map_or_else(|| format!("<shared {offset:#x}>"), |w| w.name.clone());
+        rec.def_shared_with = Some(owner.clone());
+        rec.fields.push(("weaponDef".into(), FieldValue::Str(format!("shared with {owner}"))));
     }
     for &(off, kind, fname) in VARIANT_FIELDS.iter().filter(|f| f.0 < 0x38) {
         field(s, &mut rec, h + off, kind, fname)?;
@@ -212,7 +223,7 @@ pub fn weapon(s: &mut Stream, h: usize) -> Result<Option<String>> {
     }
     if let Some(t) = s.records(h + 0x48, ANIMS, 8, 7)? {
         for i in 0..ANIMS {
-            if let Some(a) = s.string_named(t + 8 * i)? {
+            if let Some(a) = s.string_named(t + 8 * i)?.filter(|a| !a.is_empty()) {
                 let slot = ANIM_NAMES.iter().find(|n| n.0 == i).map_or_else(|| format!("anim{i}"), |n| n.1.to_string());
                 rec.anims.push((i, slot, a));
             }

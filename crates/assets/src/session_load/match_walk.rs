@@ -145,6 +145,10 @@ pub(super) async fn walk_prepared_match(
             let mut loaded = match game {
                 "iw3" => crate::lane::load_iw3_world(path, &progress, material_seed),
                 "t4" => crate::lane::load_t4_world(path, &progress, material_seed),
+                // bo2mp: Ghosts' maps.
+                "iw6" => crate::lane::load_iw6_world(path, &progress, material_seed),
+                // bo2mp: Infinite Warfare's maps.
+                "iw7" => crate::lane::load_iw7_world(path, &progress, material_seed),
                 _ => {
                     drop(material_seed);
                     LoadedWorld::with_gap(
@@ -157,7 +161,8 @@ pub(super) async fn walk_prepared_match(
             };
             if crate::t6_rules() {
                 let stage = progress.begin_scoped(StageId::MapAssets, "black ops ii rules", None);
-                crate::lane::t6_surface_list(&mut loaded, &zone_name, game == "iw3");
+                // (Ghosts' surface list is Infinity Ward's, as CoD4's.)
+                crate::lane::t6_surface_list(&mut loaded, &zone_name, matches!(game, "iw3" | "iw6"));
                 crate::lane::attach_t6_rules(
                     &mut loaded,
                     &zone_name,
@@ -381,6 +386,15 @@ pub(super) async fn walk_prepared_match(
             guests.iter().take(80).cloned().collect::<Vec<_>>().join(" ")
         ));
     }
+    // bo2mp: on a Zombies map, the Mystery Box's guest guns' Pack-a-Punch
+    // upgrades (their own games' upgraded weapons, else Black Ops II-style
+    // copies), before anything resolves against the catalog.
+    let zm_upgrades = if crate::t6_rules() && crate::guest_guns() && zone_name.starts_with("zm_") {
+        guest_zm_upgrades(&mut weapons, &mut report)
+    } else {
+        Vec::new()
+    };
+    bo2_profile::guest::set_zm_upgrades(zm_upgrades);
     let common_xanim_count = xanims.len();
     let map_xanim_count = map_xanims.len();
     let t5_xanim_added = xanims.absorb(t5_xanims);
@@ -1039,6 +1053,86 @@ fn resolve_world_lights(
     dynamic_light
 }
 
+/// bo2mp: the Pack-a-Punch upgrade of each guest gun the Mystery Box can
+/// give on this Zombies map (`bo2_profile::guest::zm_box_guns`, as the
+/// box's list is made): its own game's upgraded weapon when that game has
+/// a Pack-a-Punch and the weapon is loaded (shown by our key for its
+/// name), else a Black Ops II-style copy of the gun
+/// (`WeaponBuild::add_upgrade_copies`; its damage and ammo are the combat
+/// table's, `session::combat_table::zombies_guest_upgrades`).
+fn guest_zm_upgrades(weapons: &mut asset_game::WeaponBuild, report: &mut Vec<String>) -> Vec<bo2_profile::guest::ZmUpgrade> {
+    use asset_core::AssetNamespace as Ns;
+    use bo2_profile::guest;
+    let n = weapons.len() as u32;
+    let zm: std::collections::HashSet<String> = (1..n)
+        .filter(|&i| weapons.namespace_of(i) == Some(Ns::T6))
+        .map(|i| weapons.script_name_of(i))
+        .filter(|name| {
+            let name = name.split('+').next().unwrap_or(name);
+            name.strip_suffix("_mp").unwrap_or(name).ends_with("_zm")
+        })
+        .map(|name| guest::family_of_zm_weapon(&name))
+        .collect();
+    let index = |w: &asset_game::WeaponBuild, name: &str| w.resolve_index(name).ok().flatten().unwrap_or(0);
+    let guns = guest::zm_box_guns(&zm, |g| index(weapons, &guest::script_name(g)) != 0);
+    let mut out = Vec::new();
+    let mut copies: Vec<(u32, String, String)> = Vec::new();
+    let mut copied: Vec<&guest::GuestGun> = Vec::new();
+    let (mut own, mut keyed) = (Vec::new(), Vec::new());
+    for gun in guns {
+        let base = guest::script_name(gun);
+        let base_id = index(weapons, &base);
+        let real = Ns::parse(gun.game)
+            .filter(|_| guest::has_own_pack_a_punch(gun.game))
+            .and_then(|ns| {
+                guest::zm_upgrade_assets(gun.game, gun.gun).into_iter().find_map(|name| {
+                    let key = asset_core::AssetKey::new(ns, asset_core::AssetKind::Weapon, name).ok()?;
+                    weapons.resolve_key(&key).ok().flatten().filter(|&id| id != 0 && id != base_id)
+                })
+            });
+        match real {
+            Some(id) => {
+                keyed.push((id, guest::zm_upgrade_key(gun)));
+                let upgraded = weapons.script_name_of(id).to_ascii_lowercase();
+                own.push(upgraded.clone());
+                out.push(guest::ZmUpgrade {
+                    base,
+                    upgraded,
+                    made: false,
+                    bo2_camo: guest::own_upgrade_wears_bo2_camo(gun.game),
+                });
+            }
+            None => {
+                copies.push((base_id, guest::zm_upgrade_copy_name(weapons.name_of(base_id)), guest::zm_upgrade_key(gun)));
+                copied.push(gun);
+            }
+        }
+    }
+    for (id, key) in keyed {
+        weapons.set_display_name_key(id, &key);
+    }
+    let ids = weapons.add_upgrade_copies(&copies);
+    for (gun, id) in copied.into_iter().zip(ids) {
+        if id == 0 {
+            continue;
+        }
+        out.push(guest::ZmUpgrade {
+            base: guest::script_name(gun),
+            upgraded: weapons.script_name_of(id).to_ascii_lowercase(),
+            made: true,
+            bo2_camo: true,
+        });
+    }
+    report.push(format!(
+        "bo2mp zombies Pack-a-Punch: {} guest guns: {} own games' upgrades ({}), {} made Black Ops II-style",
+        out.len(),
+        own.len(),
+        own.join(" "),
+        out.iter().filter(|u| u.made).count()
+    ));
+    out
+}
+
 #[allow(clippy::too_many_arguments)]
 
 /// bo2mp: the other games' guns' camos as material swaps (see
@@ -1122,6 +1216,32 @@ fn guest_camo_swaps(fpv: &FpvMeshBuild, world: &WorldWeaponBuild, report: &mut V
     }
     report.push(format!("guest camos: Black Ops II's material camos on {} materials of {models} other games' gun models", wrap.len()));
     asset_core::weapon_camos::install_wrap(wrap);
+    // bo2mp: Zombies' Pack-a-Punch camo on the guest guns' upgrades draws
+    // over every other game's gun, Modern Warfare 2's and 3's as well.
+    let mut pap = std::collections::HashSet::new();
+    let mut take_all = |keys: &[Option<asset_core::MaterialKey>], edges: &[asset_core::AssetEdge<asset_model::MaterialSpace>]| {
+        for (k, e) in keys.iter().zip(edges) {
+            if let (Some(k), Some(i)) = (k, e.bound_index())
+                && !skip(&k.name)
+            {
+                pap.insert(i as u32);
+            }
+        }
+    };
+    if !bo2_profile::guest::zm_upgrades().is_empty() {
+        for i in 0..fpv.len() {
+            if let Some(e) = fpv.get_at(i).filter(|e| e.namespace != Ns::T6) {
+                take_all(&e.material_keys, &e.material_edges);
+            }
+        }
+        for i in 0..world.len() {
+            if let Some(e) = world.get_at(i).filter(|e| e.namespace != Ns::T6) {
+                take_all(&e.material_keys, &e.material_edges);
+            }
+        }
+        report.push(format!("guest Pack-a-Punch camo: drawn over {} materials of other games' gun models", pap.len()));
+    }
+    asset_core::weapon_camos::install_pap_wrap(pap);
 }
 
 fn link_materials_after_absorb(

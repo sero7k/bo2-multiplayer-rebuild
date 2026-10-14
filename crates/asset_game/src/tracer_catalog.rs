@@ -224,6 +224,42 @@ impl TracerCatalog {
         true
     }
 
+    /// bo2mp: one Advanced Warfare tracer (`TracerDef` bytes, its material's
+    /// name), under the S1 namespace. AW's tracer fields are IW4's in the
+    /// same order (a `FxEffectDef` pointer added before them, unused here).
+    pub fn capture_s1(&mut self, name: &str, material: &str, record: &[u8]) -> bool {
+        use fastfile_s1::layout::TracerDef as t;
+        if name.is_empty() || name.starts_with(',') || record.len() < t::SIZE {
+            return false;
+        }
+        let f = |at: usize| f32::from_le_bytes(record[at..at + 4].try_into().unwrap_or([0; 4]));
+        let ns = crate::AssetNamespace::S1;
+        let material = material.trim_start_matches(',');
+        self.published.insert_owned(OwnedTracerDef {
+            namespace: ns,
+            name: name.to_owned(),
+            material: TracerMaterial::Unresolved(AssetEdgeReason::CatalogMiss),
+            material_hint: (!material.is_empty()).then(|| material.to_owned()),
+            material_namespace: ns,
+            material_authored: crate::AuthoredRef {
+                slot: !material.is_empty(),
+                alias: false,
+            },
+            draw_interval: i32::from_le_bytes(
+                record[t::drawInterval..t::drawInterval + 4].try_into().unwrap_or([0; 4]),
+            )
+            .max(0) as u32,
+            speed: f(t::speed),
+            beam_length: f(t::beamLength),
+            beam_width: f(t::beamWidth),
+            screw_radius: f(t::screwRadius),
+            screw_dist: f(t::screwDist),
+            colors: std::array::from_fn(|c| std::array::from_fn(|k| f(t::colors + 16 * c + 4 * k))),
+            fade_msec: 0,
+        });
+        true
+    }
+
     /// bo2zm: tracers a map zone defines (Black Ops II maps carry their
     /// own) join this catalog; a name already here is replaced.
     pub fn absorb(&mut self, other: TracerCatalog) {

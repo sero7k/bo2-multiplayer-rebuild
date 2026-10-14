@@ -199,6 +199,11 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         script_player::give_weapon(&mut frame(world), id, w, false)?;
         // bo2mp: its camo (the options `calcweaponoptions` made).
         wear_camo(world, id, w, arg(a, 2).as_int().unwrap_or(0) & 0xff);
+        // bo2mp: a guest gun's Pack-a-Punch upgrade wears Black Ops II's
+        // Pack-a-Punch camo (its gun has no camo set of its own).
+        if bo2_profile::guest::zm_upgraded(&name).is_some_and(|u| u.bo2_camo) {
+            wear_camo(world, id, w, bo2_profile::guest::ZM_PAP_CAMO_OPTION as i32);
+        }
         // bo2zm: Black Ops II's engine puts a grenade it gives into its
         // offhand slot (frag/Semtex lethal on the grenade key, the monkey
         // bomb tactical); IW4's scripts named the class themselves.

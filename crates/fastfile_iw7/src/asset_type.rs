@@ -71,7 +71,7 @@ asset_types! {
     FxWorld = 0x1c, "fxworld", 176;
     GfxWorld = 0x1d, "gfxworld", 4520;
     GfxWorldTransientZone = 0x1e, "gfxworld_transient_zone", 80;
-    IesProfile = 0x1f, "iesprofile", 0;
+    IesProfile = 0x1f, "iesprofile", 24;
     LightDef = 0x20, "light_def", 40;
     UiMap = 0x21, "ui_map", 0;
     AnimClass = 0x22, "animclass", 88;

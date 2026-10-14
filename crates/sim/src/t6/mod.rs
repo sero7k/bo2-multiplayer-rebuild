@@ -677,9 +677,12 @@ pub(crate) fn zm_guest_guns() -> bool {
 }
 
 /// bo2mp: the custom guns this map's Mystery Box can give, as
-/// `bo2mp/zm_guest_guns` reads them (`name:vox`, space-separated): the
-/// loaded guest guns a player can be given, each family once and none of a
-/// family the map's own Zombies weapons have (`bo2_profile::guest::zm_box_guns`).
+/// `bo2mp/zm_guest_guns` reads them (`name:vox:upgrade`, space-separated):
+/// the loaded guest guns a player can be given, each family once and none
+/// of a family the map's own Zombies weapons have
+/// (`bo2_profile::guest::zm_box_guns`), each with its Pack-a-Punch upgrade
+/// (`bo2_profile::guest::zm_upgrade_of`, made by the match load; empty when
+/// it has none loaded).
 fn zm_box_guest_list(world: &mut World) -> String {
     let f = frame(world);
     let names = f.weapon_script_names();
@@ -687,7 +690,9 @@ fn zm_box_guest_list(world: &mut World) -> String {
         .iter()
         .filter(|n| {
             let n = n.split('+').next().unwrap_or(n);
-            n.strip_suffix("_mp").unwrap_or(n).ends_with("_zm")
+            // (The guest guns' own upgrades, `bo1_ak74u_upgraded_zm_mp`,
+            // are no family of the map's.)
+            !bo2_profile::guest::is_guest_name(n) && n.strip_suffix("_mp").unwrap_or(n).ends_with("_zm")
         })
         .map(|n| bo2_profile::guest::family_of_zm_weapon(n))
         .collect();
@@ -695,8 +700,13 @@ fn zm_box_guest_list(world: &mut World) -> String {
         f.weapon_index_by_script_name(&bo2_profile::guest::script_name(g))
             .is_some_and(|w| w != 0 && f.combat_facts_for(w).is_some())
     });
+    let loaded = |name: &str| f.weapon_index_by_script_name(name).is_some_and(|w| w != 0 && f.combat_facts_for(w).is_some());
     guns.iter()
-        .map(|g| format!("{}:{}", bo2_profile::guest::script_name(g), bo2_profile::guest::zm_vox(g)))
+        .map(|g| {
+            let name = bo2_profile::guest::script_name(g);
+            let upgrade = bo2_profile::guest::zm_upgrade_of(&name).map(|u| u.upgraded).filter(|u| loaded(u)).unwrap_or_default();
+            format!("{name}:{}:{upgrade}", bo2_profile::guest::zm_vox(g))
+        })
         .collect::<Vec<_>>()
         .join(" ")
 }

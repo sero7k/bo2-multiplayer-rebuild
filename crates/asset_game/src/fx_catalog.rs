@@ -5,6 +5,14 @@ use std::collections::{HashMap, HashSet};
 mod t6;
 pub use t6::{T6_FIRST_PERSON_FLASH_SCALE, t6_elem_type, t6_first_person_flash_name};
 
+// bo2mp: Advanced Warfare's effects (its guest guns').
+#[path = "fx_catalog_s1.rs"]
+mod s1;
+pub use s1::{
+    S1FxElemView, S1FxTrail, S1FxView, S1FxVisual, s1_elem_flags, s1_elem_type,
+    s1_vis_sample_to_iw4,
+};
+
 use asset_iw4::size::{self as sz, fx_elem};
 use fastfile_iw4::{
     AssetLinkSink, AssetType, FxEffectDefGeometry, Ptr, Result, ZonePtr, ZoneStream,

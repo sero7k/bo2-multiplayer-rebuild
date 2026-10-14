@@ -1190,6 +1190,14 @@ pub struct WeaponCombatFx {
 
     pub namespace: crate::AssetNamespace,
 
+    /// bo2mp: a guest gun's own impact effects, played in place of the
+    /// match's impact table: one effect per surface type (IW4 order,
+    /// `fx_iw4::FX_IMPACT_NONFLESH_COUNT` of them), then the four flesh
+    /// cells; empty names (or an empty row) fall back to the table. Set for
+    /// Advanced Warfare's Tac-19 (its energy-shotgun shockwave hits) and EM1
+    /// (laser hits), whose impacts Black Ops II has nothing like.
+    pub impact_row: Vec<String>,
+
     last_shot_eject_pair_authored: bool,
 }
 
@@ -1288,6 +1296,24 @@ impl WeaponCombatFx {
         } else {
             self.brass_edge(player_view)
         }
+    }
+
+    /// bo2mp: the gun's own impact effect for a surface (`flesh_slot` for
+    /// flesh: `fx_iw4::flesh_effect_index`), when it has one
+    /// (`impact_row`).
+    pub fn own_impact(&self, surf_type: usize, flesh_slot: Option<usize>) -> Option<crate::FxName<'_>> {
+        let n = fx_iw4::FX_IMPACT_NONFLESH_COUNT;
+        let at = if surf_type == fx_iw4::FX_SURF_TYPE_FLESH {
+            n + flesh_slot?
+        } else if surf_type < n {
+            surf_type
+        } else {
+            return None;
+        };
+        self.impact_row
+            .get(at)
+            .filter(|name| !name.is_empty())
+            .map(|name| crate::FxName::new(self.namespace, name))
     }
 
     pub fn explosion_present(&self) -> Option<crate::FxName<'_>> {
@@ -5361,6 +5387,47 @@ impl WeaponBuild {
     /// bo2mp: see `WeaponRegistry::set_guest_names`.
     pub fn set_guest_names(&mut self, on: bool) {
         self.registry.set_guest_names(on);
+    }
+
+    /// bo2mp: Zombies' Pack-a-Punch for another game's gun that has no
+    /// upgraded weapon of its own here: a copy of the gun's row (`base`)
+    /// under a new name (`ak74u_upgraded_zm`, same game), its own ammo and
+    /// magazine (not the gun's), with `display_key` for its name. Its
+    /// stronger damage and ammo are given in the combat table. Returns the
+    /// copies' indices (0 where `base` is no row); the names resolve once
+    /// all are added.
+    pub fn add_upgrade_copies(&mut self, copies: &[(u32, String, String)]) -> Vec<u32> {
+        let mut out = Vec::with_capacity(copies.len());
+        for (base, name, display_key) in copies {
+            let Some(row) = self.registry.rows.get(*base as usize).filter(|_| *base != 0) else {
+                out.push(0);
+                continue;
+            };
+            let mut row = row.clone();
+            row.name = normalize_weapon_name(name);
+            row.display_name_key = Some(display_key.clone());
+            row.alternate_weapon = None;
+            row.alternate_index = 0;
+            row.iw5_configuration = None;
+            row.facts.ammo_index = 0;
+            row.facts.clip_index = 0;
+            let slots = self.combat_slots.get(*base as usize).copied().unwrap_or_default();
+            self.combat_slots.resize(self.registry.rows.len(), CombatFxSlots::default());
+            self.combat_slots.push(slots);
+            out.push(self.registry.rows.len() as u32);
+            self.registry.rows.push(row);
+        }
+        self.registry.rebuild_name_maps();
+        self.registry.revision = mint_weapon_revision();
+        out
+    }
+
+    /// bo2mp: the text key a row's name is shown by (an upgraded guest gun
+    /// from its own game shown by our key for its name).
+    pub fn set_display_name_key(&mut self, index: u32, key: &str) {
+        if let Some(row) = self.registry.rows.get_mut(index as usize).filter(|_| index != 0) {
+            row.display_name_key = Some(key.to_owned());
+        }
     }
 
     pub fn publish(self) -> WeaponRegistry {

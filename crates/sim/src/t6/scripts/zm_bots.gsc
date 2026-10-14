@@ -347,6 +347,19 @@ buy_at( trig )
     return 1;
 }
 
+// Whether the Pack-a-Punch takes this gun: a custom gun from the box only
+// with its upgraded weapon (bo2mp/zm_guest_guns); the map's own as before.
+can_upgrade( gun )
+{
+    if ( !isdefined( level.bo2mp_guest_gun ) || !isdefined( level.bo2mp_guest_gun[ gun ] ) )
+        return 1;
+
+    if ( !isdefined( level.zombie_weapons ) || !isdefined( level.zombie_weapons[ gun ] ) )
+        return 0;
+
+    return isdefined( level.zombie_weapons[ gun ].upgrade_name );
+}
+
 // 4. Spend points: a perk, the Pack-a-Punch, a door near the team.
 bot_spend()
 {
@@ -380,8 +393,9 @@ bot_spend()
         if ( score >= 5000 + self.bot_reserve )
         {
             gun = self getcurrentweapon();
-            // (A custom gun from the box cannot be upgraded.)
-            if ( isdefined( gun ) && !issubstr( gun, "upgraded" ) && !( isdefined( level.bo2mp_guest_gun ) && isdefined( level.bo2mp_guest_gun[ gun ] ) ) )
+            // (A custom gun from the box is upgraded as the map's own are,
+            // unless it has no upgraded weapon.)
+            if ( isdefined( gun ) && !issubstr( gun, "upgraded" ) && can_upgrade( gun ) )
             {
                 pap = getentarray( "specialty_weapupgrade", "script_noteworthy" );
                 foreach ( m in pap )

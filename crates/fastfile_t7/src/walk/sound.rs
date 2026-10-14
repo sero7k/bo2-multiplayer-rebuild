@@ -32,7 +32,10 @@
 //! Stream order: the four names, the alias lists (40 each, aligned 8),
 //! then per list its name and alias array (aligned 8), then per alias its
 //! strings in field order; the index (aligned 4), radverbs, ducks (then
-//! each duck's two curves) and the 0x184 records. The sound data is not in
+//! each duck's two curves), the 0x184 snapshots (aligned 32), the lookups,
+//! the music sets (per set its states, per state its loops, aligned 8).
+//! (The snapshot and loop alignments are what end `core_post_gfx` and
+//! `mp_common` exactly at their VIRTUAL sizes.) The sound data is not in
 //! the zone: `assetFileName` names it in the `.sabl`/`.sabs` banks.
 
 use crate::cursor::Result;
@@ -88,7 +91,13 @@ pub fn sound_bank(s: &mut Stream, h: usize) -> Result<Option<String>> {
         }
     }
     let snapshots = s.u32_at(h + 0x58)? as usize;
-    s.records(h + 0x60, snapshots, SNAPSHOT, 3)?;
+    // The snapshots are 32-aligned; an empty array (`-1` with a zero
+    // count, mp_common's bank) does not move VIRTUAL.
+    if snapshots > 0 {
+        s.records(h + 0x60, snapshots, SNAPSHOT, 31)?;
+    } else {
+        s.array(h + 0x60, 0, 0)?;
+    }
     let lookups = s.u32_at(h + 0x68)? as usize;
     s.records(h + 0x70, lookups, 8, 3)?;
     let sets = s.u32_at(h + MUSIC_SET_COUNT)? as usize;
@@ -100,7 +109,7 @@ pub fn sound_bank(s: &mut Stream, h: usize) -> Result<Option<String>> {
                 for k in 0..states {
                     let state = st + MUSIC_STATE * k;
                     let loops = s.u32_at(state + 0x15c)? as usize;
-                    s.records(state + 0x160, loops, MUSIC_ASSET, 3)?;
+                    s.records(state + 0x160, loops, MUSIC_ASSET, 7)?;
                 }
             }
         }

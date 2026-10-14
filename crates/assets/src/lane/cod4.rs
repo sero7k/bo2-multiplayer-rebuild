@@ -525,14 +525,14 @@ pub(crate) fn load_iw3_world(
 /// (CoD4's `setExpFog`) or height fog (WaW's `setVolFog`, base height and
 /// half height as Black Ops II's own fog).
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct LegacyFog {
-    start: f32,
-    half: f32,
-    opacity: f32,
-    colour: [f32; 3],
-    sun: Option<asset_world::SunFog>,
-    base_height: f32,
-    half_height: f32,
+pub(super) struct LegacyFog {
+    pub(super) start: f32,
+    pub(super) half: f32,
+    pub(super) opacity: f32,
+    pub(super) colour: [f32; 3],
+    pub(super) sun: Option<asset_world::SunFog>,
+    pub(super) base_height: f32,
+    pub(super) half_height: f32,
 }
 
 /// The fog a createart script sets: `setVolFog(start, halfway,
@@ -581,7 +581,7 @@ fn legacy_fog(script: &str) -> Option<LegacyFog> {
 /// above every map and a vast half height flatten the shader's height term
 /// to 1, leaving 1 - 2^-((d - start) / half). Its colours are gamma values,
 /// squared for the linear fallback pass.
-fn legacy_fog_table(fog: &LegacyFog) -> Vec<[f32; 16]> {
+pub(super) fn legacy_fog_table(fog: &LegacyFog) -> Vec<[f32; 16]> {
     let lin = |c: [f32; 3]| c.map(|x| x * x);
     let colour = lin(fog.colour);
     let (sun_colour, sun_dir, blend) = match fog.sun {

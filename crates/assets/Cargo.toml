@@ -28,6 +28,7 @@ fastfile_t6.workspace = true # bo2zm
 asset_t6.workspace = true # bo2zm
 fastfile_iw6.workspace = true # bo2mp: Ghosts guest guns
 fastfile_s1.workspace = true # bo2mp: Advanced Warfare guest guns
+fastfile_iw7.workspace = true # bo2mp: Infinite Warfare maps
 hks_t6.workspace = true # bo2zm M4
 bcdec_rs.workspace = true # bo2zm M4: additive HUD pictures
 ipak_t6.workspace = true # bo2zm

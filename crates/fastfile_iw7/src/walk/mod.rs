@@ -29,6 +29,7 @@ mod suit;
 mod vehicle;
 mod vfx;
 mod weapon;
+mod world;
 
 use std::collections::HashMap;
 
@@ -138,6 +139,10 @@ pub struct Walker<'a> {
     pub(crate) str_slots: HashMap<u64, String>,
     /// Debug: VIRTUAL offsets where allocations started.
     pub alloc_starts: std::collections::HashSet<u64>,
+    /// The correction the last reference resolved near its slot needed.
+    slot_fix: std::cell::Cell<i64>,
+    /// Each asset loaded in place: the VIRTUAL its data took (start, end).
+    pub spans: Vec<(u64, u64, AssetId)>,
 }
 
 #[cfg(test)]
@@ -178,6 +183,8 @@ impl<'a> Walker<'a> {
             bad_from: Default::default(),
             alloc_starts: Default::default(),
             str_slots: HashMap::new(),
+            slot_fix: Default::default(),
+            spans: Vec::new(),
         }
     }
 
@@ -389,6 +396,12 @@ impl<'a> Walker<'a> {
                         .filter(|(k, id)| id.ty == ty && k.abs_diff(v) <= 0x200)
                         .min_by_key(|(k, _)| k.abs_diff(v))
                         .map(|(k, _)| (*k, self.slot_pos.get(k).copied().unwrap_or(0)));
+                    if std::env::var_os("IW7_SPANS").is_some() {
+                        let l = self.local(v);
+                        let inside: Vec<String> = self.spans.iter().filter(|(a, b, id)| *a <= l && l < *b && id.ty == ty).map(|(a, b, id)| format!("{} [{a:#x}..{b:#x}] +{:#x}", self.cap.name_of(*id), l - a)).collect();
+                        let before = self.spans.iter().filter(|(_, b, id)| *b <= l && id.ty == ty).max_by_key(|(_, b, _)| *b).map(|(a, b, id)| format!("{} [{a:#x}..{b:#x}] end+{:#x}", self.cap.name_of(*id), l - b));
+                        eprintln!("SPAN want local {l:#x} {ty:?} inside {inside:?} before {before:?}");
+                    }
                     if std::env::var_os("IW7_MISSES").is_some() {
                         let ti = self.list.asset_index_of(Ptr::Ref { block: VIRTUAL, offset: v as u32 });
                         eprintln!(
@@ -432,11 +445,44 @@ impl<'a> Walker<'a> {
             return Some(*id);
         }
         // The XAsset table's header slots.
-        let i = self.list.asset_index_of(Ptr::Ref {
-            block: VIRTUAL,
-            offset: virt as u32,
-        })?;
-        self.cap.by_table.get(&i).copied().filter(|id| id.ty == ty)
+        let table = self
+            .list
+            .asset_index_of(Ptr::Ref {
+                block: VIRTUAL,
+                offset: virt as u32,
+            })
+            .and_then(|i| self.cap.by_table.get(&i).copied().filter(|id| id.ty == ty));
+        if table.is_some() || self.deltas.is_empty() {
+            return table;
+        }
+        // A fitted zone's delta can be off where its references switch
+        // segments (the fit reads string references; long runs of other
+        // data have none): the correction the last such reference needed,
+        // else the slot of this type closest within 0x100 (its correction
+        // kept for the next).
+        let local = self.local(virt);
+        let fix = self.slot_fix.get();
+        if fix != 0
+            && let Some(id) = self.slots.get(&local.wrapping_add_signed(fix)).copied().filter(|id| id.ty == ty)
+        {
+            return Some(id);
+        }
+        let found = (1..=64u64).find_map(|k| {
+            [local.wrapping_sub(4 * k), local + 4 * k]
+                .into_iter()
+                .find_map(|v| self.slots.get(&v).copied().filter(|id| id.ty == ty).map(|id| (v, id)))
+        });
+        if let Some((at, id)) = found {
+            self.slot_fix.set(at.wrapping_sub(local) as i64);
+            return Some(id);
+        }
+        // Else an asset of this type loaded in place whose data holds the
+        // offset (references into a model loaded inside another's data).
+        self.spans
+            .iter()
+            .filter(|(a, b, id)| *a <= local && local < *b && id.ty == ty)
+            .max_by_key(|(a, _, _)| *a)
+            .map(|(_, _, id)| *id)
     }
 
     /// A sub-asset (or table asset) whose data starts here: its header in
@@ -451,6 +497,7 @@ impl<'a> Walker<'a> {
             ));
         }
         let h = self.st(header, 7)?;
+        let v0 = self.s.offset(VIRTUAL);
         #[cfg(test)]
         if std::env::var("IW7_TRACE_ASSET")
             .ok()
@@ -463,6 +510,9 @@ impl<'a> Walker<'a> {
             );
         }
         let id = self.load_body(ty, h);
+        if let Ok(id) = id {
+            self.spans.push((v0, self.s.offset(VIRTUAL), id));
+        }
         #[cfg(test)]
         if std::env::var("IW7_TRACE_ASSET")
             .ok()
@@ -523,6 +573,21 @@ impl<'a> Walker<'a> {
             T::AnimClass => anim_class::anim_class(self, h),
             T::SoundBank => sound_bank::sound_bank(self, h),
             T::BehaviorTree => behavior_tree::behavior_tree(self, h),
+            T::ComWorld => world::comworld(self, h),
+            T::NavMesh => world::navmesh(self, h),
+            T::ImpactFx => world::impact_fx(self, h),
+            T::FxWorld => world::fxworld(self, h),
+            T::GfxLightMap => world::gfx_light_map(self, h),
+            T::IesProfile => world::ies_profile(self, h),
+            T::GfxWorld => world::gfxworld(self, h),
+            T::GfxWorldTransientZone => world::gfx_world_tr(self, h),
+            T::MapEnts => world::mapents(self, h),
+            T::GlassWorld => world::glassworld(self, h),
+            T::PathData => world::pathdata(self, h),
+            T::ClipMap => world::clipmap(self, h),
+            T::LocalizeEntry => misc::localize(self, h),
+            T::ParticleSimAnimation => vfx::particle_sim(self, h),
+            T::StringTable => misc::string_table(self, h),
             _ => Err(ReadError::Invalid(ty.name(), h)),
         }
     }
@@ -636,6 +701,13 @@ impl<'a> Walker<'a> {
     /// delta near `hint` that most references agree on, then a sweep that
     /// switches to a nearby delta where a run of references needs one.
     pub fn fit_deltas(&self, hint: u64) -> Vec<(u64, u64)> {
+        self.fit_deltas_below(hint, 0x10000)
+    }
+
+    /// `fit_deltas` searching from `below` under `hint` (a zone with many
+    /// shared ranges sits further below its header's figure: about 31
+    /// bytes a range).
+    pub fn fit_deltas_below(&self, hint: u64, below: u64) -> Vec<(u64, u64)> {
         let mut refs = self.string_refs.clone();
         refs.sort_unstable();
         refs.dedup();
@@ -643,7 +715,7 @@ impl<'a> Walker<'a> {
             return Vec::new();
         }
         let sample: Vec<u64> = refs.iter().step_by((refs.len() / 256).max(1)).take(256).copied().collect();
-        let lo = hint.saturating_sub(0x10000);
+        let lo = hint.saturating_sub(below);
         let hits = |d: u64, rs: &[u64]| rs.iter().filter(|&&r| r >= d && self.is_string_start(r - d)).count();
         let Some(best) = (lo..hint + 0x1000).max_by_key(|&d| hits(d, &sample[..sample.len().min(32)])) else {
             return Vec::new();
@@ -731,7 +803,8 @@ pub fn walk_fitted(zone: &crate::Zone) -> (Walker<'_>, Option<WalkStop>) {
     if hint == 0 {
         return (w, stop);
     }
-    let deltas = w.fit_deltas(hint);
+    let below = (64 * zone.header.shared_files.len() as u64).max(0x10000);
+    let deltas = w.fit_deltas_below(hint, below);
     let mut w2 = Walker::new(&zone.image, &zone.assets, &zone.header.stream_files);
     w2.deltas = deltas;
     let stop = w2.walk().err();

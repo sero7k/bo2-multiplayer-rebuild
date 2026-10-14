@@ -9,6 +9,12 @@ mod cod4;
 mod waw;
 // bo2mp: Ghosts' guns as guest guns.
 mod iw6;
+// bo2mp: Ghosts' multiplayer maps (no ZoneGame of their own).
+mod iw6_map;
+pub(crate) use iw6_map::load_iw6_world;
+// bo2mp: Infinite Warfare's maps (no ZoneGame of their own).
+mod iw7;
+pub(crate) use iw7::load_iw7_world;
 pub(crate) use iw6::{
     Iw6Guests, build_iw6_guest_guns, iw6_anim_check, iw6_sound_check, prefetch_iw6_guest_guns, walk_iw6_guest_guns,
 };

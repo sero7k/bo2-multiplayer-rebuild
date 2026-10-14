@@ -112,11 +112,44 @@ pub fn install_guest(swaps: HashMap<(u32, u32), MaterialCamo>) {
     }
 }
 
+/// bo2mp: Black Ops II's Pack-a-Punch camo on other games' guns in
+/// Zombies (their upgrades: `bo2_profile::guest::ZmUpgrade`): the camo
+/// option the server marks such a gun with, and the zombies camo's
+/// material (the one Black Ops II's upgraded guns' camo set swaps in most).
+static PAP: RwLock<Option<(u32, MaterialCamo)>> = RwLock::new(None);
+/// The other games' guns' materials it draws over (every game's, Modern
+/// Warfare 2's and 3's too; glass, sights and hands left out).
+static PAP_WRAP: RwLock<Option<std::collections::HashSet<u32>>> = RwLock::new(None);
+
+/// The match's Pack-a-Punch camo for other games' guns (None: off a
+/// Zombies map, or the map's camo set gave none).
+pub fn install_pap(pap: Option<(u32, MaterialCamo)>) {
+    if let Ok(mut p) = PAP.write() {
+        *p = pap;
+    }
+}
+
+pub fn install_pap_wrap(materials: std::collections::HashSet<u32>) {
+    if let Ok(mut w) = PAP_WRAP.write() {
+        *w = (!materials.is_empty()).then_some(materials);
+    }
+}
+
+/// The Pack-a-Punch camo's material for a guest gun's `material`, when
+/// `option` is the Pack-a-Punch option.
+fn pap_swap(option: u32, material: u32) -> Option<MaterialCamo> {
+    let (o, camo) = (*PAP.read().ok()?)?;
+    (o == option && PAP_WRAP.read().ok()?.as_ref()?.contains(&material)).then_some(camo)
+}
+
 /// What `option` draws a gun's `material` with, if it changes it.
 #[must_use]
 pub fn swap(option: u32, material: u32) -> Option<MaterialCamo> {
     if option == 0 {
         return None;
+    }
+    if let Some(camo) = pap_swap(option, material) {
+        return Some(camo);
     }
     let own = TABLE.read().ok().and_then(|t| t.as_ref()?.swaps.get(&(option, material)).copied());
     own.or_else(|| GUEST.read().ok()?.as_ref()?.get(&(option, material)).copied())

@@ -280,6 +280,11 @@ pub fn zombies_guest_proportions(combat: &mut [WeaponCombatFacts], weapons: &Wea
         if !guest(i) || !combat[i as usize].is_usable() {
             continue;
         }
+        // (A guest gun's upgrade from its own game's Pack-a-Punch is that
+        // game's zombies weapon already: its stats stay its own.)
+        if bo2_profile::guest::zm_upgraded(&weapons.script_name_of(i)).is_some_and(|u| !u.made) {
+            continue;
+        }
         let f = &mut combat[i as usize];
         if f.weap_type == WEAPTYPE_BULLET && f.damage > 0 && damage_scale != 1.0 {
             f.damage = (f.damage as f32 * damage_scale).round() as i32;
@@ -299,6 +304,100 @@ pub fn zombies_guest_proportions(combat: &mut [WeaponCombatFacts], weapons: &Wea
         "bo2mp zombies guest guns: {changed} weapons at Zombies proportions: damage x{damage_scale:.2} ({} pairs), reserve {reserve_mags:.1} magazines ({} pairs, at most {ZM_GUEST_MAX_RESERVE}); measured on {}",
         damage.len(),
         mags.len(),
+        pairs.join(" ")
+    )
+}
+
+/// bo2mp: the most rounds a Black Ops II-style guest upgrade carries past
+/// its magazine.
+const ZM_GUEST_UPGRADE_MAX_RESERVE: i32 = 600;
+
+/// bo2mp: the guest guns' Pack-a-Punch upgrades made Black Ops II-style
+/// (`bo2_profile::guest::ZmUpgrade::made`, copies of the gun) are stronger
+/// than the gun as the map's own upgrades are than theirs: the median, over
+/// the map's Zombies guns with an upgrade (`ak74u_zm` and
+/// `ak74u_upgraded_zm`), of the upgrade's damage over the gun's (bullet
+/// guns), magazine over magazine, and reserve over reserve. With no such
+/// pair: damage x1.8, magazine x1.5, reserve x1.6. Run after
+/// `zombies_guest_proportions` (the copy starts as the gun at Zombies'
+/// proportions). An upgrade from the gun's own game keeps that game's
+/// stats. Returns the log line.
+pub fn zombies_guest_upgrades(combat: &mut [WeaponCombatFacts], weapons: &WeaponRegistry) -> String {
+    use weapon_iw4::WEAPTYPE_BULLET;
+    let upgrades = bo2_profile::guest::zm_upgrades();
+    if upgrades.is_empty() {
+        return "bo2mp zombies guest upgrades: none".to_owned();
+    }
+    let t6: std::collections::HashMap<String, usize> = (1..combat.len() as u32)
+        .filter(|&i| weapons.namespace_of(i) == Some(asset_core::AssetNamespace::T6))
+        .filter_map(|i| {
+            let name = weapons.script_name_of(i).to_ascii_lowercase();
+            let stem = name.strip_suffix("_mp").unwrap_or(&name).to_owned();
+            (stem.ends_with("_zm") && !stem.contains('+')).then_some((stem, i as usize))
+        })
+        .collect();
+    let (mut damage, mut clip, mut reserve) = (Vec::new(), Vec::new(), Vec::new());
+    let mut pairs = Vec::new();
+    for (name, &i) in &t6 {
+        let Some(stem) = name.strip_suffix("_zm").filter(|s| !s.contains("upgraded")) else { continue };
+        let Some(&u) = t6.get(&format!("{stem}_upgraded_zm")) else { continue };
+        let (g, up) = (&combat[i], &combat[u]);
+        if !g.is_usable() || !up.is_usable() || g.unlimited_ammo || up.unlimited_ammo {
+            continue;
+        }
+        if g.weap_type == WEAPTYPE_BULLET && up.weap_type == WEAPTYPE_BULLET && g.damage > 0 && up.damage > 0 {
+            damage.push(up.damage as f32 / g.damage as f32);
+        }
+        if g.clip_size > 0 && up.clip_size > 0 {
+            clip.push(up.clip_size as f32 / g.clip_size as f32);
+        }
+        if g.max_ammo > 0 && up.max_ammo > 0 {
+            reserve.push(up.max_ammo as f32 / g.max_ammo as f32);
+        }
+        pairs.push(stem.to_owned());
+    }
+    pairs.sort();
+    let median = |v: &mut Vec<f32>| {
+        v.sort_by(f32::total_cmp);
+        v.get(v.len() / 2).copied()
+    };
+    let damage_scale = median(&mut damage).map_or(1.8, |r| r.clamp(1.0, 5.0));
+    let clip_scale = median(&mut clip).map_or(1.5, |r| r.clamp(1.0, 3.0));
+    let reserve_scale = median(&mut reserve).map_or(1.6, |r| r.clamp(1.0, 4.0));
+    let mut made = 0;
+    for u in upgrades.iter().filter(|u| u.made) {
+        let index = |name: &str| weapons.resolve_index(name).ok().flatten().unwrap_or(0) as usize;
+        let (b, i) = (index(&u.base), index(&u.upgraded));
+        if b == 0 || i == 0 || i >= combat.len() || b >= combat.len() || !combat[b].is_usable() {
+            continue;
+        }
+        let mut f = combat[b];
+        // (Its own magazine and reserve, not the gun's.)
+        f.ammo_index = 0;
+        f.clip_index = 0;
+        if f.weap_type == WEAPTYPE_BULLET && f.damage > 0 {
+            f.damage = (f.damage as f32 * damage_scale).round() as i32;
+            f.min_damage = (f.min_damage as f32 * damage_scale).round() as i32;
+            for point in &mut f.damage_points {
+                point[1] *= damage_scale;
+            }
+        }
+        if f.clip_size > 0 && !f.unlimited_ammo {
+            let clip = (f.clip_size as f32 * clip_scale).round() as i32;
+            let reserve = ((f.max_ammo as f32 * reserve_scale).round() as i32).min(ZM_GUEST_UPGRADE_MAX_RESERVE.max(f.max_ammo));
+            f.clip_size = clip.max(f.clip_size);
+            f.max_ammo = reserve.max(f.max_ammo);
+            f.start_ammo = f.max_ammo;
+        }
+        combat[i] = f;
+        made += 1;
+    }
+    format!(
+        "bo2mp zombies guest upgrades: {made} made Black Ops II-style, {} from their own games; damage x{damage_scale:.2} ({} pairs), magazine x{clip_scale:.2} ({} pairs), reserve x{reserve_scale:.2} ({} pairs); measured on {}",
+        upgrades.iter().filter(|u| !u.made).count(),
+        damage.len(),
+        clip.len(),
+        reserve.len(),
         pairs.join(" ")
     )
 }

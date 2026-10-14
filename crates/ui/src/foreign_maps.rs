@@ -262,6 +262,92 @@ const GAMES: &[Game] = &[
             ("mp_killhouse", "Killhouse"),
         ],
     },
+    // bo2mp: Call of Duty: Ghosts (its maps through `assets::lane::iw6_map`).
+    Game {
+        prefix: "iw6",
+        key: "GHOSTS",
+        title: "Ghosts",
+        base: &[
+            ("mp_chasm", "Chasm"),
+            ("mp_flooded", "Flooded"),
+            ("mp_frag", "Freight"),
+            ("mp_descent_new", "Free Fall"),
+            ("mp_dart", "Octane"),
+            ("mp_zebra", "Overlord"),
+            ("mp_prisonbreak", "Prison Break"),
+            ("mp_hashima", "Siege"),
+            ("mp_sovereign", "Sovereign"),
+            ("mp_skeleton", "Stonehaven"),
+            ("mp_fahrenheit", "Stormfront"),
+            ("mp_strikezone", "Strikezone"),
+            ("mp_lonestar", "Tremor"),
+            ("mp_warhawk", "Warhawk"),
+            ("mp_snow", "Whiteout"),
+        ],
+        dlc: &[
+            ("mp_swamp", "Fog"),
+            ("mp_ca_rumble", "Bayview"),
+            ("mp_ca_red_river", "Containment"),
+            ("mp_boneyard_ns", "Ignition"),
+            ("mp_battery3", "Ruins"),
+            ("mp_ca_impact", "Collision"),
+            ("mp_ca_behemoth", "Behemoth"),
+            ("mp_dome_ns", "Unearthed"),
+            ("mp_dig", "Pharaoh"),
+            ("mp_favela_iw6", "Favela"),
+            ("mp_pirate", "Mutiny"),
+            ("mp_zulu", "Departed"),
+            ("mp_zerosub", "Subzero"),
+            ("mp_conflict", "Dynasty"),
+            ("mp_mine", "Goldrush"),
+            ("mp_shipment_ns", "Showtime"),
+        ],
+    },
+    // bo2mp: Call of Duty: Infinite Warfare (its maps through
+    // `assets::lane::iw7`). Titles the game's files do not name here are
+    // made from the zone names.
+    Game {
+        prefix: "iw7",
+        key: "IW",
+        title: "Infinite Warfare",
+        base: &[
+            ("mp_breakneck", "Breakout"),
+            ("mp_quarry", "Crusher"),
+            ("mp_frontier", "Frontier"),
+            ("mp_geneva", "Retaliation"),
+            ("mp_desert", "Scorch"),
+            ("mp_flip", "Flip"),
+            ("mp_metropolis", "Metropolis"),
+            ("mp_riot", "Riot"),
+            ("mp_fallen", "Fallen"),
+            ("mp_proto", "Proto"),
+            ("mp_dome_iw", "Dome"),
+            ("mp_marsoasis", "Mars Oasis"),
+        ],
+        dlc: &[
+            ("mp_afghan", "Dominion"),
+            ("mp_junk", "Scrap"),
+            ("mp_turista2", "Turista"),
+            ("mp_renaissance2", "Renaissance"),
+            ("mp_permafrost2", "Permafrost"),
+            ("mp_carnage2", "Carnage"),
+            ("mp_depot", "Depot"),
+            ("mp_neon", "Neon"),
+            ("mp_mansion", "Mansion"),
+            ("mp_nova", "Nova"),
+            ("mp_overflow", "Overflow"),
+            ("mp_paris", "Paris"),
+            ("mp_pixel", "Pixel"),
+            ("mp_prime", "Prime"),
+            ("mp_skyway", "Skyway"),
+            ("mp_parkour", "Parkour"),
+            ("mp_divide", "Divide"),
+            ("mp_codphish", "Codphish"),
+            ("mp_hawkwar", "Hawkwar"),
+            ("mp_rally", "Rally"),
+            ("mp_rivet", "Rivet"),
+        ],
+    },
 ];
 
 /// A map from another game, as the menus list it.
@@ -396,11 +482,12 @@ fn discover() -> Vec<Category> {
         })
         .collect();
     // Call of Duty 4's and World at War's maps (read by their own readers:
-    // `iw3`, and `t4` through the CoD4 lane).
+    // `iw3`, and `t4` through the CoD4 lane), and Ghosts' (`iw6`, read by
+    // `fastfile_iw6`).
     installed.extend(
         asset_transport::list_legacy_mp_maps(&root)
             .into_iter()
-            .filter(|(game, _)| game == "iw3" || game == "t4"),
+            .filter(|(game, _)| game == "iw3" || game == "t4" || game == "iw6" || game == "iw7"),
     );
     installed.sort();
     installed.dedup();
@@ -716,6 +803,15 @@ pub(crate) fn read_game_image(prefix: &str, names: &[String]) -> Option<(u32, u3
         let install = ghosts_install(asset_transport::games_root_from_env().ok().as_ref())?;
         return fastfile_iw6::ui_image::read_ui_image(&install, names);
     }
+    // bo2mp: Infinite Warfare's are in its ui.ff (and its image paks): the
+    // map previews `image_mp_map_<map>`, the Zombies posters.
+    if prefix == "iw7" {
+        let root = asset_transport::games_root_from_env().ok()?;
+        let ui = asset_transport::find_zone_file_version(&root, "ui", asset_transport::IW7_ZONE_VERSION).ok()?;
+        let dir = ui.path.parent()?.to_path_buf();
+        let wanted: Vec<String> = names.iter().flat_map(|n| iw7_picture_names(n)).collect();
+        return fastfile_iw7::ui_image::read_ui_image(&dir, &wanted);
+    }
     // bo2mp: Advanced Warfare's are in its common_mp (and its image paks).
     if prefix == "s1" {
         let root = asset_transport::games_root_from_env().ok();
@@ -754,6 +850,28 @@ pub(crate) fn game_image_names(prefix: &str, starts: &str) -> Vec<String> {
     let mut out: Vec<String> = index.image_names().filter(|n| n.starts_with(starts)).map(str::to_owned).collect();
     out.sort();
     out
+}
+
+/// bo2mp: Infinite Warfare's pictures for a name the menus ask for
+/// (`loadscreen_<map>`, `preview_<map>`): its map preview (named for the
+/// map's code name, mostly the zone name) or its Zombies poster.
+fn iw7_picture_names(name: &str) -> Vec<String> {
+    let map = name
+        .strip_prefix("loadscreen_")
+        .or_else(|| name.strip_prefix("preview_"))
+        .or_else(|| name.strip_suffix("_load"))
+        .unwrap_or(name);
+    if let Some(cp) = map.strip_prefix("cp_") {
+        return vec![format!("zm_theater_poster_{cp}")];
+    }
+    let code = map.strip_prefix("mp_").unwrap_or(map);
+    let code = match code {
+        "breakneck" => "breakout",
+        "carnage2" => "carnage",
+        "dome_iw" => "dome",
+        other => other,
+    };
+    vec![format!("image_mp_map_{code}"), format!("image_mp_map_{code}_vote")]
 }
 
 /// A prestige icon from another game where BO2's menus ask for one: the

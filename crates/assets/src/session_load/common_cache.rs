@@ -482,6 +482,9 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
         world_guns: s1_guest_world_guns,
         xanims: s1_guest_xanims,
         material_seed,
+        fx: s1_guest_fx,
+        fx_models: s1_guest_fx_models,
+        tracers: s1_guest_tracers,
         report: s1_guest_report,
     } = {
         let progress = progress.clone();
@@ -508,6 +511,10 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
     let legacy_xanim_n: Vec<usize> =
         legacy_guests.iter_mut().map(|g| t5_xanims.absorb(std::mem::take(&mut g.xanims))).collect();
     t5_fx.absorb_missing(iw4_guest_fx);
+    // bo2mp: Advanced Warfare's guns' own effects (S1 namespace: no name
+    // meets another game's).
+    let s1_guest_fx_n = s1_guest_fx.len();
+    t5_fx.absorb(s1_guest_fx);
     let t5_ids = t5_weapons.len();
     let t5_fpv_n = t5_fpv.len();
     let t5_xanim_n = t5_xanims.len();
@@ -567,7 +574,7 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
         mut xanims,
         mut player_anim_sources,
         common_fx,
-        common_fx_models,
+        mut common_fx_models,
         common_impact,
         material_seed,
         mut common_walk_report,
@@ -757,6 +764,14 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
             "s1 guest guns absorbed: {n} weapons, fpv=+{fpv} world_guns=+{world} xanims=+{s1_guest_xanim_n}; registry now {} (s1={})",
             weapons.len(),
             weapons.namespace_count(asset_core::AssetNamespace::S1)
+        ));
+        // bo2mp: their effects (joined to the leftover effects above),
+        // effect models and tracers.
+        let models = common_fx_models.absorb(s1_guest_fx_models);
+        let tracer_n = s1_guest_tracers.len();
+        common_tracers.absorb(s1_guest_tracers);
+        common_report.push(format!(
+            "s1 guest guns: {s1_guest_fx_n} effects, +{models} effect models, {tracer_n} tracers joined"
         ));
     }
     for (guests, xanim_n) in legacy_guests.into_iter().zip(legacy_xanim_n) {

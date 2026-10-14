@@ -270,7 +270,7 @@ pub(crate) fn rows(s: &Shell) -> Vec<Row> {
                 r.push(bots);
                 let mut guns = Row::new(
                     "CUSTOM WEAPONS",
-                    "Multiplayer's custom guns, from Black Ops, Modern Warfare 2 and 3, Ghosts and the other games, in the Mystery Box beside the map's own. They cannot be Pack-a-Punched.",
+                    "Multiplayer's custom guns, from Black Ops, Modern Warfare 2 and 3, Ghosts and the other games, in the Mystery Box beside the map's own. The Pack-a-Punch upgrades them: their own game's upgraded gun where it had one, else a Black Ops II-style upgrade.",
                     Act::Cycle(Setting::ZmCustomWeapons),
                 );
                 guns.value = Some(if s.zm_custom_weapons { "ON" } else { "OFF" }.to_owned());

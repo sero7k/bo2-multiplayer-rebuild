@@ -284,8 +284,65 @@ pub struct FxElemRec {
     pub record: Span,
     pub materials: Vec<AssetId>,
     pub models: Vec<AssetId>,
+    /// Every effect the element names: its runners' children, then its
+    /// impact, death and emitted effects.
     pub effects: Vec<String>,
     pub sounds: Vec<String>,
+    /// bo2mp: `FxElemVelStateSample` x (velIntervalCount + 1).
+    pub vel_samples: Option<Span>,
+    /// bo2mp: `FxElemVisStateSample` x (visStateIntervalCount + 1).
+    pub vis_samples: Option<Span>,
+    /// bo2mp: the visuals in order, one per `visualCount` (a null one too).
+    pub visuals: Vec<FxVisualRec>,
+    /// bo2mp: `effectOnImpact`, `effectOnDeath`, `effectEmitted`.
+    pub effect_on_impact: Option<String>,
+    pub effect_on_death: Option<String>,
+    pub effect_emitted: Option<String>,
+    /// bo2mp: a trail's `FxTrailDef` and its vertices and indices.
+    pub trail: Option<FxTrailRec>,
+    /// bo2mp: the `extended` record of a spark fountain or a light.
+    pub extended: Option<Span>,
+}
+
+/// bo2mp: one visual of an effect element.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum FxVisualRec {
+    #[default]
+    None,
+    Material(AssetId),
+    Model(AssetId),
+    Effect(String),
+    Sound(String),
+    /// A decal's two materials (model, world).
+    Mark([Option<AssetId>; 2]),
+    /// A light definition, vector field or particle simulation.
+    Other,
+}
+
+/// bo2mp: a `TracerDef`: its name, material and record.
+#[derive(Clone, Debug, Default)]
+pub struct TracerRec {
+    pub name: String,
+    pub material: Option<AssetId>,
+    pub record: Span,
+}
+
+/// bo2mp: an effect table (`ImpactFx`): `IMPACT_FX_ROW` effects per
+/// impact type (`[surface types][flesh]`), in table order.
+#[derive(Clone, Debug, Default)]
+pub struct FxTableRec {
+    pub name: String,
+    pub cells: Vec<Option<AssetId>>,
+}
+
+/// bo2mp: an `FxTrailDef`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FxTrailRec {
+    pub record: Span,
+    /// `FxTrailVertex` x vertCount.
+    pub verts: Option<Span>,
+    /// u16 x indCount.
+    pub inds: Option<Span>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -363,6 +420,10 @@ pub struct Capture {
     pub weapons: Vec<WeaponRec>,
     pub attachments: Vec<AttachmentRec>,
     pub fx: Vec<FxRec>,
+    /// bo2mp: tracers (`TracerDef`), in walk order.
+    pub tracers: Vec<TracerRec>,
+    /// bo2mp: `ImpactFx` tables (`fx/impacts/...`), their cells in order.
+    pub impact_tables: Vec<FxTableRec>,
     pub raw_files: Vec<RawFileRec>,
     pub com_worlds: Vec<ComWorldRec>,
     pub gfx_worlds: Vec<GfxWorldRec>,

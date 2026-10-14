@@ -22,13 +22,18 @@ use std::sync::Arc;
 
 use asset_anim::XAnimBuild;
 use asset_core::{AssetEdge, AssetNamespace, AssetRef, ZoneOwner};
-use asset_game::{S1WeaponView, WeaponBuild, WeaponCatalog};
+use asset_game::{
+    FxCatalog, FxModelCatalog, S1FxElemView, S1FxTrail, S1FxView, S1FxVisual, S1WeaponView,
+    TracerCatalog, WeaponBuild, WeaponCatalog,
+};
 use asset_material::{
     AuthoredImage, AuthoredMaterial, MaterialCatalog, MaterialTextureBinding, TS_COLOR_MAP,
     TS_NORMAL_MAP, TS_SPECULAR_MAP,
 };
 use asset_model::{FpvMeshBuild, WorldWeaponBuild};
-use fastfile_s1::walk::{AssetId, Capture, ImageRec, MaterialRec, WeaponRec, XAnimRec, XModelRec};
+use fastfile_s1::walk::{
+    AssetId, Capture, FxVisualRec, ImageRec, MaterialRec, WeaponRec, XAnimRec, XModelRec,
+};
 
 use super::iw6::{fold_blend, gpu_image, iw6_model_draw, le_u16s, le_u32s};
 
@@ -44,6 +49,8 @@ const SPECULAR_MAP_HASH: u32 = 0x34ec_ccb3;
 /// third-person models' (`BO2MP_AW_TEXTURE=<size>` changes the first).
 const FIRST_PERSON_MAX: u32 = 1024;
 const WORLD_MAX: u32 = 512;
+/// The largest level kept of an effect's pictures (and its models').
+const FX_MAX: u32 = 512;
 
 /// AW's own multiplayer guns (`iw5_<gun>_mp`), without the variants (loot,
 /// gold, Juggernaut) and the killstreak and equipment weapons. Guns another
@@ -72,6 +79,12 @@ pub(crate) struct S1Guests {
     pub world_guns: WorldWeaponBuild,
     pub xanims: XAnimBuild,
     pub material_seed: MaterialCatalog,
+    /// bo2mp: the guns' own effects (flashes, shell ejects, trails, what
+    /// their projectiles do), their models and tracers, under the S1
+    /// namespace.
+    pub fx: FxCatalog,
+    pub fx_models: FxModelCatalog,
+    pub tracers: TracerCatalog,
     pub report: Vec<String>,
 }
 
@@ -83,6 +96,9 @@ impl S1Guests {
             world_guns: WorldWeaponBuild::default(),
             xanims: XAnimBuild::default(),
             material_seed,
+            fx: FxCatalog::default(),
+            fx_models: FxModelCatalog::default(),
+            tracers: TracerCatalog::default(),
             report,
         }
     }
@@ -123,6 +139,16 @@ fn walk(path: &Path) -> Result<Walked, String> {
     Ok(Walked { zone, cap })
 }
 
+/// A zone walked as far as it reads: the capture so far, and where it
+/// stopped.
+fn walk_partial(path: &Path) -> Result<(Walked, Option<String>), String> {
+    let zone = fastfile_s1::Zone::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+    let mut w = fastfile_s1::walk::Walker::new(&zone.image, &zone.assets, &zone.header.stream_files);
+    let stop = w.walk().err().map(|s| format!("asset {} ({:?}): {}", s.asset_index, s.asset_type, s.error));
+    let cap = w.cap;
+    Ok((Walked { zone, cap }, stop))
+}
+
 /// AW's common_mp and the guns' transient zones, read ahead of the build.
 pub(crate) enum S1Prefetch {
     Off(Vec<String>),
@@ -132,6 +158,8 @@ pub(crate) enum S1Prefetch {
 pub(crate) struct S1Zones {
     dir: PathBuf,
     common: Walked,
+    /// `code_post_gfx_mp`, walked as far as it reads (see `Builder::post`).
+    post: Option<Walked>,
     /// Gun -> (first-person zone, world zone).
     parts: BTreeMap<String, (Option<Walked>, Option<Walked>)>,
     report: Vec<String>,
@@ -164,6 +192,26 @@ pub(crate) fn prefetch_s1_guest_guns(wanted: bool) -> S1Prefetch {
         common.cap.images.len(),
         started.elapsed().as_secs_f64(),
     )];
+    // bo2mp: code_post_gfx_mp: the effects and materials common_mp only
+    // references. Its walk stops near the end (at its leaderboards, after
+    // every effect, material and impact table): what came before is kept.
+    let post = match walk_partial(&dir.join("code_post_gfx_mp.ff")) {
+        Ok((w, stop)) => {
+            report.push(format!(
+                "s1 guest guns: code_post_gfx_mp: walked {} assets ({} effects, {} materials, {} impact tables){}",
+                w.cap.walked,
+                w.cap.fx.len(),
+                w.cap.materials.len(),
+                w.cap.impact_tables.len(),
+                stop.map(|s| format!("; stopped: {s}")).unwrap_or_default()
+            ));
+            Some(w)
+        }
+        Err(e) => {
+            report.push(format!("s1 guest guns: code_post_gfx_mp: {e} (effects common_mp only references are left out)"));
+            None
+        }
+    };
     let mut parts = BTreeMap::new();
     let mut failed = Vec::new();
     for gun in AW_GUNS {
@@ -192,6 +240,7 @@ pub(crate) fn prefetch_s1_guest_guns(wanted: bool) -> S1Prefetch {
     S1Prefetch::Ready(Box::new(S1Zones {
         dir,
         common,
+        post,
         parts,
         report,
         started,
@@ -334,17 +383,37 @@ struct Joined {
 
 struct Builder<'a> {
     common: &'a Walked,
+    /// bo2mp: `code_post_gfx_mp` (zone 1), which defines the effects and
+    /// materials common_mp only references (its impact effects, the shared
+    /// smoke, glow and spark materials).
+    post: Option<&'a Walked>,
+    /// Its materials by name.
+    post_material_names: HashMap<String, usize>,
     paks: fastfile_s1::image::ImagePaks,
     catalog: MaterialCatalog,
     owner: ZoneOwner,
     /// Common_mp materials by name.
     material_names: HashMap<String, usize>,
-    /// Common_mp material index -> catalog material index.
-    materials: HashMap<usize, usize>,
-    /// (common image index, size cap) -> catalog image slot.
-    images: HashMap<(usize, u32), Option<usize>>,
+    /// (zone, material index) -> catalog material index.
+    materials: HashMap<(u8, usize), usize>,
+    /// (zone, image index, size cap) -> catalog image slot.
+    images: HashMap<(u8, usize, u32), Option<usize>>,
     image_failures: Vec<String>,
     decoded: usize,
+    /// Effect materials by name: usable (`true`) or left out.
+    fx_materials: HashMap<String, bool>,
+    /// Effect models by name: built (`true`) or left out.
+    fx_model_names: HashMap<String, bool>,
+}
+
+/// An effect technique Black Ops II cannot draw: it bends or blurs the
+/// picture behind it (AW's shockwaves, heat haze, the ADS blur) or dirties
+/// the lens. Such visuals are left out, not drawn as flat sprites.
+fn fx_technique_unsupported(technique_set: &str) -> bool {
+    let t = technique_set.trim_start_matches(',');
+    t.starts_with("distortion")
+        || t.contains("radialblur")
+        || t.contains("dustonlens")
 }
 
 fn string(strings: &[Option<String>], index: u32) -> String {
@@ -362,7 +431,7 @@ fn find_model<'a>(w: &'a Walked, name: &str) -> Option<&'a XModelRec> {
         .find(|m| m.name.trim_start_matches(',') == name && m.lods.first().is_some_and(|l| l.surfs.is_some()))
 }
 
-impl Builder<'_> {
+impl<'a> Builder<'a> {
     /// Joins `part` (a model of `w`) into `j`: its root bone onto `j`'s bone
     /// of the same name (none yet: it starts the skeleton), its other bones
     /// appended, its first-LOD surfaces moved by the root's bind pose.
@@ -586,12 +655,13 @@ impl Builder<'_> {
     }
 
     /// One picture into the catalog (`None` when its pixels are not here).
-    fn image(&mut self, index: usize, max: u32, semantic: u8) -> Option<usize> {
-        if let Some(slot) = self.images.get(&(index, max)) {
+    fn image(&mut self, z: u8, index: usize, max: u32, semantic: u8) -> Option<usize> {
+        if let Some(slot) = self.images.get(&(z, index, max)) {
             return *slot;
         }
-        let rec: &ImageRec = self.common.cap.images.get(index)?;
-        let slot = match fastfile_s1::image::image_pixels(rec, &self.common.zone.image, &mut self.paks, max)
+        let zone = self.zone(z);
+        let rec: &ImageRec = zone.cap.images.get(index)?;
+        let slot = match fastfile_s1::image::image_pixels(rec, &zone.zone.image, &mut self.paks, max)
             .map(|px| fastfile_iw6::image::ImagePixels {
                 width: px.width,
                 height: px.height,
@@ -628,20 +698,33 @@ impl Builder<'_> {
                 None
             }
         };
-        self.images.insert((index, max), slot);
+        self.images.insert((z, index, max), slot);
         slot
+    }
+
+    /// Zone `z` (0 common_mp, 1 code_post_gfx_mp).
+    fn zone(&self, z: u8) -> &'a Walked {
+        match (z, self.post) {
+            (1, Some(post)) => post,
+            _ => self.common,
+        }
     }
 
     /// One material into the catalog, with its colour, normal and specular
     /// maps.
     fn material(&mut self, index: usize, max: u32) -> Option<usize> {
-        if let Some(&i) = self.materials.get(&index) {
+        self.material_in(0, index, max)
+    }
+
+    fn material_in(&mut self, z: u8, index: usize, max: u32) -> Option<usize> {
+        if let Some(&i) = self.materials.get(&(z, index)) {
             return Some(i);
         }
-        let m: &MaterialRec = self.common.cap.materials.get(index)?;
+        let zone = self.zone(z);
+        let m: &MaterialRec = zone.cap.materials.get(index)?;
         let technique_set = m
             .techset
-            .map(|t| self.common.cap.name_of(t).to_owned())
+            .map(|t| zone.cap.name_of(t).to_owned())
             .unwrap_or_default();
         let draw = iw6_model_draw(&technique_set, m.sort_key);
         let pick = |hash: u32| {
@@ -663,7 +746,7 @@ impl Builder<'_> {
         let mut textures = Vec::new();
         for (hash, sampler_state, semantic, image) in slots {
             let Some(image) = image else { continue };
-            if let Some(slot) = self.image(image.index as usize, max, semantic) {
+            if let Some(slot) = self.image(z, image.index as usize, max, semantic) {
                 textures.push(MaterialTextureBinding {
                     name_hash: hash,
                     name_start: 0,
@@ -674,7 +757,7 @@ impl Builder<'_> {
                 });
             }
         }
-        let m: &MaterialRec = &self.common.cap.materials[index];
+        let m: &MaterialRec = &zone.cap.materials[index];
         let index_in_catalog = self.catalog.link_material(AuthoredMaterial {
             name: AssetRef::Real(m.name.clone()),
             namespace: NS,
@@ -713,7 +796,7 @@ impl Builder<'_> {
             zone: self.owner,
             t6_draw: Some(draw),
         });
-        self.materials.insert(index, index_in_catalog);
+        self.materials.insert((z, index), index_in_catalog);
         Some(index_in_catalog)
     }
 
@@ -750,6 +833,130 @@ impl Builder<'_> {
 
     fn name(&self, id: AssetId) -> String {
         self.common.cap.name_of(id).trim_start_matches(',').to_owned()
+    }
+
+    fn technique_of(&self, index: usize) -> String {
+        self.technique_in(0, index)
+    }
+
+    fn technique_in(&self, z: u8, index: usize) -> String {
+        let zone = self.zone(z);
+        zone.cap
+            .materials
+            .get(index)
+            .and_then(|m| m.techset)
+            .map(|t| zone.cap.name_of(t).to_owned())
+            .unwrap_or_default()
+    }
+
+    /// An effect's material by name, linked into the catalog: `None` when
+    /// common_mp only references it (it lives in `code_post_gfx_mp`), its
+    /// technique cannot be drawn here, or it has no colour map.
+    fn fx_material(&mut self, z: u8, id: AssetId) -> Option<String> {
+        let name = self.zone(z).cap.name_of(id).trim_start_matches(',').to_owned();
+        if let Some(&ok) = self.fx_materials.get(&name) {
+            return ok.then_some(name);
+        }
+        let ok = (|| {
+            // (Defined in common_mp, else in code_post_gfx_mp.)
+            let (z, index) = match self.material_names.get(&name) {
+                Some(&i) => (0, i),
+                None => (1, *self.post_material_names.get(&name)?),
+            };
+            if fx_technique_unsupported(&self.technique_in(z, index)) {
+                return None;
+            }
+            let slot = self.material_in(z, index, FX_MAX)?;
+            self.catalog.materials[slot]
+                .textures
+                .iter()
+                .any(|t| t.semantic == TS_COLOR_MAP && t.image.is_some())
+                .then_some(())
+        })()
+        .is_some();
+        self.fx_materials.insert(name.clone(), ok);
+        ok.then_some(name)
+    }
+
+    /// An effect's model (a shell casing, a glow on the gun) into
+    /// `models`: false when it is not in common_mp or draws only with
+    /// techniques left out (`fx_technique_unsupported`).
+    fn fx_model(&mut self, name: &str, models: &mut FxModelCatalog) -> bool {
+        if let Some(&ok) = self.fx_model_names.get(name) {
+            return ok;
+        }
+        let ok = (|| {
+            let (xref, keys) = self.model_ref(name, None)?;
+            if !keys.is_empty() && keys.iter().all(|&k| fx_technique_unsupported(&self.technique_of(k))) {
+                return None;
+            }
+            let keys: Vec<usize> = keys
+                .into_iter()
+                .filter(|&k| !fx_technique_unsupported(&self.technique_of(k)))
+                .collect();
+            let linked: HashMap<usize, usize> = keys
+                .into_iter()
+                .filter_map(|k| Some((k, self.material(k, FX_MAX)?)))
+                .collect();
+            let skel = asset_model::capture_model_skel_t6(&xref, |k| linked.get(&k.index).copied())?;
+            models.insert_skel(skel, &self.catalog);
+            Some(())
+        })()
+        .is_some();
+        self.fx_model_names.insert(name.to_owned(), ok);
+        ok
+    }
+
+    /// One walked effect with its names resolved (materials and models
+    /// brought over as they are met).
+    fn fx_view(&mut self, z: u8, f: &fastfile_s1::walk::FxRec, models: &mut FxModelCatalog) -> S1FxView {
+        let zone = self.zone(z);
+        let image = &zone.zone.image[..];
+        let bytes = |s: Option<fastfile_s1::walk::Span>| s.map_or(Vec::new(), |s| s.get(image).to_vec());
+        let mut elems = Vec::with_capacity(f.elems.len());
+        for el in &f.elems {
+            let mut visuals = Vec::with_capacity(el.visuals.len());
+            for v in &el.visuals {
+                visuals.push(match v {
+                    FxVisualRec::None => S1FxVisual::None,
+                    FxVisualRec::Other => S1FxVisual::Other,
+                    FxVisualRec::Material(id) => self.fx_material(z, *id).map_or(S1FxVisual::None, S1FxVisual::Material),
+                    FxVisualRec::Mark(pair) => S1FxVisual::Mark(pair.map(|id| id.and_then(|id| self.fx_material(z, id)))),
+                    FxVisualRec::Model(id) => {
+                        let name = zone.cap.name_of(*id).trim_start_matches(',').to_owned();
+                        if self.fx_model(&name, models) {
+                            S1FxVisual::Model(name)
+                        } else {
+                            S1FxVisual::None
+                        }
+                    }
+                    FxVisualRec::Effect(name) => S1FxVisual::Effect(name.trim_start_matches(',').to_owned()),
+                    FxVisualRec::Sound(name) => S1FxVisual::Sound(name.clone()),
+                });
+            }
+            let bytes = |s: Option<fastfile_s1::walk::Span>| s.map_or(Vec::new(), |s| s.get(image).to_vec());
+            let child = |n: &Option<String>| n.as_ref().map(|n| n.trim_start_matches(',').to_owned());
+            elems.push(S1FxElemView {
+                record: el.record.get(image).to_vec(),
+                vel_samples: bytes(el.vel_samples),
+                vis_samples: bytes(el.vis_samples),
+                visuals,
+                effect_on_impact: child(&el.effect_on_impact),
+                effect_on_death: child(&el.effect_on_death),
+                effect_emitted: child(&el.effect_emitted),
+                trail: el.trail.map(|t| S1FxTrail {
+                    record: t.record.get(image).to_vec(),
+                    verts: bytes(t.verts),
+                    inds: bytes(t.inds),
+                }),
+                extended: bytes(el.extended),
+            });
+        }
+        S1FxView {
+            name: f.name.clone(),
+            header: bytes(Some(f.record)),
+            elems,
+        }
     }
 
     fn weapon_view(&self, w: &WeaponRec) -> S1WeaponView {
@@ -796,8 +1003,210 @@ impl Builder<'_> {
                     .collect()
             }),
             tracer: w.tracer.map(|id| self.name(id)).filter(|n| !n.is_empty()),
+            impact_row: Vec::new(),
         }
     }
+}
+
+/// AW's impact table row for an AW `ImpactType` (its rows measured on
+/// code_post_gfx_mp: small 0, large 2, explosive 4, shotgun 5, armour
+/// piercing 9, energy shotgun 8, laser 16).
+fn s1_impact_row(impact_type: i32) -> Option<usize> {
+    Some(match impact_type {
+        1 => 0,
+        2 => 2,
+        3 => 9,
+        4 => 4,
+        5 => 5,
+        6 => 7,
+        7 => 8,
+        12 => 16,
+        _ => return None,
+    })
+}
+
+/// The AW impact types a guest gun keeps its own impacts for: those Black
+/// Ops II has nothing like (the Tac-19's energy shotgun, the EM1's laser).
+/// Every other AW gun hits as the Black Ops II bullet, shotgun or explosion
+/// it maps to (`asset_game::remap_s1_impact_type`), as Black Ops II's own
+/// guns do on the same map.
+fn s1_keeps_own_impacts(impact_type: i32) -> bool {
+    matches!(impact_type, 7 | 12)
+}
+
+/// Our surface type (IW4 order, `weapon_iw4::SURFACE_TYPE_NAMES`) -> AW's
+/// impact table column (measured: AW adds a second metal at 14 and moves
+/// cushion to 52; flesh is 53..56).
+fn s1_impact_column(surf: usize) -> usize {
+    match surf {
+        0..=13 => surf,
+        14..=25 => surf + 1,
+        26 => 52,
+        _ => surf,
+    }
+}
+
+const S1_IMPACT_COLUMNS: usize = 60;
+/// Our impact surfaces (`fx_iw4::FX_IMPACT_NONFLESH_COUNT`).
+const S1_IMPACT_SURFACES: usize = 31;
+const S1_IMPACT_FLESH: usize = 53;
+
+/// bo2mp: the guns' effects: every effect a gun names (flashes, shell
+/// ejects, projectile trails and explosions), the impacts of the guns that
+/// keep their own (`s1_keeps_own_impacts`), and every effect those play
+/// (runners, impact, death and emitted effects), with their materials and
+/// models; and the guns' tracers. Also each such gun's impact row (31
+/// surfaces then 4 flesh cells, `WeaponCombatFx::impact_row`).
+fn build_s1_effects(
+    b: &mut Builder<'_>,
+    guns: &[(&str, &WeaponRec)],
+    report: &mut Vec<String>,
+) -> (FxCatalog, FxModelCatalog, TracerCatalog, HashMap<String, Vec<String>>) {
+    // Effects by name: common_mp's own first, then code_post_gfx_mp's.
+    let mut by_name: HashMap<String, (u8, usize)> = HashMap::new();
+    for z in [1u8, 0] {
+        let zone = b.zone(z);
+        if z == 1 && b.post.is_none() {
+            continue;
+        }
+        for (i, f) in zone.cap.fx.iter().enumerate() {
+            if !f.name.starts_with(',') {
+                by_name.insert(f.name.clone(), (z, i));
+            }
+        }
+    }
+    let mut todo: Vec<String> = guns
+        .iter()
+        .flat_map(|(_, w)| w.fx.iter().map(|(_, id)| b.name(*id)))
+        .collect();
+
+    // The impact rows of the guns that keep their own impacts.
+    let mut impact_rows: HashMap<String, Vec<String>> = HashMap::new();
+    let table = b.post.and_then(|post| {
+        post.cap
+            .impact_tables
+            .iter()
+            .find(|t| !t.name.contains("paintball") && t.cells.len() >= 19 * S1_IMPACT_COLUMNS)
+            .map(|t| (post, t))
+    });
+    for (gun, w) in guns {
+        let raw = {
+            let def = w.def.get(&b.common.zone.image);
+            def.get(fastfile_s1::layout::WeaponDef::impactType..)
+                .and_then(|d| d.get(..4))
+                .map_or(0, |d| i32::from_le_bytes([d[0], d[1], d[2], d[3]]))
+        };
+        if !s1_keeps_own_impacts(raw) {
+            continue;
+        }
+        let (Some((post, table)), Some(row)) = (table, s1_impact_row(raw)) else {
+            continue;
+        };
+        let cell = |col: usize| {
+            table
+                .cells
+                .get(row * S1_IMPACT_COLUMNS + col)
+                .copied()
+                .flatten()
+                .map(|id| post.cap.name_of(id).trim_start_matches(',').to_owned())
+                .unwrap_or_default()
+        };
+        let cells: Vec<String> = (0..S1_IMPACT_SURFACES)
+            .map(|surf| cell(s1_impact_column(surf)))
+            .chain((0..4).map(|k| cell(S1_IMPACT_FLESH + k)))
+            .collect();
+        todo.extend(cells.iter().filter(|n| !n.is_empty()).cloned());
+        impact_rows.insert((*gun).to_owned(), cells);
+    }
+
+    let mut seen = std::collections::BTreeSet::new();
+    let mut missing = std::collections::BTreeSet::new();
+    let mut order = Vec::new();
+    while let Some(name) = todo.pop() {
+        if name.is_empty() || !seen.insert(name.clone()) {
+            continue;
+        }
+        let Some(&(z, i)) = by_name.get(name.as_str()) else {
+            missing.insert(name);
+            continue;
+        };
+        order.push((z, i));
+        for el in &b.zone(z).cap.fx[i].elems {
+            todo.extend(el.effects.iter().map(|n| n.trim_start_matches(',').to_owned()));
+        }
+    }
+    let mut fx = FxCatalog::default();
+    fx.set_capture_ns(NS);
+    fx.set_capture_zone(b.owner);
+    let mut models = FxModelCatalog::default();
+    models.set_capture_ns(NS);
+    models.set_capture_zone(b.owner);
+    let (mut captured, mut elems, mut dropped_visuals, mut from_post) = (0usize, 0usize, 0usize, 0usize);
+    for &(z, i) in &order {
+        let rec = &b.zone(z).cap.fx[i];
+        let view = b.fx_view(z, rec, &mut models);
+        elems += view.elems.len();
+        dropped_visuals += view
+            .elems
+            .iter()
+            .zip(&rec.elems)
+            .map(|(v, r)| {
+                v.visuals
+                    .iter()
+                    .zip(&r.visuals)
+                    .filter(|(a, b)| matches!(a, S1FxVisual::None) && !matches!(b, FxVisualRec::None | FxVisualRec::Other))
+                    .count()
+            })
+            .sum::<usize>();
+        let ok = fx.capture_s1(&view);
+        captured += usize::from(ok);
+        from_post += usize::from(ok && z == 1);
+    }
+    let fx_material_n = b.fx_materials.values().filter(|&&ok| ok).count();
+    report.push(format!(
+        "s1 guest guns: effects: {captured} of {} named captured ({from_post} from code_post_gfx_mp; {elems} elements; {} not found {:?}); {fx_material_n} of {} effect materials and {} of {} effect models brought over; {dropped_visuals} visuals left out (distortion/blur/lens dirt, no colour map, not found); own impact rows: {:?}",
+        order.len() + missing.len(),
+        missing.len(),
+        missing.iter().take(6).collect::<Vec<_>>(),
+        b.fx_materials.len(),
+        models.len(),
+        b.fx_model_names.len(),
+        impact_rows.keys().collect::<Vec<_>>(),
+    ));
+
+    // Tracers (common_mp's, else code_post_gfx_mp's).
+    let mut tracers = TracerCatalog::default();
+    tracers.set_capture_ns(NS);
+    tracers.set_capture_zone(b.owner);
+    let wanted: std::collections::BTreeSet<String> = guns
+        .iter()
+        .filter_map(|(_, w)| w.tracer.map(|id| b.name(id)))
+        .filter(|n| !n.is_empty())
+        .collect();
+    let mut tracer_n = 0usize;
+    for name in &wanted {
+        let found = [0u8, 1].into_iter().find_map(|z| {
+            let zone = b.zone(z);
+            (z == 0 || b.post.is_some())
+                .then(|| zone.cap.tracers.iter().find(|t| t.name == *name).map(|t| (z, t)))
+                .flatten()
+        });
+        let Some((z, t)) = found else {
+            continue;
+        };
+        let material = t
+            .material
+            .and_then(|id| b.fx_material(z, id))
+            .unwrap_or_default();
+        let record = t.record.get(&b.zone(z).zone.image).to_vec();
+        tracer_n += usize::from(tracers.capture_s1(&t.name, &material, &record));
+    }
+    report.push(format!(
+        "s1 guest guns: tracers: {tracer_n} of {} named ({:?})",
+        wanted.len(),
+        wanted.iter().take(8).collect::<Vec<_>>()
+    ));
+    (fx, models, tracers, impact_rows)
 }
 
 /// AW's guns from its walked zones, their materials linked into
@@ -806,12 +1215,26 @@ fn load_s1_guests(z: S1Zones, material_seed: MaterialCatalog) -> S1Guests {
     let S1Zones {
         dir,
         common,
+        post,
         parts,
         mut report,
         started,
     } = z;
     let mut b = Builder {
         common: &common,
+        post: post.as_ref(),
+        post_material_names: post
+            .as_ref()
+            .map(|p| {
+                p.cap
+                    .materials
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, m)| !m.name.starts_with(','))
+                    .map(|(i, m)| (m.name.clone(), i))
+                    .collect()
+            })
+            .unwrap_or_default(),
         paks: fastfile_s1::image::ImagePaks::new(&dir),
         catalog: material_seed,
         owner: ZoneOwner::from_zone_path(&dir.join("common_mp.ff")),
@@ -827,6 +1250,8 @@ fn load_s1_guests(z: S1Zones, material_seed: MaterialCatalog) -> S1Guests {
         images: HashMap::new(),
         image_failures: Vec::new(),
         decoded: 0,
+        fx_materials: HashMap::new(),
+        fx_model_names: HashMap::new(),
     };
     let first_person_max = std::env::var("BO2MP_AW_TEXTURE")
         .ok()
@@ -910,11 +1335,15 @@ fn load_s1_guests(z: S1Zones, material_seed: MaterialCatalog) -> S1Guests {
         xanims.capture_gaps
     ));
 
-    // The weapon catalog.
+    // The guns' effects, then the weapon catalog (whose combat effects
+    // name them).
+    let (fx, fx_models, tracers, impact_rows) = build_s1_effects(&mut b, &guns, &mut report);
     let mut catalog = WeaponCatalog::default();
     catalog.set_capture_ns(NS);
-    for (_, w) in &guns {
-        catalog.capture_s1(&b.weapon_view(w));
+    for (gun, w) in &guns {
+        let mut view = b.weapon_view(w);
+        view.impact_row = impact_rows.get(*gun).cloned().unwrap_or_default();
+        catalog.capture_s1(&view);
     }
     let captured = catalog.len();
     let mut weapons = catalog.into_build();
@@ -937,6 +1366,9 @@ fn load_s1_guests(z: S1Zones, material_seed: MaterialCatalog) -> S1Guests {
         world_guns,
         xanims,
         material_seed,
+        fx,
+        fx_models,
+        tracers,
         report,
     }
 }

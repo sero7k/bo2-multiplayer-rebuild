@@ -14,6 +14,7 @@ pub mod cursor;
 pub mod image;
 pub mod install;
 pub mod layout;
+pub mod map;
 pub mod music;
 pub mod ncs;
 pub mod pak;

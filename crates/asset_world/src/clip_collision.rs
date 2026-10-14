@@ -464,7 +464,7 @@ fn extract_aabb_forest(
             mesh.partitions.push(clipmap_iw4::ClipPartition {
                 tri_count: tri_n,
                 first_tri: first,
-                first_vert_segment: seg,
+                first_vert_segment: seg.into(),
                 border_count,
                 first_border,
             });
@@ -1384,7 +1384,7 @@ fn extract_iw5_aabb_forest(
             mesh.partitions.push(clipmap_iw4::ClipPartition {
                 tri_count: tri_n,
                 first_tri: first,
-                first_vert_segment: seg,
+                first_vert_segment: seg.into(),
                 border_count,
                 first_border,
             });

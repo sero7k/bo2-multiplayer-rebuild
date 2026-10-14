@@ -107,7 +107,9 @@ pub(super) fn xmodel(w: &mut Walker, h: usize) -> Result<AssetId> {
         });
     }
     let ncoll = w.s.u32_at(h + X::numCollSurfs)? as usize;
-    w.blob(h + X::collSurfs, L::XModelCollSurf_s::SIZE * ncoll, 3)?;
+    rec.coll_surfs = w
+        .blob(h + X::collSurfs, L::XModelCollSurf_s::SIZE * ncoll, 3)?
+        .map(|pos| super::Span { pos, len: L::XModelCollSurf_s::SIZE * ncoll });
     w.blob(h + X::boneInfo, L::XBoneInfo::SIZE * nb, 3)?;
     w.blob(h + X::invHighMipRadius, 2 * ns, 1)?;
     rec.phys_preset = w.asset(AssetType::PhysPreset, h + X::physPreset)?;

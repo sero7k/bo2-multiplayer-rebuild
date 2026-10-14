@@ -234,12 +234,20 @@ pub fn usermap_iwds_for_main(main: &Path) -> Vec<PathBuf> {
 pub const IW3_ZONE_VERSION: u32 = 5;
 /// bo2mp: World at War's fast file version (`IWffu100`, 0x183).
 pub const T4_ZONE_VERSION: u32 = 0x183;
+/// bo2mp: Call of Duty: Ghosts' fast file version (`IWffu100`, 0x235): its
+/// maps load through `fastfile_iw6` (`assets::lane::iw6_map`).
+pub const IW6_ZONE_VERSION: u32 = 0x235;
+/// bo2mp: Call of Duty: Infinite Warfare's fast file version (`IWff0100`,
+/// 0x653): its maps load through `fastfile_iw7` (`assets::lane::iw7`).
+pub const IW7_ZONE_VERSION: u32 = 0x653;
 
 /// bo2mp: the version of a legacy game's zones by its prefix.
 pub fn legacy_version(prefix: &str) -> Option<u32> {
     match prefix {
         "iw3" => Some(IW3_ZONE_VERSION),
         "t4" => Some(T4_ZONE_VERSION),
+        "iw6" => Some(IW6_ZONE_VERSION),
+        "iw7" => Some(IW7_ZONE_VERSION),
         _ => None,
     }
 }
@@ -250,6 +258,8 @@ pub fn legacy_game_for_path(path: &Path) -> Option<&'static str> {
     match peek_zone_version(path)? {
         IW3_ZONE_VERSION => Some("iw3"),
         T4_ZONE_VERSION => Some("t4"),
+        IW6_ZONE_VERSION => Some("iw6"),
+        IW7_ZONE_VERSION => Some("iw7"),
         _ => None,
     }
 }
@@ -277,8 +287,51 @@ pub fn list_legacy_mp_map_files(root: &GamesRoot) -> Vec<(String, String, PathBu
         }
         if let Some(game) = legacy_game_for_path(&path)
             && !out.iter().any(|(g, s, _)| g == game && *s == stem)
+            && (game != "iw6" || is_ghosts_mp_map(&path, &stem))
+            && (game != "iw7" || is_iw7_map(&path, &stem))
         {
             out.push((game.to_owned(), stem, path));
+        }
+    }
+    out.sort();
+    out
+}
+
+/// bo2mp: a Ghosts zone named `mp_*` is a multiplayer map when its
+/// loading zone (`<map>_load.ff`) is beside it: Ghosts' `mp_` zones are
+/// also its characters' bodies, heads and arms (`mp_body_*`, ...) and its
+/// character room; Extinction's maps (`mp_alien_*`) are not multiplayer.
+fn is_ghosts_mp_map(path: &Path, stem: &str) -> bool {
+    !stem.starts_with("mp_alien")
+        && path
+            .parent()
+            .is_some_and(|dir| dir.join(format!("{stem}_load.ff")).is_file())
+}
+
+/// bo2mp: an Infinite Warfare zone is a map when its material zone
+/// (`techsets_<map>.ff`) is beside it: IW7's `mp_` zones are also its
+/// characters' bodies, heads and arms and its guns' parts (`*_tr`), and its
+/// front ends (`mp_frontend`, `cp_frontend`) are no maps.
+pub fn is_iw7_map(path: &Path, stem: &str) -> bool {
+    !stem.ends_with("_frontend")
+        && path
+            .parent()
+            .is_some_and(|dir| dir.join(format!("techsets_{stem}.ff")).is_file())
+}
+
+/// bo2mp: every Infinite Warfare Zombies map installed (`cp_*` with its
+/// material zone beside it): (map, zone file).
+pub fn list_iw7_zombies_maps(root: &GamesRoot) -> Vec<(String, PathBuf)> {
+    let mut out: Vec<(String, PathBuf)> = Vec::new();
+    for path in game_files(&root.0).flatten() {
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()).map(str::to_ascii_lowercase) else {
+            continue;
+        };
+        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ff")) || !stem.starts_with("cp_") {
+            continue;
+        }
+        if legacy_game_for_path(&path) == Some("iw7") && is_iw7_map(&path, &stem) && !out.iter().any(|(s, _)| *s == stem) {
+            out.push((stem, path));
         }
     }
     out.sort();

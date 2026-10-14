@@ -6,7 +6,6 @@
 //!
 //! ```text
 //! lightdescription 0x240   (mp_common: ",gfx_dlight_gen_omni_r200599854254")
-//! klf              0xa8    (mp_common: ",2130c766-437a-45c8-981f-3aef80383930")
 //! aimtable         0x330   (mp_common: ",soldier_aim")
 //! customizationtablecolor 0x30 (mp_common: ",cc_c_t7_mp_warrior_body1_skin1")
 //! customizationtable 0x28 (mp_common: ",mp_character_customization")
@@ -30,7 +29,6 @@ macro_rules! placeholders {
 }
 
 placeholders! {
-    lens_flare => NewLensFlareDef;
     aim_table => AimTable;
     xcam => XCam;
     customization_table => CustomizationTable;

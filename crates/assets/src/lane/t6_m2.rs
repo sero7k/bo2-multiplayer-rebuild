@@ -2601,6 +2601,30 @@ pub(crate) fn load_t6_combat(
             camo_plan.len()
         ));
         asset_core::weapon_camos::install((!table.swaps.is_empty() || !table.patterns.is_empty()).then_some(table));
+        // bo2mp: the guest guns' Pack-a-Punch upgrades wear the map's
+        // Pack-a-Punch camo: the camo material its upgraded guns' camo
+        // set swaps in most, at its tiling.
+        let mut counts: BTreeMap<(&str, [u32; 2]), usize> = BTreeMap::new();
+        for (_, swaps) in pap.models.values() {
+            for (_, camo, tile) in swaps {
+                *counts.entry((camo.trim_start_matches(','), tile.map(f32::to_bits))).or_default() += 1;
+            }
+        }
+        let guest_pap = counts
+            .iter()
+            .max_by_key(|(_, n)| **n)
+            .and_then(|((camo, tile), _)| {
+                let material = catalog_of(camo)?;
+                Some((
+                    bo2_profile::guest::ZM_PAP_CAMO_OPTION,
+                    asset_core::weapon_camos::MaterialCamo { material, tile: f32::from_bits(tile[0]) },
+                ))
+            });
+        report.push(format!(
+            "t6 Pack-a-Punch camo for guest guns: {}",
+            guest_pap.map_or_else(|| "none".to_owned(), |(_, c)| format!("material {} tile {}", c.material, c.tile))
+        ));
+        asset_core::weapon_camos::install_pap(guest_pap);
     }
 
     // A model surface's material, in the catalog: the capture's own row

@@ -195,6 +195,7 @@ anchors), `surface_check`, `gun_*`, `image_dump`, `type_runs`.
 | common_mp | 8777/8777 | yes (0x22c505a) | 0 unresolved; 6296 lists; 972 name anchors ok, 0 off |
 | patch_common_core_mp, patch_common_mp, ui_mp, code_pre_gfx_mp, mp_prisonbreak_load, patch_mp_prisonbreak | all | yes | |
 | mp_prisonbreak | 1741/1741 | yes (0x7bf5160) | 0 unresolved; FxWorld, GfxWorld, MapEnts, GlassWorld, ClipMap read |
+| the 15 base MP maps (below) | all | yes | 0 unresolved; `iw6_walk_check` |
 | code_post_gfx_mp, techsets_mp_prisonbreak | partial | no | technique sets with shader programs drift (not needed for guns) |
 
 Layouts settled on retail data (beyond x64-zt):
@@ -270,15 +271,70 @@ ranges (FLAC).
   `weap_rgm_fire_plr`, the two riot shields), notetrack (reload) sounds 623
   of 637; 828 animations decode.
 
+## Maps (phase 3: Ghosts' multiplayer maps)
+
+All 15 base maps walk exactly (stream end = zone end, VIRTUAL end = block
+size, 0 unresolved references): mp_chasm, mp_dart, mp_descent_new,
+mp_fahrenheit, mp_flooded, mp_frag, mp_hashima, mp_lonestar, mp_prisonbreak,
+mp_skeleton, mp_snow, mp_sovereign, mp_strikezone, mp_warhawk, mp_zebra
+(`cargo run -p fastfile_iw6 --example iw6_walk_check -- <zone.ff>`). What
+the other maps needed beyond Prison Break:
+
+* `FxGlassDef`'s sub-assets load physics preset, material, shattered
+  material (in their own fields, x64-zt's layout); Prison Break walked in
+  field order only because all three load there.
+* `ScriptableDef` (inline in `clipMap_t::scriptableMapEnts`): parts, states,
+  on-enter events by kind (0 model asset, 1 play-effect asset, 2 stop-effect
+  name slot as a sound alias's, 3 sound alias name, 4 animation name, 6
+  physics model, 7 light settings' `noteworthy`, 9 shake rumble name; the
+  others hold numbers), notetracks (0 effect asset, 1 sound name). An
+  instance reads its def's counts from the def's header, kept by index
+  (`Capture::scriptable_headers`) when an earlier instance loaded it.
+* `ImpactFx` / `SurfaceFx` tables align to 4 (mp_snow's and mp_skeleton's
+  own impact tables, named "", sit 4 past an 8-byte boundary).
+
+`fastfile_iw6::map::read_map` turns the walk into plain data
+(`examples/iw6_map_check.rs` checks it): the world (CoD4's vertex layout,
+unit vectors unsigned 10:10:10), surfaces with bounds and the lit / decal /
+emissive ranges, static models with their ground light, brush models;
+collision (brushes with their side planes, terrain triangles, partitions
+with their vertex segment — triangles index vertices from `segment * 1024`,
+AABB forest, brush models, leaf brush nodes); the entity string (keys are
+canonical script string numbers, `IW6_KEYS` names those read off retail
+values: 97 classname, 430 origin, 47 angles, 642 targetname, 640 target,
+392 model, ...); spawn points (`MapEnts::spawnList`, not in the entity
+string) written back as entities; trigger models (`"model" "?N"`, as
+IW4's/IW5's); the sun (ComWorld's first sun light); lightmaps as CoD4's
+(`iw3_lightmap`: BC4 primary = sun visibility at twice the page, secondary
+two stacked R16G16B16A16_FLOAT pages, linear light made CoD4's gamma bytes,
+alpha direction -1..1 to CoD4's code).
+
+In the game (`assets::lane::iw6_map`): a zone of version 0x235 is a legacy
+map (`asset_transport::legacy_game_for_path` says `iw6`; zone key
+`iw6:mp_prisonbreak`); the world goes through the IW3 world builder, the
+collision through the IW3 clip builder (vertex segments and trigger models
+set after), world materials by technique set name (`l_sm_r0c0..`,
+`b1c1`/`m1c1` layers with `colorMap1`/`colorMap2`; sky, tools, shadow-only
+and distortion surfaces not drawn), placed models through the guest-gun
+model builder, colour maps at most 512 px (`BO2MP_GH_MAP_TEXTURE`), the
+film vision and createart fog from the zone, spawn records over nothing
+left out (Ghosts parks unplayed modes' spawns in an empty corner), and
+Black Ops II's rules on top. The map list (`ui::foreign_maps`) lists a
+Ghosts `mp_*` zone with a `<map>_load.ff` beside it (not Extinction's
+`mp_alien_*`); its picture is ui_mp's `loadscreen_<map>`.
+
 ## Next
 
 1. Ghosts attachments on the guns (attachment assets: view/world models,
    reticles, stat changes) instead of the base gun for every variant.
-2. **A map**: done reading (walk exact). Retail `FxGlassDef` keeps the
-   physics preset where x64-zt has the material. `GfxWorld`, `MapEnts`,
-   `GlassWorld` and `clipMap_t` (640 bytes, `alignas(128)`, offsets in
-   `walk/world.rs::cm`) follow x64-zt's writers unchanged. Next: build the
-   world draw and collision from `GfxWorldRec` / `ClipMapRec`.
+2. **Maps** (in game, unchecked): lightmap brightness (the gamma and
+   scale of the converted pages), layer blending weights (which vertex
+   colour channels Ghosts' layers read), the sky (its cube is not drawn:
+   the sky surfaces are left out), the minimap picture (in the map zone,
+   which the HUD does not read for an `iw6` map), static model collision
+   (Ghosts traces a placed model's collision LOD mesh; only the clip brushes
+   around props are used), dynamic entities and scriptables (read, not
+   placed), glass, `worldspawn` keys still numbered (`iw6_<n>`), DLC maps.
    Old notes: `mp_prisonbreak.ff` (+ `_load`, `_path`, `techsets_...`,
    `patch_...`): ReverbPreset now reads (72 bytes: name, 16 floats), and
    FxWorld follows x64-zt's writer but ends 0x40 bytes early on retail data.

@@ -27,7 +27,8 @@ pub struct ClipPartition {
     pub tri_count: u8,
     pub first_tri: i32,
 
-    pub first_vert_segment: u8,
+    /// (u16: maps with more than 326,656 collision vertices, IW7's.)
+    pub first_vert_segment: u16,
 
     pub border_count: u8,
     pub first_border: u32,
