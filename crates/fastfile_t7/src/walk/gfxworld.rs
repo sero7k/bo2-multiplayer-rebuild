@@ -358,11 +358,14 @@ pub fn gfx_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
     }
     let n = count(s, h + 0x540)?;
     s.records(h + 0x548, n, 68, 3)?;
-    // The two umbra tome lists (0x558/0x560, 0x568/0x570), the siege
+    // The two umbra tome lists (0x558/0x560, 0x56c/0x570), the siege
     // animations (count at 0x578, `mp_sector`'s seven; asset pointers, 8
     // each) and those that play by themselves (0x588: `SiegeAutoPlay`, 20
     // each).
-    for (count_at, field) in [(0x558, 0x560), (0x568, 0x570)] {
+    // (The second list's count is the u32 at 0x56c: the one at 0x568 is 1
+    // on `zm_factory`, `zm_genesis` and `zm_island` alike, whose lists
+    // hold none, eleven and thirteen.)
+    for (count_at, field) in [(0x558, 0x560), (0x56c, 0x570)] {
         umbra_tomes(s, h + count_at, h + field)?;
     }
     let n = count(s, h + 0x578)?;
