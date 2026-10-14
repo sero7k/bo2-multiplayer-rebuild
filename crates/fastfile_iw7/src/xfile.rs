@@ -156,8 +156,15 @@ pub fn parse_asset_list(zone: &[u8]) -> Result<AssetList> {
                 (72, counts.stable_constant_buffers),
             ] {
                 if c.ptr_at(g + off)?.is_inline() {
-                    c.virt_struct(4 * n as usize, 4)?;
+                    let (at, _) = c.virt_struct(4 * n as usize, 4)?;
+                    if std::env::var_os("IW7_DEBUG").is_some() {
+                        let sum: u64 = (0..n as usize).map(|i| c.u32_at(at + 4 * i).unwrap_or(0) as u64).sum();
+                        eprintln!("globals cb@{off} n {n} size sum {sum:#x}");
+                    }
                 }
+            }
+            if std::env::var_os("IW7_DEBUG").is_some() {
+                eprintln!("globals counts ds {} blend {} ptrs {:x?}", counts.depth_stencil_states, counts.blend_states, (0..13).map(|k| c.u64_at(g + 8 * k).unwrap_or(0)).collect::<Vec<_>>());
             }
             globals = Some(counts);
         }

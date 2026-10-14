@@ -18,6 +18,8 @@ mod material;
 mod misc;
 mod model;
 mod physics;
+mod scriptable;
+mod vfx;
 mod weapon;
 
 use std::collections::HashMap;
@@ -244,6 +246,22 @@ impl<'a> Walker<'a> {
                 if let Some(t) = self.str_slots.get(&(offset as u64)) {
                     return Ok(Some(t.clone()));
                 }
+                if let Ok(d) = std::env::var("IW7_D") {
+                    let d = u64::from_str_radix(&d, 16).unwrap_or(0);
+                    let v = (offset as u64).wrapping_sub(d);
+                    let ok = self.vmap.file_pos(v).map(|at| at > 0 && self.s.data()[at - 1] == 0 && self.s.data()[at] != 0);
+                    let mut near = None;
+                    if ok != Some(true) {
+                        for k in 1..64u64 {
+                            for c in [v.wrapping_sub(k), v + k] {
+                                if near.is_none() && self.vmap.file_pos(c).is_some_and(|at| at > 0 && self.s.data()[at - 1] == 0 && self.s.data()[at] != 0) {
+                                    near = Some(c as i64 - v as i64);
+                                }
+                            }
+                        }
+                    }
+                    eprintln!("DSTR asset {} virt {:#x} ok {:?} near {:?} {:?}", self.cap.walked, self.s.offset(VIRTUAL), ok, near, self.string_at(v));
+                }
                 Ok(Some(
                     self.string_at(offset as u64)
                         .unwrap_or_else(|| format!("<ref {offset:#x}>")),
@@ -344,8 +362,14 @@ impl<'a> Walker<'a> {
             } => {
                 let r = self.resolve_slot(ty, offset as u64);
                 if r.is_none() && offset as u64 >= self.s.offset(VIRTUAL) {
+                    if std::env::var_os("IW7_FWD").is_some() {
+                        eprintln!("FWD asset {} pos {:#x} virt {:#x} want {:#x} {:?}", self.cap.walked, self.s.pos(), self.s.offset(VIRTUAL), offset, ty);
+                    }
                     self.forward.push((offset as u64, ty));
                     return Ok(None);
+                }
+                if r.is_some() && std::env::var_os("IW7_RES").is_some() {
+                    eprintln!("RES asset {} virt {:#x} want {:#x} {:?}", self.cap.walked, self.s.offset(VIRTUAL), offset, ty);
                 }
                 if r.is_some() && self.first_unresolved.get().is_none() {
                     self.last_resolved.set(Some((self.s.pos(), offset as u64)));
@@ -472,6 +496,8 @@ impl<'a> Walker<'a> {
             T::Weapon => weapon::weapon(self, h),
             T::AnimPackage => weapon::anim_package(self, h),
             T::Attachment => weapon::attachment(self, h),
+            T::Vfx => vfx::vfx(self, h),
+            T::Scriptable => scriptable::scriptable(self, h),
             T::Rumble => misc::rumble(self, h),
             T::RumbleGraph => misc::name_only(self, ty, h),
             T::Laser => misc::laser(self, h),
@@ -514,6 +540,11 @@ impl<'a> Walker<'a> {
                     r.map(Some)
                 }
                 (Some(ty), p @ Ptr::Ref { .. }) => {
+                    if std::env::var_os("IW7_TREF").is_some() {
+                        let v = p.virtual_offset().unwrap_or(0);
+                        let s0: u64 = self.cap.images.iter().map(|im| im.streams[0].2 as u64).sum();
+                        eprintln!("TREF {i} {ty:?} want {v:#x} ours {:#x} delta {:#x} images {} s0sum {s0:#x} resolved {:?}", self.s.offset(VIRTUAL), v.wrapping_sub(self.s.offset(VIRTUAL)), self.cap.images.len(), self.resolve_slot(ty, v));
+                    }
                     Ok(p.virtual_offset().and_then(|v| self.resolve_slot(ty, v)))
                 }
                 (Some(_), _) => Ok(None),

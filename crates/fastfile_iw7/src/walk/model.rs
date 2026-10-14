@@ -11,6 +11,15 @@ pub(super) fn xmodel(w: &mut Walker, h: usize) -> Result<AssetId> {
     use L::XModel as X;
     w.s.push(VIRTUAL);
     let name = w.xstr(h + X::name)?.unwrap_or_default();
+    if std::env::var_os("IW7_MDUMP").is_some() {
+        eprintln!("xmodel {name} header {h:#x} pos {:#x}", w.s.pos());
+        for o in (0..X::SIZE).step_by(8) {
+            let v = w.s.u64_at(h + o)?;
+            if v != 0 {
+                eprintln!("  xm+{o:4} {v:#018x}");
+            }
+        }
+    }
     let num_bones = w.s.u8_at(h + X::numBones)?;
     let num_root = w.s.u8_at(h + X::numRootBones)?;
     let client_bones = w.s.u16_at(h + X::numClientBones)? as usize;

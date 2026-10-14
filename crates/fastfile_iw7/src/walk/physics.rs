@@ -75,16 +75,42 @@ pub(super) fn procedural_bones(w: &mut Walker, h: usize) -> Result<AssetId> {
     use L::XAnimProceduralBones as B;
     w.s.push(VIRTUAL);
     let name = w.xstr(h + B::name)?.unwrap_or_default();
+    if std::env::var_os("IW7_DEBUG").is_some() {
+        eprintln!("procbones {name} pos {:#x} virt {:#x}", w.s.pos(), w.s.offset(VIRTUAL));
+        for o in (0..B::SIZE).step_by(8) {
+            eprintln!("  pb+{o:3} {:#018x}", w.s.u64_at(h + o)?);
+        }
+    }
     let constraints = w.s.u32_at(h + B::numConstraints)? as usize;
     w.blob(h + B::constraints, L::XAnimConstraint::SIZE * constraints, 3)?;
     let targets = w.s.u32_at(h + B::numTargetBones)? as usize;
     w.blob(h + B::targetBoneNames, 4 * targets, 3)?;
     let n1 = w.s.u32_at(h + B::unk01_count)? as usize;
-    w.blob(h + B::unk01, 0x80 * n1, 3)?;
+    // Each 0x80-byte entry holds two string pointers (+96, +104; x64-zt
+    // has them as padding), read after the array.
+    if let Some(table) = w.inline_array(h + B::unk01, 0x80 * n1, 3)? {
+        for i in 0..n1 {
+            if std::env::var_os("IW7_DEBUG").is_some() {
+                eprintln!("  pb entry {i} virt {:#x} ptrs {:x} {:x}", w.s.offset(VIRTUAL), w.s.u64_at(table + 0x80 * i + 96)?, w.s.u64_at(table + 0x80 * i + 104)?);
+            }
+            w.xstr(table + 0x80 * i + 96)?;
+            w.xstr(table + 0x80 * i + 104)?;
+        }
+    }
+    let dbg = std::env::var_os("IW7_DEBUG").is_some();
+    if dbg {
+        eprintln!("  pb after unk01 pos {:#x} virt {:#x}", w.s.pos(), w.s.offset(VIRTUAL));
+    }
     let n2 = w.s.u32_at(h + B::unk02_count)? as usize;
     w.blob(h + B::unk02, 12 * n2, 3)?;
+    if dbg {
+        eprintln!("  pb after unk02 pos {:#x} virt {:#x}", w.s.pos(), w.s.offset(VIRTUAL));
+    }
     let n3 = w.s.u32_at(h + B::unk03_count)? as usize;
     w.blob(h + B::unk03, 32 * n3, 3)?;
+    if dbg {
+        eprintln!("  pb after unk03 pos {:#x} virt {:#x}", w.s.pos(), w.s.offset(VIRTUAL));
+    }
     w.s.pop();
     Ok(w.name_only(AssetType::XAnimProceduralBones, name))
 }

@@ -42,6 +42,9 @@ fn always_loaded(w: &mut Walker, f: usize) -> Result<()> {
     use L::AlwaysloadedFlags as A;
     let images = w.s.u32_at(f + A::imageCount)? as usize;
     if let Some(table) = w.inline_array(f + A::images, 8 * images, 7)? {
+        if std::env::var_os("IW7_DEBUG").is_some() {
+            eprintln!("alwaysloaded images {images} table virt {:#x}", w.vmap.virt_of(table).unwrap_or(0));
+        }
         for i in 0..images {
             w.asset(AssetType::Image, table + 8 * i)?;
         }
@@ -64,6 +67,12 @@ pub(super) fn streaming_info(w: &mut Walker, h: usize) -> Result<AssetId> {
     use L::StreamingInfo as S;
     w.s.push(VIRTUAL);
     let name = w.xstr(h + S::name)?.unwrap_or_default();
+    if std::env::var_os("IW7_DEBUG").is_some() {
+        eprintln!("streaming_info header {h:#x} virt {:#x}", w.s.offset(VIRTUAL));
+        for o in (0..S::SIZE).step_by(8) {
+            eprintln!("  si+{o:3} {:#018x}", w.s.u64_at(h + o)?);
+        }
+    }
     always_loaded(w, h + S::flags)?;
     let models = w.s.u32_at(h + S::modelCount)? as usize;
     use L::AlwaysloadedFlagsPerModel as P;
