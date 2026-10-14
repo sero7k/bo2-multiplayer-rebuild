@@ -11,6 +11,8 @@ fn main() {
                 for l in &map.report {
                     println!("  {l}");
                 }
+                let probe = map.probe_image.as_deref().and_then(|n| map.image_info(n).map(|r| (n, r.format, r.width, r.level_count, r.num_elements)));
+                println!("  probes: {} origins, array {probe:?}", map.probe_origins.len());
             }
             Err(e) => println!("{path}: {e}"),
         }

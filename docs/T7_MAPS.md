@@ -15,10 +15,22 @@ through the Infinite Warfare Zombies pipeline (`lane::iw7_zombies`).
 
 ## What walks (retail, 14 Oct 2026)
 
-All MP map zones walk to their exact end but `mp_veiled_heyday` (an effect
-stops it). Zombies: `zm_factory` walks to its end; the others stop at an
-XCam, ComWorld, SAnim or light description. `T7_TRACE` prints the walker
-line of each allocation.
+Every MP map zone walks to its exact end, `mp_veiled_heyday` included.
+Zombies: `zm_factory`, `zm_castle`, `zm_island`, `zm_zod`, `zm_genesis`
+and `zm_stalingrad` walk to their exact end and read whole
+(`T7_MAP_LOAD=1 t7_map`: world, static models, collision, entities).
+`zm_common` and `zm_levelcommon` still stop (player sounds, a weapon).
+`T7_TRACE` prints the walker line of each allocation; `t7_scan` finds
+pointer runs where a list really starts.
+
+What the Zombies maps needed: XCam's list at 0x68 (16 each, count at 0x70)
+and its frame-list count in the u32 at 0x18 when bytes 0x14/0x15 are 0;
+ComWorld's second tome list (0x68/0x70, a 24-byte record at a tome's 0x20)
+and umbra gates (0x78/0x80, 16 each, a name first), a tome's u32 list
+(0x40/0x48); GfxWorld's second tome count at 0x56c (0x568 is a flag);
+SAnim's first list holds both u16 counts (0x64 + 0x66) when the first is
+under three; LightDescription's 0x210..0x230 are runtime words; a decal
+effect's second visuals may load a material rather than an image.
 
 Retail vs x64-zt: GfxWorld exposure volumes 108; siege anim count at 0x578;
 `unk` (0x1e8) 48 a record; second umbra list and auto-play list (20) load;
