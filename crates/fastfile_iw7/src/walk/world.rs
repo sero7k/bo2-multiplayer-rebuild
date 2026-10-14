@@ -340,6 +340,8 @@ pub(super) fn gfxworld(w: &mut Walker, h: usize) -> Result<AssetId> {
         if let Some(at) = w.inline_array(h + G::draw__reflectionProbeData__reflectionProbes, R::SIZE * n, 7)? {
             for i in 0..n {
                 let r = at + R::SIZE * i;
+                let o = |k: usize| w.s.f32_at(r + R::origin + 4 * k);
+                rec.probe_origins.push([o(0)?, o(1)?, o(2)?]);
                 w.xstr(r + R::livePath)?;
                 let k = u32f(w, r + R::probeInstanceCount)?;
                 w.blob(r + R::probeInstances, 4 * k, 3)?;
@@ -371,9 +373,9 @@ pub(super) fn gfxworld(w: &mut Walker, h: usize) -> Result<AssetId> {
         )?;
     }
     let k = u32f(w, h + G::draw__lightmapReindexData__reindexCount)?;
-    w.blob(h + G::draw__lightmapReindexData__reindexElement, L::GfxWorldLightmapReindexDataElement::SIZE * k, 3)?;
+    rec.lightmap_reindex = arr(w, h + G::draw__lightmapReindexData__reindexElement, k, L::GfxWorldLightmapReindexDataElement::SIZE, 3)?;
     let k = u32f(w, h + G::draw__lightmapReindexData__packedLightmapCount)?;
-    w.blob(h + G::draw__lightmapReindexData__packedLightmap, L::GfxWorldPackedLightmap::SIZE * k, 3)?;
+    rec.packed_lightmaps = arr(w, h + G::draw__lightmapReindexData__packedLightmap, k, L::GfxWorldPackedLightmap::SIZE, 3)?;
     if let Some(id) = w.asset(T::Image, h + G::draw__iesLookupTexture)? {
         rec.images.push(("iesLookup", id));
     }
@@ -632,7 +634,8 @@ pub(super) fn gfxworld(w: &mut Walker, h: usize) -> Result<AssetId> {
                 let m = w.asset(T::XModel, d + D::model)?;
                 rec.smodel_models.push(m);
                 let k = u32f(w, d + D::vertexLightingInfo__numLightingValues)?;
-                w.blob(d + D::vertexLightingInfo__lightingValues, L::GfxStaticModelVertexLighting::SIZE * k, 3)?;
+                let at = w.blob(d + D::vertexLightingInfo__lightingValues, L::GfxStaticModelVertexLighting::SIZE * k, 3)?;
+                rec.smodel_lighting.push(at.map(|pos| Span { pos, len: L::GfxStaticModelVertexLighting::SIZE * k }));
             }
         }
     }

@@ -927,8 +927,8 @@ fn prepare_streamed(
         }));
     }
     // bo2mp: a Ghosts clip names its pak and range (`offset:length`) of a
-    // FLAC stream.
-    if ns == AssetNamespace::Iw6 {
+    // FLAC stream; a Black Ops III clip its sound bank and range.
+    if ns == AssetNamespace::Iw6 || ns == AssetNamespace::T7 {
         let bytes = asset_audio::read_ghosts_stream(dir, name).map_err(|e| {
             diag::warn!(Audio, "audio: Ghosts clip `{name}` in `{dir}`: {e}");
             ClipError::Read

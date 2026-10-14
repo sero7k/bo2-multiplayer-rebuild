@@ -38,6 +38,7 @@
 //! `mp_common` exactly at their VIRTUAL sizes.) The sound data is not in
 //! the zone: `assetFileName` names it in the `.sabl`/`.sabs` banks.
 
+use super::capture::SoundAliasRec;
 use crate::cursor::Result;
 use crate::stream::Stream;
 
@@ -65,14 +66,25 @@ pub fn sound_bank(s: &mut Stream, h: usize) -> Result<Option<String>> {
         for i in 0..lists {
             let l = t + ALIAS_LIST * i;
             s.no_loads(l, ALIAS_LIST, &[0, 0x10])?;
-            s.string(l)?;
+            let list_name = s.string(l)?.unwrap_or_default();
             let n = s.i32_at(l + 0x18)?.max(0) as usize;
             if let Some(a) = s.records(l + 0x10, n, ALIAS, 7)? {
                 for j in 0..n {
                     let e = a + ALIAS * j;
                     s.no_loads(e, ALIAS, &ALIAS_STRINGS)?;
-                    for f in ALIAS_STRINGS {
-                        s.string(e + f)?;
+                    let mut texts: [Option<String>; 7] = Default::default();
+                    for (k, f) in ALIAS_STRINGS.into_iter().enumerate() {
+                        texts[k] = s.string(e + f)?;
+                    }
+                    if s.capture.keep_anims {
+                        let [_, _, secondary, _, file, _, _] = texts;
+                        s.capture.sound_aliases.push(SoundAliasRec {
+                            name: list_name.clone(),
+                            asset_id: s.u32_at(e + 0x38)?,
+                            file: file.unwrap_or_default(),
+                            secondary: secondary.unwrap_or_default(),
+                            record: s.slice(e, ALIAS)?.to_vec(),
+                        });
                     }
                 }
             }

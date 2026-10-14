@@ -39,7 +39,7 @@ fn main() {
             let end = (a + n).min(z.image.len());
             std::fs::write(&out, &z.image[a.min(end)..end]).expect("write image");
         }
-        let w = walk_with(&z, Options { resync: std::env::var_os("T7_RESYNC").is_some() });
+        let w = walk_with(&z, Options { resync: std::env::var_os("T7_RESYNC").is_some(), ..Options::default() });
         if std::env::var_os("T7_LIST").is_some() {
             for a in &w.walked {
                 println!(

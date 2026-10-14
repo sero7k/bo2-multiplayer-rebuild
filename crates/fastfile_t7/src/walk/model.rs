@@ -1,6 +1,6 @@
 //! Models: `XModelMesh`, `XModel`, physics presets and constraints.
 
-use super::capture::{LodRec, MeshRec, ModelRec, SurfaceRec};
+use super::capture::{LodRec, MeshRec, ModelRec, Skeleton, SurfaceRec};
 use super::image::XPakEntry;
 use super::simple::placeholder;
 use crate::asset_type::AssetType;
@@ -143,18 +143,21 @@ pub fn xmodel(s: &mut Stream, h: usize) -> Result<Option<String>> {
     s.no_loads(h, 0x150, &known)?;
     let name = s.string(h)?;
     let bones = s.u8_at(h + 8)? as usize + s.u16_at(h + 0xa)? as usize;
-    let non_root = bones.saturating_sub(s.u8_at(h + 9)? as usize);
-    s.records(h + 0x10, bones, 4, 3)?;
-    s.records(h + 0x18, non_root, 1, 0)?;
-    s.records(h + 0x20, non_root, 8, 1)?;
-    s.records(h + 0x28, non_root, 16, 3)?;
-    s.records(h + 0x30, bones, 1, 0)?;
-    s.records(h + 0x38, bones, BASE_MAT, 3)?;
+    let roots = s.u8_at(h + 9)?;
+    let non_root = bones.saturating_sub(roots as usize);
+    let names_at = s.records_at(h + 0x10, bones, 4, 3)?;
+    let parents_at = s.records_at(h + 0x18, non_root, 1, 0)?;
+    let quats_at = s.records_at(h + 0x20, non_root, 8, 1)?;
+    let trans_at = s.records_at(h + 0x28, non_root, 16, 3)?;
+    let parts_at = s.records_at(h + 0x30, bones, 1, 0)?;
+    let mats_at = s.records_at(h + 0x38, bones, BASE_MAT, 3)?;
+    let skeleton = skeleton(s, bones, roots, [names_at, parents_at, quats_at, trans_at, parts_at, mats_at])?;
     let lods = (s.u8_at(h + 0x40)? as usize).min(8);
     let mut rec = ModelRec {
         name: name.clone().unwrap_or_else(String::new),
         header_at: h,
         bones,
+        skeleton,
         ..Default::default()
     };
     for i in 0..lods {
@@ -216,6 +219,55 @@ pub fn xmodel(s: &mut Stream, h: usize) -> Result<Option<String>> {
     }
     s.capture.add_model(rec);
     Ok(name)
+}
+
+/// bo2mp: the skeleton's arrays read where the walk found them (names u32
+/// script strings; parents u8; rest quaternions as four halves; rest
+/// translations packed vec3s; part classification u8; bind poses `DObjAnimMat`, 32).
+fn skeleton(s: &Stream, bones: usize, roots: u8, at: [Option<usize>; 6]) -> Result<Skeleton> {
+    let non_root = bones.saturating_sub(roots as usize);
+    let [names, parents, quats, trans, parts, mats] = at;
+    let mut k = Skeleton { num_root_bones: roots, ..Default::default() };
+    if let Some(a) = names {
+        for i in 0..bones {
+            k.bone_names.push(s.u32_at(a + 4 * i)?);
+        }
+    }
+    if let Some(a) = parents {
+        for i in 0..non_root {
+            k.parent_list.push(s.u8_at(a + i)?);
+        }
+    }
+    if let Some(a) = quats {
+        for i in 0..non_root {
+            let q = a + 8 * i;
+            k.quats.push([0, 2, 4, 6].map(|o| s.u16_at(q + o).map_or(0.0, crate::mesh::f16)));
+        }
+    }
+    // (The translations are packed vec3s, 12 bytes each, though the array
+    // the stream holds is 16 a bone.)
+    if let Some(a) = trans {
+        for i in 0..non_root {
+            let t = a + 12 * i;
+            k.trans.push([s.f32_at(t)?, s.f32_at(t + 4)?, s.f32_at(t + 8)?]);
+        }
+    }
+    if let Some(a) = parts {
+        for i in 0..bones {
+            k.part_classification.push(s.u8_at(a + i)?);
+        }
+    }
+    if let Some(a) = mats {
+        for i in 0..bones {
+            let m = a + BASE_MAT * i;
+            let mut v = [0f32; 8];
+            for (j, x) in v.iter_mut().enumerate() {
+                *x = s.f32_at(m + 4 * j)?;
+            }
+            k.base_mat.push(v);
+        }
+    }
+    Ok(k)
 }
 
 const BRUSH: usize = 0x70;

@@ -315,6 +315,7 @@ dependencies = [
  "fastfile_iw6",
  "fastfile_s1",
  "fastfile_t5",
+ "fastfile_t7",
  "sab_t6",
  "t4",
 ]
@@ -2828,6 +2829,7 @@ version = "0.1.0"
 dependencies = [
  "bcdec_rs",
  "lz4_flex",
+ "miniz_oxide",
  "png",
 ]
 
@@ -6543,6 +6545,7 @@ dependencies = [
  "fastfile_iw6",
  "fastfile_iw7",
  "fastfile_s1",
+ "fastfile_t7",
  "frame",
  "hks_t6",
  "image",

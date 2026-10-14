@@ -248,6 +248,19 @@ impl<'a> Stream<'a> {
         self.array(field, len, mask)
     }
 
+    /// bo2mp: `records`, and where the data is when the field is a
+    /// reference to data loaded earlier (its file offset, when that was
+    /// read from the file): where to read the records either way.
+    #[track_caller]
+    pub fn records_at(&mut self, field: usize, count: usize, size: usize, mask: u64) -> Result<Option<usize>> {
+        let p = self.ptr_at(field)?;
+        let here = self.records(field, count, size, mask)?;
+        Ok(here.or_else(|| match p {
+            Ptr::Ref { .. } => p.virtual_offset().and_then(|v| self.vmap.file_pos(v)),
+            _ => None,
+        }))
+    }
+
     /// A pointer to an asset of type `ty`: loaded right here when it
     /// follows (its struct in TEMP, its data in VIRTUAL), else a reference
     /// to one loaded earlier. The asset's name when it was loaded here.
@@ -369,6 +382,9 @@ pub struct Options {
     /// (the skipped assets' allocations are not counted), so references
     /// read after it are counted but no longer checked meaningfully.
     pub resync: bool,
+    /// bo2mp: keep every animation's data (`Capture::anims`; the guns'
+    /// lane converts them).
+    pub keep_anims: bool,
 }
 
 /// Assets `walk_with` skipped: (first index, the index it resumed at, the
@@ -524,6 +540,7 @@ type GapSize = (u64, (usize, usize));
 fn walk_pass(zone: &Zone, options: Options, sizes: &[GapSize]) -> (Walk, Option<(GapSize, bool)>) {
     let mut s = Stream::new(&zone.image);
     s.keep_misses = true;
+    s.capture.keep_anims = options.keep_anims;
     let mut gaps: Vec<gap::Gap> = Vec::new();
     let mut walked = Vec::new();
     let mut skipped: Vec<Skip> = Vec::new();

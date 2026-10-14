@@ -374,7 +374,7 @@ pub(super) async fn walk_prepared_match(
             .filter(|n| !n.contains('+'))
             .collect();
         // (A game's guns are listed in Create-a-Class only when they loaded.)
-        for (game, ns) in [("t5", asset_core::AssetNamespace::T5), ("iw4", asset_core::AssetNamespace::Iw4), ("iw5", asset_core::AssetNamespace::Iw5), ("t4", asset_core::AssetNamespace::T4), ("iw3", asset_core::AssetNamespace::Iw3), ("iw6", asset_core::AssetNamespace::Iw6), ("s1", asset_core::AssetNamespace::S1)] {
+        for (game, ns) in [("t5", asset_core::AssetNamespace::T5), ("iw4", asset_core::AssetNamespace::Iw4), ("iw5", asset_core::AssetNamespace::Iw5), ("t4", asset_core::AssetNamespace::T4), ("iw3", asset_core::AssetNamespace::Iw3), ("iw6", asset_core::AssetNamespace::Iw6), ("s1", asset_core::AssetNamespace::S1), ("t7", asset_core::AssetNamespace::T7)] {
             let wanted = bo2_profile::guest::all().filter(|g| g.game == game).count();
             let loaded = bo2_profile::guest::all()
                 .filter(|g| g.game == game)

@@ -29,6 +29,8 @@ impl AdsOverlayConvention {
             crate::AssetNamespace::T5 => Self::PlayAdsAnim,
             // bo2zm: follows Black Ops until BO2 weapons are measured (M2).
             crate::AssetNamespace::T6 => Self::PlayAdsAnim,
+            // bo2mp: Black Ops III is Black Ops II's engine: its ADS moves.
+            crate::AssetNamespace::T7 => Self::PlayAdsAnim,
             crate::AssetNamespace::Iw4
             | crate::AssetNamespace::Iw5
             | crate::AssetNamespace::Iw6

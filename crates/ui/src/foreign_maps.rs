@@ -31,6 +31,16 @@ struct Game {
     dlc: &'static [(&'static str, &'static str)],
 }
 
+/// bo2mp: Infinite Warfare's free re-releases of its DLC maps and the
+/// originals they repeat: a variant is listed only when its original is not
+/// installed (the zones are the same maps, a few vertices apart).
+const IW7_VARIANTS: &[(&str, &str)] = &[
+    ("mp_renaissance2", "mp_geneva"),
+    ("mp_carnage2", "mp_rally"),
+    ("mp_permafrost2", "mp_overflow"),
+    ("mp_turista2", "mp_marsoasis"),
+];
+
 /// bo2mp: IW4x's own map pack in Modern Warfare 2 (`zone/iw4x/.../dlc`):
 /// Call of Duty 4's and Black Ops' maps rebuilt for MW2, and its variants,
 /// titled as IW4x lists them. They are MW2's maps here (MW2's section), and
@@ -304,48 +314,51 @@ const GAMES: &[Game] = &[
         ],
     },
     // bo2mp: Call of Duty: Infinite Warfare (its maps through
-    // `assets::lane::iw7`). Titles the game's files do not name here are
-    // made from the zone names.
+    // `assets::lane::iw7`). Titles as the game's own English text names
+    // them (`presence_<map>` in `english/eng_code_post_gfx.ff`, past the
+    // zone's font); `mp_dome_iw` is the `mp_dome` there. The free re-releases
+    // of DLC maps (`IW7_VARIANTS`) are not listed when their originals are
+    // installed.
     Game {
         prefix: "iw7",
         key: "IW",
         title: "Infinite Warfare",
         base: &[
-            ("mp_breakneck", "Breakout"),
+            ("mp_parkour", "Breakout"),
             ("mp_quarry", "Crusher"),
             ("mp_frontier", "Frontier"),
-            ("mp_geneva", "Retaliation"),
-            ("mp_desert", "Scorch"),
-            ("mp_flip", "Flip"),
-            ("mp_metropolis", "Metropolis"),
-            ("mp_riot", "Riot"),
-            ("mp_fallen", "Fallen"),
-            ("mp_proto", "Proto"),
-            ("mp_dome_iw", "Dome"),
-            ("mp_marsoasis", "Mars Oasis"),
+            ("mp_proto", "Frost"),
+            ("mp_dome_iw", "Genesis"),
+            ("mp_breakneck", "Mayday"),
+            ("mp_metropolis", "Precinct"),
+            ("mp_riot", "Retaliation"),
+            ("mp_divide", "Scorch"),
+            ("mp_rivet", "SkyDock"),
+            ("mp_fallen", "Throwback"),
+            ("mp_skyway", "Terminal"),
         ],
         dlc: &[
+            ("mp_flip", "Excess"),
+            ("mp_desert", "Grounded"),
             ("mp_afghan", "Dominion"),
-            ("mp_junk", "Scrap"),
-            ("mp_turista2", "Turista"),
-            ("mp_renaissance2", "Renaissance"),
-            ("mp_permafrost2", "Permafrost"),
-            ("mp_carnage2", "Carnage"),
-            ("mp_depot", "Depot"),
+            ("mp_prime", "Noir"),
+            ("mp_geneva", "Renaissance"),
             ("mp_neon", "Neon"),
-            ("mp_mansion", "Mansion"),
-            ("mp_nova", "Nova"),
-            ("mp_overflow", "Overflow"),
-            ("mp_paris", "Paris"),
-            ("mp_pixel", "Pixel"),
-            ("mp_prime", "Prime"),
-            ("mp_skyway", "Skyway"),
-            ("mp_parkour", "Parkour"),
-            ("mp_divide", "Divide"),
-            ("mp_codphish", "Codphish"),
-            ("mp_hawkwar", "Hawkwar"),
-            ("mp_rally", "Rally"),
-            ("mp_rivet", "Rivet"),
+            ("mp_mansion", "Archive"),
+            ("mp_paris", "Ember"),
+            ("mp_junk", "Scrap"),
+            ("mp_marsoasis", "Turista"),
+            ("mp_nova", "Bermuda"),
+            ("mp_pixel", "Fore"),
+            ("mp_overflow", "Permafrost"),
+            ("mp_codphish", "Altitude"),
+            ("mp_rally", "Carnage"),
+            ("mp_depot", "Depot 22"),
+            ("mp_hawkwar", "Heartland"),
+            ("mp_renaissance2", "Renaissance"),
+            ("mp_carnage2", "Carnage"),
+            ("mp_permafrost2", "Permafrost"),
+            ("mp_turista2", "Turista"),
         ],
     },
     // bo2mp: Call of Duty: Black Ops III (its maps through
@@ -568,7 +581,12 @@ fn discover() -> Vec<Category> {
         if all_mine.is_empty() {
             continue;
         }
-        let (custom_mine, mine): (Vec<&String>, Vec<&String>) = all_mine.into_iter().partition(|s| is_custom(s));
+        let (custom_mine, mut mine): (Vec<&String>, Vec<&String>) = all_mine.into_iter().partition(|s| is_custom(s));
+        if game.prefix == "iw7" {
+            let has = |stem: &str| mine.iter().any(|m| m.as_str() == stem);
+            let hidden: Vec<&str> = IW7_VARIANTS.iter().filter(|(v, original)| has(v) && has(original)).map(|(v, _)| *v).collect();
+            mine.retain(|m| !hidden.contains(&m.as_str()));
+        }
         let known = |list: &[(&str, &str)]| -> Vec<(String, String)> {
             list.iter()
                 .filter(|(s, _)| mine.iter().any(|m| m.as_str() == *s))
@@ -819,6 +837,36 @@ pub(crate) fn guest_guns_available() {
     let aw = on && fastfile_s1::install::find_install(root.as_ref().map(|r| r.0.as_path()), &extra).is_some();
     bo2_profile::guest::set_available("s1", aw);
     diag::info!(Ui, "bo2mp guest guns: Advanced Warfare {}", say(aw));
+    // (Black Ops III: read by `fastfile_t7`; its guns are in core_common.)
+    let bo3 = on
+        && root.as_ref().is_some_and(|r| {
+            asset_transport::find_zone_file_version(r, "core_common", asset_transport::T7_ZONE_VERSION).is_ok()
+        });
+    bo2_profile::guest::set_available("t7", bo3);
+    diag::info!(Ui, "bo2mp guest guns: Black Ops III {}", say(bo3));
+}
+
+/// bo2mp: Black Ops III's weapon icons (`t7_icon_weapon_*` in core_common),
+/// read once a run (the zone is big: it is walked once, its icons kept).
+fn bo3_icons() -> Option<&'static std::collections::HashMap<String, (u32, u32, Vec<u8>)>> {
+    static ICONS: std::sync::OnceLock<Option<std::collections::HashMap<String, (u32, u32, Vec<u8>)>>> =
+        std::sync::OnceLock::new();
+    ICONS
+        .get_or_init(|| {
+            let root = asset_transport::games_root_from_env().ok()?;
+            let zone = asset_transport::find_zone_file_version(&root, "core_common", asset_transport::T7_ZONE_VERSION).ok()?;
+            match fastfile_t7::ui_image::read_images(&zone.path, |n| n.starts_with("t7_icon_weapon_"), 512) {
+                Ok(list) => {
+                    diag::info!(Ui, "bo2mp: {} Black Ops III weapon icons read", list.len());
+                    Some(list.into_iter().map(|(n, w, h, px)| (n, (w, h, px))).collect())
+                }
+                Err(e) => {
+                    diag::warn!(Ui, "bo2mp: Black Ops III weapon icons: {e}");
+                    None
+                }
+            }
+        })
+        .as_ref()
 }
 
 /// bo2mp: where Ghosts is installed (`fastfile_iw6::install`'s search, with
@@ -853,6 +901,15 @@ pub(crate) fn read_game_image(prefix: &str, names: &[String]) -> Option<(u32, u3
         let dir = ui.path.parent()?.to_path_buf();
         let wanted: Vec<String> = names.iter().flat_map(|n| iw7_picture_names(n)).collect();
         return fastfile_iw7::ui_image::read_ui_image(&dir, &wanted);
+    }
+    // bo2mp: Black Ops III's weapon icons are in its core_common (and its
+    // `.xpak` packages).
+    if prefix == "t7" {
+        if !names.iter().any(|n| n.starts_with("t7_icon_weapon_")) {
+            return None;
+        }
+        let icons = bo3_icons()?;
+        return names.iter().find_map(|n| icons.get(n.as_str()).cloned());
     }
     // bo2mp: Advanced Warfare's are in its common_mp (and its image paks).
     if prefix == "s1" {
@@ -907,10 +964,22 @@ fn iw7_picture_names(name: &str) -> Vec<String> {
         return vec![format!("zm_theater_poster_{cp}")];
     }
     let code = map.strip_prefix("mp_").unwrap_or(map);
+    // (ui.ff names the pictures by the maps' titles where the zone names
+    // differ: Mayday is mp_breakneck, Breakout mp_parkour.)
     let code = match code {
-        "breakneck" => "breakout",
-        "carnage2" => "carnage",
+        "breakneck" => "mayday",
+        "parkour" => "breakout",
+        "codphish" => "altitude",
+        "rally" | "carnage2" => "carnage",
         "dome_iw" => "dome",
+        "desert" => "grounded",
+        "hawkwar" => "heartland",
+        "divide" => "scorch",
+        "rivet" => "skydock",
+        "skyway" => "terminus",
+        "renaissance2" => "geneva",
+        "permafrost2" => "overflow",
+        "turista2" => "marsoasis",
         other => other,
     };
     vec![format!("image_mp_map_{code}"), format!("image_mp_map_{code}_vote")]

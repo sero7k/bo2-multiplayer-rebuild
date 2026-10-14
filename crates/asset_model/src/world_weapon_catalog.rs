@@ -300,7 +300,7 @@ impl WorldWeaponCatalog {
     }
 
     pub fn collide_name_count(&self) -> usize {
-        let mut seen: HashMap<&str, u8> = HashMap::new();
+        let mut seen: HashMap<&str, u16> = HashMap::new();
         for k in &self.order {
             *seen.entry(k.name.as_str()).or_insert(0) |= match k.namespace {
                 AssetNamespace::Iw4 => 1,
@@ -311,6 +311,7 @@ impl WorldWeaponCatalog {
                 AssetNamespace::T4 => 32,
                 AssetNamespace::Iw3 => 64,
                 AssetNamespace::S1 => 128,
+                AssetNamespace::T7 => 256,
             };
         }
         seen.values().filter(|bits| bits.count_ones() >= 2).count()

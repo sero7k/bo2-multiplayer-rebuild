@@ -323,13 +323,67 @@ Black Ops II's rules on top. The map list (`ui::foreign_maps`) lists a
 Ghosts `mp_*` zone with a `<map>_load.ff` beside it (not Extinction's
 `mp_alien_*`); its picture is ui_mp's `loadscreen_<map>`.
 
+### Maps: textures and look (checked on all 15 maps)
+
+`examples/iw6_material_census.rs` counts each map's world and placed-model
+triangles by whether their colour map reads (`IW6_CENSUS_SHARED=1` as the
+game now reads them; `_LIST`, `_TECH`, `_LIGHT`, `_Z`, `_BMODELS` list the
+details); `examples/iw6_map_render.rs` software-renders a map (world, placed
+models, colour maps, layers, lightmaps as the fallback draw lights them) to
+PNG from the top or from spawn points, `IW6_RENDER_BEFORE=1` as the game drew
+it before these fixes.
+
+* **Vertex colour is R, G, B, A** in memory (a layered surface's layer-1
+  weight in green, layer-2 in blue; byte 0 sits near 255). The IW3 builder
+  reads D3DCOLOR (B, G, R, A), so the lane swaps red and blue
+  (`iw6_map::iw3_colour`); read as it was, every two-layer surface (1-10 %
+  of a map) showed its second layer everywhere.
+* **Height-blended layers** are written `b1ha1c1` / `b1hb1c1` (bases
+  `r0ha0c0`); BO2's reader wants the colour map right after the layer
+  number, so they were not drawn at all (base layer only): 54 % of
+  Skeleton's world triangles, 24 % of Snow's, 14 % of Chasm's, 12 % of
+  Zebra's. `iw6::ghosts_layer_tokens` drops the `h?` part.
+* **Placed models' vertex colour is no tint**: foliage keeps wind and
+  reactive-motion weights there (ferns and grass drew red); the map lane
+  whitens it.
+* **Shared images and materials** (`shared.rs`): a map names images (and
+  whole materials, `,m/mtl_sz_crate_federation`) another zone holds,
+  `,name` with an empty record. They are read from `common_mp`,
+  `common_core_mp` and their patches (once per process), the engine's own
+  (`$white`, `$black`, `$identitynormalmap`) made. Strikezone's crates were
+  20 % of its placed triangles, Zebra's 3 %, Chasm's broken floors 1.5 % of
+  its world.
+* **Exposure**: Ghosts tone-maps HDR light per map (baked light at the
+  90th percentile from 0.07 on Sovereign to 1.7 on Skeleton; suns from 0.2
+  to 10). `map::light_exposure` scales the lightmaps by `EXPOSURE_KEY` /
+  that percentile before they become CoD4's gamma bytes; the sun takes the
+  same exposure, at most `SUN_GAMMA_MAX` in gamma space; placed models'
+  ground light too. Taken 1 : 1, sunlit surfaces summed past 2 (burnt
+  white) and Sovereign's halls were dim.
+* **Decals** (the world's decal range) take one polygon offset step
+  (they are coplanar, without depth writes, and flickered).
+* **Brush models** placed by their `script_brushmodel` entities are drawn
+  where the entity stands (`map::placed_brush_models`): Freight's sliding
+  doors, Fahrenheit's elevator, Flooded's running water, Prison Break's
+  bomb-site wall. They were collision only (invisible walls). Later states
+  (`targetname "exploder"`, `script_noteworthy "show"`) and brush models
+  with no entity stay out.
+* **Strikezone's second level**: the after-the-strike map is built into the
+  same world 35,000 units up (half the world's triangles, 5,000 models and
+  its own spawn points). `map::alternate_level_cut` finds it from the spawn
+  points; its geometry, models and spawn records are left out.
+* Exposure portals (`*_distfalloff_*`, colour map `$white`) are not drawn.
+
+Coverage of drawn world triangles by readable colour maps went from
+98.6..100 % to 100 % on every map; placed models from 79.7 % (Strikezone)
+/ 97.1 % (Zebra) / 99+ % to 100 % (but a few lens-flare sprites). No DLC
+map zones are installed (only `common_*_dlc*` and `patch_mp_alien_dlc3`).
+
 ## Next
 
 1. Ghosts attachments on the guns (attachment assets: view/world models,
    reticles, stat changes) instead of the base gun for every variant.
-2. **Maps** (in game, unchecked): lightmap brightness (the gamma and
-   scale of the converted pages), layer blending weights (which vertex
-   colour channels Ghosts' layers read), the sky (its cube is not drawn:
+2. **Maps** (in game, unchecked): the sky (its cube is not drawn:
    the sky surfaces are left out), the minimap picture (in the map zone,
    which the HUD does not read for an `iw6` map), static model collision
    (Ghosts traces a placed model's collision LOD mesh; only the clip brushes

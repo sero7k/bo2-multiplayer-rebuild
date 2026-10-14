@@ -259,7 +259,7 @@ pub fn rank_picture(level: i32, prestige: i32) -> String {
 #[must_use]
 pub fn foreign_picture(name: &str) -> Option<(&'static str, Vec<String>)> {
     let (game, material) = name.split_once(':')?;
-    let game = ["t5", "iw4", "iw5", "iw6", "t4", "iw3", "s1"].into_iter().find(|g| *g == game)?;
+    let game = ["t5", "iw4", "iw5", "iw6", "t4", "iw3", "s1", "t7"].into_iter().find(|g| *g == game)?;
     // (`t5:menu_mp_weapons_ak74u|hud_icon_ak74u`: the names to try, in order.)
     let mut parts = material.split('|');
     let material = parts.next().unwrap_or(material);

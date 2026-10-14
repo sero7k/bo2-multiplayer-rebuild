@@ -458,8 +458,10 @@ impl<'a> Walker<'a> {
         // A fitted zone's delta can be off where its references switch
         // segments (the fit reads string references; long runs of other
         // data have none): the correction the last such reference needed,
-        // else the slot of this type closest within 0x100 (its correction
-        // kept for the next).
+        // else the slot of this type closest within 0x800 (its correction
+        // kept for the next). (mp_geneva's placed models name their models
+        // 0x4c0 below the fitted delta of their region: 6029 of 9221 missed
+        // within 0x100; mp_renaissance2 and mp_hawkwar likewise.)
         let local = self.local(virt);
         let fix = self.slot_fix.get();
         if fix != 0
@@ -467,7 +469,7 @@ impl<'a> Walker<'a> {
         {
             return Some(id);
         }
-        let found = (1..=64u64).find_map(|k| {
+        let found = (1..=512u64).find_map(|k| {
             [local.wrapping_sub(4 * k), local + 4 * k]
                 .into_iter()
                 .find_map(|v| self.slots.get(&v).copied().filter(|id| id.ty == ty).map(|id| (v, id)))

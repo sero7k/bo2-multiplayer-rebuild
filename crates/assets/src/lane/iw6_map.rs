@@ -42,6 +42,46 @@ fn texture_max() -> u32 {
         .unwrap_or(WORLD_TEXTURE_MAX)
 }
 
+/// The images and materials Ghosts' map zones name but do not hold
+/// (`,name`): those of `common_mp` and `common_core_mp` (and their patches)
+/// beside the map, read once per process (two walks of a second or two;
+/// image records, inline pixels and material texture lists kept, streamed
+/// pixels read from the paks when a map wants them).
+fn shared_images(zone_dir: &Path) -> Option<std::sync::Arc<fastfile_iw6::shared::SharedImages>> {
+    use std::sync::{Arc, Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<std::path::PathBuf, Arc<fastfile_iw6::shared::SharedImages>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let mut guard = cache.lock().ok()?;
+    if let Some(hit) = guard.get(zone_dir) {
+        return Some(hit.clone());
+    }
+    let mut shared = fastfile_iw6::shared::SharedImages::default();
+    for z in ["patch_common_mp", "common_mp", "patch_common_core_mp", "common_core_mp"] {
+        let p = zone_dir.join(format!("{z}.ff"));
+        if !p.is_file() {
+            continue;
+        }
+        let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| shared.add_zone(&p)));
+        match read {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => diag::warn!(World, "bo2mp iw6: shared images: {e}"),
+            Err(_) => diag::warn!(World, "bo2mp iw6: shared images: reading {} panicked", p.display()),
+        }
+    }
+    let shared = Arc::new(shared);
+    guard.insert(zone_dir.to_path_buf(), shared.clone());
+    Some(shared)
+}
+
+fn rotate(v: [f32; 3], axis: &[[f32; 3]; 3]) -> [f32; 3] {
+    std::array::from_fn(|k| axis[0][k] * v[0] + axis[1][k] * v[1] + axis[2][k] * v[2])
+}
+
+fn place_point(v: [f32; 3], origin: [f32; 3], axis: &[[f32; 3]; 3]) -> [f32; 3] {
+    let r = rotate(v, axis);
+    std::array::from_fn(|k| origin[k] + r[k])
+}
+
 /// CoD4's packed unit vector (as `asset_model::unpack_unit_vec` reads it,
 /// scale byte 63: 1/127 a step).
 fn iw3_unit_vec(v: [f32; 3]) -> u32 {
@@ -203,14 +243,26 @@ fn iw3_clip(clip: &fastfile_iw6::map::Clip) -> iw3::zone::ClipMap {
 }
 
 /// Ghosts' HDR sun light (linear, its brightest channel) as CoD4's
-/// gamma-space `sunlight`.
-fn sun_gamma(peak: f32) -> f32 {
-    (peak.max(0.0).sqrt() * 0.5).clamp(0.6, 1.6)
+/// gamma-space `sunlight`, under the exposure the map's lightmaps take
+/// (`fastfile_iw6::map::light_exposure`), at most
+/// `fastfile_iw6::map::SUN_GAMMA_MAX`.
+fn sun_gamma(peak: f32, exposure: f32) -> f32 {
+    fastfile_iw6::map::iw3_sun_gamma(peak, exposure)
+}
+
+/// Ghosts' world vertex colour (bytes R, G, B, A: a layered surface's
+/// weights in green for layer 1 and blue for layer 2) as CoD4's D3DCOLOR
+/// (bytes B, G, R, A), which the IW3 world builder reads. Read as it was,
+/// layer 2's weight came from the red byte (near 255 everywhere: the second
+/// layer covered every two-layer surface) and tints swapped red and blue.
+fn iw3_colour(rgba: u32) -> u32 {
+    let [r, g, b, a] = rgba.to_le_bytes();
+    u32::from_le_bytes([b, g, r, a])
 }
 
 /// Ghosts' drawn world as CoD4's `GfxWorld` (materials and lightmaps go
 /// beside it, not in it).
-fn iw3_world(w: &fastfile_iw6::map::World, sun: Option<fastfile_iw6::map::Sun>) -> iw3::zone::GfxWorld {
+fn iw3_world(w: &fastfile_iw6::map::World, sun: Option<fastfile_iw6::map::Sun>, exposure: f32) -> iw3::zone::GfxWorld {
     let range = |(a, b): (u32, u32)| a.min(b)..b;
     // Lit opaque, decal and transparent run on from one another.
     let lit = w.ranges[0].0.min(w.ranges[2].0)..w.ranges[0].1.max(w.ranges[2].1);
@@ -235,7 +287,7 @@ fn iw3_world(w: &fastfile_iw6::map::World, sun: Option<fastfile_iw6::map::Sun>) 
             .map(|v| iw3::zone::WorldVertex {
                 xyz: v.xyz,
                 binormal_sign: v.binormal_sign,
-                color: v.color,
+                color: iw3_colour(v.color),
                 tex_coord: v.tex_coord,
                 lmap_coord: v.lmap_coord,
                 normal: iw3_unit_vec(v.normal),
@@ -269,10 +321,8 @@ fn iw3_world(w: &fastfile_iw6::map::World, sun: Option<fastfile_iw6::map::Sun>) 
             // (Ghosts' sun colour is HDR linear light, 9 on Prison Break,
             // its brightest channel the light and the rest the colour. The
             // fallback draw adds the sun in CoD4's gamma space beside the
-            // lightmap's sqrt(light): the square root of Ghosts' light, then
-            // halved, puts it at CoD4's sunlight (1 to 1.5); the light
-            // itself, 4 at most, burnt every sunlit surface white.)
-            sun_light: sun_gamma(colour.1),
+            // lightmap's sqrt(light), both under one exposure: `sun_gamma`.)
+            sun_light: sun_gamma(colour.1, exposure),
             sun_color: colour.0,
             diffuse_color: colour.0,
             angles,
@@ -411,7 +461,18 @@ fn build_iw6_world(
     // (Prison Break's Capture the Flag and Search and Rescue spawns stand
     // over a void); Black Ops II's rules copy those modes' spawns from the
     // map's others instead.
+    // A second level built above the first (Strikezone's after-the-strike
+    // map): its spawn points, geometry and placed models are left out.
+    let level_cut = fastfile_iw6::map::alternate_level_cut(&map.spawns);
     let mut spawn_records = map.spawns.clone();
+    if let Some(cut) = level_cut {
+        let before = spawn_records.len();
+        spawn_records.retain(|s| s.origin[2] < cut);
+        report.push(format!(
+            "iw6 second level above z {cut:.0} left out: {} of {before} spawn records there",
+            before - spawn_records.len()
+        ));
+    }
     let mut parked = 0usize;
     if let Some(clip) = &collision {
         const MINS: [f32; 3] = [-15.0, -15.0, 0.0];
@@ -433,6 +494,10 @@ fn build_iw6_world(
     }
     let entity_string = IwMap { spawns: spawn_records, entities: map.entities.clone(), ..Default::default() }.entity_string();
     let entities = iw3::ents::parse(&entity_string);
+    // Brush models their entities place as the map starts (doors,
+    // elevators, walls, water sheets; `fastfile_iw6::map::placed_brush_models`).
+    let placed_bmodels: Vec<(std::ops::Range<usize>, [f32; 3], [[f32; 3]; 3])> =
+        fastfile_iw6::map::placed_brush_models(map, level_cut).into_iter().map(|b| (b.surfaces, b.origin, b.axis)).collect();
     let spawns = spawns_of(&entities);
     report.push(format!(
         "iw6 entities: {}, spawn points {} ({} spawn records, {parked} over nothing left out), {} trigger models",
@@ -484,11 +549,20 @@ fn build_iw6_world(
     let mut materials = material_seed;
     materials.set_capture_ns(AssetNamespace::T6);
     let mut b = super::iw6::Builder::new(cap, zone, path, materials);
+    b.shared = path.parent().and_then(shared_images);
     // Surfaces not drawn: the sky's (the sky pass draws behind them), tool,
     // shadow-only and distortion (refraction) surfaces.
     let mut hidden = vec![false; world.surfaces.len()];
     let mut surface_materials = Vec::with_capacity(world.surfaces.len());
     let mut hidden_kinds: HashMap<&'static str, usize> = HashMap::new();
+    // Materials of the decal range (`dpvs.litDecalSurfs`).
+    let decal_materials: std::collections::HashSet<u32> = {
+        let (a, e) = world.ranges[1];
+        world.surfaces[(a.min(e) as usize).min(world.surfaces.len())..(e as usize).min(world.surfaces.len())]
+            .iter()
+            .filter_map(|s| s.material.map(|m| m.index))
+            .collect()
+    };
     for (i, s) in world.surfaces.iter().enumerate() {
         let Some(m) = s.material else {
             surface_materials.push(None);
@@ -501,7 +575,9 @@ fn build_iw6_world(
             .map(|t| cap.name_of(t).trim_start_matches(',').to_owned())
             .unwrap_or_default();
         let words: Vec<&str> = techset.split('_').collect();
-        let kind = if words.iter().any(|w| w.starts_with("sky")) {
+        let kind = if level_cut.is_some_and(|cut| s.mins[2] > cut) {
+            Some("second level")
+        } else if words.iter().any(|w| w.starts_with("sky")) {
             Some("sky")
         } else if words.contains(&"tools") {
             Some("tools")
@@ -509,6 +585,10 @@ fn build_iw6_world(
             Some("shadow only")
         } else if words.contains(&"distortion") {
             Some("distortion")
+        } else if words.contains(&"distfalloff") {
+            // (`hdrportal_lighten`: an exposure portal fading with distance,
+            // its colour map the engine's `$white`; drawn, a white sheet.)
+            Some("exposure portal")
         } else {
             None
         };
@@ -518,7 +598,7 @@ fn build_iw6_world(
             surface_materials.push(None);
             continue;
         }
-        surface_materials.push(b.world_material(m.index as usize, max));
+        surface_materials.push(b.world_material(m.index as usize, max, decal_materials.contains(&m.index)));
     }
     // bo2mp: the sky: its cube under a sky material (the sky surface itself
     // is not drawn; the sky pass draws the cube behind the world).
@@ -531,9 +611,11 @@ fn build_iw6_world(
     };
     report.push(sky_line);
     report.push(format!(
-        "iw6 materials: {} world materials linked, {} pictures decoded (at most {max}px), {} failed{}; not drawn: {:?}",
+        "iw6 materials: {} world materials linked, {} pictures decoded (at most {max}px; {} from {:?} or built in), {} failed{}; not drawn: {:?}",
         b.materials.len(),
         b.decoded,
+        b.from_shared,
+        b.shared.as_ref().map(|s| s.zones.clone()).unwrap_or_default(),
         b.image_failures.len(),
         if b.image_failures.is_empty() {
             String::new()
@@ -541,6 +623,15 @@ fn build_iw6_world(
             format!(" (first: {})", b.image_failures.iter().take(4).cloned().collect::<Vec<_>>().join("; "))
         },
         hidden_kinds
+    ));
+
+    // The map's exposure (Ghosts tone-maps HDR light per map): from its
+    // baked light, for the lightmaps, the sun and the models' ground light.
+    let light_key = fastfile_iw6::map::lightmap_key(cap, &zone.image, &world.lightmaps);
+    let exposure = fastfile_iw6::map::light_exposure(light_key);
+    report.push(format!(
+        "iw6 exposure: {exposure:.3} (baked light 90th percentile {})",
+        light_key.map_or_else(|| "unmeasured".to_owned(), |k| format!("{k:.3}"))
     ));
 
     // The placed models (rocks, trees, vehicles, furniture).
@@ -553,23 +644,35 @@ fn build_iw6_world(
         let failures_before = b.image_failures.len();
         for (i, sm) in world.static_models.iter().enumerate() {
             let Some(id) = sm.model else { continue };
+            if level_cut.is_some_and(|cut| sm.origin[2] > cut) {
+                continue;
+            }
             let entry = *shared.entry(id.index).or_insert_with(|| {
                 let model = cap.xmodels.get(id.index as usize)?;
-                let Some((xref, keys)) = b.model_ref(model) else {
+                let Some((mut xref, keys)) = b.model_ref(model) else {
                     if unreadable.len() < 8 {
                         unreadable.push(model.name.clone());
                     }
                     return None;
                 };
+                // A placed model's vertex colour is no tint in Ghosts: its
+                // foliage keeps wind and reactive-motion weights there (red,
+                // green, blue, alpha all vary), which tinted ferns and grass
+                // red; the rest is white.
+                for surf in &mut xref.lod0 {
+                    for v in surf.verts.chunks_exact_mut(32) {
+                        v[16..20].fill(0xff);
+                    }
+                }
                 let linked: HashMap<usize, usize> = keys.into_iter().filter_map(|k| Some((k, b.material(k, max)?))).collect();
                 let mesh = asset_world::build_t6_model_mesh(&xref, |k| linked.get(&k.index).copied())?;
                 meshes.push(mesh);
                 Some(meshes.len() - 1)
             });
             let Some(mesh) = entry else { continue };
-            // (Ghosts' ground light is linear; the IW3 grid's packing is
-            // sqrt(light / 32).)
-            let g = sm.ground_lighting;
+            // (Ghosts' ground light is linear, under the map's exposure as
+            // its lightmaps; the IW3 grid's packing is sqrt(light / 32).)
+            let g = sm.ground_lighting.map(|v| v * exposure);
             let packed_lighting = (g[0] + g[1] + g[2] > 0.0).then(|| {
                 lit += 1;
                 let p = |v: f32| ((v.max(0.0) / 32.0).sqrt() * 255.0).round().clamp(0.0, 255.0) as u8;
@@ -644,7 +747,7 @@ fn build_iw6_world(
                 pair.0.map(|id| cap.name_of(id).to_owned()).unwrap_or_default(),
                 pair.1.map(|id| cap.name_of(id).to_owned()).unwrap_or_default(),
             );
-            let page = match fastfile_iw6::map::iw3_lightmap(cap, &zone.image, pair) {
+            let page = match fastfile_iw6::map::iw3_lightmap_exposed(cap, &zone.image, pair, exposure) {
                 Ok(page) => page,
                 Err(e) => {
                     lightmap_gaps.push(format!("page {i}: {e}"));
@@ -673,7 +776,65 @@ fn build_iw6_world(
         if lightmap_gaps.is_empty() { String::new() } else { format!(" ({})", lightmap_gaps.join("; ")) }
     ));
 
-    let iw3w = iw3_world(world, map.sun);
+    let mut iw3w = iw3_world(world, map.sun, exposure);
+    // The brush models their entities place (doors, elevators, walls,
+    // water sheets): drawn where the entity stands, as the map starts.
+    {
+        let n = iw3w.surfaces.len();
+        let listed = |i: usize| {
+            let i = i as u32;
+            [&iw3w.lit_surfs, &iw3w.decal_surfs, &iw3w.emissive_surfs].iter().any(|r| r.contains(&i))
+        };
+        let listed: Vec<bool> = (0..n).map(listed).collect();
+        let mut placed = vec![false; n];
+        // (A vertex is moved once, should two surfaces share it.)
+        let mut moved = vec![false; iw3w.vertices.len()];
+        for (range, origin, axis) in &placed_bmodels {
+            for i in range.clone().filter(|&i| i < n) {
+                if listed[i] || placed[i] {
+                    continue;
+                }
+                placed[i] = true;
+                let surf = &mut iw3w.surfaces[i];
+                let first = surf.first_vertex.max(0) as usize;
+                let verts = first..(first + usize::from(surf.vertex_count)).min(iw3w.vertices.len());
+                if verts.is_empty() {
+                    continue;
+                }
+                let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                for (vi, v) in iw3w.vertices[verts.clone()].iter_mut().enumerate() {
+                    if std::mem::replace(&mut moved[verts.start + vi], true) {
+                        continue;
+                    }
+                    v.xyz = place_point(v.xyz, *origin, axis);
+                    v.normal = iw3_unit_vec(rotate(asset_model::unpack_unit_vec(v.normal), axis));
+                    v.tangent = iw3_unit_vec(rotate(asset_model::unpack_unit_vec(v.tangent), axis));
+                }
+                for v in &iw3w.vertices[verts] {
+                    for k in 0..3 {
+                        lo[k] = lo[k].min(v.xyz[k]);
+                        hi[k] = hi[k].max(v.xyz[k]);
+                    }
+                }
+                if lo[0] <= hi[0] {
+                    surf.bounds = [lo, hi];
+                }
+            }
+        }
+        // Every surface is then listed; what was not (and is not placed)
+        // stays undrawn.
+        for i in 0..n {
+            if !listed[i] && !placed[i] {
+                hidden[i] = true;
+            }
+        }
+        iw3w.lit_surfs = 0..n as u32;
+        report.push(format!(
+            "iw6 brush models: {} placed by their entities ({} surfaces)",
+            placed_bmodels.len(),
+            placed.iter().filter(|&&p| p).count()
+        ));
+    }
     let (pitch, yaw) = (iw3w.sun.angles[0].to_radians(), iw3w.sun.angles[1].to_radians());
     let dir = [pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), -pitch.sin()];
     let colour = [
@@ -768,6 +929,15 @@ fn build_iw6_world(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn axes_of_angles() {
+        let a = fastfile_iw6::map::axis_of([0.0, 90.0, 0.0]);
+        let close = |x: [f32; 3], y: [f32; 3]| x.iter().zip(y).all(|(a, b)| (a - b).abs() < 1e-5);
+        assert!(close(a[0], [0.0, 1.0, 0.0]) && close(a[1], [-1.0, 0.0, 0.0]) && close(a[2], [0.0, 0.0, 1.0]));
+        let p = super::place_point([10.0, 0.0, 5.0], [100.0, 0.0, 0.0], &a);
+        assert!(close(p, [100.0, 10.0, 5.0]));
+    }
+
     #[test]
     fn unit_vectors_pack_as_cod4() {
         for v in [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.6, 0.0, 0.8]] {

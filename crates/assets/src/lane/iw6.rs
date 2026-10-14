@@ -206,6 +206,9 @@ fn load_iw6_guests(z: Iw6Zone, material_seed: MaterialCatalog) -> Iw6Guests {
         images: HashMap::new(),
         image_failures: Vec::new(),
         decoded: 0,
+        shared: None,
+        from_shared: 0,
+        named_images: HashMap::new(),
     };
     let first_person_max = std::env::var("BO2MP_GH_TEXTURE")
         .ok()
@@ -462,6 +465,31 @@ pub(super) struct Builder<'a> {
     pub(super) images: HashMap<(usize, u32), Option<usize>>,
     pub(super) image_failures: Vec<String>,
     pub(super) decoded: usize,
+    /// bo2mp: images the zone names but another zone holds (`,name`:
+    /// common_mp's), for a map's builder (`iw6_map::shared_images`).
+    pub(super) shared: Option<std::sync::Arc<fastfile_iw6::shared::SharedImages>>,
+    /// How many pictures came from `shared` or the engine's built-ins.
+    pub(super) from_shared: usize,
+    /// (image name, size cap) -> catalog image slot, for shared materials.
+    pub(super) named_images: HashMap<(String, u32), Option<usize>>,
+}
+
+/// Where a material's picture is: the zone's image table, or by name in
+/// the shared zones.
+#[derive(Clone, Debug)]
+enum MatImage {
+    Zone(usize),
+    Named(String),
+}
+
+/// A material as `Builder` reads it (`Builder::view`).
+struct MatView {
+    name: String,
+    techset: String,
+    sort_key: u8,
+    /// (name hash, sampler state, semantic, image)
+    textures: Vec<(u32, u8, u8, MatImage)>,
+    constants: Vec<fastfile_iw6::walk::MaterialConstant>,
 }
 
 pub(super) fn le_u16s(b: &[u8]) -> Vec<u16> {
@@ -559,6 +587,41 @@ pub(super) fn iw6_model_draw(technique_set: &str, sort_key: u8) -> T6Draw {
         draw.alpha_test = false;
     }
     draw
+}
+
+/// A Ghosts technique set's layer tokens as Black Ops II's reader takes
+/// them: Ghosts writes a height-blended layer as `b1ha1c1` or `b1hb1c1` (and
+/// a base as `r0ha0c0`), the colour map after the `ha`; the reader wants it right
+/// after the layer number (`b1c1`), so such layers were not drawn at all
+/// (their surfaces showed the base layer alone).
+pub(super) fn ghosts_layer_tokens(technique_set: &str) -> String {
+    technique_set
+        .split('_')
+        .map(|t| {
+            let b = t.as_bytes();
+            if b.len() >= 5 && matches!(b[0], b'r' | b'b' | b'm' | b't' | b'a') && b[1].is_ascii_digit() && b[2] == b'h' && b[3].is_ascii_lowercase() {
+                let rest = t[4..].trim_start_matches(|c: char| c.is_ascii_digit());
+                format!("{}{rest}", &t[..2])
+            } else {
+                t.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+/// Ghosts' layer tokens: a height-blended layer reads as a blend layer.
+#[cfg(test)]
+mod layer_token_tests {
+    #[test]
+    fn height_blended_layers_read_as_layers() {
+        assert_eq!(super::ghosts_layer_tokens("l_sm_r0c0nl0sl0l0_b1ha1c1nl1sl1l1_nfwpf"), "l_sm_r0c0nl0sl0l0_b1c1nl1sl1l1_nfwpf");
+        assert_eq!(super::ghosts_layer_tokens("wc_l_sm_r0ha0c0l0_nfwpf"), "wc_l_sm_r0c0l0_nfwpf");
+        assert_eq!(super::ghosts_layer_tokens("l_sm_r0c0nl0sl0l0_b1hb1c1z1nl1sl1l1_y2"), "l_sm_r0c0nl0sl0l0_b1c1z1nl1sl1l1_y2");
+        assert_eq!(super::ghosts_layer_tokens("wc_unlit_add_lin_ndw_ua_bl_blmod"), "wc_unlit_add_lin_ndw_ua_bl_blmod");
+        let layers = asset_core::T6Layers::from_technique_set(&super::ghosts_layer_tokens("l_sm_r0c0l0_b1ha1c1l1_nfwpf"));
+        assert_eq!(layers.kinds[0], 1);
+    }
 }
 
 /// Ghosts' BC5 normal maps as Black Ops II's model shader reads them.
@@ -665,6 +728,9 @@ impl<'a> Builder<'a> {
             images: HashMap::new(),
             image_failures: Vec::new(),
             decoded: 0,
+            shared: None,
+            from_shared: 0,
+            named_images: HashMap::new(),
         }
     }
 
@@ -672,17 +738,25 @@ impl<'a> Builder<'a> {
     /// as its technique set names it (`l_sm_r0c0..` lit, `b1c1` layers with
     /// the vertex colour as their weights, `t0` alpha tested, `b0` blended),
     /// with its colour map and its layers' (`colorMap1`, `colorMap2`).
-    /// `None` when the material is not in the zone.
-    pub(super) fn world_material(&mut self, index: usize, max: u32) -> Option<usize> {
+    /// A decal (a surface of the world's decal range) sits one polygon
+    /// offset step toward the eye. `None` when the material is not in the
+    /// zone.
+    pub(super) fn world_material(&mut self, index: usize, max: u32, decal: bool) -> Option<usize> {
         // (World materials keep their own key space apart from models'.)
         const WORLD: usize = 1 << 40;
         if let Some(&i) = self.materials.get(&(index | WORLD)) {
             return Some(i);
         }
-        let m: &MaterialRec = self.cap.materials.get(index)?;
-        let technique_set = m.techset.map(|t| self.cap.name_of(t).to_owned()).unwrap_or_default();
-        let name = technique_set.trim_start_matches(',');
+        let m = self.view(index)?;
+        let name = ghosts_layer_tokens(&m.techset);
+        let name = name.as_str();
         let mut draw = T6Draw::from_technique_set(name, m.sort_key, None);
+        // (Ghosts' decals are coplanar with the walls and floors they lie
+        // on, drawn without depth writes; with no offset they flickered
+        // through them.)
+        if decal && draw.polygon_offset == 0 {
+            draw.polygon_offset = 1;
+        }
         // A replacing base layer (`r0c0`) is opaque whatever the sort key.
         let base = name.split('_').find(|t| {
             let b = t.as_bytes();
@@ -702,27 +776,23 @@ impl<'a> Builder<'a> {
         let colour = m
             .textures
             .iter()
-            .find(|t| t.name_hash == COLOR_MAP_HASH && t.image.is_some())
-            .or_else(|| m.textures.iter().find(|t| t.semantic == 2 && t.image.is_some()));
-        let mut wanted: Vec<(u32, u8, u8, usize)> = Vec::new();
-        if let Some(t) = colour
-            && let Some(img) = t.image
-        {
-            wanted.push((t.name_hash, t.sampler_state, TS_COLOR_MAP, img.index as usize));
+            .find(|t| t.0 == COLOR_MAP_HASH)
+            .or_else(|| m.textures.iter().find(|t| t.2 == 2));
+        let mut wanted: Vec<(u32, u8, u8, MatImage)> = Vec::new();
+        if let Some(t) = colour {
+            wanted.push((t.0, t.1, TS_COLOR_MAP, t.3.clone()));
         }
         if draw.layered {
             for (hash, semantic) in super::t6_materials::LAYER_MAPS {
-                if let Some(t) = m.textures.iter().find(|t| t.name_hash == hash)
-                    && let Some(img) = t.image
-                {
-                    wanted.push((hash, t.sampler_state, semantic, img.index as usize));
+                if let Some(t) = m.textures.iter().find(|t| t.0 == hash) {
+                    wanted.push((hash, t.1, semantic, t.3.clone()));
                 }
             }
         }
         for (hash, sampler_state, semantic, image) in wanted {
             // Layer pictures are colour pictures (sRGB) too.
             let read_as = if semantic == TS_NORMAL_MAP || semantic == TS_SPECULAR_MAP { semantic } else { TS_COLOR_MAP };
-            if let Some(slot) = self.image(image, max, read_as) {
+            if let Some(slot) = self.image_of(&image, max, read_as) {
                 textures.push(MaterialTextureBinding {
                     name_hash: hash,
                     name_start: 0,
@@ -734,7 +804,7 @@ impl<'a> Builder<'a> {
             }
         }
         let index_in_catalog = self.catalog.link_material(AuthoredMaterial {
-            name: AssetRef::Real(format!("iw6:{}", m.name)),
+            name: AssetRef::Real(format!("iw6:{}", m.name.trim_start_matches(','))),
             namespace: AssetNamespace::T6,
             technique_set: AssetRef::default(),
             technique_set_edge: AssetEdge::Absent,
@@ -873,13 +943,112 @@ impl<'a> Builder<'a> {
         ))
     }
 
+    /// bo2mp: a material as the builder reads it: the zone's own, or, for
+    /// one the zone only names (`,m/mtl_sz_crate_federation`: no technique
+    /// set, no textures here), the shared zones' (`shared`).
+    fn view(&self, index: usize) -> Option<MatView> {
+        let m: &MaterialRec = self.cap.materials.get(index)?;
+        if m.techset.is_none()
+            && m.textures.is_empty()
+            && let Some(shared) = self.shared.as_ref().and_then(|s| s.material(&m.name))
+        {
+            return Some(MatView {
+                name: m.name.clone(),
+                techset: shared.techset.clone(),
+                sort_key: shared.sort_key,
+                textures: shared.textures.iter().map(|(h, ss, sem, img)| (*h, *ss, *sem, MatImage::Named(img.clone()))).collect(),
+                constants: shared.constants.clone(),
+            });
+        }
+        Some(MatView {
+            name: m.name.clone(),
+            techset: m.techset.map(|t| self.cap.name_of(t).trim_start_matches(',').to_owned()).unwrap_or_default(),
+            sort_key: m.sort_key,
+            textures: m
+                .textures
+                .iter()
+                .filter_map(|t| Some((t.name_hash, t.sampler_state, t.semantic, MatImage::Zone(t.image?.index as usize))))
+                .collect(),
+            constants: m.constants.clone(),
+        })
+    }
+
+    fn image_of(&mut self, image: &MatImage, max: u32, semantic: u8) -> Option<usize> {
+        match image {
+            MatImage::Zone(i) => self.image(*i, max, semantic),
+            MatImage::Named(name) => self.named_image(name, max, semantic),
+        }
+    }
+
+    /// bo2mp: a picture a shared material names, from the shared zones.
+    fn named_image(&mut self, name: &str, max: u32, semantic: u8) -> Option<usize> {
+        let key = (fastfile_iw6::shared::image_key(name), max);
+        if let Some(slot) = self.named_images.get(&key) {
+            return *slot;
+        }
+        let pixels = match fastfile_iw6::shared::builtin_pixels(name) {
+            Some(px) => Ok(px),
+            None => match &self.shared {
+                Some(shared) => shared.pixels(name, &mut self.paks, max),
+                None => Err("no shared zones".to_owned()),
+            },
+        };
+        let rec = self.shared.as_ref().and_then(|s| s.get(name)).cloned().unwrap_or_default();
+        let slot = match pixels.and_then(|px| gpu_image(&px, semantic == TS_COLOR_MAP).map(|img| (px, img))) {
+            Ok((px, gpu)) => {
+                self.decoded += 1;
+                self.from_shared += 1;
+                Some(self.catalog.link_image(AuthoredImage {
+                    namespace: AssetNamespace::Iw6,
+                    name: AssetRef::Real(format!("{}#{max}", name.trim_start_matches(','))),
+                    map_type: rec.map_type,
+                    semantic,
+                    category: 0,
+                    use_srgb_reads: semantic == TS_COLOR_MAP,
+                    width: px.width as u16,
+                    height: px.height as u16,
+                    depth: 1,
+                    level_count: px.levels as u8,
+                    format: 0,
+                    payload: Arc::new(Vec::new()),
+                    decoded: Some(Arc::new(gpu)),
+                    common_owned: false,
+                    decoded_variant: None,
+                    decoded_by: None,
+                    pending_decode: None,
+                }))
+            }
+            Err(e) => {
+                self.image_failures.push(format!("{}: {e}", name.trim_start_matches(',')));
+                None
+            }
+        };
+        self.named_images.insert(key, slot);
+        slot
+    }
+
     /// One picture into the catalog (`None` when its pixels are not here).
     fn image(&mut self, index: usize, max: u32, semantic: u8) -> Option<usize> {
         if let Some(slot) = self.images.get(&(index, max)) {
             return *slot;
         }
         let rec: &ImageRec = self.cap.images.get(index)?;
-        let slot = match fastfile_iw6::image::image_pixels(rec, self.image, &mut self.paks, max)
+        // An image held by another zone (`,name`) or one of the engine's
+        // own (`$white`): from the shared zones, or made.
+        let pixels = match &self.shared {
+            Some(shared) if fastfile_iw6::shared::is_reference(rec) => {
+                let px = match fastfile_iw6::shared::builtin_pixels(&rec.name) {
+                    Some(px) => Ok(px),
+                    None => shared.pixels(&rec.name, &mut self.paks, max),
+                };
+                if px.is_ok() {
+                    self.from_shared += 1;
+                }
+                px
+            }
+            _ => fastfile_iw6::image::image_pixels(rec, self.image, &mut self.paks, max),
+        };
+        let slot = match pixels
             .and_then(|px| gpu_image(&px, semantic == TS_COLOR_MAP).map(|img| (px, img)))
         {
             Ok((px, gpu)) => {
@@ -919,23 +1088,15 @@ impl<'a> Builder<'a> {
         if let Some(&i) = self.materials.get(&index) {
             return Some(i);
         }
-        let m: &MaterialRec = self.cap.materials.get(index)?;
-        let technique_set = m
-            .techset
-            .map(|t| self.cap.name_of(t).to_owned())
-            .unwrap_or_default();
-        let draw = iw6_model_draw(&technique_set, m.sort_key);
+        let m = self.view(index)?;
+        let draw = iw6_model_draw(&m.techset, m.sort_key);
         let mut textures = Vec::new();
         let colour = m
             .textures
             .iter()
-            .find(|t| t.name_hash == COLOR_MAP_HASH && t.image.is_some())
-            .or_else(|| {
-                m.textures
-                    .iter()
-                    .find(|t| t.semantic == 2 && t.image.is_some())
-            });
-        let mut slots: Vec<(&fastfile_iw6::walk::MaterialTexture, u8)> = Vec::new();
+            .find(|t| t.0 == COLOR_MAP_HASH)
+            .or_else(|| m.textures.iter().find(|t| t.2 == 2));
+        let mut slots: Vec<(&(u32, u8, u8, MatImage), u8)> = Vec::new();
         if let Some(t) = colour {
             slots.push((t, TS_COLOR_MAP));
         }
@@ -944,21 +1105,14 @@ impl<'a> Builder<'a> {
                 (NORMAL_MAP_HASH, TS_NORMAL_MAP),
                 (SPECULAR_MAP_HASH, TS_SPECULAR_MAP),
             ] {
-                if let Some(t) = m
-                    .textures
-                    .iter()
-                    .find(|t| t.name_hash == hash && t.image.is_some())
-                {
+                if let Some(t) = m.textures.iter().find(|t| t.0 == hash) {
                     slots.push((t, semantic));
                 }
             }
         }
-        let wanted: Vec<(u32, u8, u8, usize)> = slots
-            .iter()
-            .filter_map(|(t, s)| Some((t.name_hash, t.sampler_state, *s, t.image?.index as usize)))
-            .collect();
+        let wanted: Vec<(u32, u8, u8, MatImage)> = slots.iter().map(|(t, s)| (t.0, t.1, *s, t.3.clone())).collect();
         for (hash, sampler_state, semantic, image) in wanted {
-            if let Some(slot) = self.image(image, max, semantic) {
+            if let Some(slot) = self.image_of(&image, max, semantic) {
                 textures.push(MaterialTextureBinding {
                     name_hash: hash,
                     name_start: 0,
@@ -970,7 +1124,7 @@ impl<'a> Builder<'a> {
             }
         }
         let index_in_catalog = self.catalog.link_material(AuthoredMaterial {
-            name: AssetRef::Real(m.name.clone()),
+            name: AssetRef::Real(m.name.trim_start_matches(',').to_owned()),
             namespace: AssetNamespace::Iw6,
             technique_set: AssetRef::default(),
             technique_set_edge: AssetEdge::Absent,

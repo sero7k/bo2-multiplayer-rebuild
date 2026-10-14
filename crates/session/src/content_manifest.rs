@@ -289,6 +289,7 @@ fn namespace_tag(namespace: asset_core::AssetNamespace) -> u8 {
         asset_core::AssetNamespace::T4 => 6,
         asset_core::AssetNamespace::Iw3 => 7,
         asset_core::AssetNamespace::S1 => 8, // bo2mp: Advanced Warfare guest guns
+        asset_core::AssetNamespace::T7 => 9, // bo2mp: Black Ops III guest guns
     }
 }
 

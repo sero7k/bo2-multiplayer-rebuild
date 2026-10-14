@@ -42,7 +42,7 @@ const fn game_default_hands_name(ns: AssetNamespace) -> &'static str {
     match ns {
         AssetNamespace::Iw4 | AssetNamespace::Iw5 => VIEWHANDS_NAME,
         AssetNamespace::T5 => VIEWHANDS_NAME_T5,
-        AssetNamespace::T6 | AssetNamespace::Iw6 | AssetNamespace::T4 | AssetNamespace::Iw3 | AssetNamespace::S1 => VIEWHANDS_NAME_T6,
+        AssetNamespace::T6 | AssetNamespace::Iw6 | AssetNamespace::T4 | AssetNamespace::Iw3 | AssetNamespace::S1 | AssetNamespace::T7 => VIEWHANDS_NAME_T6,
     }
 }
 
@@ -527,7 +527,7 @@ impl FpvMeshCatalog {
     }
 
     pub fn collide_name_count(&self) -> usize {
-        let mut seen: HashMap<&str, u8> = HashMap::new();
+        let mut seen: HashMap<&str, u16> = HashMap::new();
         for k in &self.order {
             *seen.entry(k.name.as_str()).or_insert(0) |= match k.namespace {
                 AssetNamespace::Iw4 => 1,
@@ -538,6 +538,7 @@ impl FpvMeshCatalog {
                 AssetNamespace::T4 => 32,
                 AssetNamespace::Iw3 => 64,
                 AssetNamespace::S1 => 128,
+                AssetNamespace::T7 => 256,
             };
         }
         seen.values().filter(|bits| bits.count_ones() >= 2).count()

@@ -261,3 +261,137 @@ pub fn level_rgba(l: &ImageLevels, mip: u32) -> Option<(u32, u32, Vec<u8>)> {
     }
     Some((lw, lh, out))
 }
+
+/// bo2mp: `image_levels`, its top level at most `max_dim` on a side (a
+/// streamed image from the largest part that fits: that part, then every
+/// smaller one, so the whole chain down to 1x1 is there).
+pub fn image_levels_max(im: &ImageRec, zone_image: &[u8], paks: &XpakSet, max_dim: u32) -> Result<ImageLevels, TextureError> {
+    if im.xpak.is_empty() {
+        let mut l = zone_levels(im, zone_image)?;
+        // (Levels above the cap are dropped from the chain.)
+        while l.levels > 1 && l.width.max(l.height) > max_dim {
+            let top = level_size(l.format, l.width, l.height).ok_or(TextureError::Format(l.format))?;
+            if top >= l.data.len() {
+                break;
+            }
+            l.data.drain(..top);
+            l.width = (l.width / 2).max(1);
+            l.height = (l.height / 2).max(1);
+            l.levels -= 1;
+        }
+        return Ok(l);
+    }
+    let dim = |k: usize| u32::from(im.xpak[k].width.max(im.xpak[k].height));
+    let top = (0..im.xpak.len()).rev().find(|&k| dim(k) <= max_dim).unwrap_or(0);
+    let f = im.format;
+    let mut data = Vec::new();
+    for (i, p) in im.xpak.iter().enumerate().take(top + 1).rev() {
+        let part = paks.read(p.key)?;
+        let (w, h) = (p.width as u32, p.height as u32);
+        let want = if i == 0 { chain_size(f, w, h, full_levels(w, h)) } else { level_size(f, w, h) }.ok_or(TextureError::Format(f))?;
+        if part.len() < want {
+            return Err(TextureError::Size { what: "streamed part", want, got: part.len() });
+        }
+        data.extend_from_slice(&part[..want]);
+    }
+    let t = &im.xpak[top];
+    let levels = top as u32 + full_levels(im.xpak[0].width as u32, im.xpak[0].height as u32);
+    Ok(ImageLevels { format: f, width: t.width as u32, height: t.height as u32, levels, data, part: Some(top) })
+}
+
+/// bo2mp: one channel of a 4x4 block (16 values) as a BC4 block: the
+/// block's own range, eight interpolated values, each texel the nearest.
+pub fn encode_bc4_block(v: &[u8; 16]) -> [u8; 8] {
+    let (lo, hi) = (*v.iter().min().unwrap_or(&0), *v.iter().max().unwrap_or(&0));
+    let mut out = [0u8; 8];
+    out[0] = hi;
+    out[1] = lo;
+    if hi == lo {
+        return out;
+    }
+    // Eight values: hi, lo, then six between (hi > lo).
+    let pal: [i32; 8] = std::array::from_fn(|k| match k {
+        0 => i32::from(hi),
+        1 => i32::from(lo),
+        k => (i32::from(hi) * (8 - k as i32) + i32::from(lo) * (k as i32 - 1)) / 7,
+    });
+    let mut bits: u64 = 0;
+    for (t, &x) in v.iter().enumerate() {
+        let best = (0..8).min_by_key(|&k| (pal[k] - i32::from(x)).abs()).unwrap_or(0) as u64;
+        bits |= best << (3 * t);
+    }
+    out[2..8].copy_from_slice(&bits.to_le_bytes()[..6]);
+    out
+}
+
+/// bo2mp: a normal map (any block format `level_rgba` reads; Black Ops
+/// III's are BC7 with the tangent-space x, y in red and green, unsigned,
+/// blue and alpha holding other data) as BC5 of its red and green, every
+/// level of the chain (the form Ghosts' normal maps take, which the guest
+/// lanes then turn into what Black Ops II's lit model draw reads). `None`
+/// for formats not decoded.
+pub fn normal_map_bc5(l: &ImageLevels) -> Option<ImageLevels> {
+    let mut data = Vec::new();
+    for mip in 0..l.levels {
+        let (w, h, px) = level_rgba(l, mip)?;
+        let (bw, bh) = ((w as usize).div_ceil(4), (h as usize).div_ceil(4));
+        for by in 0..bh {
+            for bx in 0..bw {
+                for ch in 0..2 {
+                    let mut v = [0u8; 16];
+                    for (t, out) in v.iter_mut().enumerate() {
+                        let (x, y) = ((bx * 4 + t % 4).min(w as usize - 1), (by * 4 + t / 4).min(h as usize - 1));
+                        *out = px[(y * w as usize + x) * 4 + ch];
+                    }
+                    data.extend_from_slice(&encode_bc4_block(&v));
+                }
+            }
+        }
+    }
+    Some(ImageLevels { format: 83, width: l.width, height: l.height, levels: l.levels, data, part: l.part })
+}
+
+/// bo2mp: a specular colour map (BC1) and a gloss map (BC4) as one BC3
+/// image the way Black Ops II's specular map is read (colour in RGB, gloss
+/// in alpha): each block the colour's BC1 block after the gloss's BC4
+/// block, both from the smaller one's top size down. `None` when the
+/// formats are not those or the sizes do not meet.
+pub fn specular_gloss_bc3(spec: &ImageLevels, gloss: &ImageLevels) -> Option<ImageLevels> {
+    if !matches!(spec.format, 70..=72) || !matches!(gloss.format, 79 | 80) {
+        return None;
+    }
+    // Both from the level of the smaller one's top size (the bigger one's
+    // levels above it dropped).
+    let skip = |l: &ImageLevels, w: u32, h: u32| -> Option<(usize, u32)> {
+        let (mut at, mut m) = (0usize, 0u32);
+        while (l.width >> m).max(1) > w || (l.height >> m).max(1) > h {
+            at += level_size(l.format, l.width >> m, l.height >> m)?;
+            m += 1;
+            if m >= l.levels {
+                return None;
+            }
+        }
+        ((l.width >> m).max(1) == w && (l.height >> m).max(1) == h).then_some((at, m))
+    };
+    let (w, h) = (spec.width.min(gloss.width), spec.height.min(gloss.height));
+    let (mut s_at, s_level) = skip(spec, w, h)?;
+    let (mut g_at, g_level) = skip(gloss, w, h)?;
+    let levels = (spec.levels - s_level).min(gloss.levels - g_level);
+    let mut data = Vec::new();
+    for m in 0..levels {
+        let n = level_size(71, w >> m, h >> m)?;
+        let s = spec.data.get(s_at..s_at + n)?;
+        let g = gloss.data.get(g_at..g_at + n)?;
+        for (sb, gb) in s.chunks_exact(8).zip(g.chunks_exact(8)) {
+            data.extend_from_slice(gb);
+            data.extend_from_slice(sb);
+        }
+        s_at += n;
+        g_at += n;
+    }
+    // (BC3's colour blocks are always read as four colours: a BC1 block in
+    // its three-colour mode draws its third colour as the fourth's
+    // interpolation; the specular maps are opaque, so this is rare.)
+    let format = if spec.format == 72 { 78 } else { 77 };
+    Some(ImageLevels { format, width: w, height: h, levels, data, part: spec.part })
+}

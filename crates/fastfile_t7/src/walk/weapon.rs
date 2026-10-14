@@ -134,6 +134,21 @@ fn list(s: &mut Stream, rec: &mut WeaponRec, at: usize, count: usize, kind: Kind
         for i in 0..count {
             field(s, rec, t + 8 * i, kind, &format!("{name}[{i}]"))?;
         }
+    } else if let (Some(t), None) = (shared, kind.asset_type()) {
+        // bo2mp: a shared list of strings (`attachViewModelTag`): the
+        // strings its entries named there.
+        for i in 0..count {
+            let slot = t + 8 * i;
+            let text = match s.ptr_at(slot)? {
+                Ptr::Null => continue,
+                p @ Ptr::Ref { .. } => p.virtual_offset().and_then(|v| s.string_at(v)),
+                // (Loaded by that variant: its own record has the text.)
+                _ => continue,
+            };
+            if let Some(text) = text.map(crate::cursor::text).filter(|t| !t.is_empty()) {
+                rec.fields.push((format!("{name}[{i}]"), FieldValue::Str(text)));
+            }
+        }
     } else if let (Some(t), Some(ty)) = (shared, kind.asset_type()) {
         // The list is another variant's (`ar_standard_mp`'s attachments are
         // `ar_standard_cp`'s array): what its entries named there.
@@ -195,7 +210,7 @@ fn weapon_def(s: &mut Stream, rec: &mut WeaponRec, d: usize) -> Result<()> {
                 s.array(d + off, BOUNCE, 3)?;
             }
             (0x13b0, None) => {
-                s.array(d + off, LOCATION_DAMAGE, 3)?;
+                rec.location_damage_at = s.records_at(d + off, LOCATION_DAMAGE, 1, 3)?;
             }
             (_, None) => {
                 let count_at = KNOTS.iter().find(|k| k.0 == off).map_or(0, |k| k.1);

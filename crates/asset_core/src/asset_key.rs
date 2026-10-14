@@ -17,6 +17,9 @@ pub enum AssetNamespace {
     Iw3,
     /// bo2mp: Call of Duty: Advanced Warfare (guest guns only).
     S1,
+    /// bo2mp: Call of Duty: Black Ops III (guest guns only; its maps are
+    /// read into Black Ops II's own namespace).
+    T7,
 }
 
 impl AssetNamespace {
@@ -30,6 +33,7 @@ impl AssetNamespace {
             Self::T4 => "t4",
             Self::Iw3 => "iw3",
             Self::S1 => "s1",
+            Self::T7 => "t7",
         }
     }
 
@@ -45,13 +49,14 @@ impl AssetNamespace {
             Self::T4 => "waw_",
             Self::Iw3 => "cod4_",
             Self::S1 => "aw_",
+            Self::T7 => "bo3_",
             Self::T6 => "",
         }
     }
 
     /// bo2mp: the game a guest gun's script name says it is from.
     pub fn from_guest_name(name: &str) -> Option<Self> {
-        [Self::T5, Self::Iw4, Self::Iw5, Self::Iw6, Self::T4, Self::Iw3, Self::S1].into_iter().find(|ns| name.starts_with(ns.guest_prefix()))
+        [Self::T5, Self::Iw4, Self::Iw5, Self::Iw6, Self::T4, Self::Iw3, Self::S1, Self::T7].into_iter().find(|ns| name.starts_with(ns.guest_prefix()))
     }
 
     /// bo2mp: the attachment words of this game's gun variants
@@ -72,7 +77,7 @@ impl AssetNamespace {
                 "aperture", "bayonet", "bigammo", "flash", "gl", "grip", "sawoff", "scoped", "silenced", "telescopic",
             ],
             Self::Iw3 => &["acog", "gl", "grip", "reflex", "silencer"],
-            Self::Iw5 | Self::T6 | Self::Iw6 | Self::S1 => &[],
+            Self::Iw5 | Self::T6 | Self::Iw6 | Self::S1 | Self::T7 => &[],
         }
     }
 
@@ -122,6 +127,7 @@ impl AssetNamespace {
             "t4" => Some(Self::T4),
             "iw3" => Some(Self::Iw3),
             "s1" => Some(Self::S1),
+            "t7" => Some(Self::T7),
             _ => None,
         }
     }

@@ -12,6 +12,8 @@
 //! string but in `MapEnts::spawnList`; [`IwMap::entity_string`] writes them
 //! back as entities so every consumer of IW entity text finds them.
 
+use std::collections::HashMap;
+
 use crate::layout as L;
 use crate::walk::{AssetId, Capture, ClipMapRec, GfxWorldRec};
 
@@ -701,6 +703,35 @@ fn read_triggers(r: &R, [models, hulls, slabs]: [Option<crate::walk::Span>; 3]) 
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_second_level_is_cut_off() {
+        let at = |z: f32| super::SpawnRecord { origin: [0.0, 0.0, z], ..Default::default() };
+        let mut spawns: Vec<super::SpawnRecord> = (0..20).map(|i| at(i as f32 * 10.0)).collect();
+        assert_eq!(super::alternate_level_cut(&spawns), None);
+        spawns.extend((0..12).map(|i| at(35000.0 + i as f32)));
+        assert_eq!(super::alternate_level_cut(&spawns), Some((190.0 + 35000.0) / 2.0));
+    }
+
+    #[test]
+    fn brush_models_are_placed_by_their_entities() {
+        let mut w = super::World::default();
+        w.brush_models = vec![
+            super::BrushModel { start_surf: 0, surface_count: 5, ..Default::default() },
+            super::BrushModel { start_surf: 5, surface_count: 2, ..Default::default() },
+            super::BrushModel { start_surf: 7, surface_count: 3, ..Default::default() },
+        ];
+        let map = super::IwMap {
+            world: Some(w),
+            entities: "{\n97 \"script_brushmodel\"\n430 \"10 20 30\"\n392 \"*1\"\n}\n{\n97 \"script_brushmodel\"\n642 \"exploder\"\n392 \"*2\"\n}\n".to_owned(),
+            ..Default::default()
+        };
+        let placed = super::placed_brush_models(&map, None);
+        assert_eq!(placed.len(), 1);
+        assert_eq!((placed[0].surfaces.clone(), placed[0].origin), (5..7, [10.0, 20.0, 30.0]));
+        let a = super::axis_of([0.0, 90.0, 0.0]);
+        assert!((a[0][1] - 1.0).abs() < 1e-6 && (a[1][0] + 1.0).abs() < 1e-6 && (a[2][2] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
     fn keys_are_named() {
         let t = "{\n97 \"worldspawn\"\n430 \"0 0 0\"\n99999 \"x\"\n}";
         let n = super::named_entity_text(t);
@@ -736,6 +767,96 @@ pub fn half_to_f32(h: u16) -> f32 {
     }
 }
 
+/// Where a map keeps a second level above the one it starts on: the height
+/// to cut at, keeping what lies below.
+///
+/// Strikezone builds its after-the-strike map into the same world 35,000
+/// units up (half its world triangles, 5,000 placed models, its own spawn
+/// points and sky brush `after_sky`); the game moves everyone there when
+/// the strike lands. Drawn together, the destroyed copy hung in the sky,
+/// and its spawn points put players in it. Found from the spawn points:
+/// two groups at least 8,000 units apart in height, each of at least eight;
+/// the cut is half way between them.
+pub fn alternate_level_cut(spawns: &[SpawnRecord]) -> Option<f32> {
+    let mut z: Vec<f32> = spawns.iter().map(|s| s.origin[2]).filter(|z| z.is_finite()).collect();
+    z.sort_by(f32::total_cmp);
+    let (i, gap) = z.windows(2).enumerate().map(|(i, w)| (i, w[1] - w[0])).max_by(|a, b| a.1.total_cmp(&b.1))?;
+    let (below, above) = (i + 1, z.len() - i - 1);
+    (gap >= 8000.0 && below >= 8 && above >= 8).then(|| (z[i] + z[i + 1]) / 2.0)
+}
+
+/// A brush model an entity places as the map starts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlacedBrushModel {
+    /// Its surfaces (`World::surfaces`); their vertices are the model's own,
+    /// about its origin.
+    pub surfaces: std::ops::Range<usize>,
+    pub origin: [f32; 3],
+    /// Forward, left, up in the world.
+    pub axis: [[f32; 3]; 3],
+}
+
+/// An entity's axes (forward, left, up) from its pitch, yaw and roll in
+/// degrees, as the engine's `AnglesToAxis`.
+pub fn axis_of(angles: [f32; 3]) -> [[f32; 3]; 3] {
+    let [p, y, r] = angles.map(f32::to_radians);
+    let (sp, cp, sy, cy, sr, cr) = (p.sin(), p.cos(), y.sin(), y.cos(), r.sin(), r.cos());
+    let forward = [cp * cy, cp * sy, -sp];
+    let right = [-sr * sp * cy + cr * sy, -sr * sp * sy - cr * cy, -sr * cp];
+    let up = [cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp];
+    [forward, right.map(|v| -v), up]
+}
+
+/// The brush models (`"model" "*N"`, N > 0, with surfaces) the map's
+/// `script_brushmodel*` entities place as it starts: not a later state
+/// (`targetname "exploder"`: a wall once blown, as Prison Break's bomb-site
+/// wall; `script_noteworthy "show"`: shown by a script, as Dart's breached
+/// walls), not above `cut` (`alternate_level_cut`). Ghosts keeps these
+/// surfaces outside the world's draw ranges and draws them with their
+/// entities: Freight's sliding doors, Fahrenheit's elevator and its doors,
+/// Flooded's running water, Prison Break's bomb-site wall. Brush models
+/// with no entity are a script's to spawn and are left out.
+pub fn placed_brush_models(map: &IwMap, cut: Option<f32>) -> Vec<PlacedBrushModel> {
+    let Some(w) = &map.world else { return Vec::new() };
+    let text = named_entity_text(map.entities.trim_end_matches('\0'));
+    let mut out = Vec::new();
+    for block in text.split('{').skip(1) {
+        let mut kv: HashMap<&str, &str> = HashMap::new();
+        for line in block.lines() {
+            let mut parts = line.split('"').skip(1).step_by(2);
+            if let (Some(k), Some(v)) = (parts.next(), parts.next()) {
+                kv.insert(k, v);
+            }
+        }
+        if !kv.get("classname").is_some_and(|c| c.starts_with("script_brushmodel")) {
+            continue;
+        }
+        if kv.get("targetname") == Some(&"exploder") {
+            continue;
+        }
+        if kv.get("script_noteworthy").is_some_and(|n| n.split([',', ' ']).any(|t| t == "show")) {
+            continue;
+        }
+        let Some(n) = kv.get("model").and_then(|m| m.strip_prefix('*')).and_then(|n| n.parse::<usize>().ok()) else { continue };
+        let Some(b) = w.brush_models.get(n) else { continue };
+        if n == 0 || b.surface_count == 0 || b.start_surf == u32::MAX {
+            continue;
+        }
+        let vec3 = |k: &str| -> Option<[f32; 3]> {
+            let mut it = kv.get(k)?.split_whitespace().map(|x| x.parse::<f32>().ok());
+            Some([it.next()??, it.next()??, it.next()??])
+        };
+        let origin = vec3("origin").unwrap_or_default();
+        if cut.is_some_and(|c| origin[2] > c) {
+            continue;
+        }
+        let angles = vec3("angles").unwrap_or_else(|| [0.0, kv.get("angle").and_then(|a| a.parse().ok()).unwrap_or(0.0), 0.0]);
+        let start = b.start_surf as usize;
+        out.push(PlacedBrushModel { surfaces: start..start + b.surface_count as usize, origin, axis: axis_of(angles) });
+    }
+    out
+}
+
 /// One lightmap page in Call of Duty 4's form (what the fallback draw's
 /// IW3 branch reads): the primary as 8-bit luminance (`D3DFMT_L8`) and the
 /// secondary's two stacked pages as `A8R8G8B8` (bytes B, G, R, A).
@@ -750,14 +871,88 @@ pub struct Iw3Lightmap {
 /// Ghosts' primary is BC4 at twice the secondary page's size (the sun's
 /// baked visibility, as CoD4's L8 primary); its secondary is two pages
 /// stacked (`R16G16B16A16_FLOAT`), the upper the softer, as CoD4's A and B:
-/// linear light, alpha a tangent direction in -1..1. Here the light becomes
-/// CoD4's gamma bytes (`sqrt`, clamped at 1), the direction CoD4's alpha
+/// linear light, alpha a tangent direction in -1..1. Here the light, scaled
+/// by the map's exposure (`light_exposure`), becomes CoD4's gamma bytes (`sqrt`, clamped at 1),
+/// the direction CoD4's alpha
 /// code (`a * 4.08 - 2.08`), and the primary is box-filtered down to the
 /// page's size (the full size made a 2048 x 6144 page per lightmap).
 pub fn iw3_lightmap(
     cap: &Capture,
     image: &[u8],
     pair: (Option<AssetId>, Option<AssetId>),
+) -> Result<Iw3Lightmap, String> {
+    iw3_lightmap_exposed(cap, image, pair, LIGHT_EXPOSURE)
+}
+
+/// The exposure Ghosts' linear light is scaled by before it becomes CoD4's
+/// gamma bytes (and the sun's gamma colour, `iw3_sun_gamma`), when a map's
+/// own (`light_exposure`) cannot be measured.
+///
+/// Ghosts lights in HDR and brings it to the screen through each map's own
+/// tone mapping (`toneMapping "mp_prisonbreak_tone_01"` in its vision):
+/// the baked light (the secondary's two pages) of Prison Break sits at
+/// 0.1 (median) .. 0.37 (90th percentile) under a sun of 9; Sovereign's at
+/// 0.009 .. 0.067 under one of 0.6; Skeleton's at 0.33 .. 1.7 under 10.
+/// CoD4's fallback draw sums gamma-space light (`A + B f + sun N.L vis`)
+/// and squares it; taken 1 : 1 the sum was over 2 on every sunlit Prison
+/// Break surface (burnt white) and Sovereign's halls were black.
+pub const LIGHT_EXPOSURE: f32 = 1.0;
+
+/// What a map's brighter baked light (its 90th percentile, linear) is
+/// exposed to: CoD4's gamma bytes put it at `sqrt(EXPOSURE_KEY)`.
+pub const EXPOSURE_KEY: f32 = 0.3;
+
+/// The brightest the sun gets in CoD4's gamma space (a sunlit floor then
+/// sits near 1 with its baked light): Ghosts' tone mapping compresses its
+/// sun of 3..10 against the baked light the same way.
+pub const SUN_GAMMA_MAX: f32 = 0.8;
+
+/// A map's exposure from its baked light: `EXPOSURE_KEY` over the 90th
+/// percentile of its lit lightmap texels' luminance (`lightmap_key`).
+pub fn light_exposure(key: Option<f32>) -> f32 {
+    key.filter(|k| *k > 1e-4).map_or(LIGHT_EXPOSURE, |k| (EXPOSURE_KEY / k).clamp(0.05, 32.0))
+}
+
+/// The 90th percentile of the luminance of the lit texels of a map's
+/// lightmap secondaries (both pages, linear light), every 7th texel read.
+pub fn lightmap_key(cap: &Capture, image: &[u8], pairs: &[(Option<AssetId>, Option<AssetId>)]) -> Option<f32> {
+    let mut paks = crate::image::ImagePaks::new(std::path::Path::new("."));
+    let mut lum: Vec<f32> = Vec::new();
+    for &(_, s) in pairs {
+        let Some(rec) = s.and_then(|i| cap.images.get(i.index as usize)) else { continue };
+        let Ok(px) = crate::image::image_pixels(rec, image, &mut paks, 1 << 14) else { continue };
+        if px.dxgi_format != 10 {
+            continue;
+        }
+        for t in px.data.chunks_exact(8).step_by(7) {
+            let h = |c: usize| half_to_f32(u16::from_le_bytes([t[2 * c], t[2 * c + 1]]));
+            let l = 0.3 * h(0) + 0.59 * h(1) + 0.11 * h(2);
+            if l > 0.0 && l.is_finite() {
+                lum.push(l);
+            }
+        }
+    }
+    if lum.is_empty() {
+        return None;
+    }
+    let at = (lum.len() - 1) * 9 / 10;
+    let (_, p90, _) = lum.select_nth_unstable_by(at, |a, b| a.total_cmp(b));
+    Some(*p90)
+}
+
+/// Ghosts' sun (linear HDR, its brightest channel) as CoD4's gamma-space
+/// `sunlight` under the same exposure as the lightmaps, at most
+/// `SUN_GAMMA_MAX`.
+pub fn iw3_sun_gamma(peak: f32, exposure: f32) -> f32 {
+    (peak.max(0.0) * exposure).sqrt().min(SUN_GAMMA_MAX)
+}
+
+/// `iw3_lightmap` under a given exposure (`LIGHT_EXPOSURE`).
+pub fn iw3_lightmap_exposed(
+    cap: &Capture,
+    image: &[u8],
+    pair: (Option<AssetId>, Option<AssetId>),
+    exposure: f32,
 ) -> Result<Iw3Lightmap, String> {
     let get = |id: Option<AssetId>| -> Result<&crate::walk::ImageRec, String> {
         id.and_then(|i| cap.images.get(i.index as usize)).ok_or_else(|| "image not in the zone".to_owned())
@@ -783,7 +978,7 @@ pub fn iw3_lightmap(
     let mut secondary = vec![0u8; sw * sh * 4];
     for i in 0..sw * sh {
         let h = |c: usize| half_to_f32(u16::from_le_bytes([sp.data[i * 8 + 2 * c], sp.data[i * 8 + 2 * c + 1]]));
-        let g = |v: f32| (v.clamp(0.0, 1.0).sqrt() * 255.0).round() as u8;
+        let g = |v: f32| ((v * exposure).clamp(0.0, 1.0).sqrt() * 255.0).round() as u8;
         let a = (((h(3).clamp(-1.0, 1.0) + 2.08) / 4.08) * 255.0).round().clamp(0.0, 255.0) as u8;
         secondary[i * 4..i * 4 + 4].copy_from_slice(&[g(h(2)), g(h(1)), g(h(0)), a]);
     }

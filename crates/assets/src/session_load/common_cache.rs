@@ -386,6 +386,12 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
         let wanted = crate::t6_rules() && crate::guest_guns();
         pool.spawn(async move { crate::lane::prefetch_s1_guest_guns(wanted) })
     };
+    // bo2mp: Black Ops III's guns: its core_common inflated and walked
+    // ahead.
+    let t7_prefetch = {
+        let wanted = crate::t6_rules() && crate::guest_guns();
+        pool.spawn(async move { crate::lane::prefetch_t7_guest_guns(wanted) })
+    };
     let legacy_prefetch = [crate::lane::Legacy::T4, crate::lane::Legacy::Iw3].map(|game| {
         let wanted = crate::t6_rules() && crate::guest_guns();
         pool.spawn(async move { crate::lane::prefetch_legacy_guest_guns(game, wanted) })
@@ -492,6 +498,20 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
         pool.spawn(async move { crate::lane::build_s1_guest_guns(prefetch, material_seed, &progress) }).await
     };
     common_report.extend(s1_guest_report);
+    // bo2mp: Black Ops III's guest guns, after AW's on the same pool.
+    let crate::lane::T7Guests {
+        weapons: t7_guest_weapons,
+        fpv: t7_guest_fpv,
+        world_guns: t7_guest_world_guns,
+        xanims: t7_guest_xanims,
+        material_seed,
+        report: t7_guest_report,
+    } = {
+        let progress = progress.clone();
+        let prefetch = t7_prefetch.await;
+        pool.spawn(async move { crate::lane::build_t7_guest_guns(prefetch, material_seed, &progress) }).await
+    };
+    common_report.extend(t7_guest_report);
     let mut legacy_guests = Vec::new();
     let mut material_seed = material_seed;
     for prefetch in legacy_prefetch {
@@ -508,6 +528,7 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
     let iw4_guest_xanim_n = t5_xanims.absorb(iw4_guest_xanims);
     let iw6_guest_xanim_n = t5_xanims.absorb(iw6_guest_xanims);
     let s1_guest_xanim_n = t5_xanims.absorb(s1_guest_xanims);
+    let t7_guest_xanim_n = t5_xanims.absorb(t7_guest_xanims);
     let legacy_xanim_n: Vec<usize> =
         legacy_guests.iter_mut().map(|g| t5_xanims.absorb(std::mem::take(&mut g.xanims))).collect();
     t5_fx.absorb_missing(iw4_guest_fx);
@@ -772,6 +793,17 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
         common_tracers.absorb(s1_guest_tracers);
         common_report.push(format!(
             "s1 guest guns: {s1_guest_fx_n} effects, +{models} effect models, {tracer_n} tracers joined"
+        ));
+    }
+    if !t7_guest_weapons.is_empty() {
+        let n = t7_guest_weapons.len();
+        weapons.absorb(t7_guest_weapons);
+        let fpv = fpv_meshes.absorb(t7_guest_fpv);
+        let world = world_weapons.absorb(t7_guest_world_guns);
+        common_report.push(format!(
+            "t7 guest guns absorbed: {n} weapons, fpv=+{fpv} world_guns=+{world} xanims=+{t7_guest_xanim_n}; registry now {} (t7={})",
+            weapons.len(),
+            weapons.namespace_count(asset_core::AssetNamespace::T7)
         ));
     }
     for (guests, xanim_n) in legacy_guests.into_iter().zip(legacy_xanim_n) {

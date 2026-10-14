@@ -5593,6 +5593,32 @@ impl WeaponBuild {
                 tracers,
             );
         }
+        self.borrow_t6_combat_fx();
+    }
+
+    /// bo2mp: Black Ops III's guns, whose effects are not read, flash,
+    /// eject and trace as a Black Ops II gun of their class does (the first
+    /// with a bound flash: an assault rifle's for an assault rifle, a
+    /// shotgun's for a shotgun; any for a class Black Ops II lacks).
+    fn borrow_t6_combat_fx(&mut self) {
+        let rows = &self.registry.rows;
+        let mut donors: HashMap<i32, WeaponCombatFx> = HashMap::new();
+        let mut any: Option<WeaponCombatFx> = None;
+        for row in rows.iter().skip(1) {
+            if row.namespace != crate::AssetNamespace::T6 || !row.combat_fx.view_flash.is_bound() || row.facts.weap_type != 0 {
+                continue;
+            }
+            donors.entry(row.facts.weap_class).or_insert_with(|| row.combat_fx.clone());
+            any.get_or_insert_with(|| row.combat_fx.clone());
+        }
+        for row in self.registry.rows.iter_mut().skip(1) {
+            if row.namespace != crate::AssetNamespace::T7 || row.combat_fx.view_flash.is_bound() {
+                continue;
+            }
+            if let Some(donor) = donors.get(&row.facts.weap_class).or(any.as_ref()) {
+                row.combat_fx = donor.clone();
+            }
+        }
     }
 
     pub fn stamp_namespace(&mut self, ns: crate::AssetNamespace) {
@@ -7585,7 +7611,7 @@ impl WeaponRegistry {
     pub fn player_anim_type_iw_numbered(&self, index: u32) -> bool {
         use crate::AssetNamespace as Ns;
         self.namespace_of(index)
-            .is_some_and(|ns| !matches!(ns, Ns::T6 | Ns::T5))
+            .is_some_and(|ns| !matches!(ns, Ns::T6 | Ns::T5 | Ns::T7))
     }
 
     pub fn revision(&self) -> u64 {

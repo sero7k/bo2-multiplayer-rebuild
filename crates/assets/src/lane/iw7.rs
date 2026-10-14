@@ -40,6 +40,10 @@ use crate::session_load::PreparedWorld;
 /// (`BO2MP_IW7_MAP_TEXTURE=<size>` changes it).
 const TEXTURE_MAX: u32 = 512;
 
+/// The world light table's row the placed models' sun is in (a primary
+/// light of type 1: the shader's sun, its shadow included).
+const SUN_LIGHT_ROW: usize = 1;
+
 /// A placed model smaller than this (its radius, scaled) does not collide.
 const COLLIDE_MIN_RADIUS: f32 = 24.0;
 
@@ -81,30 +85,20 @@ fn iw7_vertex_to_t6(v: &[u8; 32]) -> [u8; 32] {
     out
 }
 
-/// What a technique set is, by the words of its name.
+/// What a technique set hides as, by the words of its name
+/// (`fastfile_iw7::look`).
 fn hidden_kind(technique_set: &str) -> Option<&'static str> {
-    let words: Vec<&str> = technique_set.split('_').collect();
-    if words.iter().any(|w| w.starts_with("sky")) {
-        Some("sky")
-    } else if words.contains(&"tools") {
-        Some("tools")
-    } else if words.contains(&"shadowcaster") || words.contains(&"onlycast") {
-        Some("shadow only")
-    } else if words.contains(&"distortion") {
-        Some("distortion")
-    } else if words.contains(&"threed") {
-        Some("3d")
-    } else {
-        None
-    }
+    fastfile_iw7::look::look(technique_set).hidden
 }
 
-/// An IW7 technique set as Black Ops II's draw: by its name (`w_`/`wc_`
-/// world and `mo_`/`mopw_`/`mcopw_` model techniques read like BO2's, the
-/// same `r0c0`, `t0c0`, `b0c0` base and blend words), without BO2's layers
-/// (IW7's vertex colour is no layer weight) and drawn double-sided for
-/// models.
+/// An IW7 technique set as Black Ops II's draw: its blend, alpha test,
+/// lighting and decal step by the words of its name
+/// (`fastfile_iw7::look`: `replace`, `atest`, `blend`, `blendadd`, `add`,
+/// `multiply`, `unlit`, `ndw`), without BO2's layers (IW7's vertex colour
+/// is no layer weight) and drawn double-sided for models.
 fn iw7_draw(technique_set: &str, sort_key: u8, model: bool) -> T6Draw {
+    use fastfile_iw7::look::Blend;
+    let look = fastfile_iw7::look::look(technique_set);
     let mut draw = T6Draw::from_technique_set(technique_set, sort_key, None);
     draw.layered = false;
     draw.layers = [0, 0];
@@ -114,9 +108,23 @@ fn iw7_draw(technique_set: &str, sort_key: u8, model: bool) -> T6Draw {
     draw.flag = false;
     draw.tile_blend = false;
     draw.objective = false;
+    draw.foliage = false;
+    draw.blend = match look.hidden {
+        Some("sky") => T6Blend::Sky,
+        Some("shadow only") => T6Blend::ShadowOnly,
+        _ => match look.blend {
+            Blend::Opaque => T6Blend::Opaque,
+            Blend::Blend => T6Blend::Blend,
+            Blend::Add => T6Blend::Add,
+            Blend::Multiply => T6Blend::Multiply,
+        },
+    };
+    draw.alpha_test = look.alpha_test;
+    draw.unlit = look.unlit;
+    // A decal (no depth write over the world) sits a step toward the eye.
+    draw.polygon_offset = u8::from(look.decal);
     if model {
         draw.cull = T6Cull::None;
-        draw.foliage = false;
         if draw.blend == T6Blend::Sky {
             draw.blend = T6Blend::Opaque;
         }
@@ -133,7 +141,10 @@ struct Materials<'a> {
     /// (map material, as a model's) -> catalog material.
     linked: HashMap<(usize, bool), Option<usize>>,
     images: HashMap<String, Option<usize>>,
+    /// Material -> its colour map with opacity in alpha.
+    alpha_images: HashMap<usize, Option<usize>>,
     decoded: usize,
+    with_alpha: usize,
     failures: Vec<String>,
 }
 
@@ -185,6 +196,69 @@ impl Materials<'_> {
         slot
     }
 
+    /// A material's colour map as RGBA8 with its opacity in alpha
+    /// (`Iw7Map::colour_rgba`), mipmapped.
+    fn image_with_alpha(&mut self, material: usize) -> Option<usize> {
+        if let Some(slot) = self.alpha_images.get(&material) {
+            return *slot;
+        }
+        let m = &self.map.materials[material];
+        let keep = m.texture("colorMap").is_some_and(fastfile_iw7::look::colour_alpha_is_opacity);
+        let slot = match self.map.colour_rgba(m, self.max, keep) {
+            Ok(rgba) => {
+                use bevy::asset::RenderAssetUsages;
+                use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
+                use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+                let mut image = bevy::prelude::Image::new_uninit(
+                    Extent3d { width: rgba.width, height: rgba.height, depth_or_array_layers: 1 },
+                    TextureDimension::D2,
+                    TextureFormat::Rgba8UnormSrgb,
+                    RenderAssetUsages::RENDER_WORLD,
+                );
+                image.texture_descriptor.mip_level_count = rgba.levels.len() as u32;
+                image.data = Some(rgba.levels.concat());
+                image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+                    address_mode_u: ImageAddressMode::Repeat,
+                    address_mode_v: ImageAddressMode::Repeat,
+                    mag_filter: ImageFilterMode::Linear,
+                    min_filter: ImageFilterMode::Linear,
+                    mipmap_filter: ImageFilterMode::Linear,
+                    anisotropy_clamp: 8,
+                    ..Default::default()
+                });
+                self.decoded += 1;
+                self.with_alpha += 1;
+                Some(self.catalog.link_image(AuthoredImage {
+                    namespace: AssetNamespace::T6,
+                    name: AssetRef::Real(format!("iw7:{}#alpha#{}", m.name, self.max)),
+                    map_type: 0,
+                    semantic: TS_COLOR_MAP,
+                    category: 0,
+                    use_srgb_reads: true,
+                    width: rgba.width as u16,
+                    height: rgba.height as u16,
+                    depth: 1,
+                    level_count: rgba.levels.len() as u8,
+                    format: 0,
+                    payload: Arc::new(Vec::new()),
+                    decoded: Some(Arc::new(image)),
+                    common_owned: false,
+                    decoded_variant: None,
+                    decoded_by: None,
+                    pending_decode: None,
+                }))
+            }
+            Err(e) => {
+                if self.failures.len() < 64 {
+                    self.failures.push(format!("{} (with alpha): {e}", m.name));
+                }
+                None
+            }
+        };
+        self.alpha_images.insert(material, slot);
+        slot
+    }
+
     fn material(&mut self, index: usize, model: bool) -> Option<usize> {
         if let Some(&m) = self.linked.get(&(index, model)) {
             return m;
@@ -196,7 +270,17 @@ impl Materials<'_> {
         if let Some(name) = colour {
             let hash = fastfile_iw7::texture::name_hash("colorMap");
             let sampler = m.textures.iter().find(|t| t.0 == hash).map_or(0x13, |t| t.1);
-            if let Some(slot) = self.image(&name) {
+            // A cut-out or blended material takes its opacity from its alpha
+            // map (or a plain colour map's own alpha): the packed colour
+            // maps keep smoothness in alpha (`fastfile_iw7::look`).
+            let has_alpha_map = m.textures.iter().any(|t| t.0 == fastfile_iw7::look::ALPHA_MAP_HASH);
+            let wants_alpha = draw.alpha_test || matches!(draw.blend, T6Blend::Blend);
+            let slot = if wants_alpha && (has_alpha_map || fastfile_iw7::look::colour_alpha_is_opacity(&name)) {
+                self.image_with_alpha(index).or_else(|| self.image(&name))
+            } else {
+                self.image(&name)
+            };
+            if let Some(slot) = slot {
                 textures.push(MaterialTextureBinding {
                     name_hash: hash,
                     name_start: 0,
@@ -236,9 +320,24 @@ impl Materials<'_> {
     }
 }
 
-/// The map's sun: the worldspawn's `sundirection` (pitch yaw roll toward
-/// the sun), `suncolor` and `sunlight`.
-fn sun_of(entities: &[iw3::ents::Entity]) -> ([f32; 3], [f32; 3], f32) {
+/// The map's sun as CoD4's (angles toward the sun, colour, gamma-space
+/// light): the ComWorld's sun (its primary light of type 1: HDR linear
+/// light, the brightest channel the light, the direction toward the sun),
+/// in the lightmap pages' exposure (`fastfile_iw7::light::sun_gamma`);
+/// else the worldspawn's `sundirection`, `suncolor` and `sunlight`.
+fn sun_of(map: &Iw7Map, entities: &[iw3::ents::Entity], exposure: Option<f32>) -> ([f32; 3], [f32; 3], f32, &'static str) {
+    if let Some(l) = map.lights.iter().find(|l| l.kind == 1 && l.color.iter().any(|&c| c > 0.0)) {
+        let d = l.dir;
+        let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(1e-6);
+        let d = d.map(|x| x / n);
+        let yaw = d[1].atan2(d[0]).to_degrees();
+        let pitch = (-d[2]).clamp(-1.0, 1.0).asin().to_degrees();
+        let peak = l.color.iter().copied().fold(1e-6f32, f32::max);
+        // (In the lightmap pages' units when they were read: their exposure;
+        // else Ghosts' quarter.)
+        let light = fastfile_iw7::light::sun_gamma(peak, exposure.unwrap_or(0.25));
+        return ([pitch, yaw, 0.0], l.color.map(|c| c / peak), light, "the ComWorld");
+    }
     let world = entities.iter().find(|e| e.classname() == "worldspawn");
     let vec3 = |k: &str| -> Option<[f32; 3]> {
         let v: Vec<f32> = world?.get(k)?.split_whitespace().filter_map(|x| x.parse().ok()).collect();
@@ -247,12 +346,69 @@ fn sun_of(entities: &[iw3::ents::Entity]) -> ([f32; 3], [f32; 3], f32) {
     let angles = vec3("sundirection").unwrap_or([-60.0, 45.0, 0.0]);
     let colour = vec3("suncolor").unwrap_or([1.0; 3]);
     // (IW7's `sunlight` is in its HDR units: about 7 outdoors.)
-    let light = world.and_then(|e| e.get("sunlight")).and_then(|v| v.trim().parse::<f32>().ok()).map_or(1.0, |l| (l / 5.0).clamp(0.5, 2.0));
-    (angles, colour, light)
+    let light = world.and_then(|e| e.get("sunlight")).and_then(|v| v.trim().parse::<f32>().ok()).map_or(1.0, |l| (l.max(0.0).sqrt() * 0.5).clamp(0.6, 1.6));
+    (angles, colour, light, "the worldspawn")
+}
+
+/// The fog of a map's vision (`vision/<map>.vision`): IW7 keeps it as
+/// dvar lines, `fogStartDist`, `fogDensity` (a distance: the halfway one,
+/// 300 under Geneva's water, 30000..70000 outdoors), `fogColor` (and an
+/// HDR `fogColorIntensity`, not used: the fog here is in display colour),
+/// `fogMaxOpacity` and the sun fog (`fogSunColor`, `fogSunDir`,
+/// `fogSunBeginFadeAngle`, `fogSunEndFadeAngle`, on with
+/// `fogSunColorIntensity` above zero).
+fn vision_fog(text: &str) -> Option<super::cod4::LegacyFog> {
+    let mut vals: HashMap<String, Vec<f32>> = HashMap::new();
+    for line in text.lines() {
+        let Some((key, value)) = line.trim().split_once(' ') else { continue };
+        let v: Vec<f32> = value.trim().trim_matches('"').split_whitespace().filter_map(|x| x.parse().ok()).collect();
+        if !v.is_empty() {
+            vals.entry(key.to_ascii_lowercase()).or_insert(v);
+        }
+    }
+    let one = |k: &str| vals.get(k).and_then(|v| v.first().copied());
+    let three = |k: &str| vals.get(k).filter(|v| v.len() >= 3).map(|v| [v[0], v[1], v[2]]);
+    let half = one("fogdensity")?;
+    let opacity = one("fogmaxopacity").unwrap_or(1.0).clamp(0.0, 1.0);
+    if half <= 0.0 || opacity <= 0.0 {
+        return None;
+    }
+    let colour = three("fogcolor")?.map(|c| c.clamp(0.0, 1.0));
+    let sun = (one("fogsuncolorintensity").unwrap_or(0.0) > 0.0)
+        .then(|| {
+            Some(asset_world::SunFog {
+                color_rgb: three("fogsuncolor")?.map(|c| c.clamp(0.0, 1.0)),
+                sun_dir: three("fogsundir")?,
+                begin_angle_deg: one("fogsunbeginfadeangle").unwrap_or(0.0),
+                end_angle_deg: one("fogsunendfadeangle").unwrap_or(90.0),
+                scale: 1.0,
+            })
+        })
+        .flatten();
+    Some(super::cod4::LegacyFog {
+        start: one("fogstartdist").unwrap_or(0.0).max(0.0),
+        half,
+        opacity,
+        colour,
+        sun,
+        base_height: 1.0e7,
+        half_height: 1.0e9,
+    })
+}
+
+/// The largest lightmap page width kept (`BO2MP_IW7_LIGHTMAP=<px>`): IW7's
+/// pages are 4096 wide; the fallback draw's page is three times the page's
+/// texels in RGBA8, 25 MB at 2048.
+fn lightmap_max() -> u32 {
+    std::env::var("BO2MP_IW7_LIGHTMAP")
+        .ok()
+        .and_then(|v| v.trim().parse().ok())
+        .filter(|&v: &u32| (256..=4096).contains(&v))
+        .unwrap_or(2048)
 }
 
 /// The world as CoD4's `GfxWorld` (materials beside it, not in it).
-fn iw3_world(map: &Iw7Map, sun: ([f32; 3], [f32; 3], f32)) -> iw3::zone::GfxWorld {
+fn iw3_world(map: &Iw7Map, sun: ([f32; 3], [f32; 3], f32, &'static str)) -> iw3::zone::GfxWorld {
     iw3::zone::GfxWorld {
         name: map.name.clone(),
         base_name: map.name.clone(),
@@ -263,7 +419,10 @@ fn iw3_world(map: &Iw7Map, sun: ([f32; 3], [f32; 3], f32)) -> iw3::zone::GfxWorl
             .map(|v| iw3::zone::WorldVertex {
                 xyz: v.xyz,
                 binormal_sign: v.binormal_sign,
-                color: v.color,
+                // IW7's world vertex colour is no tint (layer weights and
+                // the like: it turned mp_riot's streets magenta and cyan,
+                // mp_geneva's blue); white, its alpha kept.
+                color: v.color | 0x00ff_ffff,
                 tex_coord: v.uv,
                 lmap_coord: v.lmap_uv,
                 normal: iw3_unit_vec(v.normal),
@@ -279,7 +438,7 @@ fn iw3_world(map: &Iw7Map, sun: ([f32; 3], [f32; 3], f32)) -> iw3::zone::GfxWorl
                 tri_count: s.tri_count,
                 base_index: s.base_index as i32,
                 material: None,
-                lightmap_index: 0,
+                lightmap_index: s.lightmap_index,
                 reflection_probe_index: 0,
                 primary_light_index: 0,
                 flags: s.flags,
@@ -413,6 +572,23 @@ fn collision_of(map: &Iw7Map, hidden: &[bool]) -> (asset_world::ClipCollision, V
     (clip, tris)
 }
 
+/// Whether a world surface of this material collides: opaque and
+/// alpha-tested surfaces do (grates, fences, railings), but not cut-out
+/// foliage; of the blended ones only glass (windows, glass floors) does,
+/// not decals or light cards.
+fn collides(m: &fastfile_iw7::map::MapMaterial) -> bool {
+    let draw = iw7_draw(&m.technique_set, m.sort_key, false);
+    let name = m.name.to_ascii_lowercase();
+    let foliage = ["foliage", "leaf", "leaves", "grass", "ivy", "vine", "fern", "bush", "hedge", "plant", "flower"]
+        .iter()
+        .any(|w| name.contains(w));
+    match draw.blend {
+        T6Blend::Opaque => !(draw.alpha_test && foliage),
+        T6Blend::Blend => name.contains("glass") && !draw.unlit && draw.polygon_offset == 0,
+        _ => false,
+    }
+}
+
 fn collision_tris(map: &Iw7Map, hidden: &[bool]) -> Vec<asset_world::world_iw7::SoupTri> {
     use asset_world::world_iw7::{IW7_SOLID, SoupTri};
     let mut tris = Vec::new();
@@ -420,11 +596,10 @@ fn collision_tris(map: &Iw7Map, hidden: &[bool]) -> Vec<asset_world::world_iw7::
         if hidden.get(i).copied().unwrap_or(false) {
             continue;
         }
-        if let Some(m) = s.material {
-            let draw = iw7_draw(&map.materials[m].technique_set, map.materials[m].sort_key, false);
-            if draw.blend != T6Blend::Opaque {
-                continue;
-            }
+        if let Some(m) = s.material
+            && !collides(&map.materials[m])
+        {
+            continue;
         }
         for t in 0..s.tri_count as usize {
             let v = |k: usize| {
@@ -445,6 +620,10 @@ fn collision_tris(map: &Iw7Map, hidden: &[bool]) -> Vec<asset_world::world_iw7::
             std::array::from_fn(|k| sm.origin[k] + (p[0] * sm.axis[0][k] + p[1] * sm.axis[1][k] + p[2] * sm.axis[2][k]) * sm.scale)
         };
         for s in surfaces {
+            // (A tree's leaf cards, a decal sheet: no collision.)
+            if s.material.is_some_and(|k| !collides(&map.materials[k])) {
+                continue;
+            }
             for t in &s.tris {
                 let (Some(a), Some(b), Some(c)) = (s.verts.get(usize::from(t[0])), s.verts.get(usize::from(t[1])), s.verts.get(usize::from(t[2]))) else {
                     continue;
@@ -540,7 +719,9 @@ fn build_iw7_world(
         max: texture_max(),
         linked: HashMap::new(),
         images: HashMap::new(),
+        alpha_images: HashMap::new(),
         decoded: 0,
+        with_alpha: 0,
         failures: Vec::new(),
     };
     let surface_materials: Vec<Option<usize>> = map
@@ -571,13 +752,72 @@ fn build_iw7_world(
         None => "iw7 sky: no sky material".to_owned(),
     });
 
+    // The baked light: each GfxLightMap as CoD4's page
+    // (`fastfile_iw7::light`), for the world's lit surfaces; the placed
+    // models take the light of the floor under them.
+    let stage_light = progress.begin_scoped(StageId::MapAssets, "infinite warfare lightmaps", None);
+    let lm_max = lightmap_max();
+    let mut lightmap_gaps = Vec::new();
+    let pages: Vec<Option<fastfile_iw7::light::LightmapPage>> = (0..map.light_maps.len())
+        .map(|i| match map.lightmap_page(i, lm_max) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                lightmap_gaps.push(format!("page {i}: {e}"));
+                None
+            }
+        })
+        .collect();
+    let lightmaps: Vec<Option<asset_world::WorldLightmap>> = pages
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let p = p.as_ref()?;
+            let names = &map.light_maps[i];
+            let (pw, ph, pp) = &p.primary;
+            let (sw, sh, sp) = &p.secondary;
+            match asset_world::world_iw3::iw3_lightmap(
+                (*pw, *ph, asset_world::world_iw3::IW3_LIGHTMAP_PRIMARY_FORMAT, pp),
+                (*sw, *sh, asset_world::world_iw3::IW3_LIGHTMAP_SECONDARY_FORMAT, sp),
+                (&names[0], &names[1]),
+            ) {
+                Ok(page) => Some(page),
+                Err(e) => {
+                    lightmap_gaps.push(format!("page {i}: {e:?}"));
+                    None
+                }
+            }
+        })
+        .collect();
+    report.push(format!(
+        "iw7 lightmaps: {}/{} pages converted (at most {lm_max} wide){}",
+        lightmaps.iter().filter(|p| p.is_some()).count(),
+        lightmaps.len(),
+        if lightmap_gaps.is_empty() { String::new() } else { format!(" ({})", lightmap_gaps.join("; ")) }
+    ));
+    let origins: Vec<[f32; 3]> = map.static_models.iter().map(|s| s.lighting_origin).collect();
+    let ground = map.ground_light(&pages, &origins, 4096.0);
+    // (The pages' exposure: the sun is brought into the same units.)
+    let exposure = pages.iter().flatten().next().map(|p| p.exposure);
+    report.push(format!(
+        "iw7 exposure: {}",
+        pages
+            .iter()
+            .flatten()
+            .map(|p| format!("mean light {:.3} x{:.2}", p.mean_light, p.exposure))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    drop(pages);
+    stage_light.done();
+
     // The placed models.
     let (prop_meshes, prop_placements) = {
         use bevy::prelude::{Mat3, Quat, Transform, Vec3};
         let mut meshes: Vec<asset_world::ModelMesh> = Vec::new();
         let mut built: HashMap<usize, Option<usize>> = HashMap::new();
         let mut placements = Vec::with_capacity(map.static_models.len());
-        for sm in &map.static_models {
+        let mut lit = 0usize;
+        for (i, sm) in map.static_models.iter().enumerate() {
             let entry = *built.entry(sm.model).or_insert_with(|| {
                 let m = &map.models[sm.model];
                 let key = |i: usize| asset_t6::AssetKey { ty: fastfile_t6::AssetType::Material, index: i };
@@ -652,13 +892,27 @@ fn build_iw7_world(
                 reflection_probe_index: 0,
                 primary_light_index: 0,
                 flags: 0,
-                // No light grid read: a neutral light (sqrt(1 / 32)).
-                packed_lighting: Some([45, 45, 45, 0]),
-                t6_primary: [0, 0],
+                // The floor's light under the model (linear, packed as the
+                // light grid's sqrt(light / 32)) and the sun (primary light
+                // 1, `SUN_LIGHT_ROW`) by the floor's sun visibility; with no
+                // lit floor below, a neutral light and half the sun.
+                packed_lighting: Some(match ground.get(i).copied().flatten() {
+                    Some(g) => {
+                        lit += 1;
+                        let a = g.ambient_linear();
+                        let p = |v: f32| ((v.max(0.0) / 32.0).sqrt() * 255.0).round().clamp(1.0, 255.0) as u8;
+                        [p(a[0]), p(a[1]), p(a[2]), 0]
+                    }
+                    None => [32, 32, 32, 0],
+                }),
+                t6_primary: [
+                    SUN_LIGHT_ROW as u8,
+                    ground.get(i).copied().flatten().map_or(128, |g| (g.sun * 255.0).round() as u8),
+                ],
             }));
         }
         report.push(format!(
-            "iw7 static models: {} placed of {}, {} distinct models built",
+            "iw7 static models: {} placed of {}, {} distinct models built, {lit} lit by the floor under them",
             placements.iter().filter(|p| p.is_some()).count(),
             map.static_models.len(),
             meshes.len()
@@ -666,9 +920,10 @@ fn build_iw7_world(
         (meshes, placements)
     };
     report.push(format!(
-        "iw7 materials: {} linked, {} colour maps decoded (at most {}px), {} failed{}; not drawn: {hidden_kinds:?}",
+        "iw7 materials: {} linked, {} colour maps decoded ({} with their alpha maps, at most {}px), {} failed{}; not drawn: {hidden_kinds:?}",
         b.linked.len(),
         b.decoded,
+        b.with_alpha,
         b.max,
         b.failures.len(),
         if b.failures.is_empty() { String::new() } else { format!(" (first: {})", b.failures.iter().take(4).cloned().collect::<Vec<_>>().join("; ")) },
@@ -677,12 +932,12 @@ fn build_iw7_world(
     drop(b);
     stage.done();
 
-    let sun = sun_of(&entities);
+    let sun = sun_of(map, &entities, exposure);
     let iw3w = iw3_world(map, sun);
     let (pitch, yaw) = (sun.0[0].to_radians(), sun.0[1].to_radians());
     let dir = [pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), -pitch.sin()];
     let colour = [sun.1[0] * sun.2, sun.1[1] * sun.2, sun.1[2] * sun.2, 1.0];
-    report.push(format!("iw7 sun: toward {dir:?} colour {colour:?}"));
+    report.push(format!("iw7 sun: from {} toward {dir:?} colour {colour:?}", sun.3));
     let lighting = asset_world::T6WorldLighting {
         sun: asset_world::WorldSunLight { direction: dir, diffuse: colour, specular: colour },
         exposure_scale: 1.0,
@@ -691,13 +946,32 @@ fn build_iw7_world(
         saturation: None,
         grade: None,
     };
-    // (IW7's lightmaps are GfxLightMap pages the fallback draw cannot read
-    // yet: the world draws by the sun and its colour maps.)
-    match asset_world::world_iw3::build_iw3_world_draw(&iw3w, &surface_materials, &hidden, Vec::new(), Some(lighting)) {
-        Ok(draw) => {
+    match asset_world::world_iw3::build_iw3_world_draw(&iw3w, &surface_materials, &hidden, lightmaps, Some(lighting)) {
+        Ok(mut draw) => {
+            // The fog (the map's vision) and the sun as a primary light for
+            // the placed models (rows 30 and 31 are the fog's).
+            let fog = map.vision.as_ref().and_then(|(_, text)| vision_fog(text));
+            match (&fog, &map.vision) {
+                (Some(f), Some((name, _))) => report.push(format!(
+                    "iw7 fog: READY from {name}: start={:.1} half={:.1} opacity={:.3} colour={:?} sun={}",
+                    f.start,
+                    f.half,
+                    f.opacity,
+                    f.colour,
+                    f.sun.is_some()
+                )),
+                (None, Some((name, _))) => report.push(format!("iw7 fog: none ({name} sets none)")),
+                _ => report.push("iw7 fog: none (no vision in the zone)".to_owned()),
+            }
+            draw.t6_lights = fog.as_ref().map_or_else(|| vec![[0.0f32; 16]; 32], super::cod4::legacy_fog_table);
+            draw.t6_lights.resize(32, [0.0; 16]);
+            draw.t6_lights[SUN_LIGHT_ROW][3] = 1.0;
             report.push(format!(
-                "world mesh: {} vertices, {} triangles, {} surfaces (Infinite Warfare, fallback draw with colour maps, no lightmaps)",
-                draw.stats.vertices, draw.stats.triangles, draw.stats.surfaces
+                "world mesh: {} vertices, {} triangles, {} surfaces (Infinite Warfare, fallback draw with colour maps{})",
+                draw.stats.vertices,
+                draw.stats.triangles,
+                draw.stats.surfaces,
+                if draw.iw3_lightmaps { " and its lightmaps" } else { ", no lightmaps" }
             ));
             let (min, max) = (draw.stats.min, draw.stats.max);
             materials.set_capture_ns(AssetNamespace::T6);

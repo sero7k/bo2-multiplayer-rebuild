@@ -34,6 +34,7 @@
 //!                      else: frames* at 8; (size + 1) indices at 0x10; frames (size + 1) x 8
 //! ```
 
+use super::capture::AnimRec;
 use crate::asset_type::AssetType;
 use crate::cursor::{ReadError, Result};
 use crate::stream::Stream;
@@ -82,10 +83,28 @@ pub fn xanim(s: &mut Stream, h: usize) -> Result<Option<String>> {
     let frames = s.u16_at(h + 0x20)? as usize;
     let bones = s.u16_at(h + 0x22)? as usize;
     let index = if frames >= 256 { 2 } else { 1 };
-    s.records(h + 0x68, bones, 4, 3)?;
-    for (ptr, count) in [(0xc0, 0xc8), (0xd0, 0xd8), (0xe0, 0xe8)] {
+    let keep = s.capture.keep_anims;
+    let names_at = s.records_at(h + 0x68, bones, 4, 3)?;
+    let mut rec = AnimRec { name: name.clone().unwrap_or_default(), numframes: frames as u16, ..Default::default() };
+    if keep {
+        rec.header = s.slice(h, AssetType::XAnimParts.header_size())?.to_vec();
+        if let Some(a) = names_at {
+            for i in 0..bones {
+                rec.names.push(s.u32_at(a + 4 * i)?);
+            }
+        }
+    }
+    for (k, (ptr, count)) in [(0xc0, 0xc8), (0xd0, 0xd8), (0xe0, 0xe8)].into_iter().enumerate() {
         let n = s.u8_at(h + count)? as usize;
-        s.records(h + ptr, n, NOTIFY, 3)?;
+        let at = s.records_at(h + ptr, n, NOTIFY, 3)?;
+        // (The notetracks: name, time; the startup and shutdown lists
+        // are left out.)
+        if keep && k == 0 && let Some(a) = at {
+            for i in 0..n {
+                let n = a + NOTIFY * i;
+                rec.notifies.push((s.u32_at(n)?, s.f32_at(n + 4)?, s.u32_at(n + 8)?, s.u32_at(n + 12)?));
+            }
+        }
     }
     if let Some(d) = s.array(h + 0xf0, 24, 7)? {
         delta_component(s, d, index, 0x14, 0x28, None)?;
@@ -105,8 +124,21 @@ pub fn xanim(s: &mut Stream, h: usize) -> Result<Option<String>> {
         (0xb0, u32_at(0x60)? * IK_LAYER, 3),
         (0xb8, u32_at(0x64)? * IK_BONE, 3),
     ];
-    for (ptr, len, mask) in arrays {
-        s.array(h + ptr, len, mask)?;
+    for (k, (ptr, len, mask)) in arrays.into_iter().enumerate() {
+        let at = s.records_at(h + ptr, len, 1, mask)?.map(|a| (a, len));
+        match k {
+            0 => rec.data_byte = at,
+            1 => rec.data_short = at,
+            2 => rec.data_int = at,
+            3 => rec.random_data_short = at,
+            4 => rec.random_data_byte = at,
+            5 => rec.random_data_int = at,
+            7 => rec.indices = at,
+            _ => {}
+        }
+    }
+    if keep {
+        s.capture.add_anim(rec);
     }
     Ok(name)
 }

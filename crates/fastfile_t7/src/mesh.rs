@@ -29,6 +29,11 @@ pub struct Geometry {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
+    /// bo2mp: per vertex its tangent (and the packed word's top two bits)
+    /// and colour.
+    pub tangents: Vec<[f32; 3]>,
+    pub tangent_w: Vec<u8>,
+    pub colors: Vec<[u8; 4]>,
     /// Per vertex: (bone, weight) pairs.
     pub weights: Vec<Vec<(u16, f32)>>,
     pub surfaces: Vec<SurfaceGeometry>,
@@ -56,7 +61,8 @@ impl std::fmt::Display for MeshError {
 
 impl std::error::Error for MeshError {}
 
-fn f16(h: u16) -> f32 {
+/// An IEEE half as f32.
+pub fn f16(h: u16) -> f32 {
     let (sign, exp, frac) = ((h >> 15) as u32, ((h >> 10) & 0x1f) as i32, (h & 0x3ff) as f32);
     let v = match exp {
         0 => frac / 1024.0 * 2f32.powi(-14),
@@ -92,6 +98,10 @@ pub fn decode(me: &MeshRec, data: &[u8]) -> Result<Geometry, MeshError> {
         let a = 16 * i;
         g.uvs.push([f16(u16_at(v, a + 4)), f16(u16_at(v, a + 6))]);
         g.normals.push(unpack_normal(u32_at(v, a + 8)));
+        let t = u32_at(v, a + 12);
+        g.tangents.push(unpack_normal(t));
+        g.tangent_w.push((t >> 30) as u8);
+        g.colors.push([v[a], v[a + 1], v[a + 2], v[a + 3]]);
     }
     let skinned = (me.skin_vert_count as usize).min(n);
     g.weights = vec![Vec::new(); n];

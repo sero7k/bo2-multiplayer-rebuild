@@ -40,6 +40,9 @@ pub struct WeaponRec {
     pub anims: Vec<(usize, String, String)>,
     /// `hideTags`: script string indices (32 slots, zero ones dropped).
     pub hide_tags: Vec<u32>,
+    /// bo2mp: the `WeaponDef`'s location damage multipliers (21 f32), when
+    /// it loaded them: file offset.
+    pub location_damage_at: Option<usize>,
 }
 
 impl WeaponRec {
@@ -67,6 +70,60 @@ pub struct ModelRec {
     /// The collision LOD mesh and the physics preset, when named.
     pub collision_mesh: Option<String>,
     pub phys_preset: Option<String>,
+    /// bo2mp: the skeleton (`walk::model::xmodel`).
+    pub skeleton: Skeleton,
+}
+
+/// bo2mp: a model's skeleton, as Black Ops II's `XModel` keeps it: bone
+/// names (script strings), the root count, per non-root bone its parent
+/// (how many bones back) and its rest pose relative to the parent
+/// (quaternion xyzw, stored as halves; translation), per bone its part
+/// classification and bind pose in model space (`DObjAnimMat`: unit
+/// quaternion xyzw, translation, translation weight).
+#[derive(Clone, Debug, Default)]
+pub struct Skeleton {
+    pub bone_names: Vec<u32>,
+    pub num_root_bones: u8,
+    pub parent_list: Vec<u8>,
+    pub quats: Vec<[f32; 4]>,
+    pub trans: Vec<[f32; 3]>,
+    pub part_classification: Vec<u8>,
+    pub base_mat: Vec<[f32; 8]>,
+}
+
+/// bo2mp: one sound alias (`SndAlias`, 0xd8): its list's name, the
+/// `assetId` its sound has in the `.sabl`/`.sabs` banks, its file name,
+/// its secondary alias, and the record (volumes, distances, flags).
+#[derive(Clone, Debug, Default)]
+pub struct SoundAliasRec {
+    pub name: String,
+    pub asset_id: u32,
+    pub file: String,
+    pub secondary: String,
+    pub record: Vec<u8>,
+}
+
+/// bo2mp: an `XAnimParts` loaded in the zone: its header (0xf8 bytes) and
+/// where its arrays are, as (file offset, bytes).
+#[derive(Clone, Debug, Default)]
+pub struct AnimRec {
+    pub name: String,
+    pub header: Vec<u8>,
+    pub numframes: u16,
+    /// The animated bones' names (script strings).
+    pub names: Vec<u32>,
+    /// Notetracks: (kind script string: `sound`, `rumble`, `self notify`,
+    /// time 0..1, the two parameters' script strings: a `sound` note's
+    /// alias first).
+    pub notifies: Vec<(u32, f32, u32, u32)>,
+    pub data_byte: Option<(usize, usize)>,
+    pub data_short: Option<(usize, usize)>,
+    pub data_int: Option<(usize, usize)>,
+    pub random_data_short: Option<(usize, usize)>,
+    pub random_data_byte: Option<(usize, usize)>,
+    pub random_data_int: Option<(usize, usize)>,
+    /// Key frame indices: u8 each when `numframes < 256`, else u16.
+    pub indices: Option<(usize, usize)>,
 }
 
 /// One surface of a mesh (`XSurface`).
@@ -141,6 +198,13 @@ pub struct Capture {
     pub materials: Vec<MaterialRec>,
     pub images: Vec<ImageRec>,
     pub meshes: Vec<MeshRec>,
+    /// bo2mp: animations (`walk::anim`), kept only when `keep_anims` is on.
+    pub anims: Vec<AnimRec>,
+    /// Also the sound aliases (`walk::sound`): kept with the animations.
+    pub keep_anims: bool,
+    pub sound_aliases: Vec<SoundAliasRec>,
+    /// Also the localized strings: (key, text).
+    pub localize: Vec<(String, String)>,
     /// The map assets (`walk::world`).
     pub world: crate::walk::world::WorldCapture,
     /// What the fields of the assets whose walkers keep them name
@@ -160,6 +224,17 @@ impl Capture {
         self.by_name
             .insert((AssetType::XModelMesh, r.name.clone()), self.meshes.len());
         self.meshes.push(r);
+    }
+    pub(crate) fn add_anim(&mut self, r: AnimRec) {
+        self.by_name
+            .insert((AssetType::XAnimParts, r.name.clone()), self.anims.len());
+        self.anims.push(r);
+    }
+    /// bo2mp: the animation called `name` (when the walk kept animations).
+    pub fn anim(&self, name: &str) -> Option<&AnimRec> {
+        self.by_name
+            .get(&(AssetType::XAnimParts, name.to_string()))
+            .map(|&i| &self.anims[i])
     }
     pub fn mesh(&self, name: &str) -> Option<&MeshRec> {
         self.by_name

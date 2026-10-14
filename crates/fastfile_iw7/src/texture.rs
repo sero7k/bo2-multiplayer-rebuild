@@ -296,7 +296,28 @@ pub fn name_hash(s: &str) -> u32 {
     s.bytes().fold(0u32, |h, c| (c | 0x20) as u32 ^ h.wrapping_mul(33))
 }
 
-const SAMPLER_BASES: [&str; 7] = ["colorMap", "normalMap", "specularMap", "emissiveMap", "detailMap", "detailNormalMap", "glossMap"];
+const SAMPLER_BASES: [&str; 20] = [
+    "colorMap",
+    "normalMap",
+    "specularMap",
+    "emissiveMap",
+    "detailMap",
+    "detailNormalMap",
+    "glossMap",
+    "alphaRevealMap",
+    "revealMap",
+    "alphaMap",
+    "occlusionMap",
+    "transRevealMap",
+    "translucencyMap",
+    "displacementMap",
+    "heightMap",
+    "cosineMap",
+    "specularGlossMap",
+    "thicknessMap",
+    "maskMap",
+    "flowMap",
+];
 
 /// A texture slot's name from its hash, for the names known so far.
 pub fn sampler_name(hash: u32) -> Option<&'static str> {

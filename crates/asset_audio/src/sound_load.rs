@@ -269,6 +269,10 @@ fn sound_sources(games: &GamesRoot, map: &Path) -> (Vec<SoundSource>, Vec<SoundS
         // bo2mp: Advanced Warfare's guns: their sounds, from its common_mp
         // (read by `fastfile_s1`, kept under the AW namespace).
         after_map.extend(aw_sound_source(games));
+        // bo2mp: Black Ops III's guns: their sounds, from its mp_common and
+        // its sound banks (read by `fastfile_t7`, kept under the BO3
+        // namespace).
+        after_map.extend(bo3_sound_source(games));
     }
     (before_map, after_map)
 }
@@ -293,6 +297,18 @@ fn aw_sound_source(games: &GamesRoot) -> Option<SoundSource> {
         namespace: AssetNamespace::S1,
         name: "common_mp (AW guns)",
         found: Ok(path),
+        merge: Merge::Missing,
+        absent: Absent::Skip,
+    })
+}
+
+/// bo2mp: Black Ops III's mp_common, its guns' sounds, when it is
+/// installed.
+fn bo3_sound_source(games: &GamesRoot) -> Option<SoundSource> {
+    Some(SoundSource {
+        namespace: AssetNamespace::T7,
+        name: "mp_common (BO3 guns)",
+        found: Ok(crate::bo3_mp_common(games)?),
         merge: Merge::Missing,
         absent: Absent::Skip,
     })
@@ -420,6 +436,7 @@ impl SoundSources {
             AssetNamespace::Iw6 => (crate::ghosts_weapon_sounds(path), ZoneSoundOrigin::AudioOnly),
             AssetNamespace::T4 => (crate::waw_weapon_sounds(path), ZoneSoundOrigin::AudioOnly),
             AssetNamespace::S1 => (crate::aw_weapon_sounds(path), ZoneSoundOrigin::AudioOnly),
+            AssetNamespace::T7 => (crate::bo3_weapon_sounds(path), ZoneSoundOrigin::AudioOnly),
             _ => ensure_zone_sound(path),
         };
         match catalog {

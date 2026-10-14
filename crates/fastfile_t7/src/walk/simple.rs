@@ -24,8 +24,15 @@ use crate::cursor::{ReadError, Result};
 use crate::stream::Stream;
 
 pub fn localize(s: &mut Stream, h: usize) -> Result<Option<String>> {
-    s.string(h)?;
-    s.string(h + 8)
+    let value = s.string(h)?;
+    let key = s.string(h + 8)?;
+    // bo2mp: kept with the animations (the guns' names).
+    if s.capture.keep_anims
+        && let (Some(k), Some(v)) = (&key, value)
+    {
+        s.capture.localize.push((k.clone(), v));
+    }
+    Ok(key)
 }
 
 /// A name and a `len + 1`-byte buffer (rawfile, scriptparsetree, ttf).

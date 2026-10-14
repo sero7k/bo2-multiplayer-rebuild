@@ -20,6 +20,7 @@ pub mod ncs;
 pub mod pak;
 pub mod ptr;
 pub mod scan;
+pub mod shared;
 pub mod sound;
 pub mod stream;
 pub mod ui_image;

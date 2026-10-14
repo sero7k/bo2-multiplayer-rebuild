@@ -128,6 +128,10 @@ pub struct StaticModel {
     pub axis: [[f32; 3]; 3],
     pub scale: f32,
     pub cull_dist: f32,
+    /// Where the model takes its light from (`GfxStaticModelInst`).
+    pub lighting_origin: [f32; 3],
+    /// Its index among the world's placed models.
+    pub index: u32,
 }
 
 /// A spawn point from the zone's spawn list.
@@ -225,6 +229,17 @@ pub struct Iw7Map {
     /// added).
     pub entities: String,
     pub lights: Vec<PrimaryLight>,
+    /// The `GfxLightMap`s: their primary (BC4 sun visibility), secondary
+    /// (BC6H, two pages stacked) and second-unorm (R8G8 dominant light
+    /// directions) image names.
+    pub light_maps: Vec<[String; 3]>,
+    /// The map's vision (`vision/<map>.vision`, else the first vision in
+    /// the zone): its name and text.
+    pub vision: Option<(String, String)>,
+    /// The reflection probes' cube array image (`*reflection_probe_array`)
+    /// and the probes' origins.
+    pub probe_image: Option<String>,
+    pub probe_origins: Vec<[f32; 3]>,
     /// The server triggers' hulls by `?<n>` (a volume's or trigger's
     /// `model`): each hull's midpoint and half size, about the entity's
     /// origin.
@@ -473,6 +488,16 @@ impl Iw7Map {
             .as_ref()
             .map(|(_, c)| c.model_surfs.iter().enumerate().map(|(i, m)| (m.name.as_str(), i)).collect())
             .unwrap_or_default();
+        // Model surfaces whose vertices are in the map zone itself (mp_riot's
+        // vista mountains, `ml/periph_*`), for those the shared streams lack.
+        let zone_surfs: HashMap<&str, usize> = map
+            .cap
+            .model_surfs
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| !m.name.starts_with(',') && m.surfs.iter().any(|s| s.verts.is_some()))
+            .map(|(i, m)| (m.name.as_str(), i))
+            .collect();
         let mut model_index: HashMap<String, Option<usize>> = HashMap::new();
         let mut no_mesh = Vec::new();
         if let Some(at) = g.smodels {
@@ -485,24 +510,28 @@ impl Iw7Map {
                     Some(m) => *m,
                     None => {
                         let built = (|| {
-                            let (sv, scap) = shared.as_ref()?;
                             let x = map.cap.xmodels.iter().find(|x| x.name == name)?;
-                            // The LODs whose surfaces are in the shared streams: the
-                            // first is drawn, the last is the collision's.
-                            let found: Vec<&walk::LodRec> = x
-                                .lods
-                                .iter()
-                                .filter(|l| l.numsurfs > 0 && l.surfs.is_some_and(|s| surfs_by_name.contains_key(bare(map.cap.name_of(s)))))
-                                .collect();
+                            // Where a LOD's surfaces are: the shared streams, else
+                            // the zone.
+                            let source = |l: &walk::LodRec| -> Option<(&walk::ModelSurfsRec, &[u8])> {
+                                let n = bare(map.cap.name_of(l.surfs?));
+                                if let (Some((sv, scap)), Some(&i)) = (shared.as_ref(), surfs_by_name.get(n)) {
+                                    return Some((&scap.model_surfs[i], sv.data.as_slice()));
+                                }
+                                zone_surfs.get(n).map(|&i| (&map.cap.model_surfs[i], image.as_slice()))
+                            };
+                            // The LODs whose surfaces were found: the first is
+                            // drawn, the last is the collision's.
+                            let found: Vec<&walk::LodRec> = x.lods.iter().filter(|l| l.numsurfs > 0 && source(l).is_some()).collect();
                             let lod = *found.first()?;
                             let mut read = |out: &mut Iw7Map, l: &walk::LodRec| -> Option<Vec<ModelSurface>> {
-                                let ms = &scap.model_surfs[surfs_by_name[bare(map.cap.name_of(l.surfs?))]];
+                                let (ms, data) = source(l)?;
                                 let mut surfaces = Vec::new();
                                 for (k, s) in ms.surfs.iter().enumerate() {
                                     let (Some(vs), Some(ts)) = (s.verts, s.tris) else { continue };
-                                    let verts: Vec<[u8; 32]> = vs.get(&sv.data).chunks_exact(32).map(|c| c.try_into().unwrap()).collect();
+                                    let verts: Vec<[u8; 32]> = vs.get(data).chunks_exact(32).map(|c| c.try_into().unwrap()).collect();
                                     let tris: Vec<[u16; 3]> =
-                                        ts.get(&sv.data).chunks_exact(6).map(|c| [u16_at(c, 0), u16_at(c, 2), u16_at(c, 4)]).collect();
+                                        ts.get(data).chunks_exact(6).map(|c| [u16_at(c, 0), u16_at(c, 2), u16_at(c, 4)]).collect();
                                     let material = material_of(out, &map.cap, x.materials.get(usize::from(l.surf_index) + k).copied().flatten());
                                     surfaces.push(ModelSurface { verts, tris, material });
                                 }
@@ -524,7 +553,16 @@ impl Iw7Map {
                             Some(out.models.len() - 1)
                         })();
                         if built.is_none() && no_mesh.len() < 8 {
-                            no_mesh.push(name.clone());
+                            // Why: no XModel of that name, or none of its
+                            // LODs' surfaces in the shared streams.
+                            let why = match map.cap.xmodels.iter().find(|x| x.name == name) {
+                                None => "no xmodel".to_owned(),
+                                Some(x) => format!(
+                                    "lods {:?}",
+                                    x.lods.iter().map(|l| (l.numsurfs, l.surfs.map(|s| bare(map.cap.name_of(s)).to_owned()))).collect::<Vec<_>>()
+                                ),
+                            };
+                            no_mesh.push(format!("{name} ({why})"));
                         }
                         model_index.insert(name.clone(), built);
                         built
@@ -532,12 +570,20 @@ impl Iw7Map {
                 };
                 let Some(model) = model else { continue };
                 let axis = [v3(d, D::placement__axis), v3(d, D::placement__axis + 12), v3(d, D::placement__axis + 24)];
+                let origin = v3(d, D::placement__origin);
+                let lighting_origin = g
+                    .smodel_insts
+                    .map(|at| v3(image, at + L::GfxStaticModelInst::SIZE * i + L::GfxStaticModelInst::lightingOrigin))
+                    .filter(|p| p.iter().all(|c| c.is_finite()))
+                    .unwrap_or(origin);
                 out.static_models.push(StaticModel {
                     model,
-                    origin: v3(d, D::placement__origin),
+                    origin,
                     axis,
                     scale: f32_at(d, D::placement__scale),
                     cull_dist: f32::from(u16_at(d, D::cullDist)),
+                    lighting_origin,
+                    index: i as u32,
                 });
             }
         }
@@ -553,6 +599,46 @@ impl Iw7Map {
             g.smodel_count,
             out.models.len(),
             if no_mesh.is_empty() { String::new() } else { format!("; no mesh for {}", no_mesh.join(", ")) },
+        ));
+
+        // The baked light: each `GfxLightMap`'s images by name.
+        // (A reference that named no slot, mp_junk's and mp_desert's among
+        // them: the zone's own GfxLightMap of that index; a map zone holds
+        // its world's light maps in order.)
+        for (j, id) in g.light_maps.iter().enumerate() {
+            let rec = match id {
+                Some(id) => map.cap.light_maps.get(id.index as usize),
+                None => map.cap.light_maps.get(j),
+            };
+            if let Some(l) = rec {
+                out.light_maps.push(l.textures.map(|t| t.map(|t| bare(map.cap.name_of(t)).to_owned()).unwrap_or_default()));
+            }
+        }
+        // (A world whose light map list is itself a reference: the zone's
+        // light maps, in order.)
+        if out.light_maps.is_empty() {
+            for l in &map.cap.light_maps {
+                out.light_maps.push(l.textures.map(|t| t.map(|t| bare(map.cap.name_of(t)).to_owned()).unwrap_or_default()));
+            }
+        }
+        out.probe_image = g.images.iter().find(|(k, _)| *k == "reflectionProbeArray").map(|(_, id)| bare(map.cap.name_of(*id)).to_owned());
+        out.probe_origins = g.probe_origins.clone();
+        // The vision: the map's own, else the first.
+        let own = format!("vision/{}.vision", out.name);
+        let vision = map
+            .cap
+            .raw_files
+            .iter()
+            .find(|r| r.name.eq_ignore_ascii_case(&own))
+            .or_else(|| map.cap.raw_files.iter().find(|r| r.name.starts_with("vision/") && r.name.contains(out.name.as_str())))
+            .or_else(|| map.cap.raw_files.iter().find(|r| r.name.starts_with("vision/")));
+        out.vision = vision
+            .and_then(|r| Some((r.name.clone(), String::from_utf8_lossy(&raw_file(&map.cap, image, &r.name)?).into_owned())));
+        out.report.push(format!(
+            "light: {} light maps {:?}, vision {}",
+            out.light_maps.len(),
+            out.light_maps.iter().map(|l| l[1].as_str()).collect::<Vec<_>>(),
+            out.vision.as_ref().map_or("none", |v| v.0.as_str())
         ));
 
         // Lights.
@@ -727,6 +813,17 @@ fn zombies_starts(text: &str) -> Vec<(String, String)> {
         }
     }
     out
+}
+
+/// A raw file of a walked zone by name (case-insensitive), inflated when
+/// stored compressed (zlib).
+pub fn raw_file(cap: &Capture, image: &[u8], name: &str) -> Option<Vec<u8>> {
+    let r = cap.raw_files.iter().find(|r| r.name.eq_ignore_ascii_case(name))?;
+    let data = r.data?.get(image);
+    if r.compressed_len == 0 {
+        return Some(data.get(..r.len as usize).unwrap_or(data).to_vec());
+    }
+    miniz_oxide::inflate::decompress_to_vec_zlib(data).ok()
 }
 
 /// An `imagefile` range: from the pak, or from a copy of just that range

@@ -233,7 +233,7 @@ impl XAnimCatalog {
     }
 
     pub fn collide_name_count(&self) -> usize {
-        let mut seen: std::collections::HashMap<&str, u8> = std::collections::HashMap::new();
+        let mut seen: std::collections::HashMap<&str, u16> = std::collections::HashMap::new();
         for k in &self.order {
             *seen.entry(k.name.as_str()).or_insert(0) |= match k.namespace {
                 AssetNamespace::Iw4 => 1,
@@ -244,6 +244,7 @@ impl XAnimCatalog {
                 AssetNamespace::T4 => 32,
                 AssetNamespace::Iw3 => 64,
                 AssetNamespace::S1 => 128,
+                AssetNamespace::T7 => 256,
             };
         }
         seen.values().filter(|bits| bits.count_ones() >= 2).count()

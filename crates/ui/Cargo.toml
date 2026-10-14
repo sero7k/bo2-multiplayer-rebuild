@@ -16,6 +16,7 @@ asset_material.workspace = true
 asset_transport.workspace = true
 fastfile_iw6.workspace = true # bo2mp: Ghosts' Create-a-Class pictures
 fastfile_s1.workspace = true
+fastfile_t7.workspace = true # bo2mp: Black Ops III's weapon icons
 fastfile_iw7.workspace = true # bo2mp: Infinite Warfare's map pictures
 assets.workspace = true
 bcdec_rs.workspace = true # bo2zm: popup blur of menu pictures

@@ -289,6 +289,51 @@ pub const AW: &[GuestGun] = &[
 /// The first statstable index of Advanced Warfare's guns.
 pub const AW_FIRST_INDEX: i32 = 900;
 
+const fn t7(gun: &'static str, name: &'static str, group: &'static str, slot: &'static str) -> GuestGun {
+    GuestGun { game: "t7", gun, name, group, slot, attachments: "", icon: "" }
+}
+
+/// bo2mp: Call of Duty: Black Ops III's multiplayer guns (`<gun>_mp` in its
+/// core_common; Create-a-Class and the scripts call it `bo3_<gun>`),
+/// grouped by their class. A guest gun is its base gun (Black Ops III builds
+/// attachments onto the gun at run time). Its statstable rows are numbered
+/// from `BO3_FIRST_INDEX`.
+pub const BO3: &[GuestGun] = &[
+    t7("ar_standard", "KN-44", AR, P),
+    t7("ar_accurate", "ICR-1", AR, P),
+    t7("ar_fastburst", "XR-2", AR, P),
+    t7("ar_cqb", "HVK-30", AR, P),
+    t7("ar_damage", "Man-O-War", AR, P),
+    t7("ar_marksman", "Sheiva", AR, P),
+    t7("ar_longburst", "M8A7", AR, P),
+    t7("smg_standard", "Kuda", SMG, P),
+    t7("smg_versatile", "VMP", SMG, P),
+    t7("smg_capacity", "Weevil", SMG, P),
+    t7("smg_fastfire", "Vesper", SMG, P),
+    t7("smg_burst", "Pharo", SMG, P),
+    t7("smg_longrange", "Razorback", SMG, P),
+    t7("lmg_light", "BRM", LMG, P),
+    t7("lmg_cqb", "Dingo", LMG, P),
+    t7("lmg_slowfire", "Gorgon", LMG, P),
+    t7("lmg_heavy", "48 Dredge", LMG, P),
+    t7("sniper_fastbolt", "Locus", SNIPER, P),
+    t7("sniper_fastsemi", "Drakon", SNIPER, P),
+    t7("sniper_powerbolt", "SVG-100", SNIPER, P),
+    t7("sniper_chargeshot", "P-06", SNIPER, P),
+    t7("shotgun_pump", "KRM-262", CQB, P),
+    t7("shotgun_semiauto", "205 Brecci", CQB, P),
+    t7("shotgun_fullauto", "Haymaker 12", CQB, P),
+    t7("shotgun_precision", "Argus", CQB, P),
+    t7("pistol_standard", "MR6", PISTOL, S),
+    t7("pistol_burst", "RK5", PISTOL, S),
+    t7("pistol_fullauto", "L-CAR 9", PISTOL, S),
+    t7("launcher_standard", "XM-53", LAUNCHER, S),
+    t7("launcher_lockonly", "BlackCell", LAUNCHER, S),
+];
+
+/// The first statstable index of Black Ops III's guns.
+pub const BO3_FIRST_INDEX: i32 = 1000;
+
 const fn w3(
     gun: &'static str,
     name: &'static str,
@@ -529,6 +574,7 @@ pub fn prefix(game: &str) -> &'static str {
         "t4" => "waw_",
         "iw3" => "cod4_",
         "s1" => "aw_",
+        "t7" => "bo3_",
         _ => "",
     }
 }
@@ -540,7 +586,7 @@ pub fn is_guest_name(name: &str) -> bool {
     GAMES.iter().any(|g| name.starts_with(prefix(g)))
 }
 
-const GAMES: [&str; 7] = ["t5", "iw4", "iw5", "iw6", "t4", "iw3", "s1"];
+const GAMES: [&str; 8] = ["t5", "iw4", "iw5", "iw6", "t4", "iw3", "s1", "t7"];
 static AVAILABLE: AtomicU8 = AtomicU8::new(0);
 
 fn bit(game: &str) -> u8 {
@@ -563,7 +609,7 @@ pub fn available(game: &str) -> bool {
 
 /// Every guest gun, available or not, in table order.
 pub fn all() -> impl Iterator<Item = &'static GuestGun> {
-    BO1.iter().chain(MW2.iter()).chain(GHOSTS.iter()).chain(MW3.iter()).chain(WAW.iter()).chain(COD4.iter()).chain(AW.iter())
+    BO1.iter().chain(MW2.iter()).chain(GHOSTS.iter()).chain(MW3.iter()).chain(WAW.iter()).chain(COD4.iter()).chain(AW.iter()).chain(BO3.iter())
 }
 
 /// The statstable index of the guest gun at `position` in `all()`: a
@@ -576,6 +622,7 @@ fn stats_index(position: usize, gun: &GuestGun) -> i32 {
         (COD4, COD4_FIRST_INDEX),
         (GHOSTS, GHOSTS_FIRST_INDEX),
         (AW, AW_FIRST_INDEX),
+        (BO3, BO3_FIRST_INDEX),
     ];
     for (roster, first) in own {
         if let Some(k) = roster.iter().position(|g| g.game == gun.game && g.gun == gun.gun) {
@@ -606,6 +653,7 @@ impl GuestGun {
             "t4" => "Call of Duty: World at War",
             "iw3" => "Call of Duty 4",
             "s1" => "Call of Duty: Advanced Warfare",
+            "t7" => "Call of Duty: Black Ops III",
             _ => "another game",
         }
     }
@@ -637,6 +685,9 @@ impl GuestGun {
             "iw6" => format!("iw6:{}|weapon_{gun}_360|hud_icon_{gun}", self.icon),
             // (AW's are common_mp's `weapon_<gun>` (streamed), then the kill icon.)
             "s1" => format!("s1:weapon_{gun}|hud_icon_{gun}"),
+            // (Black Ops III's are its weapon icons in core_common: the
+            // pick-up icon, then the kill icon.)
+            "t7" => format!("t7:t7_icon_weapon_{gun}_pu|t7_icon_weapon_{gun}_kf"),
             _ => {
                 let mut p = format!("{}:menu_mp_weapons_{gun}", self.game);
                 if !self.icon.is_empty() {
@@ -657,7 +708,7 @@ impl GuestGun {
 // one kept, `family_of_reference`).
 
 /// Which game's copy of a shared gun is listed (Black Ops II's always).
-const PRIORITY: [&str; 7] = ["iw4", "iw5", "t5", "iw6", "iw3", "t4", "s1"];
+const PRIORITY: [&str; 8] = ["iw4", "iw5", "t5", "iw6", "iw3", "t4", "s1", "t7"];
 
 /// Guns known by another name in another game (name without its game's
 /// `iw5_` prefix -> the family). (game, name, family); game "" = any.
@@ -838,6 +889,7 @@ const NO_ZOMBIES: &[(&str, &str)] = &[
     ("iw4", "javelin"),
     ("iw5", "stinger"),
     ("s1", "stingerm7"),
+    ("t7", "launcher_lockonly"),
 ];
 
 /// The family of a Black Ops II Zombies weapon's script name
@@ -1131,10 +1183,11 @@ pub struct ZmUpgrade {
 /// Pack-a-Punch camo: Black Ops' upgrades wore its own camo option
 /// (its models are the plain gun's; Black Ops II's camo stands in for it);
 /// World at War's wore none; the later games' upgrades carry their look in
-/// their own models.
+/// their own models, but Black Ops III's (its Pack-a-Punch camo is a camo
+/// asset over the plain gun's models, not read: Black Ops II's stands in).
 #[must_use]
 pub fn own_upgrade_wears_bo2_camo(game: &str) -> bool {
-    game == "t5"
+    matches!(game, "t5" | "t7")
 }
 
 static ZM_UPGRADES: std::sync::RwLock<Vec<ZmUpgrade>> = std::sync::RwLock::new(Vec::new());

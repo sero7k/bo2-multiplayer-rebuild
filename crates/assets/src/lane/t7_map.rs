@@ -57,7 +57,7 @@ fn iw3_unit_vec(v: [f32; 3]) -> u32 {
 }
 
 /// Black Ops II's packed unit vector: signed 10:10:10 over 511.
-fn t6_unit_vec(v: [f32; 3]) -> u32 {
+pub(super) fn t6_unit_vec(v: [f32; 3]) -> u32 {
     let mut out = 0u32;
     for (k, c) in v.iter().enumerate() {
         let s = (c.clamp(-1.0, 1.0) * 511.0).round() as i32;
@@ -67,7 +67,7 @@ fn t6_unit_vec(v: [f32; 3]) -> u32 {
 }
 
 /// IEEE half from f32 (round to nearest; UVs only, so no NaN care).
-fn f16_bits(x: f32) -> u16 {
+pub(super) fn f16_bits(x: f32) -> u16 {
     let b = x.to_bits();
     let sign = ((b >> 16) & 0x8000) as u16;
     let exp = ((b >> 23) & 0xff) as i32 - 127 + 15;
@@ -131,7 +131,7 @@ fn hidden_kind(material: &str, technique_set: &str) -> Option<&'static str> {
 /// and its own name (Black Ops III's technique names are not Black Ops
 /// II's: blended and alpha-tested ones are told by their words), single
 /// layered, drawn double-sided for models.
-fn t7_draw(material: &str, technique_set: &str, model: bool) -> T6Draw {
+pub(super) fn t7_draw(material: &str, technique_set: &str, model: bool) -> T6Draw {
     let mut draw = T6Draw::from_technique_set(technique_set, 0, None);
     draw.layered = false;
     draw.layers = [0, 0];

@@ -52,6 +52,7 @@ pub fn game_label(ns: AssetNamespace) -> &'static str {
         AssetNamespace::T4 => "World at War",
         AssetNamespace::Iw3 => "Call of Duty 4",
         AssetNamespace::S1 => "Advanced Warfare",
+        AssetNamespace::T7 => "Black Ops III",
     }
 }
 

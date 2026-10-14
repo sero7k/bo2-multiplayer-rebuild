@@ -392,6 +392,15 @@ pub struct GfxWorldRec {
     pub sky_surfs: Vec<Vec<i32>>,
     pub surface_bounds: Option<usize>,
     pub smodel_insts: Option<usize>,
+    /// IW7: per placed model, its baked vertex lighting
+    /// (`GfxStaticModelVertexLighting`, 20 bytes a vertex) when inline.
+    pub smodel_lighting: Vec<Option<Span>>,
+    /// IW7: the lightmap reindex table (`GfxWorldLightmapReindexDataElement`:
+    /// index, x, y, width, height) and the packed pages' sizes.
+    pub lightmap_reindex: Option<Span>,
+    /// IW7: the reflection probes' origins, in probe order.
+    pub probe_origins: Vec<[f32; 3]>,
+    pub packed_lightmaps: Option<Span>,
     /// IW7: images the world names (outdoor, ies lookup, probes).
     pub images: Vec<(&'static str, super::AssetId)>,
 }

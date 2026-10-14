@@ -7,6 +7,8 @@ mod sound_load_iw5;
 // bo2mp: Ghosts' weapon sounds (its guest guns).
 mod sound_load_iw6;
 mod sound_load_s1;
+// bo2mp: Black Ops III's weapon sounds (its guest guns).
+mod sound_load_t7;
 // bo2mp: World at War's weapon sounds (its guest guns).
 mod sound_load_t4;
 mod sound_load_t5;
@@ -28,6 +30,7 @@ pub use sound_load::*;
 pub use sound_load_iw5::*;
 pub use sound_load_iw6::*;
 pub use sound_load_s1::*;
+pub use sound_load_t7::*;
 pub use sound_load_t4::*;
 pub use sound_load_t5::*;
 pub use sound_load_t6::*;
