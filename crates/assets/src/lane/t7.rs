@@ -62,6 +62,8 @@ const SPECULAR_MAP_HASH: u32 = 0x34ec_ccb3;
 /// Black Ops III's specular colour and gloss maps (`i_..._s`, `i_..._g`).
 const T7_SPECULAR_HASH: u32 = 0xec44_3804;
 const T7_GLOSS_HASH: u32 = 0x6d0a_6c98;
+/// Black Ops III's emissive map (a lit-emissive tritium dot's picture).
+const T7_EMISSIVE_HASH: u32 = 0x3461_4347;
 
 /// The largest level kept of a gun's pictures (first person), and of the
 /// third-person models' (`BO2MP_BO3_TEXTURE=<size>` changes the first).
@@ -302,6 +304,49 @@ fn t7_quats_to_t6(r: &mut asset_t6::XAnimRef) -> Option<()> {
         }
     }
     Some(())
+}
+
+/// The colour (linear) of a material with no picture to colour it: see
+/// `Builder::stand_in_colour`. `placeholder` is its colour slot's
+/// placeholder (`,$black_color`, `,$white_diffuse`).
+fn solid_colour(name: &str, placeholder: &str, consts: Option<[f32; 8]>) -> [f32; 3] {
+    let tint = consts.map(|c| [c[0], c[1], c[2]]);
+    let spec = consts.map(|c| [c[4], c[5], c[6]]);
+    let lit = |c: &[f32; 3]| c.iter().all(|x| x.is_finite()) && c.iter().any(|&x| x > 0.004);
+    let white = |c: &[f32; 3]| c.iter().all(|&x| x > 0.99);
+    if placeholder.contains("black")
+        && let Some(s) = spec.filter(lit)
+    {
+        return s;
+    }
+    if let Some(t) = tint.filter(|t| lit(t) && !white(t)) {
+        return t;
+    }
+    // (A tritium dot without constants: its colour by its name.)
+    for (word, rgb) in [
+        ("red", [0.9, 0.02, 0.02]),
+        ("grn", [0.05, 0.9, 0.1]),
+        ("green", [0.05, 0.9, 0.1]),
+        ("ylw", [0.9, 0.75, 0.05]),
+        ("yellow", [0.9, 0.75, 0.05]),
+        ("tritium", [0.05, 0.9, 0.1]),
+    ] {
+        if name.split(['_', '/']).any(|w| w == word) {
+            return rgb;
+        }
+    }
+    [0.03, 0.03, 0.03]
+}
+
+/// One colour as a 4x4 sRGB picture (DXGI R8G8B8A8_UNORM_SRGB).
+fn solid_levels(rgb: [f32; 3]) -> ImageLevels {
+    let srgb = |x: f32| {
+        let x = x.clamp(0.0, 1.0);
+        let s = if x <= 0.003_130_8 { 12.92 * x } else { 1.055 * x.powf(1.0 / 2.4) - 0.055 };
+        (s * 255.0).round() as u8
+    };
+    let px = [srgb(rgb[0]), srgb(rgb[1]), srgb(rgb[2]), 255];
+    ImageLevels { format: 29, width: 4, height: 4, levels: 1, data: px.repeat(16), part: None }
 }
 
 /// Black Ops III's animation slots -> Black Ops II's (`szXAnims`, the slots
@@ -595,9 +640,11 @@ impl<'a> Builder<'a> {
         }
         let gloss = m.textures.iter().find(|(h, n)| *h == T7_GLOSS_HASH && real(n)).map(|(_, n)| n.clone());
         let mut textures = Vec::new();
-        if let Some(colour) = picks.get(&Kind::Colour).cloned()
-            && let Some(slot) = self.link_image(colour.clone(), max, TS_COLOR_MAP, |b| b.levels(&colour, max))
-        {
+        let colour_slot = match picks.get(&Kind::Colour).cloned() {
+            Some(colour) => self.link_image(colour.clone(), max, TS_COLOR_MAP, |b| b.levels(&colour, max)),
+            None => self.stand_in_colour(m, &technique, picks.get(&Kind::Specular).cloned(), max),
+        };
+        if let Some(slot) = colour_slot {
             textures.push(MaterialTextureBinding {
                 name_hash: COLOR_MAP_HASH,
                 name_start: 0,
@@ -667,6 +714,56 @@ impl<'a> Builder<'a> {
         });
         self.materials.insert((name.to_owned(), max), Some(index));
         Some(index)
+    }
+
+    /// The colour a material without a colour map of its own is drawn with
+    /// (Black Ops III draws many gun parts from their specular colour, or
+    /// from constants alone: a bullet's brass, a tritium dot):
+    ///
+    /// - its specular colour map (`_s`; metal parts' colour is their
+    ///   reflectance, and BO2 draws a gun's metal from its colour map);
+    /// - else its emissive picture (a lit-emissive tritium dot's);
+    /// - else one colour from its constants: the specular colour where the
+    ///   colour slot is Black Ops III's black placeholder (metals: brass),
+    ///   else its tint (a tritium dot's red), else a dark grey.
+    ///
+    /// `None` for what Black Ops II's gun pass should not draw solid: a
+    /// paint-shop overlay, a scope's stencil or glass, a reticle, a
+    /// thermal screen, a 3D-UI panel.
+    fn stand_in_colour(
+        &mut self,
+        m: &fastfile_t7::walk::capture::MaterialRec,
+        technique: &str,
+        specular: Option<String>,
+        max: u32,
+    ) -> Option<usize> {
+        let t = technique.trim_start_matches(',');
+        let skip = ["paintshop", "stencil", "reticle", "thermal", "ui_3d", "transparent", "glass"];
+        if skip.iter().any(|w| t.contains(w) || m.name.contains(w)) {
+            return None;
+        }
+        if let Some(spec) = specular
+            && let Some(slot) = self.link_image(spec.clone(), max, TS_COLOR_MAP, |b| b.levels(&spec, max))
+        {
+            return Some(slot);
+        }
+        let real = |n: &str| !n.starts_with(',') && !n.starts_with('$');
+        if t.contains("emissive")
+            && let Some((_, glow)) = m.textures.iter().find(|(h, n)| *h == T7_EMISSIVE_HASH && real(n))
+        {
+            let glow = glow.clone();
+            if let Some(slot) = self.link_image(glow.clone(), max, TS_COLOR_MAP, |b| b.levels(&glow, max)) {
+                return Some(slot);
+            }
+        }
+        let placeholder = m
+            .textures
+            .iter()
+            .find(|(h, _)| *h == COLOR_MAP_HASH)
+            .map_or("", |(_, n)| n.as_str());
+        let rgb = solid_colour(&m.name, placeholder, m.colour_consts);
+        let key = format!("$solid:{:.3},{:.3},{:.3}", rgb[0], rgb[1], rgb[2]);
+        self.link_image(key, 4, TS_COLOR_MAP, |_| Ok(solid_levels(rgb)))
     }
 
     /// An animation in Black Ops II's captured form; `None` when its bone
@@ -1093,6 +1190,20 @@ mod tests {
         assert_eq!(t7_fire_type(2, 3), 3);
         assert_eq!(t7_fire_type(3, 4), 4);
         assert_eq!(t7_fire_type(2, 9), 5);
+    }
+
+    #[test]
+    fn colourless_materials_get_a_colour() {
+        // A bullet case: black placeholder, brass specular.
+        let brass = solid_colour("mc/mtl_wpn_t7_bullet_case", ",$black_color", Some([0.0, 0.0, 0.0, 0.0, 0.591, 0.527, 0.352, 1.0]));
+        assert_eq!(brass, [0.591, 0.527, 0.352]);
+        // A tritium dot: its tint.
+        let red = solid_colour("mc/mtl_wpn_t7_sniper_locus_tritium_red", ",$white_diffuse", Some([0.905, 0.009, 0.009, 0.0, 0.5, 0.5, 0.5, 1.0]));
+        assert_eq!(red, [0.905, 0.009, 0.009]);
+        // White tint, no constants of use: by name, else dark.
+        assert_eq!(solid_colour("mc/mtl_wpn_t7_xr2_tritium_red", ",$white_diffuse", None), [0.9, 0.02, 0.02]);
+        assert_eq!(solid_colour("mc/mtl_x_base", "", Some([1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0])), [0.03, 0.03, 0.03]);
+        assert_eq!(solid_levels([1.0, 0.0, 0.0]).data[..4], [255, 0, 0, 255]);
     }
 
     #[test]

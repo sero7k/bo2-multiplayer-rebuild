@@ -121,6 +121,7 @@ pub fn material(s: &mut Stream, h: usize) -> Result<Option<String>> {
     skip.extend((0..CONSTANT_BUFFER_SLOTS).map(|i| CONSTANT_BUFFERS + 8 * i));
     s.no_loads(h, AssetType::Material.header_size(), &skip)?;
     let name = s.string(h)?;
+    let mut colour_consts = None;
     for i in 0..CONSTANT_BUFFER_SLOTS {
         if let Some(c) = s.array(h + CONSTANT_BUFFERS + 8 * i, CONSTANT_BUFFER, 15)? {
             s.no_loads(c, CONSTANT_BUFFER, &[0x28, 0x38])?;
@@ -128,12 +129,24 @@ pub fn material(s: &mut Stream, h: usize) -> Result<Option<String>> {
             s.push(PHYSICAL);
             let r = s.array(c + 0x28, size, 255);
             s.pop();
-            r?;
-            s.string(c + 0x38)?;
+            let data = r?;
+            let buffer = s.string(c + 0x38)?;
+            if colour_consts.is_none()
+                && size >= 192
+                && buffer.as_deref() == Some("$Globals")
+                && let Some(at) = data
+            {
+                let mut v = [0f32; 8];
+                for (k, x) in v.iter_mut().enumerate() {
+                    *x = s.f32_at(at + 4 * (40 + k))?;
+                }
+                colour_consts = Some(v);
+            }
         }
     }
     let mut rec = MaterialRec {
         name: name.clone().unwrap_or_else(String::new),
+        colour_consts,
         ..Default::default()
     };
     rec.techset = s.asset_named(AssetType::TechniqueSet, h + 0x278)?;

@@ -169,6 +169,12 @@ pub struct MaterialRec {
     pub techset: Option<String>,
     /// The texture table: (name hash, image).
     pub textures: Vec<(u32, String)>,
+    /// bo2mp: floats 40..48 of the material's first `$Globals` constant
+    /// buffer of at least 192 bytes: its colour tint (40..43) and its
+    /// specular colour (44..47), what a material without a colour map is
+    /// drawn with (measured on core_common's gun materials: a bullet's
+    /// brass, a tritium dot's red; 1, 1, 1 where a map carries the colour).
+    pub colour_consts: Option<[f32; 8]>,
 }
 
 /// A `GfxImage` loaded in the zone.
