@@ -13,6 +13,7 @@
 //! What is read is kept in a `Capture`: names of every asset, and the
 //! models, materials, images, animations and weapons phase 2 uses.
 
+mod anim;
 mod capture;
 mod material;
 mod misc;
@@ -495,6 +496,7 @@ impl<'a> Walker<'a> {
             T::XAnimProceduralBones => physics::procedural_bones(self, h),
             T::Weapon => weapon::weapon(self, h),
             T::AnimPackage => weapon::anim_package(self, h),
+            T::XAnimParts => anim::xanim(self, h),
             T::Attachment => weapon::attachment(self, h),
             T::Vfx => vfx::vfx(self, h),
             T::Scriptable => scriptable::scriptable(self, h),
