@@ -47,7 +47,36 @@ fn main() {
                 .collect();
             shaders(&zone, &model_sets, n);
         }
+        // Any technique set by name (`PROBE_SETS=l_sm_r0c0n0s0,...`): the
+        // placed models' and the guns' sets live in common_mp.
+        if let Ok(names) = std::env::var("PROBE_SETS") {
+            for a in &zone.assets {
+                if let iw3::zone::Asset::TechniqueSet(ts) = a
+                    && names.split(',').any(|n| ts.name.trim_start_matches(',') == n)
+                {
+                    dump_set(ts);
+                }
+            }
+        }
+        if let Some(com) = zone.com_world() {
+            for (i, l) in com.primary_lights.iter().enumerate().take(3) {
+                println!("primary light {i}: kind {} colour {:?} dir {:?} radius {}", l.kind, l.color, l.dir, l.radius);
+            }
+        }
         println!("reflection probes: {}", world.reflection_probes.len());
+        for p in world.reflection_probes.iter().take(2) {
+            if let Some(img) = p.image.and_then(|i| zone.image(i)) {
+                println!(
+                    "  probe {:?}: {} {:?} {}x{} {:?}",
+                    p.origin,
+                    img.name,
+                    img.map_type,
+                    img.width,
+                    img.height,
+                    img.load_def.as_ref().map(|d| (d.format, d.level_count, d.dimensions, d.data.len()))
+                );
+            }
+        }
         for a in &zone.assets {
             if let iw3::zone::Asset::RawFile(r) = a
                 && (r.name.contains("vision") || r.name.contains("createart"))
@@ -251,6 +280,12 @@ fn shaders(zone: &iw3::zone::Zone, materials: &[iw3::zone::AssetId], n: usize) {
         if !done.insert(ts.name.clone()) {
             continue;
         }
+        dump_set(ts);
+    }
+}
+
+fn dump_set(ts: &iw3::zone::TechniqueSet) {
+    {
         for t in [7usize, 8, 9] {
             let Some(Some(tech)) = ts.techniques.get(t) else { continue };
             for pass in &tech.passes {
