@@ -221,6 +221,88 @@ pub fn bo2_player_anim_types(
     }
 }
 
+/// bo2mp: the most rounds a guest gun carries on a Zombies map, past its
+/// magazine (Black Ops II's RPD: 400).
+const ZM_GUEST_MAX_RESERVE: i32 = 400;
+
+/// bo2mp: other games' guns on a Zombies map (the Mystery Box's custom
+/// guns) carry Zombies' proportions instead of multiplayer's. Black Ops
+/// II's Zombies guns are its multiplayer guns retuned: more damage a
+/// bullet and more magazines in reserve. Each guest gun takes the same
+/// retuning, measured on this map: the median, over the guns the map's
+/// own Zombies weapons share a family with (its `ak74u_zm` and Black Ops'
+/// `bo1_ak74u_mp`), of Zombies' damage over the guest's (bullet guns), and
+/// of the Zombies gun's reserve in magazines. With no such pair the gun's
+/// damage stays and its reserve is 8 magazines. A gun arrives full (its
+/// start ammo is its reserve), as a Zombies gun from the box does. Returns
+/// the log line.
+pub fn zombies_guest_proportions(combat: &mut [WeaponCombatFacts], weapons: &WeaponRegistry) -> String {
+    use weapon_iw4::WEAPTYPE_BULLET;
+    let guest = |i: u32| weapons.namespace_of(i).is_some_and(|ns| ns != asset_core::AssetNamespace::T6);
+    let zm: std::collections::HashMap<String, usize> = (1..combat.len() as u32)
+        .filter(|&i| weapons.namespace_of(i) == Some(asset_core::AssetNamespace::T6))
+        .filter_map(|i| {
+            let name = weapons.script_name_of(i).to_ascii_lowercase();
+            let stem = name.strip_suffix("_mp").unwrap_or(&name);
+            (stem.ends_with("_zm") && !stem.contains("upgraded") && !stem.contains('+'))
+                .then(|| (bo2_profile::guest::family_of_zm_weapon(stem), i as usize))
+        })
+        .collect();
+    let (mut damage, mut mags) = (Vec::new(), Vec::new());
+    let mut pairs = Vec::new();
+    for i in 1..combat.len() as u32 {
+        let name = weapons.script_name_of(i);
+        if !guest(i) || name.contains('+') || !bo2_profile::guest::is_guest_name(&name) {
+            continue;
+        }
+        let family = bo2_profile::guest::family_of_reference(name.strip_suffix("_mp").unwrap_or(&name));
+        let Some(&z) = zm.get(&family) else { continue };
+        let (g, z) = (&combat[i as usize], &combat[z]);
+        if !g.is_usable() || !z.is_usable() || g.weap_type != WEAPTYPE_BULLET || z.weap_type != WEAPTYPE_BULLET {
+            continue;
+        }
+        if g.damage > 0 && z.damage > 0 {
+            damage.push(z.damage as f32 / g.damage as f32);
+        }
+        if z.clip_size > 0 && z.max_ammo > 0 {
+            mags.push(z.max_ammo as f32 / z.clip_size as f32);
+        }
+        pairs.push(name);
+    }
+    let median = |v: &mut Vec<f32>| {
+        v.sort_by(f32::total_cmp);
+        v.get(v.len() / 2).copied()
+    };
+    let damage_scale = median(&mut damage).map_or(1.0, |r| r.clamp(1.0, 6.0));
+    let reserve_mags = median(&mut mags).map_or(8.0, |m| m.clamp(3.0, 15.0));
+    let mut changed = 0;
+    for i in 1..combat.len() as u32 {
+        if !guest(i) || !combat[i as usize].is_usable() {
+            continue;
+        }
+        let f = &mut combat[i as usize];
+        if f.weap_type == WEAPTYPE_BULLET && f.damage > 0 && damage_scale != 1.0 {
+            f.damage = (f.damage as f32 * damage_scale).round() as i32;
+            f.min_damage = (f.min_damage as f32 * damage_scale).round() as i32;
+            for point in &mut f.damage_points {
+                point[1] *= damage_scale;
+            }
+        }
+        if f.clip_size > 0 && !f.unlimited_ammo {
+            let reserve = ((f.clip_size as f32 * reserve_mags).round() as i32).min(ZM_GUEST_MAX_RESERVE);
+            f.max_ammo = f.max_ammo.max(reserve);
+            f.start_ammo = f.max_ammo;
+        }
+        changed += 1;
+    }
+    format!(
+        "bo2mp zombies guest guns: {changed} weapons at Zombies proportions: damage x{damage_scale:.2} ({} pairs), reserve {reserve_mags:.1} magazines ({} pairs, at most {ZM_GUEST_MAX_RESERVE}); measured on {}",
+        damage.len(),
+        mags.len(),
+        pairs.join(" ")
+    )
+}
+
 const T5_WEAPTYPE_MELEE: i32 = 7;
 /// bo2zm: Black Ops II's `WEAPTYPE_MELEE` (its knives: `knife_zm`,
 /// `bowie_knife_zm`, `tazer_knuckles_zm`), kept raw since `weap_type` is

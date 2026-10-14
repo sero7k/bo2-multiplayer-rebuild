@@ -20,7 +20,14 @@
 //! SndDuck         0x88: char name[64]; u32 id; floats; 0x60 f32* attenuation; 0x68 f32* filter
 //!                 (64 floats each)
 //! 0x58/0x60 array 0x184: char name[64] ("cinematic_room"), ids, char[64], floats; no pointers
+//! 0x68 u32 count; 0x70 { u32 scriptId; u32 aliasId }* (8 each)
+//! 0x220a0 u32 musicSetCount; 0x220a8 MusicSet* (0x50: char name[64]; u32 hash; u32 stateCount;
+//!                 MusicState* (0x180: char name[64]; hash; intro and exit assets (0x8c each, inline);
+//!                 0x15c u32 loopCount; 0x160 MusicAsset* loops (0x8c: char alias[64]; flags; ints)))
 //! ```
+//! (Read on mp_common: the lookups and music sets follow the snapshots;
+//! per set its states, then each state's loops. Its aliases also have
+//! file names at 0x50 and 0x60 (loop and stop parts).)
 //!
 //! Stream order: the four names, the alias lists (40 each, aligned 8),
 //! then per list its name and alias array (aligned 8), then per alias its
@@ -33,14 +40,19 @@ use crate::stream::Stream;
 
 const ALIAS_LIST: usize = 40;
 const ALIAS: usize = 0xd8;
-const ALIAS_STRINGS: [usize; 5] = [0x00, 0x10, 0x18, 0x28, 0x40];
+const ALIAS_STRINGS: [usize; 7] = [0x00, 0x10, 0x18, 0x28, 0x40, 0x50, 0x60];
 const RADVERB: usize = 0xa0;
 const DUCK: usize = 0x88;
 const DUCK_CURVE: usize = 64 * 4;
 const SNAPSHOT: usize = 0x184;
+/// The music sets' count; their pointer follows (read on mp_common).
+const MUSIC_SET_COUNT: usize = 0x220a0;
+const MUSIC_SET: usize = 0x50;
+const MUSIC_STATE: usize = 0x180;
+const MUSIC_ASSET: usize = 0x8c;
 
 pub fn sound_bank(s: &mut Stream, h: usize) -> Result<Option<String>> {
-    s.no_loads(h, crate::AssetType::Sound.header_size(), &[0, 8, 0x10, 0x18, 0x28, 0x30, 0x40, 0x50, 0x60])?;
+    s.no_loads(h, crate::AssetType::Sound.header_size(), &[0, 8, 0x10, 0x18, 0x28, 0x30, 0x40, 0x50, 0x60, 0x70, 0x220a8])?;
     let name = s.string(h)?;
     for f in [8, 0x10, 0x18] {
         s.string(h + f)?;
@@ -77,5 +89,21 @@ pub fn sound_bank(s: &mut Stream, h: usize) -> Result<Option<String>> {
     }
     let snapshots = s.u32_at(h + 0x58)? as usize;
     s.records(h + 0x60, snapshots, SNAPSHOT, 3)?;
+    let lookups = s.u32_at(h + 0x68)? as usize;
+    s.records(h + 0x70, lookups, 8, 3)?;
+    let sets = s.u32_at(h + MUSIC_SET_COUNT)? as usize;
+    if let Some(t) = s.records(h + MUSIC_SET_COUNT + 8, sets, MUSIC_SET, 7)? {
+        for i in 0..sets {
+            let set = t + MUSIC_SET * i;
+            let states = s.u32_at(set + 0x44)? as usize;
+            if let Some(st) = s.records(set + 0x48, states, MUSIC_STATE, 7)? {
+                for k in 0..states {
+                    let state = st + MUSIC_STATE * k;
+                    let loops = s.u32_at(state + 0x15c)? as usize;
+                    s.records(state + 0x160, loops, MUSIC_ASSET, 3)?;
+                }
+            }
+        }
+    }
     Ok(name)
 }

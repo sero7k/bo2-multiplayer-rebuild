@@ -268,6 +268,13 @@ pub(crate) fn rows(s: &Shell) -> Vec<Row> {
                 let mut bots = Row::new("BOTS", "Bots that play with you: they revive you, rebuild windows, buy perks and Pack-a-Punch, open doors near you and leave your trains alone.", Act::Cycle(Setting::ZmBots));
                 bots.value = Some(if s.zm_bots == 0 { "NONE".to_owned() } else { s.zm_bots.to_string() });
                 r.push(bots);
+                let mut guns = Row::new(
+                    "CUSTOM WEAPONS",
+                    "Multiplayer's custom guns, from Black Ops, Modern Warfare 2 and 3, Ghosts and the other games, in the Mystery Box beside the map's own. They cannot be Pack-a-Punched.",
+                    Act::Cycle(Setting::ZmCustomWeapons),
+                );
+                guns.value = Some(if s.zm_custom_weapons { "ON" } else { "OFF" }.to_owned());
+                r.push(guns);
             }
             r
         }
@@ -542,6 +549,9 @@ pub(crate) fn start(shell: &Shell) -> Result<(), String> {
         let kind = shell.zm_kind;
         let round = if kind == ZmKind::Public { 1 } else { round };
         sim::set_zm_bots(if kind == ZmKind::Custom { shell.zm_bots } else { 0 });
+        // (Multiplayer's custom guns are in every game's box; Custom Games
+        // can leave them out.)
+        sim::set_zm_guest_guns(kind != ZmKind::Custom || shell.zm_custom_weapons);
         session::set_zombies_return_to_menu(true);
         // As Zombies' own front end starts a game: its start and mode
         // picked, the starting round, then `map t6:<zone>` here.

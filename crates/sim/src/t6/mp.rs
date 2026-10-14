@@ -30,6 +30,10 @@ pub(super) fn moab_kills() -> u32 {
 /// Our Zombies bots (`bo2mp/zm_bots`, Custom Games' BOTS).
 pub(super) const ZM_BOTS: &str = include_str!("scripts/zm_bots.gsc");
 
+/// Our Mystery Box custom guns (`bo2mp/zm_guest_guns`, Custom Games'
+/// CUSTOM WEAPONS).
+pub(super) const ZM_GUEST_GUNS: &str = include_str!("scripts/zm_guest_guns.gsc");
+
 /// Our optional M.O.A.B. (`bo2mp/moab`, off unless `scr_moab 1`).
 const MOAB: &str = include_str!("scripts/moab.gsc");
 
@@ -181,6 +185,14 @@ mod moab_tests {
     fn the_zombies_bots_compile() {
         let s = gsc_t6::compile("bo2mp/zm_bots", super::ZM_BOTS).expect("zm_bots.gsc compiles");
         for f in ["main", "bot_life", "bot_revive", "bot_fight", "bot_rebuild", "bot_spend", "bot_follow"] {
+            assert!(s.functions.iter().any(|x| x.name == f), "{f}");
+        }
+    }
+
+    #[test]
+    fn the_zombies_custom_guns_compile() {
+        let s = gsc_t6::compile("bo2mp/zm_guest_guns", super::ZM_GUEST_GUNS).expect("zm_guest_guns.gsc compiles");
+        for f in ["main", "register_gun", "box_slots"] {
             assert!(s.functions.iter().any(|x| x.name == f), "{f}");
         }
     }

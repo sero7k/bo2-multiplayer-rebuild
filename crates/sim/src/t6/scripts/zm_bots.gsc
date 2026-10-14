@@ -380,7 +380,8 @@ bot_spend()
         if ( score >= 5000 + self.bot_reserve )
         {
             gun = self getcurrentweapon();
-            if ( isdefined( gun ) && !issubstr( gun, "upgraded" ) )
+            // (A custom gun from the box cannot be upgraded.)
+            if ( isdefined( gun ) && !issubstr( gun, "upgraded" ) && !( isdefined( level.bo2mp_guest_gun ) && isdefined( level.bo2mp_guest_gun[ gun ] ) ) )
             {
                 pap = getentarray( "specialty_weapupgrade", "script_noteworthy" );
                 foreach ( m in pap )

@@ -658,6 +658,49 @@ pub(crate) fn zm_bots() -> i32 {
     ZM_BOTS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// bo2mp: Multiplayer's custom guns (other games' guns) in the next Zombies
+/// game's Mystery Box (Custom Games' CUSTOM WEAPONS).
+static ZM_GUEST_GUNS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// bo2mp: whether the next Zombies game's Mystery Box has the custom guns.
+pub fn set_zm_guest_guns(on: bool) {
+    ZM_GUEST_GUNS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// bo2mp: the Zombies game being started has the custom guns in its box
+/// (`BO2MP_ZM_CUSTOM_WEAPONS=0|1` overrides the lobby, a test aid).
+pub(crate) fn zm_guest_guns() -> bool {
+    match std::env::var("BO2MP_ZM_CUSTOM_WEAPONS") {
+        Ok(v) => v.trim() != "0",
+        Err(_) => ZM_GUEST_GUNS.load(std::sync::atomic::Ordering::Relaxed),
+    }
+}
+
+/// bo2mp: the custom guns this map's Mystery Box can give, as
+/// `bo2mp/zm_guest_guns` reads them (`name:vox`, space-separated): the
+/// loaded guest guns a player can be given, each family once and none of a
+/// family the map's own Zombies weapons have (`bo2_profile::guest::zm_box_guns`).
+fn zm_box_guest_list(world: &mut World) -> String {
+    let f = frame(world);
+    let names = f.weapon_script_names();
+    let zm: std::collections::HashSet<String> = names
+        .iter()
+        .filter(|n| {
+            let n = n.split('+').next().unwrap_or(n);
+            n.strip_suffix("_mp").unwrap_or(n).ends_with("_zm")
+        })
+        .map(|n| bo2_profile::guest::family_of_zm_weapon(n))
+        .collect();
+    let guns = bo2_profile::guest::zm_box_guns(&zm, |g| {
+        f.weapon_index_by_script_name(&bo2_profile::guest::script_name(g))
+            .is_some_and(|w| w != 0 && f.combat_facts_for(w).is_some())
+    });
+    guns.iter()
+        .map(|g| format!("{}:{}", bo2_profile::guest::script_name(g), bo2_profile::guest::zm_vox(g)))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// bo2zm H28: the players in the lobby that starts the next game (the host
 /// and those who joined it), 1-4; 0 = no lobby (his own game).
 pub fn set_t6_party_size(n: usize) {
@@ -698,6 +741,8 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
     } else {
         // bo2mp: Custom Games' Zombies bots.
         objects.push(gsc_t6::compile("bo2mp/zm_bots", mp::ZM_BOTS)?);
+        // bo2mp: Multiplayer's custom guns in the Mystery Box.
+        objects.push(gsc_t6::compile("bo2mp/zm_guest_guns", mp::ZM_GUEST_GUNS)?);
     }
     let mut strings = Strings::default();
     // bo2mp: Black Ops II's linker binds a bare call to the engine's own
@@ -913,6 +958,18 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
     // bo2mp: Custom Games' Zombies bots (`bo2mp/zm_bots`).
     if !mp {
         vm.dvars.insert("bo2mp_zm_bots".to_owned(), zm_bots().to_string());
+        // bo2mp: Multiplayer's custom guns in the Mystery Box
+        // (`bo2mp/zm_guest_guns`): on or off, and which.
+        let on = zm_guest_guns();
+        let list = if on { zm_box_guest_list(world) } else { String::new() };
+        diag::info!(
+            Sim,
+            "bo2mp zombies custom guns: {} ({} guns): {list}",
+            if on { "in the box" } else { "off" },
+            list.split_whitespace().count()
+        );
+        vm.dvars.insert("bo2mp_zm_guest_guns".to_owned(), if on { "1" } else { "0" }.to_owned());
+        vm.dvars.insert("bo2mp_zm_guest_list".to_owned(), list);
     }
     diag::info!(
         Sim,
@@ -1350,6 +1407,7 @@ pub(crate) fn start(world: &mut World) {
         let mut calls = calls;
         if !mp_map {
             calls.push(("bo2mp/zm_bots".to_owned(), "main", false));
+            calls.push(("bo2mp/zm_guest_guns".to_owned(), "main", false));
         }
         if mp_map {
             // bo2mp: the optional M.O.A.B. (off unless scr_moab 1).

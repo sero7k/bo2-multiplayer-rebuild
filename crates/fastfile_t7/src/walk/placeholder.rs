@@ -6,9 +6,12 @@
 //!
 //! ```text
 //! lightdescription 0x240   (mp_common: ",gfx_dlight_gen_omni_r200599854254")
-//! fx               0x90    (mp_common: ",weapon/fx_betty_light")
-//! tagfx            0x18    (mp_common: ",equip_trophy_laser")
-//! vehicledef       0xaa8   (mp_common: ",defaultvehicle_mp")
+//! klf              0xa8    (mp_common: ",2130c766-437a-45c8-981f-3aef80383930")
+//! aimtable         0x330   (mp_common: ",soldier_aim")
+//! customizationtablecolor 0x30 (mp_common: ",cc_c_t7_mp_warrior_body1_skin1")
+//! customizationtable 0x28 (mp_common: ",mp_character_customization")
+//! maptable         0x28    (mp_common: ",maptable_mp_base")
+//! xcam             0xa8    (mp_common: ",ui_cam_cac_lmg_light")
 //! ```
 
 use super::simple::placeholder;
@@ -27,8 +30,10 @@ macro_rules! placeholders {
 }
 
 placeholders! {
-    vehicle => VehicleDef;
-    tag_fx => TagFx;
-    light_description => LightDescription;
-    fx => Fx;
+    lens_flare => NewLensFlareDef;
+    aim_table => AimTable;
+    xcam => XCam;
+    customization_table => CustomizationTable;
+    map_table => MapTable;
+    customization_table_color => CustomizationTableColor;
 }

@@ -737,3 +737,58 @@ pub fn walk_fitted(zone: &crate::Zone) -> (Walker<'_>, Option<WalkStop>) {
     let stop = w2.walk().err();
     (w2, stop)
 }
+
+/// Walks a zone's shared asset streams (`pak::SharedVirtual`): each range
+/// is a run of `XAsset` entries (type, header pointer "follows"), each
+/// followed by its asset's data, read the way a zone's are. On retail
+/// these are the zone's model surfaces (`xmodel_surfs`): the zone itself
+/// holds only comma-named placeholders for them, as it does for the
+/// materials `techsets_<zone>.ff` defines. Spans in the capture are offsets
+/// into `shared.data`. Returns the capture and, per range that did not
+/// read to its end, where it stopped.
+pub fn walk_shared(shared: &crate::pak::SharedVirtual) -> (Capture, Vec<WalkStop>) {
+    let list = AssetList {
+        script_strings: Vec::new(),
+        globals: None,
+        assets: Vec::new(),
+        asset_table_virtual: 0,
+        body_offset: 0,
+        body_virtual: 0,
+    };
+    let mut w = Walker::new(&shared.data, &list, &[]);
+    let mut stops = Vec::new();
+    for (i, &(start, len)) in shared.ranges.iter().enumerate() {
+        let (start, end) = (start as usize, (start + len) as usize);
+        let mut off = [0u64; BLOCK_COUNT];
+        off[VIRTUAL as usize] = start as u64;
+        w.s = Stream::new(&shared.data, start, off);
+        loop {
+            let at = w.s.pos();
+            if at + XASSET_LEN > end {
+                break;
+            }
+            let raw = w.s.u32_at(at).unwrap_or(u32::MAX);
+            let header = w.s.ptr_at(at + 8).unwrap_or(Ptr::Null);
+            let ty = AssetType::from_u32(raw);
+            let r = match (ty, header.is_inline()) {
+                (Some(ty), true) => {
+                    w.s.seek(at + XASSET_LEN);
+                    w.load_inline(ty).map(|_| ())
+                }
+                _ => Err(ReadError::Invalid("not an XAsset entry", at)),
+            };
+            if let Err(e) = r {
+                stops.push(WalkStop { asset_index: i, asset_type: ty, file_pos: at, error: e.to_string() });
+                break;
+            }
+            w.cap.walked += 1;
+            if w.s.pos() >= end {
+                break;
+            }
+        }
+        if w.s.pos() != end && stops.last().is_none_or(|s| s.asset_index != i) {
+            stops.push(WalkStop { asset_index: i, asset_type: None, file_pos: w.s.pos(), error: format!("range ends at {end:#x}") });
+        }
+    }
+    (w.cap, stops)
+}

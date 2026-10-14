@@ -2825,6 +2825,7 @@ version = "0.1.0"
 dependencies = [
  "bcdec_rs",
  "lz4_flex",
+ "png",
 ]
 
 [[package]]
@@ -5727,6 +5728,7 @@ dependencies = [
  "assets",
  "audio",
  "bevy",
+ "bo2_profile",
  "clipmap_iw4",
  "diag",
  "frame",

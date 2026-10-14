@@ -5,7 +5,8 @@
 //! (the real anim/sfx/vfx packages, the sound bank) and the gun's transient
 //! zones (`iw7_mp_weapon_{view,world}_<gun>_tr.ff`: models, materials,
 //! images), plus `iw7_common_mp.ff` / `iw7_patch_common_core_mp.ff` when
-//! present, and prints the gun's manifest: models -> surfaces' materials ->
+//! present, and the `iw7_techsets_<zone>.ff` zones that define their
+//! materials and technique sets, and prints the gun's manifest: models -> surfaces' materials ->
 //! images (inline pixels or `imagefile<N>.pak` streams), anim packages ->
 //! the 260 slots' animations (data in a zone or not), sound aliases (and the
 //! sound files they name), effects and attachments.
@@ -211,7 +212,7 @@ impl World {
     /// streams).
     fn status(&self, ty: T, name: &str, r: Option<Hit>) -> String {
         if r.is_none() && ty == T::Material && self.index.contains_key(&(T::Material, bare(name).to_owned())) {
-            return "[name-only header; definition in the shared asset streams]".to_owned();
+            return "[name-only header; definition not in the walked zones (techsets_<zone>.ff)]".to_owned();
         }
         self.tag(r)
     }
@@ -359,7 +360,7 @@ fn material(wd: &World, m: Option<Hit>, name: &str, t: &mut Totals, indent: &str
             t.materials_missing.insert(key);
         } else {
             let z: Vec<&str> = zones.into_iter().collect();
-            println!("{indent}material {key} [name-only header in {}; definition in the shared asset streams]", z.join(", "));
+            println!("{indent}material {key} [name-only header in {}; definition not in the walked zones (techsets_<zone>.ff)]", z.join(", "));
             t.materials_shared.insert(key);
         }
         return;
@@ -372,7 +373,13 @@ fn material(wd: &World, m: Option<Hit>, name: &str, t: &mut Totals, indent: &str
     for tex in &mat.textures {
         let name = tex.image.map(|id| cap.name_of(id).to_owned()).unwrap_or_default();
         let hit = tex.image.map(|id| Hit { zone: r.zone, id });
-        image(wd, hit, &name, t, &format!("{indent}    "));
+        let slot = fastfile_iw7::texture::sampler_name(tex.name_hash).map_or_else(|| format!("{:08x}", tex.name_hash), str::to_owned);
+        println!("{indent}        {slot} (semantic {}, sampler {:#04x}):", tex.semantic, tex.sampler_state);
+        image(wd, hit, &name, t, &format!("{indent}          "));
+    }
+    for k in &mat.constants {
+        let n = fastfile_iw7::texture::constant_name(k.name_hash).map_or(k.name.as_str(), |n| n);
+        println!("{indent}        const {n} = {:?}", k.literal);
     }
 }
 
@@ -526,6 +533,14 @@ fn main() {
         "iw7_global_mp.ff".to_owned(),
         "iw7_patch_common_mp.ff".to_owned(),
         "iw7_common_mp.ff".to_owned(),
+        // Materials and technique sets: each zone's are defined in its
+        // `techsets_<zone>.ff` (the zones hold comma-named references).
+        "iw7_techsets_global_core_mp.ff".to_owned(),
+        "iw7_techsets_common_core_mp.ff".to_owned(),
+        "iw7_techsets_global_mp.ff".to_owned(),
+        "iw7_techsets_common_mp.ff".to_owned(),
+        "iw7_techsets_ui.ff".to_owned(),
+        "iw7_techsets_common.ff".to_owned(),
     ];
     let mut zones = Vec::new();
     for n in &names {
@@ -597,7 +612,27 @@ fn main() {
             eprintln!("  materials {} images {} xmodels {} xanims {}", cap.materials.len(), cap.images.len(), cap.xmodels.len(), cap.xanims.len());
         }
         let label = n.trim_start_matches("iw7_").trim_end_matches(".ff").to_owned();
-        zones.push(ZoneCap { label, cap, stop });
+        // Its shared asset streams (the model surfaces its models name with
+        // comma placeholders), when their ranges were copied next to it
+        // (`iw7_shared <zone.ff>` prints the snippet).
+        let shared = dir.join(format!("iw7_shared_{label}.bin"));
+        let shared_cap = std::fs::read(&shared).ok().map(|raw| {
+            match fastfile_iw7::pak::SharedVirtual::from_concatenated(&raw, &zone.header.shared_files) {
+                Ok(sv) => {
+                    let (c, stops) = fastfile_iw7::walk::walk_shared(&sv);
+                    println!("    shared streams ({}): {} xmodel_surfs, {} ranges not read to their end", shared.display(), c.model_surfs.len(), stops.len());
+                    Some(c)
+                }
+                Err(e) => {
+                    println!("    shared streams ({}): {e}", shared.display());
+                    None
+                }
+            }
+        });
+        zones.push(ZoneCap { label: label.clone(), cap, stop });
+        if let Some(Some(c)) = shared_cap {
+            zones.push(ZoneCap { label: format!("{label} shared streams"), cap: c, stop: None });
+        }
     }
     let wd = World::new(zones);
     let _ = wd.zones.iter().map(|z| &z.stop).count();
@@ -654,11 +689,10 @@ fn main() {
     }
 
     // ---- images ----
-    // Materials are name-only in the zones (their texture tables are in the
-    // shared asset streams), so the images come from the gun's transient
-    // zones' image lists (their streaming info): what its materials sample.
+    // The gun's transient zones' image lists (their streaming info): what
+    // its materials sample (the texture tables above, from techsets_*.ff).
     println!();
-    println!("IMAGES (the gun's transient zones' image lists; materials' texture tables are not in the zones)");
+    println!("IMAGES (the gun's transient zones' image lists)");
     let mut seen_img = BTreeSet::new();
     for (z, zc) in wd.zones.iter().enumerate() {
         if !zc.label.starts_with("mp_weapon_") {
@@ -843,7 +877,7 @@ fn main() {
     println!("  models: {} found, {} missing {:?}", t.models.len(), t.models_missing.len(), t.models_missing);
     println!("  surfaces: vertex data inline {} / not in zone {}", t.surfs_inline, t.surfs_no_verts);
     println!(
-        "  materials: {} with a definition in a zone, {} name-only (definition in the shared asset streams), {} not in any zone {:?}",
+        "  materials: {} with a definition in a zone, {} name-only (definition not in the walked techsets_<zone>.ff zones), {} not in any zone {:?}",
         t.materials.len(),
         t.materials_shared.len(),
         t.materials_missing.len(),

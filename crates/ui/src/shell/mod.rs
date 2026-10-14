@@ -131,6 +131,8 @@ pub(crate) enum Setting {
     /// Zombies' starting round, and its bots (Custom Games).
     ZmRound,
     ZmBots,
+    /// Custom Games: Multiplayer's custom guns in the Mystery Box.
+    ZmCustomWeapons,
     /// An Options row (of the tab he is on).
     Option(u8),
 }
@@ -258,6 +260,8 @@ pub(crate) struct Shell {
     /// Zombies: the lobby's kind and Custom Games' bots (0-4).
     pub zm_kind: zombies::ZmKind,
     pub zm_bots: u32,
+    /// Custom Games: Multiplayer's custom guns in the Mystery Box (on).
+    pub zm_custom_weapons: bool,
     /// FIND A MATCH: the modes ticked (none: every mode), and whether the
     /// lobby list on screen is that search's.
     pub filter: Vec<String>,
@@ -303,6 +307,7 @@ impl Default for Shell {
             zm_round: 0,
             zm_kind: zombies::ZmKind::Solo,
             zm_bots: 0,
+            zm_custom_weapons: true,
             filter: Vec::new(),
             searching: false,
             brainrot: false,
@@ -600,6 +605,7 @@ impl Shell {
             Setting::Moab => self.moab = step(self.moab, MOAB_KILLS.len() as u32 - 1),
             Setting::ZmRound => self.zm_round = step(self.zm_round as u32, zombies::ROUNDS.len() as u32 - 1) as usize,
             Setting::ZmBots => self.zm_bots = step(self.zm_bots, zombies::MAX_BOTS),
+            Setting::ZmCustomWeapons => self.zm_custom_weapons = !self.zm_custom_weapons,
             Setting::Option(k) => options::queue(self.page, k, by),
             Setting::LethalCount | Setting::TacticalCount => {
                 if let Some(b) = classes::book() {

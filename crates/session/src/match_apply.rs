@@ -326,6 +326,11 @@ pub fn apply_prepared_match(
         {
             combat_table::bo2_player_anim_types(&mut combat, &weapons.0, script);
         }
+        // bo2mp: on a Zombies map the other games' guns (the Mystery Box's
+        // custom guns) take Zombies' damage and ammo.
+        if assets::t6_rules() && zone.rsplit(':').next().unwrap_or(zone.as_str()).starts_with("zm_") {
+            diag::info!(Sim, "{}", combat_table::zombies_guest_proportions(&mut combat, &weapons.0));
+        }
         content.set_weapon_combat_table(combat.clone());
         content.set_weapon_runnable_table(weapons.0.runnable_table());
         content.set_weapon_transition_groups(weapons.0.configuration_transition_groups());

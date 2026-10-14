@@ -825,6 +825,77 @@ pub fn extend_stats_rows(rows: &mut Vec<Vec<String>>) -> bool {
     changed
 }
 
+// ---------------------------------------------------------------------------
+// bo2mp: the guest guns in Zombies' Mystery Box.
+
+/// Guns that do nothing against zombies: launchers that fire only once
+/// locked on to a vehicle (game, gun).
+const NO_ZOMBIES: &[(&str, &str)] = &[
+    ("t5", "strela"),
+    ("iw4", "stinger"),
+    ("iw4", "javelin"),
+    ("iw5", "stinger"),
+    ("s1", "stingerm7"),
+];
+
+/// The family of a Black Ops II Zombies weapon's script name
+/// (`fnfal_zm` -> `fal`, `ak74u_upgraded_zm` -> `ak74u`).
+#[must_use]
+pub fn family_of_zm_weapon(name: &str) -> String {
+    let name = name.split('+').next().unwrap_or(name).to_ascii_lowercase();
+    let name = name.strip_suffix("_mp").unwrap_or(&name);
+    let name = name.strip_suffix("_zm").unwrap_or(name);
+    let name = name.strip_suffix("_upgraded").unwrap_or(name);
+    family("t6", name)
+}
+
+/// The script name a guest gun has in a match (`bo1_ak74u_mp`).
+#[must_use]
+pub fn script_name(gun: &GuestGun) -> String {
+    format!("{}_mp", gun.reference())
+}
+
+/// The voice-over type Black Ops II Zombies' `add_zombie_weapon` gives a
+/// gun of this group (what the player says when he picks it up).
+#[must_use]
+pub fn zm_vox(gun: &GuestGun) -> &'static str {
+    match gun.group {
+        SMG => "smg",
+        AR => "assault",
+        LMG => "mg",
+        SNIPER => "sniper",
+        CQB => "shotgun",
+        PISTOL => "pistol",
+        LAUNCHER => "launcher",
+        _ => "",
+    }
+}
+
+/// The guest guns the Mystery Box can give, given the families of the
+/// map's own Zombies weapons (`bo2`): each family once and none the map
+/// already has (its AK74u, not Black Ops' as well), the copy of the first
+/// game in Create-a-Class's order whose gun `loaded` says is in the match;
+/// no special weapons (ballistic knives, crossbows: Zombies' own scripts
+/// handle those by name) and no lock-on-only launchers.
+pub fn zm_box_guns(
+    bo2: &std::collections::HashSet<String>,
+    loaded: impl Fn(&GuestGun) -> bool,
+) -> Vec<&'static GuestGun> {
+    let mut taken = bo2.clone();
+    let mut keep = Vec::new();
+    for game in PRIORITY {
+        for gun in all().filter(|g| g.game == game) {
+            if gun.group == SPECIAL || NO_ZOMBIES.contains(&(gun.game, gun.gun)) || !loaded(gun) {
+                continue;
+            }
+            if taken.insert(family(gun.game, gun.gun)) {
+                keep.push(gun);
+            }
+        }
+    }
+    keep
+}
+
 /// mp/attachmentTable.csv: the guest attachments BO2's table lacks.
 pub fn extend_attachment_rows(rows: &mut Vec<Vec<String>>) -> bool {
     if !GAMES.iter().any(|g| available(g)) {
@@ -913,6 +984,29 @@ mod tests {
                 assert!(bo2.contains(&a) || atts.iter().any(|r| r[4] == a), "{} {a}", gun.gun);
             }
         }
+    }
+
+    /// The Mystery Box: each family once, none the map's Zombies guns
+    /// have, no special weapons or lock-on launchers, only loaded guns.
+    #[test]
+    fn the_zombies_box_takes_each_family_once() {
+        let zm: std::collections::HashSet<String> =
+            ["ak74u_zm", "fnfal_zm", "mp5k_upgraded_zm", "m1911_zm"].iter().map(|n| family_of_zm_weapon(n)).collect();
+        assert!(zm.contains("fal") && zm.contains("mp5") && zm.contains("ak74u"));
+        let guns = zm_box_guns(&zm, |g| g.game != "s1");
+        let names: Vec<String> = guns.iter().map(|g| script_name(g)).collect();
+        assert!(!names.iter().any(|n| n == "bo1_ak74u_mp" || n == "bo1_fnfal_mp" || n == "bo1_mp5k_mp"));
+        assert!(!names.iter().any(|n| n.contains("stinger") || n.contains("javelin") || n.contains("knife_ballistic")));
+        assert!(!names.iter().any(|n| n.starts_with("aw_")));
+        assert!(names.iter().any(|n| n == "mw2_m4_mp"));
+        assert!(names.iter().any(|n| n == "mw2_masada_mp") && !names.iter().any(|n| n == "mw3_acr_mp"));
+        assert!(names.iter().any(|n| n == "mw3_cm901_mp"));
+        let mut families: Vec<String> = guns.iter().map(|g| family(g.game, g.gun)).collect();
+        let n = families.len();
+        families.sort();
+        families.dedup();
+        assert_eq!(families.len(), n, "each family once");
+        assert_eq!(zm_vox(guns.iter().find(|g| g.gun == "m4").unwrap()), "assault");
     }
 
     /// One of each gun: Black Ops II's own first, then MW2's, MW3's, ...;

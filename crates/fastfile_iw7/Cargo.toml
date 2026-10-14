@@ -9,5 +9,8 @@ description = "Call of Duty: Infinite Warfare (IW7, PC x64) zones: IWC LZ4 conta
 lz4_flex.workspace = true
 bcdec_rs.workspace = true
 
+[dev-dependencies]
+png.workspace = true
+
 [lints]
 workspace = true

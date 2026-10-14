@@ -28,7 +28,7 @@
 //! * references to PHYSICAL data (`6 << 60 | offset + 1`) occur too
 //!   (shared constant buffer init data) and are checked the same way.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::cursor::{MAX_STRING, ReadError, Result};
 use crate::ptr::Ptr;
@@ -135,6 +135,13 @@ pub struct Stream<'a> {
     pub refs: RefStats,
     /// The first unresolved reference: (file offset of the pointer, block offset).
     pub first_unresolved: Option<(usize, u64)>,
+    /// The assets loaded so far by the VIRTUAL slot that later references
+    /// name: (type, name). Table entries and inline sub-assets.
+    pub named: HashMap<u64, (crate::AssetType, String)>,
+    /// Debug (`T7_DRIFT`): the unresolved references (field, target).
+    pub misses: Vec<(usize, u64)>,
+    /// What the walk keeps (weapons).
+    pub capture: crate::walk::capture::Capture,
 }
 
 impl<'a> Stream<'a> {
@@ -147,6 +154,9 @@ impl<'a> Stream<'a> {
             vmap: VirtualMap::default(),
             starts: HashSet::new(),
             phys_starts: HashSet::new(),
+            named: HashMap::new(),
+            misses: Vec::new(),
+            capture: Default::default(),
             refs: RefStats::default(),
             first_unresolved: None,
         }
@@ -263,6 +273,35 @@ impl<'a> Stream<'a> {
         }
     }
 
+    /// Records that the asset pointer at file offset `field` loaded `ty` `name`.
+    pub fn name_slot(&mut self, field: usize, ty: crate::AssetType, name: &str) {
+        if let Some(v) = self.vmap.virt_of(field) {
+            self.named.insert(v, (ty, name.to_string()));
+        }
+    }
+
+    /// Debug (`T7_DRIFT`): groups the unresolved references by target, 64
+    /// at a time, and prints the shift that lands most of each group on
+    /// starts (where our VIRTUAL count and the zone's part ways).
+    pub fn print_drift(&self) {
+        let mut m = self.misses.clone();
+        m.sort_by_key(|x| x.1);
+        for g in m.chunks(32) {
+            let best = (-0x300i64..0x300)
+                .map(|d| (g.iter().filter(|x| self.starts.contains(&((x.1 as i64 - d) as u64))).count(), d))
+                .max_by_key(|x| (x.0, -x.1.abs()));
+            if let Some((n, d)) = best {
+                let at = self.vmap.file_pos((g[0].1 as i64 - d) as u64);
+                eprintln!("DRIFT targets {:#x}..{:#x} (file {:x?}): shift {d:#x} lands {n} of {}", g[0].1, g[g.len() - 1].1, at, g.len());
+            }
+        }
+    }
+
+    /// The asset a reference at VIRTUAL `virt` names, if it was loaded through a slot there.
+    pub fn named_at(&self, virt: u64) -> Option<&(crate::AssetType, String)> {
+        self.named.get(&virt)
+    }
+
     /// Counts a reference read at file offset `field`.
     pub fn note_ref(&mut self, field: usize, p: Ptr) {
         let Ptr::Ref { block, offset } = p else { return };
@@ -310,6 +349,9 @@ impl<'a> Stream<'a> {
                     self.vmap.file_pos(offset),
                     self.off[VIRTUAL as usize]
                 );
+            }
+            if std::env::var_os("T7_DRIFT").is_some() {
+                self.misses.push((field, offset));
             }
             if self.first_unresolved.is_none() {
                 self.first_unresolved = Some((field, offset));

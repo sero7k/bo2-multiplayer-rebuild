@@ -1,7 +1,8 @@
 //! Walks a Black Ops III zone's assets in table order as far as the known
 //! layouts go: `t7_walk <zone.ff>...` (`T7_LIST=1` lists every asset walked,
+//! `T7_RESYNC=1` skips assets it cannot read by finding the next one it can,
 //! `T7_HEX=<hex offset>,<len>` hexdumps the inflated image, `T7_DUMP=<file>` writes it, `T7_DUMP_AT=<hex offset>,<len>` a window of it).
-use fastfile_t7::walk::{Stop, walk};
+use fastfile_t7::walk::{Options, Stop, walk_with};
 
 fn main() {
     for path in std::env::args().skip(1) {
@@ -38,7 +39,7 @@ fn main() {
             let end = (a + n).min(z.image.len());
             std::fs::write(&out, &z.image[a.min(end)..end]).expect("write image");
         }
-        let w = walk(&z);
+        let w = walk_with(&z, Options { resync: std::env::var_os("T7_RESYNC").is_some() });
         if std::env::var_os("T7_LIST").is_some() {
             for a in &w.walked {
                 println!(
@@ -50,6 +51,13 @@ fn main() {
                     a.name.as_deref().unwrap_or("")
                 );
             }
+        }
+        for k in &w.skipped {
+            let name = fastfile_t7::AssetType::from_u32(k.raw_type).map_or("?", |t| t.name());
+            println!(
+                "  skipped {}..{} (first {name}) at {:#x}..{:#x}: {}",
+                k.index, k.resumed_at, k.start, k.end, k.why
+            );
         }
         let inline = z.assets.assets.iter().filter(|a| a.is_inline()).count();
         print!("{path}: walked {} of {inline} inline assets; ", w.walked.len());

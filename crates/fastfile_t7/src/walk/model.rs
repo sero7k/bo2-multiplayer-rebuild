@@ -2,7 +2,7 @@
 
 use super::simple::placeholder;
 use crate::asset_type::AssetType;
-use crate::cursor::{ReadError, Result};
+use crate::cursor::Result;
 use crate::stream::{PHYSICAL, Stream};
 
 const SURFACE: usize = 0x60;
@@ -136,9 +136,7 @@ pub fn xmodel(s: &mut Stream, h: usize) -> Result<Option<String>> {
                 let n = s.u32_at(g)? as usize;
                 if let Some(geoms) = s.records(g + 8, n, GEOM_INFO, 7)? {
                     for k in 0..n {
-                        if s.ptr_at(geoms + GEOM_INFO * k)?.is_inline() {
-                            return Err(ReadError::Invalid("collmap brush (no layout yet)", geoms + GEOM_INFO * k));
-                        }
+                        brush(s, geoms + GEOM_INFO * k)?;
                     }
                 }
             }
@@ -154,8 +152,30 @@ pub fn xmodel(s: &mut Stream, h: usize) -> Result<Option<String>> {
     Ok(name)
 }
 
-pub fn phys_preset(s: &mut Stream, h: usize) -> Result<Option<String>> {
-    placeholder(s, AssetType::PhysPreset, h, 0)
+const BRUSH: usize = 0x70;
+const BRUSH_SIDE: usize = 16;
+const PLANE: usize = 20;
+
+/// A collmap geom's `BrushWrapper` (0x70, x64-zt layout: bounds, 0x1c u32
+/// numsides, 0x20 cbrushside_t* sides (16: `{ cplane_t* plane; contents;
+/// sflags }`), axial flags, 0x58 u32 numverts, 0x60 vec3* verts, 0x68
+/// cplane_t* planes (20 each)). Order read on retail `mp_common`: the
+/// struct, the sides, each side's plane (aligned 4), the verts, the planes
+/// (usually a reference to the first side's plane).
+fn brush(s: &mut Stream, field: usize) -> Result<()> {
+    if let Some(b) = s.array(field, BRUSH, 7)? {
+        s.no_loads(b, BRUSH, &[0x20, 0x60, 0x68])?;
+        let sides = s.u32_at(b + 0x1c)? as usize;
+        if let Some(t) = s.records(b + 0x20, sides, BRUSH_SIDE, 7)? {
+            for i in 0..sides {
+                s.array(t + BRUSH_SIDE * i, PLANE, 3)?;
+            }
+        }
+        let verts = s.u32_at(b + 0x58)? as usize;
+        s.records(b + 0x60, verts, 12, 3)?;
+        s.records(b + 0x68, sides, PLANE, 3)?;
+    }
+    Ok(())
 }
 
 pub fn phys_constraints(s: &mut Stream, h: usize) -> Result<Option<String>> {

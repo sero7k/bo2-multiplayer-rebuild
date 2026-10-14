@@ -20,7 +20,8 @@
 //!
 //! Delta parts (indices u8 when `numframes < 256`, else u16):
 //! ```text
-//! XAnimPartTrans       u16 size; u8 smallTrans; size == 0: vec3 frame0 at 4 (16 bytes)
+//! XAnimPartTrans       u16 size; u8 smallTrans; size == 0: vec3 frame0 at 8 (20 bytes; the union
+//!                      is 8-aligned, read on mp_common's `ai_crew_crobot_vtolrider_idle_left`)
 //!                      else: vec3 mins, size at 4; frames* at 0x20; (size + 1) indices at 0x28,
 //!                      then the frames: (size + 1) x (smallTrans ? 3 : 6) bytes
 //! XAnimDeltaPartQuat2  u16 size; size == 0: XQuat2 frame0 at 8 (12 bytes)
@@ -80,7 +81,7 @@ pub fn xanim(s: &mut Stream, h: usize) -> Result<Option<String>> {
         s.records(h + ptr, n, NOTIFY, 3)?;
     }
     if let Some(d) = s.array(h + 0xf0, 24, 7)? {
-        delta_component(s, d, index, 0x10, 0x28, None)?;
+        delta_component(s, d, index, 0x14, 0x28, None)?;
         delta_component(s, d + 8, index, 12, 0x10, Some(4))?;
         delta_component(s, d + 16, index, 16, 0x10, Some(8))?;
     }
