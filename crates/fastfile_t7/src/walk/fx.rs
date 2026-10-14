@@ -76,12 +76,28 @@ fn visual(s: &mut Stream, field: usize, ty: u8, second: bool) -> Result<()> {
     }
 }
 
+/// Whether the asset a pointer at `field` loads right here is a material
+/// rather than an image: an image's header holds its name pointer at 0xf8
+/// (`-1`, the name following) and none at 0; a material's the reverse.
+fn material_follows(s: &Stream, field: usize) -> Result<bool> {
+    if !s.ptr_at(field)?.is_inline() {
+        return Ok(false);
+    }
+    let at = s.pos();
+    let image_name = super::image::IMAGE_NAME_AT;
+    Ok(s.u64_at(at)? == u64::MAX && s.u64_at(at + image_name).map_or(true, |w| w != u64::MAX))
+}
+
 /// An `FxElemDefVisuals` at `field` (0x40).
 fn visuals(s: &mut Stream, field: usize, ty: u8, count: usize, second: bool) -> Result<()> {
     if ty == TYPE_DECAL {
         if let Some(a) = s.records(field, count, MARK_VISUALS, 7)? {
             for i in 0..count * 3 {
-                let t = if second { AssetType::Image } else { AssetType::Material };
+                // (The second visuals are images, but where an image would
+                // load a material does on `zm_genesis`'s
+                // `vdd/gfx_decal_liquid_pool` effect: a header with a
+                // name first and no image name at 0xf8.)
+                let t = if second && !material_follows(s, a + 8 * i)? { AssetType::Image } else { AssetType::Material };
                 s.asset(t, a + 8 * i)?;
             }
         }
