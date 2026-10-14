@@ -518,6 +518,7 @@ pub(crate) fn tick(
         });
     }
     let gametype = setup.gametype.clone();
+    crate::shell::zombies::clear_loading();
     commands.insert_resource(setup);
     // The match's HUD is the game's own, not the front end.
     commands.remove_resource::<Bo2mpFrontend>();

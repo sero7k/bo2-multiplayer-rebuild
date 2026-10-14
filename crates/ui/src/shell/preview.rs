@@ -551,6 +551,12 @@ fn step(
             c.insert_resource(session::Bo2mpMatchSetup { map: "mp_terminal".to_owned(), gametype: "gun".to_owned(), ..default() });
             c.insert_resource(assets::LoadingScreen::new(asset_transport::progress::LoadProgress::new(1), "mp_terminal", "gun"));
         }),
+        // Zombies: the same loading screen in red.
+        ("zm9_loading", |_, c| {
+            c.remove_resource::<crate::lui_frontend::Bo2mpFrontend>();
+            c.insert_resource(session::Bo2mpMatchSetup { map: "zm_transit".to_owned(), gametype: "zclassic".to_owned(), ..default() });
+            c.insert_resource(assets::LoadingScreen::new(asset_transport::progress::LoadProgress::new(2), "zm_transit", "zclassic"));
+        }),
         ("13_ingame_class", |_, c| {
             c.remove_resource::<assets::LoadingScreen>();
             super::ingame::preview_open(2);

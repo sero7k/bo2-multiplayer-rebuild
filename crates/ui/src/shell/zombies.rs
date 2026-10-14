@@ -324,6 +324,29 @@ static PENDING_MAP: Mutex<Option<String>> = Mutex::new(None);
 /// bo2 merge: START's map, for the front end to start (`take_pending_zone`).
 static PENDING_ZONE: Mutex<Option<String>> = Mutex::new(None);
 
+/// What the loading screen shows while a Zombies map loads (no match setup
+/// says it): the map, its title, the mode, where it is from, its pictures.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ZmLoad {
+    pub map: String,
+    pub title: String,
+    pub mode: String,
+    pub origin: String,
+    pub pictures: Vec<String>,
+}
+
+static ZM_LOAD: Mutex<Option<ZmLoad>> = Mutex::new(None);
+
+/// The Zombies map loading (or played) now, for the loading screen.
+pub(crate) fn loading() -> Option<ZmLoad> {
+    ZM_LOAD.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+}
+
+/// A multiplayer match starts: the loading screen is its again.
+pub(crate) fn clear_loading() {
+    *ZM_LOAD.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+}
+
 /// The Zombies map START asked for (`t6:zm_transit`), once.
 pub(crate) fn take_pending_zone() -> Option<String> {
     PENDING_ZONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
@@ -469,6 +492,13 @@ pub(crate) fn start(shell: &Shell) -> Result<(), String> {
         // (Started as the front end starts a match: the front end is put
         // away and the session swaps the map in, so its screens do not stay
         // over the game.)
+        *ZM_LOAD.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ZmLoad {
+            map: zone.strip_prefix("t6:").unwrap_or(&zone).to_owned(),
+            title: m.title.to_uppercase(),
+            mode: z.mode_title.to_uppercase(),
+            origin: if m.bo1 { "BLACK OPS ZOMBIES".to_owned() } else { "BLACK OPS II ZOMBIES".to_owned() },
+            pictures: pictures(m, shell.zm_start),
+        });
         *PENDING_ZONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(zone);
         return Ok(());
     }

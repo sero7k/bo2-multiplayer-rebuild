@@ -2,7 +2,8 @@
 //! screen, drifting slowly closer; a black band at the top with the map's
 //! name in blue and the mode in white, a tip beside them; a black band at
 //! the bottom with what is loading and the bar. It shares the front end's
-//! picture, fade and type, and replaces BO2's own loading menu.
+//! picture, fade and type, and replaces BO2's own loading menu. A Zombies
+//! map loads on the same screen in the Zombies red, with Zombies tips.
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -38,6 +39,15 @@ const TIPS: &[&str] = &[
     "Experience comes in three times faster than in the original game.",
 ];
 
+const ZM_TIPS: &[&str] = &[
+    "Every zombie you kill brings points: spend them on doors, wall guns and the Mystery Box.",
+    "Knifing a zombie is worth more points than shooting it.",
+    "Perk machines need the power on first.",
+    "A Max Ammo refills every player's weapons, grenades included.",
+    "Revive a downed teammate before the timer runs out, or they wait for the next round.",
+    "The Pack-a-Punch upgrades a gun once you find it.",
+];
+
 #[derive(Default)]
 pub(crate) struct LoadState {
     request: Option<u64>,
@@ -67,8 +77,14 @@ pub(crate) fn shell_loading(
     time: Res<Time>,
     mut st: Local<LoadState>,
 ) {
-    let on = bridge::enabled() && front.is_none() && loading.is_some() && setup.is_some();
+    // (A Zombies map started from the shell has no match setup: its own
+    // map, title and mode.)
+    let zm = if setup.is_none() { super::zombies::loading() } else { None };
+    let on = bridge::enabled() && front.is_none() && loading.is_some() && (setup.is_some() || zm.is_some());
     bridge::set_loading_shown(on);
+    let setup: Option<session::Bo2mpMatchSetup> = setup.map(|s| (*s).clone()).or_else(|| {
+        zm.as_ref().map(|z| session::Bo2mpMatchSetup { map: z.map.clone(), gametype: "zclassic".to_owned(), ..Default::default() })
+    });
     let (Some(loading), Some(setup), Some(fonts), true) = (loading, setup, fonts, on) else {
         for e in &roots {
             commands.entity(e).despawn();
@@ -84,8 +100,13 @@ pub(crate) fn shell_loading(
         st.shown = 0.0;
         st.target = 0.0;
         st.since = now;
-        st.tip = (snap.request_id as usize).wrapping_mul(7) % TIPS.len();
+        st.tip = (snap.request_id as usize).wrapping_mul(7);
     }
+    // Zombies maps load on the same screen in red.
+    let zombies = setup.map.starts_with("zm_");
+    let (accent, tips) = if zombies { (Palette::ZOMBIES.accent, ZM_TIPS) } else { (ACCENT, TIPS) };
+    let tip = tips[st.tip % tips.len()];
+    let shade = if zombies { [0.03f32, 0.004, 0.004] } else { [0.0, 0.01, 0.03] };
     // How far: finished stages, and the share of the running ones' counts.
     let total = snap.stages.len().max(1) as f32;
     let done: f32 = snap
@@ -112,20 +133,27 @@ pub(crate) fn shell_loading(
         .map_or_else(|| "Preparing the world".to_owned(), |s| format!("Loading {}", s.key.label().to_lowercase()));
     let cat = bridge::catalog();
     let entry = cat.as_ref().and_then(|c| c.map(&setup.map).cloned());
-    let map_title = entry.as_ref().map_or_else(|| setup.map.trim_start_matches("mp_").to_uppercase(), |m| m.title.clone());
-    let mode_title = cat
+    let mut map_title = entry.as_ref().map_or_else(|| setup.map.trim_start_matches("mp_").to_uppercase(), |m| m.title.clone());
+    let mut mode_title = cat
         .as_ref()
         .and_then(|c| c.mode(&setup.gametype).map(|m| m.title.clone()))
         .unwrap_or_else(|| setup.gametype.to_uppercase());
-    let origin = entry.as_ref().map(|m| m.origin.to_uppercase()).unwrap_or_default();
+    let mut origin = entry.as_ref().map(|m| m.origin.to_uppercase()).unwrap_or_default();
     // The map's loading picture first, then its menu pictures.
     let mut names = vec![format!("loadscreen_{}", setup.map)];
     if let Some(e) = &entry {
         names.extend(e.pictures.iter().cloned());
     }
+    if let Some(z) = &zm {
+        map_title = z.title.clone();
+        mode_title = z.mode.clone();
+        origin = z.origin.clone();
+        names = z.pictures.clone();
+        names.push(format!("loadscreen_{}", z.map));
+    }
     let picture = pics.first(&names, icons.as_deref(), &mut images);
     let (area, s) = window_scale(&windows);
-    let key = format!("{map_title}|{mode_title}|{area:?}|{}|{}", picture.is_some(), st.tip);
+    let key = format!("{map_title}|{mode_title}|{area:?}|{}|{}|{zombies}", picture.is_some(), st.tip);
     if st.key != key || roots.is_empty() {
         st.key = key;
         for e in &roots {
@@ -138,7 +166,7 @@ pub(crate) fn shell_loading(
             .spawn((
                 LoadRoot,
                 GlobalZIndex(10_500),
-                BackgroundColor(Color::srgb(0.012, 0.02, 0.04)),
+                BackgroundColor(if zombies { Color::srgb(0.04, 0.008, 0.008) } else { Color::srgb(0.012, 0.02, 0.04) }),
                 Node {
                     position_type: PositionType::Absolute,
                     width: Val::Percent(100.0),
@@ -155,10 +183,10 @@ pub(crate) fn shell_loading(
                 r.spawn((
                     Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
                     BackgroundGradient::from(LinearGradient::to_bottom(vec![
-                        ColorStop::new(Color::srgba(0.0, 0.01, 0.03, 0.55), Val::Percent(0.0)),
-                        ColorStop::new(Color::srgba(0.0, 0.01, 0.03, 0.0), Val::Percent(22.0)),
-                        ColorStop::new(Color::srgba(0.0, 0.01, 0.03, 0.0), Val::Percent(70.0)),
-                        ColorStop::new(Color::srgba(0.0, 0.01, 0.03, 0.75), Val::Percent(100.0)),
+                        ColorStop::new(Color::srgba(shade[0], shade[1], shade[2], 0.55), Val::Percent(0.0)),
+                        ColorStop::new(Color::srgba(shade[0], shade[1], shade[2], 0.0), Val::Percent(22.0)),
+                        ColorStop::new(Color::srgba(shade[0], shade[1], shade[2], 0.0), Val::Percent(70.0)),
+                        ColorStop::new(Color::srgba(shade[0], shade[1], shade[2], 0.75), Val::Percent(100.0)),
                     ])),
                 ));
                 // The top band: map, mode, a tip.
@@ -179,11 +207,11 @@ pub(crate) fn shell_loading(
                 ))
                 .with_children(|top| {
                     top.spawn(Node { column_gap: px(16.0), align_items: AlignItems::Baseline, ..default() }).with_children(|t| {
-                        t.spawn((Text::new(map_title.clone()), bold(42.0), TextColor(ACCENT)));
+                        t.spawn((Text::new(map_title.clone()), bold(42.0), TextColor(accent)));
                         t.spawn((Text::new(mode_title.clone()), bold(42.0), TextColor(WHITE)));
                     });
                     top.spawn((Node { max_width: Val::Percent(52.0), ..default() },))
-                        .with_child((Text::new(TIPS[st.tip]), regular(21.0), TextColor(DIM)));
+                        .with_child((Text::new(tip), regular(21.0), TextColor(DIM)));
                 });
                 // Where the map is from, over the bottom band.
                 if !origin.is_empty() {
@@ -212,7 +240,7 @@ pub(crate) fn shell_loading(
                 .with_children(|b| {
                     b.spawn((Node { width: px(300.0), ..default() },)).with_child((LoadStage, Text::new(stage.clone()), regular(21.0), TextColor(TEXT)));
                     b.spawn((Node { flex_grow: 1.0, height: px(6.0), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.12))))
-                        .with_child((LoadBar, Node { width: Val::Percent(0.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(ACCENT)));
+                        .with_child((LoadBar, Node { width: Val::Percent(0.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(accent)));
                     b.spawn((LoadPercent, Text::new("0%"), bold(21.0), TextColor(WHITE)));
                 });
             });
