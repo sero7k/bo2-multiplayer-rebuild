@@ -272,7 +272,7 @@ fn footer(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, online: &Onl
                     _ => {}
                 }
                 let stepped = super::rows(shell, &cat).get(shell.focus).is_some_and(|r| matches!(r.act, Act::Cycle(_)));
-                if stepped || shell.screen == Screen::ClassEdit || shell.screen == Screen::Zombies {
+                if stepped || shell.screen == Screen::ClassEdit {
                     hint(l, cx, "A / D", "xenonbutton_dpad_rl", "CHANGE");
                 }
             });
@@ -1150,11 +1150,15 @@ pub(crate) fn shell_view(
                         super::cac::view(c, &mut cx, &shell, &book, &rows);
                     }
                 }
-                Screen::Zombies | Screen::ZmMapPick | Screen::ZmStartPick => super::zombies_view::view(c, &mut cx, &shell, &rows),
+                Screen::Zombies | Screen::ZmMapPick | Screen::ZmStartPick | Screen::ZmLobby | Screen::ZmRecord => {
+                    super::zombies_view::view(c, &mut cx, &shell, &rows);
+                }
             }
             // (The main menu has its own foot, and no player card; the
             // calling card and emblem pickers show his card in their middle.)
-            if !matches!(shell.screen, Screen::Main | Screen::CardPick | Screen::EmblemPick) {
+            if shell.screen.is_zombies() {
+                super::zombies_view::zm_card(c, &mut cx, &cat.player);
+            } else if !matches!(shell.screen, Screen::Main | Screen::CardPick | Screen::EmblemPick) {
                 player_card(c, &mut cx, &cat.player);
             }
             if shell.screen != Screen::Main {

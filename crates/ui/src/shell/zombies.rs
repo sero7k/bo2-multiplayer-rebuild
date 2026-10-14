@@ -200,22 +200,75 @@ pub(crate) fn chosen(shell: &Shell) -> (&'static ZmMap, &'static ZmStart) {
     (m, &m.starts[shell.zm_start.min(m.starts.len() - 1)])
 }
 
+/// Which game the lobby starts: Solo (him alone), Custom Games (his own,
+/// with up to four bots) or a public game (found through the server, or
+/// opened there for others to find).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) enum ZmKind {
+    #[default]
+    Solo,
+    Custom,
+    Public,
+}
+
+impl ZmKind {
+    /// Its row on the Zombies menu.
+    pub(crate) fn menu_row(self) -> usize {
+        match self {
+            ZmKind::Public => 0,
+            ZmKind::Solo => 1,
+            ZmKind::Custom => 2,
+        }
+    }
+
+    pub(crate) fn title(self) -> &'static str {
+        match self {
+            ZmKind::Public => "FIND A MATCH",
+            ZmKind::Solo => "SOLO",
+            ZmKind::Custom => "CUSTOM GAME",
+        }
+    }
+}
+
+/// Custom Games' most bots (four players in all, as Black Ops II).
+pub(crate) const MAX_BOTS: u32 = 3;
+
 pub(crate) fn rows(s: &Shell) -> Vec<Row> {
     let st = state();
     let (m, z) = chosen(s);
     match s.screen {
-        Screen::Zombies => {
+        Screen::Zombies => vec![
+            Row::new("FIND A MATCH", "Public games: pick a map and a mode, join a game that is open or open your own.", Act::ZmLobby(ZmKind::Public)),
+            Row::new("SOLO", "Just you: the map, the start and the round.", Act::ZmLobby(ZmKind::Solo)),
+            Row::new("CUSTOM GAME", "Your own game: the map, the mode, the round and bots to play with.", Act::ZmLobby(ZmKind::Custom)),
+            Row::new("COMBAT RECORD", "Your Zombies rank, kills, downs, revives and best rounds.", Act::ZmRecord),
+            Row::new("OPTIONS", "Graphics, sound and controls.", Act::Options),
+        ],
+        Screen::ZmLobby => {
+            let start = match s.zm_kind {
+                ZmKind::Public => Row::new("SEARCH", &format!("{}: join an open game of it, or open one for others to join.", game_line(m, z)), Act::ZmPlay),
+                _ => Row::new("START GAME", &format!("{}. You come back here when the game ends.", game_line(m, z)), Act::ZmPlay),
+            };
             let mut r = vec![
-                Row::new("START GAME", &format!("{}. You come back here when you quit Zombies.", game_line(m, z)), Act::ZmPlay),
+                start,
                 Row::new(
                     "CHANGE MAP",
                     if st.bo1() { "Every Black Ops II Zombies map, and the nine Black Ops maps." } else { "Every Black Ops II Zombies map." },
                     Act::ZmPickMap,
                 ),
                 Row::new("CHANGE START", "Where you start, and the mode: story, Survival, Grief or Turned.", Act::ZmPickStart),
-                Row::new("STARTING ROUND", "The round the game begins on.", Act::Cycle(Setting::ZmRound)),
             ];
-            r[3].value = Some(ROUNDS[s.zm_round.min(ROUNDS.len() - 1)].to_string());
+            // (A public game starts at round 1, with no bots.)
+            if s.zm_kind != ZmKind::Public {
+                let mut round = Row::new("STARTING ROUND", "The round the game begins on.", Act::Cycle(Setting::ZmRound));
+                round.value = Some(ROUNDS[s.zm_round.min(ROUNDS.len() - 1)].to_string());
+                r.push(round);
+            }
+            if s.zm_kind == ZmKind::Custom {
+                let mut bots = Row::new("BOTS", "Bots that play with you: they open doors, revive, buy perks and leave your trains alone.", Act::Cycle(Setting::ZmBots));
+                bots.value = Some(if s.zm_bots == 0 { "NONE".to_owned() } else { s.zm_bots.to_string() });
+                r.push(bots);
+            }
             r
         }
         Screen::ZmMapPick => {
@@ -344,7 +397,16 @@ pub(crate) fn loading() -> Option<ZmLoad> {
 
 /// A multiplayer match starts: the loading screen is its again.
 pub(crate) fn clear_loading() {
+    session::set_zombies_return_to_menu(false);
     *ZM_LOAD.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+}
+
+/// A public game START opens on the server (its zone and `<mode>:<start>`).
+static PENDING_ONLINE: Mutex<Option<(String, String)>> = Mutex::new(None);
+
+/// The public game START asked to open, once.
+pub(crate) fn take_pending_online() -> Option<(String, String)> {
+    PENDING_ONLINE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
 }
 
 /// The Zombies map START asked for (`t6:zm_transit`), once.
@@ -477,6 +539,10 @@ pub(crate) fn start(shell: &Shell) -> Result<(), String> {
         return Ok(());
     }
     if in_process() {
+        let kind = shell.zm_kind;
+        let round = if kind == ZmKind::Public { 1 } else { round };
+        sim::set_zm_bots(if kind == ZmKind::Custom { shell.zm_bots } else { 0 });
+        session::set_zombies_return_to_menu(true);
         // As Zombies' own front end starts a game: its start and mode
         // picked, the starting round, then `map t6:<zone>` here.
         let zone = spec.args.get(1).cloned().unwrap_or_default();
@@ -499,6 +565,27 @@ pub(crate) fn start(shell: &Shell) -> Result<(), String> {
             origin: if m.bo1 { "BLACK OPS ZOMBIES".to_owned() } else { "BLACK OPS II ZOMBIES".to_owned() },
             pictures: pictures(m, shell.zm_start),
         });
+        // A public game: one of the server's that is open on this map and
+        // start is joined, else his own is opened there for others to find.
+        if kind == ZmKind::Public {
+            if !crate::online_match::online_available() {
+                *ZM_LOAD.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+                return Err("No server set: fill in online.cfg next to run-bo2.cmd (see docs\\ONLINE.md) to play public games.".to_owned());
+            }
+            let token = format!("{}:{}", z.mode, z.loc);
+            let open = super::online::adverts().into_iter().find(|a| super::lobbies::joinable(a) && a.map == zone && a.mode == token);
+            match open {
+                Some(a) => {
+                    diag::info!(Ui, "bo2mp zombies: joining {} ({}/{}) for {line}", a.name, a.players, a.max_players);
+                    crate::online_match::queue_join_room(a.id, a.map.clone(), a.mode.clone());
+                }
+                None => {
+                    diag::info!(Ui, "bo2mp zombies: no open game of {line}: opening one");
+                    *PENDING_ONLINE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((zone, token));
+                }
+            }
+            return Ok(());
+        }
         *PENDING_ZONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(zone);
         return Ok(());
     }
@@ -656,7 +743,7 @@ pub(crate) fn pictures(m: &ZmMap, start: usize) -> Vec<String> {
 
 /// A picture name the Zombies screens ask for.
 pub(crate) fn is_zm_picture(name: &str) -> bool {
-    name.starts_with("zmshot:") || name.starts_with("zmlike:") || name.starts_with("zmbo1:") || name.starts_with("loadscreen_zm_") || name.starts_with("menu_zm_")
+    name.starts_with("zmshot:") || name.starts_with("zmlike:") || name.starts_with("zmbo1:") || name.starts_with("loadscreen_zm_") || name.starts_with("menu_zm_") || name.starts_with("hud_chalk_")
 }
 
 /// Black Ops II's Zombies pictures are still being read (the first time
@@ -746,7 +833,7 @@ fn zm_pictures() -> &'static std::collections::HashMap<String, Rgba> {
             Some(Ok(i)) => i.extra.iter().filter_map(|d| find_file(d, "mod_load.ff", 6)).collect(),
             _ => Vec::new(),
         };
-        let stamp = format!("extra={}", extra.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(";"));
+        let stamp = format!("v2 extra={}", extra.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(";"));
         let dir = Path::new(CACHE);
         let cached = std::fs::read_to_string(dir.join("index.txt")).ok().filter(|t| t.lines().next() == Some(stamp.as_str()));
         let set: std::collections::HashMap<String, Rgba> = match cached {

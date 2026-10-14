@@ -60,6 +60,23 @@ const PHOTOS: [&[u8]; 21] = [
     include_bytes!("../../assets/menu_backgrounds/bg21.jpg"),
 ];
 
+/// The Zombies menu's survivors (the Zombies screens' backdrop while no
+/// map is shown), in a random order.
+const ZM_PHOTOS: [&[u8]; 12] = [
+    include_bytes!("../../assets/menu_backgrounds/zm01.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/zm02.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/zm03.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/zm04.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/zm05.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/zm06.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/zm07.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/zm08.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/zm09.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/zm10.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/zm11.jpg"),
+    include_bytes!("../../assets/menu_backgrounds/zm12.jpg"),
+];
+
 /// A small random number source (the order the photos come in).
 fn next_random(seed: &mut u64) -> u64 {
     if *seed == 0 {
@@ -71,14 +88,15 @@ fn next_random(seed: &mut u64) -> u64 {
     *seed
 }
 
-/// The photo `i` as a picture (decoded once).
-fn photo(i: usize, pics: &mut ShellPics, images: &mut Assets<Image>) -> Option<Handle<Image>> {
-    let name = format!("\u{1}menu photo {i}");
+/// The photo `i` (of the Zombies set when `zm`) as a picture (decoded once).
+fn photo(i: usize, zm: bool, pics: &mut ShellPics, images: &mut Assets<Image>) -> Option<Handle<Image>> {
+    let name = format!("\u{1}menu photo {}{i}", if zm { "zm " } else { "" });
     if let Some(h) = pics.get(&name, None, images) {
         return Some(h);
     }
+    let set: &[&[u8]] = if zm { &ZM_PHOTOS } else { &PHOTOS };
     let img = Image::from_buffer(
-        PHOTOS.get(i)?,
+        set.get(i)?,
         bevy::image::ImageType::Extension("jpg"),
         bevy::image::CompressedImageFormats::NONE,
         true,
@@ -97,6 +115,7 @@ fn photo_screen(shell: &Shell) -> bool {
     match shell.screen {
         Screen::Main | Screen::Multiplayer | Screen::Options | Screen::Barracks | Screen::CardPick | Screen::EmblemPick => true,
         Screen::Classes | Screen::ClassEdit | Screen::ItemPick => shell.cac_from != Screen::Lobby,
+        Screen::Zombies | Screen::ZmRecord => true,
         _ => false,
     }
 }
@@ -192,16 +211,19 @@ pub(crate) fn shell_background(
     }
     st.was_main = on_main;
     if photo_screen(&shell) {
-        if now >= st.slide_at || st.now.as_ref().is_none_or(|(n, ..)| !n.starts_with("photo:")) {
+        // (The Zombies screens show the survivors, the others the soldiers.)
+        let zm = shell.screen.is_zombies();
+        let (set, tag) = if zm { (ZM_PHOTOS.len(), "zmphoto:") } else { (PHOTOS.len(), "photo:") };
+        if now >= st.slide_at || st.now.as_ref().is_none_or(|(n, ..)| !n.starts_with(tag)) {
             // (Never the same photo twice in a row.)
-            let mut i = (next_random(&mut st.seed) % PHOTOS.len() as u64) as usize;
-            if st.now.as_ref().is_some_and(|(n, ..)| *n == format!("photo:{i}")) {
-                i = (i + 1) % PHOTOS.len();
+            let mut i = (next_random(&mut st.seed) % set as u64) as usize;
+            if st.now.as_ref().is_some_and(|(n, ..)| *n == format!("{tag}{i}")) {
+                i = (i + 1) % set;
             }
             st.slide_at = now + SLIDE_SECS;
-            if let Some(h) = photo(i, &mut pics, &mut images) {
+            if let Some(h) = photo(i, zm, &mut pics, &mut images) {
                 st.old = st.now.take().map(|(_, h, _)| (h, now));
-                st.now = Some((format!("photo:{i}"), h, now));
+                st.now = Some((format!("{tag}{i}"), h, now));
             }
         }
     } else {
@@ -218,7 +240,7 @@ pub(crate) fn shell_background(
                 .and_then(|(_, maps)| maps.get(shell.focus))
                 .and_then(|&i| zm(zombies::MAPS[i].map, 0)),
             Screen::ZmStartPick => zm(&shell.zm_map, shell.focus),
-            Screen::Zombies => zm(&shell.zm_map, shell.zm_start),
+            Screen::ZmLobby => zm(&shell.zm_map, shell.zm_start),
             _ => Some(shell.map.clone()),
         };
         if let Some(name) = target

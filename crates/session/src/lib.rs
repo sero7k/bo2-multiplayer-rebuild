@@ -20,7 +20,7 @@ pub use content_manifest::{
 pub use life_front::{LifeFrontCensus, LifeNotifyCensus};
 pub use lifecycle::{
     LiveWorldIdentity, SessionSwapCompletion, SessionSwapRequest, SessionSwapResult,
-    SessionSwapTarget, TeardownGaps, TeardownRequest,
+    SessionSwapTarget, TeardownGaps, TeardownRequest, set_zombies_return_to_menu,
 };
 pub use local_arm::{
     arm_local_from_presented, join_local_on_class_select, sync_prediction_metrics_to_probe,

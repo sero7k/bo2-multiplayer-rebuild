@@ -645,6 +645,19 @@ pub(crate) fn corpse_limit() -> usize {
 /// IW4L_T6_PLAYERS.
 static PARTY: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
+/// bo2mp: the bots Custom Games adds to the next Zombies game (0-3).
+static ZM_BOTS: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// bo2mp: Custom Games' bots for the next Zombies game.
+pub fn set_zm_bots(n: u32) {
+    ZM_BOTS.store(n.min(3) as i32, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// bo2mp: the bots the Zombies game being started has.
+pub(crate) fn zm_bots() -> i32 {
+    ZM_BOTS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// bo2zm H28: the players in the lobby that starts the next game (the host
 /// and those who joined it), 1-4; 0 = no lobby (his own game).
 pub fn set_t6_party_size(n: usize) {

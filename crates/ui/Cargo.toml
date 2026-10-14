@@ -9,6 +9,7 @@ description = "Client UI state, settings and loading overlays."
 image = { version = "0.25", default-features = false, features = ["png"] } # bo2mp shell: map pictures upscaled
 diag.workspace = true
 bevy.workspace = true
+audio.workspace = true
 asset_core.workspace = true
 asset_game.workspace = true
 asset_material.workspace = true

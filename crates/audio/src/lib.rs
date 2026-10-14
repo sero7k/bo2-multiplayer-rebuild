@@ -35,7 +35,7 @@ pub use messages::{
     AliasCommand, BoundWeaponSound, Footstep, LandSound, PlayAlias, SND_ENT_LOCAL,
     ViewmodelNotetracks, WeaponSound, ent_from_number,
 };
-pub use pcm::{LivePan, LoopingPcmAudio, PcmAudio, decode_audio_bytes};
+pub use pcm::{LivePan, LoopingPcmAudio, PcmAudio, decode_audio_bytes, decode_t5_stream};
 pub use playback::{
     AmbientListener, Channel3d, MissingAliasGaps, SoundBank, SoundPickState,
     world_oneshot_channel_gains, world_oneshot_pan,

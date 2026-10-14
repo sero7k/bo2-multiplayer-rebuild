@@ -25,6 +25,7 @@ mod cac;
 pub(crate) mod cards;
 pub(crate) mod classes;
 pub(crate) mod ingame;
+pub(crate) mod zm_record;
 mod loading;
 mod friends;
 mod lobbies;
@@ -83,12 +84,16 @@ pub(crate) enum Screen {
     Zombies,
     ZmMapPick,
     ZmStartPick,
+    /// Zombies' game lobby (Solo, Custom or a public game: `zm_kind`) and
+    /// its combat record (rank and stats).
+    ZmLobby,
+    ZmRecord,
 }
 
 impl Screen {
     /// The red Zombies screens.
     pub(crate) fn is_zombies(self) -> bool {
-        matches!(self, Screen::Zombies | Screen::ZmMapPick | Screen::ZmStartPick)
+        matches!(self, Screen::Zombies | Screen::ZmMapPick | Screen::ZmStartPick | Screen::ZmLobby | Screen::ZmRecord)
     }
 }
 
@@ -122,8 +127,9 @@ pub(crate) enum Setting {
     Moab,
     LethalCount,
     TacticalCount,
-    /// Zombies' starting round.
+    /// Zombies' starting round, and its bots (Custom Games).
     ZmRound,
+    ZmBots,
     /// An Options row (of the tab he is on).
     Option(u8),
 }
@@ -153,6 +159,9 @@ pub(crate) enum Act {
     ZmPlay,
     ZmPickMap,
     ZmPickStart,
+    /// Zombies' menu: a lobby of a kind (Solo, Custom, public), the record.
+    ZmLobby(zombies::ZmKind),
+    ZmRecord,
     /// Options > ACCOUNT: type a new name.
     TypeName,
     /// Barracks: open the calling card or emblem picker.
@@ -245,6 +254,9 @@ pub(crate) struct Shell {
     pub zm_map: String,
     pub zm_start: usize,
     pub zm_round: usize,
+    /// Zombies: the lobby's kind and Custom Games' bots (0-4).
+    pub zm_kind: zombies::ZmKind,
+    pub zm_bots: u32,
     /// FIND A MATCH: the modes ticked (none: every mode), and whether the
     /// lobby list on screen is that search's.
     pub filter: Vec<String>,
@@ -288,6 +300,8 @@ impl Default for Shell {
             zm_map: zombies::MAPS[0].map.to_owned(),
             zm_start: 0,
             zm_round: 0,
+            zm_kind: zombies::ZmKind::Solo,
+            zm_bots: 0,
             filter: Vec::new(),
             searching: false,
             brainrot: false,
@@ -411,7 +425,7 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
             }
             r
         }
-        Screen::Zombies | Screen::ZmMapPick | Screen::ZmStartPick => zombies::rows(s),
+        Screen::Zombies | Screen::ZmMapPick | Screen::ZmStartPick | Screen::ZmLobby | Screen::ZmRecord => zombies::rows(s),
         Screen::CardPick | Screen::EmblemPick => {
             let kind = look_kind(s.screen);
             let list = cards::list(kind);
@@ -481,6 +495,7 @@ impl Shell {
                     (Screen::Main, _) => 2,
                     (Screen::Multiplayer, Screen::Barracks) => 3,
                     (Screen::Multiplayer, _) => 4,
+                    (Screen::Zombies, _) => 4,
                     (Screen::Lobby, _) => 1,
                     _ => 0,
                 };
@@ -541,9 +556,18 @@ impl Shell {
             }
             Screen::ZmMapPick | Screen::ZmStartPick => {
                 let from = self.screen;
-                self.go(Screen::Zombies);
+                self.go(Screen::ZmLobby);
                 self.page = 0;
                 self.focus = if from == Screen::ZmMapPick { 1 } else { 2 };
+            }
+            Screen::ZmLobby => {
+                let k = self.zm_kind;
+                self.go(Screen::Zombies);
+                self.focus = k.menu_row();
+            }
+            Screen::ZmRecord => {
+                self.go(Screen::Zombies);
+                self.focus = 3;
             }
             Screen::Lobby => {
                 if bridge::starting_in().is_some() {
@@ -574,6 +598,7 @@ impl Shell {
             Setting::Difficulty => self.difficulty = step(self.difficulty, 3),
             Setting::Moab => self.moab = step(self.moab, MOAB_KILLS.len() as u32 - 1),
             Setting::ZmRound => self.zm_round = step(self.zm_round as u32, zombies::ROUNDS.len() as u32 - 1) as usize,
+            Setting::ZmBots => self.zm_bots = step(self.zm_bots, zombies::MAX_BOTS),
             Setting::Option(k) => options::queue(self.page, k, by),
             Setting::LethalCount | Setting::TacticalCount => {
                 if let Some(b) = classes::book() {
@@ -608,6 +633,11 @@ impl Shell {
                 self.go(Screen::ZmStartPick);
                 self.focus = self.zm_start;
             }
+            Act::ZmLobby(kind) => {
+                self.zm_kind = kind;
+                self.go(Screen::ZmLobby);
+            }
+            Act::ZmRecord => self.go(Screen::ZmRecord),
             Act::Options => {
                 self.cac_from = self.screen;
                 self.go(Screen::Options);
@@ -1285,11 +1315,13 @@ pub(crate) fn register_shell(app: &mut App) {
                 prefetch_pictures,
                 view::shell_view,
                 loading::shell_loading,
+                loading::shell_loading_music,
                 ingame::ingame_input,
                 ingame::ingame_view,
                 ingame::tag_hits,
                 zombies::zombies_watch,
                 zombies::zombies_exec,
+                zm_record::watch_games,
             )
                 .chain()
                 .in_set(ClientSet::Ui),

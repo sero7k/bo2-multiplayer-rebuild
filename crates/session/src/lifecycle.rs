@@ -490,6 +490,15 @@ fn run_session_swap(
     }
 }
 
+/// bo2mp: a Zombies game the shell's menus started goes back to them when
+/// it ends (not a new game on the same map).
+static ZM_BACK_TO_MENU: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// bo2mp: the Zombies game being started came from the shell's menus.
+pub fn set_zombies_return_to_menu(on: bool) {
+    ZM_BACK_TO_MENU.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// BO2's intermission hold: `_globallogic::endgame` ends with `wait 5.0;
 /// exitlevel( 0 )` after `spawnintermission` (the end scoreboard), so the
 /// board is on screen for 5.0 s before the match goes back to the front end.
@@ -531,6 +540,14 @@ fn run_exit_level(
         return;
     }
     *waiting = false;
+    // bo2mp: a Zombies game from the shell's menus: back to them.
+    if ZM_BACK_TO_MENU.load(std::sync::atomic::Ordering::Relaxed) {
+        match transition.request_menu() {
+            Ok(id) => diag::info!(Sim, "session: exitLevel -> the Zombies menu (swap #{id})"),
+            Err(err) => diag::info!(Sim, "session: exitLevel refused - {err}"),
+        }
+        return;
+    }
     // bo2zm: a Black Ops II game started straight into the map (no menu
     // to go back to) starts a new one on the same map; one started from
     // BO2's own front end goes back to it (the menu screen).

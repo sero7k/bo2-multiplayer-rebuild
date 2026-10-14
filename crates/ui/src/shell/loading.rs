@@ -91,7 +91,12 @@ pub(crate) fn shell_loading(
 ) {
     // (A Zombies map started from the shell has no match setup: its own
     // map, title and mode.)
-    let zm = if setup.is_none() { super::zombies::loading() } else { None };
+    // (Only while that map loads: going back to the menus loads no map.)
+    let zm = if setup.is_none() {
+        super::zombies::loading().filter(|z| loading.as_ref().is_some_and(|l| l.title().contains(&z.map)))
+    } else {
+        None
+    };
     let on = bridge::enabled() && front.is_none() && loading.is_some() && (setup.is_some() || zm.is_some());
     bridge::set_loading_shown(on);
     let setup: Option<session::Bo2mpMatchSetup> = setup.map(|s| (*s).clone()).or_else(|| {
@@ -285,4 +290,80 @@ pub(crate) fn shell_loading(
             t.0 = pct.clone();
         }
     }
+}
+
+/// The loading screen's music (a Black Ops Zombies map: Black Ops' own
+/// splash music, `mus_zombie_splash_screen`, as its maps open on).
+#[derive(Component)]
+pub(crate) struct LoadMusic;
+
+/// What plays while a map loads: a Black Ops Zombies map plays Black Ops'
+/// splash music (read from its IWDs off the main thread, once); anything
+/// else plays nothing of ours. It stops when the loading screen goes.
+pub(crate) fn shell_loading_music(
+    mut commands: Commands,
+    loading: Option<Res<assets::LoadingScreen>>,
+    playing: Query<Entity, With<LoadMusic>>,
+    settings: Option<Res<frame::GameSettings>>,
+    mut clips: ResMut<Assets<audio::PcmAudio>>,
+    mut stop: MessageWriter<frame::UiStopMusic>,
+    mut st: Local<(Option<u64>, bool)>,
+) {
+    let zm = super::zombies::loading().filter(|z| loading.as_ref().is_some_and(|l| l.title().contains(&z.map)));
+    let bo1 = zm.as_ref().is_some_and(|z| z.origin == "BLACK OPS ZOMBIES");
+    let request = loading.as_ref().map(|l| l.progress.snapshot().request_id);
+    if !bridge::enabled() || request.is_none() || !bo1 {
+        for e in &playing {
+            commands.entity(e).despawn();
+        }
+        *st = (None, false);
+        return;
+    }
+    if st.0 != request {
+        *st = (request, false);
+        for e in &playing {
+            commands.entity(e).despawn();
+        }
+    }
+    if st.1 {
+        return;
+    }
+    let Some(clip) = splash_music() else { return };
+    st.1 = true;
+    // (The menus' music stops: one track at a time.)
+    stop.write(frame::UiStopMusic);
+    let volume = settings.as_deref().map_or(0.8, |s| s.master_volume * s.music_volume);
+    commands.spawn((
+        LoadMusic,
+        AudioPlayer(clips.add(clip)),
+        PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(volume.clamp(0.0, 1.0))),
+    ));
+}
+
+/// Black Ops' Zombies splash music, decoded (`None` while it is read, or
+/// when Black Ops is not installed).
+fn splash_music() -> Option<audio::PcmAudio> {
+    static CLIP: std::sync::OnceLock<Option<audio::PcmAudio>> = std::sync::OnceLock::new();
+    static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if let Some(c) = CLIP.get() {
+        return c.clone();
+    }
+    if !STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        std::thread::spawn(|| {
+            let clip = (|| {
+                let root = asset_transport::games_root_from_env().ok()?;
+                let trees = asset_transport::NamespaceTrees::discover(&root);
+                let main = trees.main_for(asset_core::AssetNamespace::T5)?.to_path_buf();
+                let index = asset_transport::iwd::IwdSoundIndex::open(&main).ok()?;
+                let bytes = index.read_sound("mus/zombie/zombie_global/mus_zombie_splash_screen.wav")?.ok()?;
+                audio::decode_t5_stream(&bytes)
+            })();
+            match &clip {
+                Some(_) => diag::info!(Ui, "bo2mp zombies: Black Ops' splash music read"),
+                None => diag::warn!(Ui, "bo2mp zombies: Black Ops' splash music not found"),
+            }
+            let _ = CLIP.set(clip);
+        });
+    }
+    None
 }

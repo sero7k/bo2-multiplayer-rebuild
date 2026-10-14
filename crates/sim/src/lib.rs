@@ -46,7 +46,7 @@ pub use t6::{
     Cheat, T6Anim, T6Install, T6PathNode, T6PathTables, T6Table, T6Vehicle, T6VehicleDrive,
     T6ZBarrierDef, cheat_on, cheat_pick, cheats_allowed, client_frame_heartbeat,
     platform_ride_box, platform_rides_on_ground,
-    set_t6_game_settings, set_t6_party_size,
+    set_t6_game_settings, set_t6_party_size, set_zm_bots,
     set_t6_profile, zm_gametype,
 };
 pub mod t5_destructible;

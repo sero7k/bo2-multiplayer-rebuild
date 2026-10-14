@@ -331,8 +331,9 @@ pub fn plain_rgba8(image: &bevy::prelude::Image) -> Option<bevy::prelude::Image>
 /// RGBA8 (`plain_rgba8`), for the shell's Zombies screens. Zones that are
 /// not there are skipped; the report says what was read.
 pub fn load_t6_zm_pictures(zone_all: &Path, extra: &[std::path::PathBuf]) -> (Vec<(String, bevy::prelude::Image)>, Vec<String>) {
-    const ZONES: [&str; 8] = [
+    const ZONES: [&str; 9] = [
         "code_post_gfx_zm",
+        "common_zm",
         "ui_zm",
         "patch_ui_zm",
         "dlczm0_load_zm",
@@ -362,7 +363,7 @@ pub fn load_t6_zm_pictures(zone_all: &Path, extra: &[std::path::PathBuf]) -> (Ve
     for c in captures.iter().rev() {
         for m in &c.materials {
             let name = m.name.as_str();
-            if !(name.starts_with("menu_zm_") || name.starts_with("loadscreen_zm_")) || out.iter().any(|(n, _)| n == name) {
+            if !(name.starts_with("menu_zm_") || name.starts_with("loadscreen_zm_") || name.starts_with("hud_chalk_")) || out.iter().any(|(n, _)| n == name) {
                 continue;
             }
             let Some(image) = super::t6_materials::colour_texture(m, c).and_then(|t| c.images.get(t.image?.index)) else {

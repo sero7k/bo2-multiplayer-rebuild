@@ -501,9 +501,20 @@ fn step(
             bridge::set_preview_starting(None);
         }),
         // Zombies: the same screens in red.
-        ("zm1_lobby", |s, _| {
+        ("zm0_menu", |s, _| {
             zombies::set_preview(Ok(stand_in_zombies()), None);
             s.screen = Screen::Zombies;
+            s.focus = 2;
+        }),
+        ("zm0b_record", |s, _| {
+            s.screen = Screen::ZmRecord;
+            s.focus = 0;
+        }),
+        ("zm1_lobby", |s, _| {
+            zombies::set_preview(Ok(stand_in_zombies()), None);
+            s.screen = Screen::ZmLobby;
+            s.zm_kind = zombies::ZmKind::Custom;
+            s.zm_bots = 2;
             s.zm_map = "zm_transit".to_owned();
             s.zm_start = 3;
             s.zm_round = 2;
@@ -528,7 +539,7 @@ fn step(
         }),
         ("zm6_in_zombies", |s, _| {
             zombies::set_preview(Ok(stand_in_zombies()), Some("TOWN  ·  GRIEF on TRANZIT"));
-            s.screen = Screen::Zombies;
+            s.screen = Screen::ZmLobby;
             s.focus = 0;
         }),
         ("zm7_not_installed", |s, _| {

@@ -408,6 +408,14 @@ pub(crate) fn tick(
     }
     // ZOMBIES: our Nuketown Zombies (BO2's own menu), or the map the shell's
     // Zombies screen started, swapped in as START MATCH swaps a map.
+    // A public Zombies game opened on the server (everyone loads it from
+    // its offer, him too).
+    if let Some((zone, token)) = crate::shell::zombies::take_pending_online() {
+        diag::info!(Ui, "bo2mp front end: public Zombies game `{zone}` ({token}) through the server");
+        commands.remove_resource::<Bo2mpFrontend>();
+        crate::online_match::queue_online_start(zone, token);
+        return;
+    }
     let shell_zone = crate::shell::zombies::take_pending_zone();
     if mp.borrow().zombies_requested || shell_zone.is_some() {
         mp.borrow_mut().zombies_requested = false;

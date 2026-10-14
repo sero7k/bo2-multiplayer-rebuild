@@ -5,17 +5,171 @@
 use bevy::prelude::*;
 
 use super::theme::*;
-use super::view::{Ctx, Kids, grid_more, grid_window, header, menu_rows, picture_box, short_section, tabs};
-use super::zombies::{self, MAPS, ZmState, chosen, game_line, pages, start_name};
+use super::bridge::PlayerCard;
+use super::cards::{self, Kind};
+use super::view::{Ctx, Kids, banner, emblem, grid_more, grid_window, header, menu_rows, picture_box, short_section, tabs};
+use super::zm_record::{self, Record};
+use super::zombies::{self, MAPS, ZmKind, ZmState, chosen, game_line, pages, start_name};
 use super::{Hit, Row, Screen, Shell};
 
 pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row]) {
     let st = zombies::state();
     match shell.screen {
+        Screen::Zombies => menu(c, cx, shell, rows),
+        Screen::ZmRecord => record(c, cx),
         Screen::ZmMapPick => map_pick(c, cx, shell, &st),
         Screen::ZmStartPick => start_pick(c, cx, shell, rows),
         _ => lobby(c, cx, shell, rows, &st),
     }
+}
+
+/// His card on the Zombies screens: his name, calling card and emblem, with
+/// his Zombies rank (BO2's symbol, its step and how far to the next) in
+/// place of his Multiplayer level.
+pub(crate) fn zm_card(c: &mut Kids, cx: &mut Ctx, card: &PlayerCard) {
+    let r = zm_record::get();
+    let (sym, step, frac) = zm_record::rank(&r);
+    let icon = cx.pic(&[zm_record::icon(&r), format!("menu_zm_rank_{sym}")]);
+    let (title, mark) = (cards::mine(Kind::Card, &card.card), cards::mine(Kind::Emblem, &card.emblem));
+    c.spawn((
+        Node {
+            width: cx.px(540.0),
+            padding: UiRect::all(cx.px(10.0)),
+            column_gap: cx.px(12.0),
+            align_items: AlignItems::Center,
+            border: UiRect::left(cx.px(3.0)),
+            ..abs(None, Some(36.0), Some(64.0), None, cx)
+        },
+        BackgroundColor(cx.pal.panel),
+        BorderColor::all(cx.pal.accent),
+    ))
+    .with_children(|p| {
+        emblem(p, cx, &mark, 84.0);
+        p.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, row_gap: cx.px(6.0), ..default() }).with_children(|col| {
+            banner(col, cx, &title, 300.0, 56.0, Some((card.name.as_str(), 28.0)));
+            col.spawn((Text::new(format!("{}  ·  {step} OF 5", zm_record::rank_title(sym))), cx.regular(18.0), TextColor(DIM)));
+            col.spawn((Node { width: cx.px(300.0), height: cx.px(4.0), ..default() }, BackgroundColor(KEYCAP)))
+                .with_child((Node { width: Val::Percent(frac * 100.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(cx.pal.accent)));
+        });
+        match icon {
+            Some(h) => {
+                p.spawn((ImageNode::new(h), Node { width: cx.px(72.0), height: cx.px(72.0), ..default() }));
+            }
+            None => {
+                p.spawn((Node { width: cx.px(72.0), height: cx.px(72.0), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }, BackgroundColor(KEYCAP)))
+                    .with_child((Text::new(sym.to_string()), cx.bold(36.0), TextColor(WHITE)));
+            }
+        }
+    });
+}
+
+/// The Zombies menu: the rows on the left, his rank and record at a glance
+/// on the right (the backdrop's survivors take turns behind).
+fn menu(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row]) {
+    header(c, cx, &["ZOMBIES"]);
+    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(8.0), ..abs(Some(72.0), Some(176.0), None, None, cx) })
+        .with_children(|col| menu_rows(col, cx, rows, shell.focus, 540.0, false));
+    let r = zm_record::get();
+    c.spawn((
+        Node {
+            width: cx.px(430.0),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(cx.px(24.0)),
+            row_gap: cx.px(6.0),
+            border: UiRect::top(cx.px(3.0)),
+            ..abs(None, Some(176.0), Some(64.0), None, cx)
+        },
+        BackgroundColor(cx.pal.panel),
+        BorderColor::all(cx.pal.accent),
+    ))
+    .with_children(|p| {
+        p.spawn((Text::new("BEST ROUND"), cx.bold(20.0), TextColor(DIM)));
+        p.spawn((Text::new(if r.best_round == 0 { "—".to_owned() } else { r.best_round.to_string() }), cx.bold(104.0), TextColor(if r.best_round == 0 { TEXT.with_alpha(0.5) } else { WHITE })));
+        p.spawn((Node { height: Val::Px(1.0), width: Val::Percent(100.0), margin: UiRect::vertical(cx.px(8.0)), ..default() }, BackgroundColor(cx.pal.line)));
+        for (k, v) in [("GAMES", r.games.to_string()), ("KILLS", r.kills.to_string()), ("REVIVES", r.revives.to_string()), ("DOWNS", r.downs.to_string())] {
+            p.spawn(Node { justify_content: JustifyContent::SpaceBetween, ..default() }).with_children(|row| {
+                row.spawn((Text::new(k), cx.bold(19.0), TextColor(FAINT)));
+                row.spawn((Text::new(v), cx.bold(19.0), TextColor(TEXT)));
+            });
+        }
+    });
+}
+
+/// COMBAT RECORD: his rank, large, and every number the rank is made from.
+fn record(c: &mut Kids, cx: &mut Ctx) {
+    header(c, cx, &["ZOMBIES", "COMBAT RECORD"]);
+    let r: Record = zm_record::get();
+    let (sym, step, frac) = zm_record::rank(&r);
+    let icon = cx.pic(&[zm_record::icon(&r), format!("menu_zm_rank_{sym}")]);
+    c.spawn((
+        Node {
+            width: cx.px(560.0),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            padding: UiRect::all(cx.px(28.0)),
+            row_gap: cx.px(10.0),
+            border: UiRect::top(cx.px(3.0)),
+            ..abs(Some(72.0), Some(176.0), None, None, cx)
+        },
+        BackgroundColor(cx.pal.panel),
+        BorderColor::all(cx.pal.accent),
+    ))
+    .with_children(|p| {
+        match icon {
+            Some(h) => {
+                p.spawn((ImageNode::new(h), Node { width: cx.px(220.0), height: cx.px(220.0), ..default() }));
+            }
+            None => {
+                p.spawn((Node { width: cx.px(220.0), height: cx.px(220.0), ..default() }, BackgroundColor(KEYCAP)));
+            }
+        }
+        p.spawn((Text::new(zm_record::rank_title(sym)), cx.bold(44.0), TextColor(WHITE)));
+        p.spawn((Text::new(format!("RANK {sym}  ·  STEP {step} OF 5")), cx.bold(21.0), TextColor(cx.pal.accent)));
+        p.spawn((Node { width: cx.px(420.0), height: cx.px(6.0), margin: UiRect::top(cx.px(6.0)), ..default() }, BackgroundColor(KEYCAP)))
+            .with_child((Node { width: Val::Percent(frac * 100.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(cx.pal.accent)));
+        let note = if r.slump {
+            "Your last game went badly: a few good games win the ground back."
+        } else {
+            "Rounds, kills, headshots and revives raise your rank; downs and leaving early lower it."
+        };
+        p.spawn((Text::new(note), cx.regular(20.0), TextColor(DIM), TextLayout::justify(bevy::text::Justify::Center)));
+    });
+    let per_game = |n: u64| if r.games == 0 { "—".to_owned() } else { format!("{:.1}", n as f64 / f64::from(r.games)) };
+    let rows: Vec<(&str, String)> = vec![
+        ("GAMES PLAYED", r.games.to_string()),
+        ("BEST ROUND", r.best_round.to_string()),
+        ("ROUNDS SURVIVED", r.rounds.to_string()),
+        ("AVERAGE ROUND", per_game(u64::from(r.rounds))),
+        ("KILLS", r.kills.to_string()),
+        ("HEADSHOTS", r.headshots.to_string()),
+        ("REVIVES", r.revives.to_string()),
+        ("DOWNS", r.downs.to_string()),
+        ("POINTS EARNED", r.points.to_string()),
+    ];
+    c.spawn((
+        Node {
+            width: cx.px(560.0),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(cx.px(24.0)),
+            row_gap: cx.px(4.0),
+            border: UiRect::top(cx.px(3.0)),
+            ..abs(Some(660.0), Some(176.0), None, None, cx)
+        },
+        BackgroundColor(cx.pal.panel),
+        BorderColor::all(cx.pal.accent),
+    ))
+    .with_children(|p| {
+        for (i, (k, v)) in rows.into_iter().enumerate() {
+            p.spawn((
+                Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, height: cx.px(44.0), padding: UiRect::horizontal(cx.px(12.0)), ..default() },
+                BackgroundColor(if i % 2 == 0 { cx.pal.panel_soft } else { Color::NONE }),
+            ))
+            .with_children(|row| {
+                row.spawn((Text::new(k), cx.bold(21.0), TextColor(DIM)));
+                row.spawn((Text::new(v), cx.bold(24.0), TextColor(WHITE)));
+            });
+        }
+    });
 }
 
 fn abs(left: Option<f32>, top: Option<f32>, right: Option<f32>, bottom: Option<f32>, cx: &Ctx) -> Node {
@@ -33,7 +187,7 @@ fn abs(left: Option<f32>, top: Option<f32>, right: Option<f32>, bottom: Option<f
 /// the rows on the left; the map, its starts and the Zombies game's state
 /// on the right.
 fn lobby(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row], st: &ZmState) {
-    header(c, cx, &["ZOMBIES"]);
+    header(c, cx, &["ZOMBIES", shell.zm_kind.title()]);
     let (m, z) = chosen(shell);
     let pictures = zombies::pictures(m, shell.zm_start);
     let round = zombies::ROUNDS[shell.zm_round.min(zombies::ROUNDS.len() - 1)];
@@ -55,6 +209,8 @@ fn lobby(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row], st: &ZmState) 
                     let (status, colour) = match (&st.running, st.problem()) {
                         (Some(_), _) => ("IN ZOMBIES", GOLD),
                         (None, Some(_)) => ("Zombies is not installed", cx.pal.accent),
+                        (None, None) if shell.zm_kind == ZmKind::Public => ("Public game", WHITE),
+                        (None, None) if shell.zm_kind == ZmKind::Custom && shell.zm_bots > 0 => ("Custom game, with bots", WHITE),
                         (None, None) => ("Ready", WHITE),
                     };
                     t.spawn((Text::new(status), cx.bold(28.0), TextColor(colour)));

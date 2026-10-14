@@ -305,6 +305,12 @@ impl Decodable for LoopingPcmAudio {
     }
 }
 
+/// bo2mp: a Black Ops streamed sound file as it is in its IWDs (its own
+/// header, then ADPCM), decoded.
+pub fn decode_t5_stream(bytes: &[u8]) -> Option<PcmAudio> {
+    t5_stream::decode(bytes)
+}
+
 pub fn decode_audio_bytes(bytes: &[u8]) -> Option<PcmAudio> {
     use symphonia::core::audio::SampleBuffer;
     use symphonia::core::codecs::{CODEC_TYPE_NULL, DecoderOptions};
