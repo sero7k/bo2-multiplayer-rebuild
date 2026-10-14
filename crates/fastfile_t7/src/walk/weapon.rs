@@ -129,9 +129,24 @@ fn list(s: &mut Stream, rec: &mut WeaponRec, at: usize, count: usize, kind: Kind
     if std::env::var_os("T7_WTRACE").is_some() {
         eprintln!("WLIST {name} {:?} at {:#x}", s.ptr_at(at)?, s.pos());
     }
+    let shared = s.ptr_at(at)?.virtual_offset().and_then(|v| s.vmap.file_pos(v));
     if let Some(t) = s.records(at, count, 8, 7)? {
         for i in 0..count {
             field(s, rec, t + 8 * i, kind, &format!("{name}[{i}]"))?;
+        }
+    } else if let (Some(t), Some(ty)) = (shared, kind.asset_type()) {
+        // The list is another variant's (`ar_standard_mp`'s attachments are
+        // `ar_standard_cp`'s array): what its entries named there.
+        for i in 0..count {
+            let slot = t + 8 * i;
+            let virt = match s.ptr_at(slot)? {
+                Ptr::Null => continue,
+                p @ Ptr::Ref { .. } => p.virtual_offset(),
+                _ => s.vmap.virt_of(slot),
+            };
+            let Some(v) = virt else { continue };
+            let n = s.named_at(v).map_or_else(|| format!("<ref {v:#x}>"), |(_, n)| n.clone());
+            rec.fields.push((format!("{name}[{i}]"), FieldValue::Asset { ty, name: n }));
         }
     }
     Ok(())

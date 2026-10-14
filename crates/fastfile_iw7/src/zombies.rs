@@ -71,8 +71,10 @@ pub struct Spot {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Spawner {
     pub spot: Spot,
-    /// They climb out of the ground (`ground_spawn*`).
+    /// They climb out of the ground (`ground_spawn*`, `spawn_ground`).
     pub ground: bool,
+    /// They drop from the ceiling (`spawn_ceiling`).
+    pub ceiling: bool,
     /// They go straight for the players, no window on the way
     /// (`ground_spawn_no_boards`).
     pub no_boards: bool,
@@ -87,6 +89,8 @@ pub struct Spawner {
 pub struct Area {
     pub name: String,
     pub origin: [f32; 3],
+    /// Its trigger model (`?<n>`): the hulls the boxes are made of.
+    pub model: Option<u32>,
     /// World boxes (mins, maxs).
     pub boxes: Vec<([f32; 3], [f32; 3])>,
     pub spawners: Vec<Spawner>,
@@ -126,8 +130,9 @@ pub struct Blocker {
     pub cost: u32,
     /// (where the player stands, the area it opens).
     pub sides: Vec<(Spot, String)>,
-    /// The use trigger (`door_buy`): origin and trigger model `?N`.
-    pub trigger: Option<([f32; 3], u32)>,
+    /// The use triggers (`door_buy`, one per side): origin and trigger
+    /// model `?N`.
+    pub triggers: Vec<([f32; 3], u32)>,
     /// The blocking brushes: `*N` and the entity's origin.
     pub brushes: Vec<(u32, [f32; 3])>,
     /// The name its pieces share (the interactions' and trigger's target).
@@ -225,9 +230,8 @@ impl ZmLayout {
             if name.is_empty() {
                 continue;
             }
-            let boxes = v
-                .get("model")
-                .and_then(|m| model_index(m, '?'))
+            let model = v.get("model").and_then(|m| model_index(m, '?'));
+            let boxes = model
                 .and_then(|n| trigger_hulls.get(n as usize))
                 .map(|hulls| {
                     hulls
@@ -243,9 +247,13 @@ impl ZmLayout {
                         .into_iter()
                         .map(|s| {
                             let params = s.get("script_parameters").unwrap_or("");
+                            // How they come in (60661): out of the ground,
+                            // the ceiling or a wall; else they walk in.
+                            let how = s.get("_k60661").unwrap_or("");
                             Spawner {
                                 spot: s.spot(),
-                                ground: params.starts_with("ground_spawn") || s.get("_k60661") == Some("spawn_ground"),
+                                ground: how == "spawn_ground" || (how.is_empty() && params.starts_with("ground_spawn")),
+                                ceiling: how == "spawn_ceiling",
                                 no_boards: params.contains("no_boards"),
                                 goal: first_target(s).map(Ent::origin),
                             }
@@ -253,7 +261,7 @@ impl ZmLayout {
                         .collect()
                 })
                 .unwrap_or_default();
-            out.areas.push(Area { name, origin, boxes, spawners });
+            out.areas.push(Area { name, origin, model, boxes, spawners });
         }
 
         for w in named("window_entrance") {
@@ -296,16 +304,17 @@ impl ZmLayout {
                 .filter(|e| e.is("targetname", "interaction"))
                 .map(|e| (e.spot(), e.get("_k60666").unwrap_or("").to_owned()))
                 .collect();
-            let trigger = pieces
+            let triggers = pieces
                 .iter()
-                .find(|e| e.is("targetname", "door_buy"))
-                .and_then(|e| Some((e.origin(), model_index(e.get("model")?, '?')?)));
+                .filter(|e| e.is("targetname", "door_buy"))
+                .filter_map(|e| Some((e.origin(), model_index(e.get("model")?, '?')?)))
+                .collect();
             let brushes = named(&g)
                 .into_iter()
                 .filter(|e| e.is("classname", "script_brushmodel"))
                 .filter_map(|e| Some((model_index(e.get("model")?, '*')?, e.origin())))
                 .collect();
-            out.blockers.push(Blocker { kind, cost, sides, trigger, brushes, group: g });
+            out.blockers.push(Blocker { kind, cost, sides, triggers, brushes, group: g });
         }
 
         for e in ents.iter().filter(|e| e.is("targetname", "interaction")) {
@@ -345,6 +354,22 @@ impl ZmLayout {
         self.areas
             .iter()
             .filter_map(|a| a.boxes.iter().filter(|b| (0..3).all(|k| p[k] >= b.0[k] && p[k] <= b.1[k])).map(vol).reduce(f32::min).map(|v| (a, v)))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(a, _)| a)
+    }
+
+    /// The area a point is in, else the one whose boxes come nearest it
+    /// (a player start or a perk machine just outside every box).
+    pub fn nearest_area(&self, p: [f32; 3]) -> Option<&Area> {
+        if let Some(a) = self.area_at(p) {
+            return Some(a);
+        }
+        let gap = |(lo, hi): &([f32; 3], [f32; 3])| -> f32 {
+            (0..3).map(|k| (lo[k] - p[k]).max(p[k] - hi[k]).max(0.0).powi(2)).sum::<f32>()
+        };
+        self.areas
+            .iter()
+            .filter_map(|a| a.boxes.iter().map(gap).reduce(f32::min).map(|d| (a, d)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(a, _)| a)
     }
@@ -409,6 +434,13 @@ mod tests {
 }
 {
 "classname" "script_struct"
+"targetname" "moon_spawner"
+"script_parameters" "ground_spawn_no_boards"
+"_k60661" "spawn_ceiling"
+"origin" "130 10 200"
+}
+{
+"classname" "script_struct"
 "targetname" "goal1"
 "origin" "160 10 0"
 }
@@ -458,15 +490,19 @@ mod tests {
         let a = &l.areas[0];
         assert_eq!(a.name, "moon");
         assert_eq!(a.boxes, vec![([50.0, -50.0, -50.0], [150.0, 50.0, 50.0])]);
-        assert_eq!(a.spawners.len(), 2);
+        assert_eq!(a.spawners.len(), 3);
         assert!(a.spawners[0].ground && a.spawners[0].no_boards);
+        assert!(a.spawners[2].ceiling && !a.spawners[2].ground);
         assert_eq!(a.spawners[1].goal, Some([160.0, 10.0, 0.0]));
         assert_eq!(l.area_at([120.0, 0.0, 0.0]).map(|a| a.name.as_str()), Some("moon"));
+        assert_eq!(a.model, Some(0));
+        assert!(l.area_at([400.0, 0.0, 0.0]).is_none());
+        assert_eq!(l.nearest_area([400.0, 0.0, 0.0]).map(|a| a.name.as_str()), Some("moon"));
         assert_eq!(l.blockers.len(), 1);
         let b = &l.blockers[0];
         assert_eq!((b.kind, b.cost), (BlockerKind::Debris, 1250));
         assert_eq!(b.sides[0].1, "moon");
-        assert_eq!(b.trigger, Some(([12.0, 22.0, 0.0], 1)));
+        assert_eq!(b.triggers, vec![([12.0, 22.0, 0.0], 1)]);
         assert_eq!(b.brushes, vec![(9, [12.0, 24.0, 0.0])]);
         assert_eq!(l.perks[0].name, "perk_machine_tough");
         assert_eq!(l.wheels.len(), 1);

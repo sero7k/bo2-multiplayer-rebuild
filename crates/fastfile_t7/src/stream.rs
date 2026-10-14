@@ -151,7 +151,10 @@ pub struct Stream<'a> {
     /// name: (type, name). Table entries and inline sub-assets.
     pub named: HashMap<u64, (crate::AssetType, String)>,
     /// Debug (`T7_DRIFT`): the unresolved references (field, target).
+    /// Also kept when `keep_misses` is set (the walk fits the VIRTUAL
+    /// size of the gaps it steps over from them, `walk::gap`).
     pub misses: Vec<(usize, u64)>,
+    pub keep_misses: bool,
     /// What the walk keeps (weapons).
     pub capture: crate::walk::capture::Capture,
     injected: usize,
@@ -171,6 +174,7 @@ impl<'a> Stream<'a> {
             phys_starts: HashSet::new(),
             named: HashMap::new(),
             misses: Vec::new(),
+            keep_misses: false,
             capture: Default::default(),
             injected: 0,
             pending: Vec::new(),
@@ -243,7 +247,12 @@ impl<'a> Stream<'a> {
         if let Some((a, z)) = trace_range()
             && (a..z).contains(&at)
         {
-            eprintln!("ALLOC file {at:#x} len {len:#x} block {b} off {v:#x} mask {mask:#x}");
+            let site = std::panic::Location::caller();
+            eprintln!(
+                "ALLOC file {at:#x} len {len:#x} block {b} off {v:#x} mask {mask:#x} at {}:{}",
+                site.file().rsplit(['/', '\\']).next().unwrap_or(""),
+                site.line()
+            );
         }
         if b == VIRTUAL {
             self.vmap.add(v, at, len as u64);
@@ -273,6 +282,13 @@ impl<'a> Stream<'a> {
             .ok_or(if window.len() < MAX_STRING * 16 { ReadError::Eof(at) } else { ReadError::BadString(at) })?;
         self.load(n + 1, 0)?;
         Ok((&self.data[at..at + n], at))
+    }
+
+    /// The VIRTUAL starts (allocations, strings, slots) at or after `from`, sorted.
+    pub fn starts_from(&self, from: u64) -> Vec<u64> {
+        let mut v: Vec<u64> = self.starts.iter().copied().filter(|&x| x >= from).collect();
+        v.sort_unstable();
+        v
     }
 
     /// Moves the current block's position without file bytes.
@@ -314,6 +330,9 @@ impl<'a> Stream<'a> {
                 self.refs.unresolved += 1;
                 if std::env::var_os("T7_MISSES").is_some() {
                     eprintln!("MISS forward field {field:#x} block {block} want {offset:#x}");
+                }
+                if self.keep_misses && block == VIRTUAL {
+                    self.misses.push((field, offset));
                 }
                 if self.first_unresolved.is_none() {
                     self.first_unresolved = Some((field, offset));
@@ -410,7 +429,7 @@ impl<'a> Stream<'a> {
                     self.off[VIRTUAL as usize]
                 );
             }
-            if std::env::var_os("T7_DRIFT").is_some() {
+            if self.keep_misses || std::env::var_os("T7_DRIFT").is_some() {
                 self.misses.push((field, offset));
             }
             if self.first_unresolved.is_none() {

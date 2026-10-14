@@ -165,7 +165,7 @@ pub(crate) fn spawn_loading_screen(
     // Then the map's picture for that game type, then any of the map's.
     // bo2mp: a Black Ops II multiplayer match (its setup from the front
     // end, not a Zombies map) draws BO2's own Loading menu instead.
-    let bo2mp_loading = bo2mp.as_deref().is_some_and(|s| !s.map.starts_with("zm_"));
+    let bo2mp_loading = bo2mp.as_deref().is_some_and(|s| !s.map.starts_with("zm_") && !sim::is_foreign_zm_map(&s.map));
     let bo2_picture = zone_ff.as_deref().filter(|_| !bo2mp_loading).and_then(|source| {
         let map = &source.map_name;
         let icons = &front.as_deref()?.icons.0;

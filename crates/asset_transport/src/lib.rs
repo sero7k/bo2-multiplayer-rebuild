@@ -26,7 +26,7 @@ pub use discover::{
     usermap_iwds_for_main, usermap_zone_of,
 };
 pub use discover::{
-    IW3_ZONE_VERSION, IW6_ZONE_VERSION, IW7_ZONE_VERSION, T4_ZONE_VERSION, is_iw7_map, legacy_game_for_path, legacy_version, list_iw7_zombies_maps, list_legacy_mp_map_files, list_legacy_mp_maps,
+    IW3_ZONE_VERSION, IW6_ZONE_VERSION, IW7_ZONE_VERSION, T4_ZONE_VERSION, T7_ZONE_VERSION, is_iw7_map, is_t7_map, list_t7_zombies_maps, legacy_game_for_path, legacy_version, list_iw7_zombies_maps, list_legacy_mp_map_files, list_legacy_mp_maps,
 };
 pub use iwd::{
     IwdFile, IwdIndex, IwdSoundIndex, cached_iwd_dirs, game_main_for_zone, game_mains_under,

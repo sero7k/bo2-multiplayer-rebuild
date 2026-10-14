@@ -15,6 +15,13 @@ pub(crate) use iw6_map::load_iw6_world;
 // bo2mp: Infinite Warfare's maps (no ZoneGame of their own).
 mod iw7;
 pub(crate) use iw7::load_iw7_world;
+// bo2mp: Black Ops III's maps (no ZoneGame of their own).
+mod t7_map;
+pub(crate) use t7_map::load_t7_world;
+// bo2mp: Infinite Warfare's Zombies maps as Black Ops II Zombies.
+mod iw7_zombies;
+#[allow(unused_imports)] // (register_foreign_zm_map: for the Black Ops III lane)
+pub(crate) use iw7_zombies::{attach_t6_zm_rules, is_iw7_zombies_map, register_foreign_zm_map};
 pub(crate) use iw6::{
     Iw6Guests, build_iw6_guest_guns, iw6_anim_check, iw6_sound_check, prefetch_iw6_guest_guns, walk_iw6_guest_guns,
 };

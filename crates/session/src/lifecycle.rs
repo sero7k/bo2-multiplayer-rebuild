@@ -555,7 +555,7 @@ fn run_exit_level(
         && let Some(zone) = identity
             .as_ref()
             .map(|i| i.zone.clone())
-            .filter(|z| z.starts_with("t6:") || z.starts_with("zm_"))
+            .filter(|z| z.starts_with("t6:") || z.starts_with("zm_") || z.strip_prefix("iw7:").is_some_and(sim::is_foreign_zm_map))
     {
         match transition.request_zone(zone.clone()) {
             Ok(id) => diag::info!(

@@ -52,6 +52,19 @@ fn main() {
                 );
             }
         }
+        for g in &w.gaps {
+            let name = z.assets.assets.get(g.index).and_then(|a| a.asset_type()).map_or("?", |t| t.name());
+            println!(
+                "  gap {}..{} (first {name}) at {:#x}..{:#x}: VIRTUAL {:#x}+{:#x}{}",
+                g.index,
+                g.resumed_at,
+                g.start,
+                g.end,
+                g.virtual_start,
+                g.virtual_len,
+                g.fitted.map_or(" (byte count, not fitted)".to_string(), |(n, t)| format!(" (fitted: {n} of {t} references land)"))
+            );
+        }
         for k in &w.skipped {
             let name = fastfile_t7::AssetType::from_u32(k.raw_type).map_or("?", |t| t.name());
             println!(

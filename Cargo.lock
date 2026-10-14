@@ -474,6 +474,7 @@ dependencies = [
  "fastfile_s1",
  "fastfile_t5",
  "fastfile_t6",
+ "fastfile_t7",
  "frame",
  "hks_t6",
  "ipak_t6",

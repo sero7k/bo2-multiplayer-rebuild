@@ -172,10 +172,12 @@ pub fn launch(
             // plays the map by Black Ops II's rules, as the front end's
             // START MATCH does, whichever game the map comes from.
             assets::set_t6_rules(true);
+            register_t7_zombies(&zone);
             run_map(games, artifacts, zone, acceptance, Role::Listen, None)
         }
         LaunchMode::Serve(zone) => {
             assets::set_t6_rules(true);
+            register_t7_zombies(&zone);
             run_map(games, artifacts, zone, None, Role::Dedicated, None)
         }
         LaunchMode::Frontend(zone) => {
@@ -192,6 +194,15 @@ pub fn launch(
             name,
             zone_override,
         } => run_play(games, artifacts, name, zone_override, acceptance),
+    }
+}
+
+/// bo2mp: `map t7:zm_<map>` plays a Black Ops III Zombies map as Black Ops
+/// II Zombies through the foreign map script (`sim::register_foreign_zm_map`;
+/// the map's lane registers its side when it reads the map).
+fn register_t7_zombies(zone: &str) {
+    if let Some(stem) = zone.trim().to_ascii_lowercase().strip_prefix("t7:").filter(|s| s.starts_with("zm_")) {
+        sim::register_foreign_zm_map(stem);
     }
 }
 

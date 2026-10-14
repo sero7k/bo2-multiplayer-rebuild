@@ -21,10 +21,10 @@ fn count(s: &Stream, at: usize) -> Result<usize> {
 /// 0x48 A* (16: { u32; u32 n; frame28* })  frames: origin + quaternion
 /// 0x50 B* (32: { u32; u32; u32 n; u32; frame48*; f32; u32 })
 /// 0x60 C* (8 each)
-/// 0x88 D* (8 each, count at 0x80)
+/// 0x78 D* (16 each, count at 0x80), 0x88 E* (16 each, count at 0x90)
 /// ```
 pub fn xcam(s: &mut Stream, h: usize) -> Result<Option<String>> {
-    s.no_loads(h, crate::AssetType::XCam.header_size(), &[0, 8, 0x48, 0x50, 0x60, 0x88])?;
+    s.no_loads(h, crate::AssetType::XCam.header_size(), &[0, 8, 0x48, 0x50, 0x60, 0x78, 0x88])?;
     let name = s.string(h)?;
     s.string(h + 8)?;
     let n = count(s, h + 0x18)?;
@@ -35,7 +35,12 @@ pub fn xcam(s: &mut Stream, h: usize) -> Result<Option<String>> {
             s.records(a + 8, frames, 28, 3)?;
         }
     }
-    let n = s.u8_at(h + 0x14)? as usize;
+    // (The count is the byte at 0x14 on `mp_nuketown_x`'s cameras, at 0x15
+    // on `zm_factory`'s intro camera.)
+    let n = match s.u8_at(h + 0x14)? {
+        0 => s.u8_at(h + 0x15)? as usize,
+        n => n as usize,
+    };
     if let Some(t) = s.records(h + 0x50, n, 32, 7)? {
         for i in 0..n {
             let b = t + 32 * i;
@@ -45,8 +50,13 @@ pub fn xcam(s: &mut Stream, h: usize) -> Result<Option<String>> {
     }
     let n = count(s, h + 0x24)?;
     s.records(h + 0x60, n, 8, 3)?;
+    // Two lists of 16-byte records (u32 ids and counts; `zm_factory`'s
+    // intro camera: five at 0x78, count at 0x80, three at 0x88, count at
+    // 0x90).
     let n = count(s, h + 0x80)?;
-    s.records(h + 0x88, n, 8, 3)?;
+    s.records(h + 0x78, n, 16, 3)?;
+    let n = count(s, h + 0x90)?;
+    s.records(h + 0x88, n, 16, 3)?;
     Ok(name)
 }
 
@@ -105,12 +115,55 @@ pub fn glasses(s: &mut Stream, h: usize) -> Result<Option<String>> {
 /// `p7_fxanim_gp_flag_freerun_01_sanim`): 0x00 name, 0x08
 /// `StreamWrappedBuffer*` (its name a reference, its data resident or in
 /// the `.xpak`), 0x18 records (28 each, count u16 at 0x64), bounds and
-/// counts in between. Loaded in that order.
+/// counts in between, 0x20 a second list (28 each: 16 bytes and three
+/// u32s; count u16 at 0x6c: `mp_banzai`'s chains have two). Loaded in
+/// that order.
 pub fn sanim(s: &mut Stream, h: usize) -> Result<Option<String>> {
-    s.no_loads(h, crate::AssetType::SAnim.header_size(), &[0, 8, 0x18])?;
+    s.no_loads(h, crate::AssetType::SAnim.header_size(), &[0, 8, 0x18, 0x20])?;
     let name = s.string(h)?;
     super::gfxworld::stream_wrapped(s, h + 8)?;
     let n = s.u16_at(h + 0x64)? as usize;
     s.records(h + 0x18, n, 28, 3)?;
+    let n = s.u16_at(h + 0x6c)? as usize;
+    s.records(h + 0x20, n, 28, 3)?;
     Ok(name)
+}
+
+/// `StreamerHint` (0x28; read on `mp_sector`, `mp_crucible`): 0x00 name,
+/// 0x08 u32 count, 0x10 hints (24 each: a name, a u32 kind, 8 bytes), 0x18
+/// u32 count, 0x20 a second list (64 each). Order: the name, the hints,
+/// each hint's name (pictures' and models' names, or references to earlier
+/// ones), then the second list and its two arrays.
+pub fn streamer_hint(s: &mut Stream, h: usize) -> Result<Option<String>> {
+    s.no_loads(h, crate::AssetType::StreamerHint.header_size(), &[0, 0x10, 0x20])?;
+    let name = s.string(h)?;
+    let n = count(s, h + 8)?;
+    if let Some(t) = s.records(h + 0x10, n, 24, 7)? {
+        for i in 0..n {
+            s.string(t + 24 * i)?;
+        }
+    }
+    // The second list (64 each; `mp_sector`, `mp_crucible`: one): 0x00 -1
+    // (no pointer: nothing loads for it), 0x20 u32 count and 0x28 u16s,
+    // 0x30 u32 count and 0x38 (u32, u32) pairs.
+    let n = count(s, h + 0x18)?;
+    if let Some(t) = s.records(h + 0x20, n, 64, 7)? {
+        for i in 0..n {
+            let r = t + 64 * i;
+            let k = count(s, r + 0x20)?;
+            s.records(r + 0x28, k, 2, 1)?;
+            let k = count(s, r + 0x30)?;
+            s.records(r + 0x38, k, 8, 3)?;
+        }
+    }
+    Ok(name)
+}
+
+/// `ZBarrierDef` (0x300; `zm_factory`'s `zm_factory_debris`): the name,
+/// then six boards (0x70 each from 0x40) whose models, effects and sounds
+/// are references to assets loaded earlier on the maps read. Inline
+/// pointers past the name are not read yet.
+pub fn zbarrier(s: &mut Stream, h: usize) -> Result<Option<String>> {
+    s.no_loads(h, crate::AssetType::ZBarrier.header_size(), &[0])?;
+    s.string(h)
 }

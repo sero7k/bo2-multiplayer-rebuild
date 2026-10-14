@@ -1707,7 +1707,7 @@ pub(crate) fn t6_surface_list(loaded: &mut LoadedWorld, map: &str, iw_list: bool
 /// light grid read as Black Ops II light, its primary lights in the
 /// table's layout (sun 1, spot 2, omni 5), and the last Black Ops II
 /// map's lightmaps and probe origins dropped.
-fn foreign_t6_lighting(loaded: &mut LoadedWorld, map: &str) {
+pub(super) fn foreign_t6_lighting(loaded: &mut LoadedWorld, map: &str) {
     let lights: Vec<[f32; 16]> = loaded.world.draw.as_ref().map_or_else(Vec::new, |draw| {
         draw.primary_lights
             .iter()
@@ -1996,7 +1996,7 @@ pub(crate) fn attach_t6_rules(
 
 /// bo2zm: every sound alias a map script names as a whole string (the
 /// banks' aliases that appear in a script's string table).
-fn script_sound_aliases(scripts: &crate::script_sources::T6ScriptSet) -> Vec<String> {
+pub(super) fn script_sound_aliases(scripts: &crate::script_sources::T6ScriptSet) -> Vec<String> {
     let known: std::collections::HashSet<&str> =
         scripts.sound_aliases.iter().map(String::as_str).collect();
     let mut out: Vec<String> = scripts

@@ -118,7 +118,7 @@ asset_types! {
     FootstepTable = 0x3e, "footsteptable", 0x40;
     EntityFxImpacts = 0x3f, "entityfximpacts", 0x218;
     EntitySoundImpacts = 0x40, "entitysoundimpacts", 0x110;
-    ZBarrier = 0x41, "zbarrier", 0x0;
+    ZBarrier = 0x41, "zbarrier", 0x300;
     VehicleFxDef = 0x42, "vehiclefxdef", 0x3d8;
     VehicleSoundDef = 0x43, "vehiclesounddef", 0x1000;
     TypeInfo = 0x44, "typeinfo", 0x0;
@@ -155,7 +155,7 @@ asset_types! {
     BinaryHtml = 0x63, "binaryhtml", 0x0;
     Laser = 0x64, "laser", 0x70;
     Beam = 0x65, "beam", 0x2b0;
-    StreamerHint = 0x66, "streamerhint", 0x0;
+    StreamerHint = 0x66, "streamerhint", 0x28;
 }
 
 /// One past the last asset type (`ASSET_TYPE_COUNT`).

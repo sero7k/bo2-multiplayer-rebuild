@@ -2535,7 +2535,7 @@ fn bo2_feel_with<S: std::hash::BuildHasher>(
     let number = |name: &str, default: f32| dvar_number(dvars, name).unwrap_or(default);
     let zombies = dvars
         .get("mapname")
-        .is_some_and(|m| m.starts_with("zm_"));
+        .is_some_and(|m| m.starts_with("zm_") || crate::is_foreign_zm_map(m));
     movement_iw4::Bo2Feel {
         on: true,
         sprint_strafe_speed_scale: number("player_sprintStrafeSpeedScale", 0.667),

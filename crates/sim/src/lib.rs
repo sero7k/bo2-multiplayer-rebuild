@@ -42,6 +42,7 @@ pub mod t6_playeranim;
 pub mod t6_ragdoll;
 pub use t6::stats::{ranked as local_match_ranked, set_local_class_set, set_local_match_ranked, set_local_stats_path}; // bo2mp lane C
 pub use t6::mp::set_moab_kills;
+pub use t6::foreign_zm::{is_foreign_zm_map, register_foreign_zm_map}; // bo2mp: Infinite Warfare's Zombies maps
 pub use t6::{
     Cheat, T6Anim, T6Install, T6PathNode, T6PathTables, T6Table, T6Vehicle, T6VehicleDrive,
     T6ZBarrierDef, cheat_on, cheat_pick, cheats_allowed, client_frame_heartbeat,

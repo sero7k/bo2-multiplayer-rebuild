@@ -240,6 +240,11 @@ pub const IW6_ZONE_VERSION: u32 = 0x235;
 /// bo2mp: Call of Duty: Infinite Warfare's fast file version (`IWff0100`,
 /// 0x653): its maps load through `fastfile_iw7` (`assets::lane::iw7`).
 pub const IW7_ZONE_VERSION: u32 = 0x653;
+/// bo2mp: Call of Duty: Black Ops III's fast file version (`TAff0000`,
+/// 0x251): its maps load through `fastfile_t7` (`assets::lane::t7_map`).
+pub const T7_ZONE_VERSION: u32 = 0x251;
+/// bo2mp: Black Ops III's envelope magic.
+const T7_MAGIC: &[u8; 8] = b"TAff0000";
 
 /// bo2mp: the version of a legacy game's zones by its prefix.
 pub fn legacy_version(prefix: &str) -> Option<u32> {
@@ -248,6 +253,7 @@ pub fn legacy_version(prefix: &str) -> Option<u32> {
         "t4" => Some(T4_ZONE_VERSION),
         "iw6" => Some(IW6_ZONE_VERSION),
         "iw7" => Some(IW7_ZONE_VERSION),
+        "t7" => Some(T7_ZONE_VERSION),
         _ => None,
     }
 }
@@ -260,6 +266,7 @@ pub fn legacy_game_for_path(path: &Path) -> Option<&'static str> {
         T4_ZONE_VERSION => Some("t4"),
         IW6_ZONE_VERSION => Some("iw6"),
         IW7_ZONE_VERSION => Some("iw7"),
+        T7_ZONE_VERSION => Some("t7"),
         _ => None,
     }
 }
@@ -289,6 +296,7 @@ pub fn list_legacy_mp_map_files(root: &GamesRoot) -> Vec<(String, String, PathBu
             && !out.iter().any(|(g, s, _)| g == game && *s == stem)
             && (game != "iw6" || is_ghosts_mp_map(&path, &stem))
             && (game != "iw7" || is_iw7_map(&path, &stem))
+            && (game != "t7" || is_t7_map(&stem))
         {
             out.push((game.to_owned(), stem, path));
         }
@@ -317,6 +325,36 @@ pub fn is_iw7_map(path: &Path, stem: &str) -> bool {
         && path
             .parent()
             .is_some_and(|dir| dir.join(format!("techsets_{stem}.ff")).is_file())
+}
+
+/// bo2mp: a Black Ops III zone named `mp_*`/`zm_*` is a map unless it is
+/// one of the shared zones (`mp_common`, `zm_levelcommon`, the `_patch` and
+/// `_all` zones) or a Freerun course (`mp_freerun_*`, no multiplayer map).
+pub fn is_t7_map(stem: &str) -> bool {
+    (stem.starts_with("mp_") || stem.starts_with("zm_"))
+        && !stem.ends_with("_patch")
+        && !stem.ends_with("_all")
+        && !stem.starts_with("mp_freerun")
+        && !matches!(stem, "mp_common" | "mp_patch" | "zm_common" | "zm_levelcommon" | "zm_patch")
+}
+
+/// bo2mp: every Black Ops III Zombies map installed (`zm_*` zones of Black
+/// Ops III's version): (map, zone file).
+pub fn list_t7_zombies_maps(root: &GamesRoot) -> Vec<(String, PathBuf)> {
+    let mut out: Vec<(String, PathBuf)> = Vec::new();
+    for path in game_files(&root.0).flatten() {
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()).map(str::to_ascii_lowercase) else {
+            continue;
+        };
+        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ff")) || !stem.starts_with("zm_") || !is_t7_map(&stem) {
+            continue;
+        }
+        if legacy_game_for_path(&path) == Some("t7") && !out.iter().any(|(s, _)| *s == stem) {
+            out.push((stem, path));
+        }
+    }
+    out.sort();
+    out
 }
 
 /// bo2mp: every Infinite Warfare Zombies map installed (`cp_*` with its
@@ -502,6 +540,7 @@ fn read_zone_version(path: &Path) -> Result<u32, String> {
     if &header[0..4] != b"IWff"
         && &header[0..4] != IW4X_MAGIC
         && !fastfile_t6::is_t6_magic(&header[..8])
+        && &header[..8] != T7_MAGIC
     {
         return Err(format!("not an IWff envelope: {:02x?}", &header[..8]));
     }

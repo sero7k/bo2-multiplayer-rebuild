@@ -1,6 +1,7 @@
 //! Black Ops III map zones: `t7_map <zone.ff>...` walks a map zone and
 //! prints what the map reader (`fastfile_t7::map`) gets from it.
-//! `T7_MAP_DUMP=materials|meshes|smodels|ents` prints those in full;
+//! `T7_MAP_DUMP=materials|meshes|smodels|ents` prints those in full
+//! (`ents` also from a zone whose walk stops after its map entities);
 //! `T7_MAP_MESH=<name>` writes that mesh's data (`<name>.mesh.bin`, from
 //! the zone or its `.xpak` entry) to the current directory.
 use fastfile_t7::walk::{Options, Stop, walk_with};
@@ -58,6 +59,13 @@ fn main() {
         }
         for m in &cap.world.map_ents {
             println!("  map_ents {}: entity string {:x?}, trigger models {:x?}", m.name, m.entity_string, m.trigger_models);
+            if dump == "ents"
+                && let Some((at, n)) = m.entity_string
+            {
+                let raw = &z.image[at..at + n];
+                let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+                println!("{}", String::from_utf8_lossy(&raw[..end]));
+            }
         }
         if dump == "materials" {
             for m in &cap.materials {

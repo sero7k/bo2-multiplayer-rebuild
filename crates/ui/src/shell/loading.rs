@@ -120,7 +120,7 @@ pub(crate) fn shell_loading(
         st.tip = (snap.request_id as usize).wrapping_mul(7);
     }
     // Zombies maps load on the same screen in red.
-    let zombies = setup.map.starts_with("zm_");
+    let zombies = setup.map.starts_with("zm_") || sim::is_foreign_zm_map(&setup.map);
     let (accent, tips) = if zombies { (Palette::ZOMBIES.accent, ZM_TIPS) } else { (ACCENT, TIPS) };
     let tip = tips[st.tip % tips.len()];
     let shade = if zombies { [0.03f32, 0.004, 0.004] } else { [0.0, 0.01, 0.03] };

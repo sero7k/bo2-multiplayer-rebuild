@@ -387,8 +387,34 @@ pub(crate) fn load_iw7_world(path: &Path, progress: &LoadProgress, material_seed
 
 /// The collision: the drawn world's triangles (not the sky's, tools',
 /// decals' or blended surfaces') and each placed model's coarsest LOD.
-fn collision_of(map: &Iw7Map, hidden: &[bool]) -> asset_world::ClipCollision {
-    use asset_world::world_iw7::{IW7_SOLID, SoupTri, build_soup_clip_collision};
+///
+/// Each brush model (`*1`, `*2`...: a door, a debris pile) gets a box brush
+/// of its bounds for the entity that names it, and each trigger model
+/// (`?1`...: a Zombies area, a buy trigger) its hulls. Also the triangles,
+/// for the Zombies maps' walk graph.
+fn collision_of(map: &Iw7Map, hidden: &[bool]) -> (asset_world::ClipCollision, Vec<asset_world::world_iw7::SoupTri>) {
+    use asset_world::world_iw7::build_soup_clip_collision;
+    let tris = collision_tris(map, hidden);
+    let cmodels: Vec<asset_world::world_iw7::SoupCmodel> = map
+        .brush_models
+        .iter()
+        .map(|b| {
+            let mid: [f32; 3] = std::array::from_fn(|k| (b.mins[k] + b.maxs[k]) * 0.5);
+            let half: [f32; 3] = std::array::from_fn(|k| (b.maxs[k] - b.mins[k]) * 0.5);
+            (mid, half, (half[0] * half[0] + half[1] * half[1] + half[2] * half[2]).sqrt())
+        })
+        .collect();
+    let mut clip = build_soup_clip_collision(&tris, &cmodels);
+    clip.trigger_models = map
+        .trigger_hulls
+        .iter()
+        .map(|hulls| hulls.iter().map(|&(mid, half)| asset_world::MapTriggerHull { mid, half, slabs: Vec::new() }).collect())
+        .collect();
+    (clip, tris)
+}
+
+fn collision_tris(map: &Iw7Map, hidden: &[bool]) -> Vec<asset_world::world_iw7::SoupTri> {
+    use asset_world::world_iw7::{IW7_SOLID, SoupTri};
     let mut tris = Vec::new();
     for (i, s) in map.surfaces.iter().enumerate() {
         if hidden.get(i).copied().unwrap_or(false) {
@@ -427,7 +453,7 @@ fn collision_of(map: &Iw7Map, hidden: &[bool]) -> asset_world::ClipCollision {
             }
         }
     }
-    build_soup_clip_collision(&tris, &[])
+    tris
 }
 
 fn build_iw7_world(
@@ -458,7 +484,7 @@ fn build_iw7_world(
 
     // Collision.
     let stage = progress.begin_scoped(StageId::MapAssets, "infinite warfare collision", None);
-    let collision = collision_of(map, &hidden);
+    let (collision, soup) = collision_of(map, &hidden);
     let census = asset_world::world_iw3::spawn_ground_census(&collision, &map.spawns.iter().map(|s| s.origin).collect::<Vec<_>>());
     report.push(format!(
         "iw7 clip: {} triangles ({} vertices, {} partitions) from the drawn world and placed models; {census}",
@@ -470,6 +496,14 @@ fn build_iw7_world(
         diag::warn!(World, "bo2mp iw7: {map_name}: most spawn points have no floor of their own in the collision ({census})");
     }
     stage.done();
+    // bo2mp: a Zombies map: its layout and a walk graph for Black Ops II's
+    // Zombies (`super::iw7_zombies`, attached under its rules).
+    if super::iw7_zombies::is_iw7_zombies_map(&map_name) {
+        let stage = progress.begin_scoped(StageId::MapAssets, "infinite warfare zombies layout", None);
+        report.extend(super::iw7_zombies::prepare(&map_name, map, &soup));
+        stage.done();
+    }
+    drop(soup);
 
     // Entities and spawns.
     let entities = iw3::ents::parse(&map.entities);

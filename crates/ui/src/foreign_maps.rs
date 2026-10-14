@@ -348,6 +348,48 @@ const GAMES: &[Game] = &[
             ("mp_rivet", "Rivet"),
         ],
     },
+    // bo2mp: Call of Duty: Black Ops III (its maps through
+    // `assets::lane::t7_map`).
+    Game {
+        prefix: "t7",
+        key: "BO3",
+        title: "Black Ops III",
+        base: &[
+            ("mp_biodome", "Aquarium"),
+            ("mp_spire", "Breach"),
+            ("mp_sector", "Combine"),
+            ("mp_apartments", "Evac"),
+            ("mp_chinatown", "Exodus"),
+            ("mp_veiled", "Fringe"),
+            ("mp_havoc", "Havoc"),
+            ("mp_ethiopia", "Hunted"),
+            ("mp_infection", "Infection"),
+            ("mp_metro", "Metro"),
+            ("mp_nuketown_x", "Nuk3town"),
+            ("mp_redwood", "Redwood"),
+            ("mp_stronghold", "Stronghold"),
+        ],
+        dlc: &[
+            ("mp_redwood_ice", "Redwood Snow"),
+            ("mp_veiled_heyday", "Fringe Night"),
+            ("mp_crucible", "Gauntlet"),
+            ("mp_rise", "Rise"),
+            ("mp_skyjacked", "Skyjacked"),
+            ("mp_waterpark", "Splash"),
+            ("mp_conduit", "Rift"),
+            ("mp_kung_fu", "Knockout"),
+            ("mp_aerospace", "Spire"),
+            ("mp_banzai", "Verge"),
+            ("mp_arena", "Rumble"),
+            ("mp_cryogen", "Cryogen"),
+            ("mp_rome", "Empire"),
+            ("mp_ruins", "Berserk"),
+            ("mp_shrine", "Citadel"),
+            ("mp_miniature", "Micro"),
+            ("mp_western", "Outlaw"),
+            ("mp_city", "Rupture"),
+        ],
+    },
 ];
 
 /// A map from another game, as the menus list it.
@@ -487,7 +529,7 @@ fn discover() -> Vec<Category> {
     installed.extend(
         asset_transport::list_legacy_mp_maps(&root)
             .into_iter()
-            .filter(|(game, _)| game == "iw3" || game == "t4" || game == "iw6" || game == "iw7"),
+            .filter(|(game, _)| game == "iw3" || game == "t4" || game == "iw6" || game == "iw7" || game == "t7"),
     );
     installed.sort();
     installed.dedup();

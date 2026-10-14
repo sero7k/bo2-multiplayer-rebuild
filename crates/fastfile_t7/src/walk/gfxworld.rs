@@ -48,6 +48,30 @@ const EXPOSURE_BLEND: usize = 80;
 const OUTDOOR_VOLUME: usize = 424;
 const FOG_VOLUME: usize = 624;
 const LUT_VOLUME: usize = 60;
+const EXPOSURE_VOLUME: usize = 108;
+const VOLUME_DECAL: usize = 184;
+
+/// The post-effect lists at the end of the `GfxWorld` header: (count's
+/// offset, record size); the pointer follows the count. Vukko (boxes 144:
+/// `zm_factory`'s seventeen), bloom (modifiers
+/// 384, boxes 464), the LUT (boxes 144), colour (modifiers 336, boxes 688),
+/// underwater (boxes 164: `mp_waterpark`'s two).
+const POST_FX_LISTS: &[(usize, Option<usize>)] = &[
+    (0x1610, None),
+    (0x1620, Some(144)),
+    (0x1630, Some(144)),
+    (0x1b40, Some(384)),
+    (0x1b50, Some(464)),
+    (0x1b60, Some(464)),
+    (0x1b80, None),
+    (0x1b90, Some(144)),
+    (0x1ba0, Some(144)),
+    (0x1ff0, Some(336)),
+    (0x2000, Some(688)),
+    (0x2010, Some(688)),
+    (0x2020, Some(164)),
+    (0x2030, Some(164)),
+];
 const GRIME_VOLUME: usize = 120;
 const GENERIC_VOLUME: usize = 12;
 const CELL: usize = 56;
@@ -220,8 +244,9 @@ pub fn gfx_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
         }
     }
     planes(s, h, 0x118)?;
+    // Exposure volumes (`GfxExposureVolume`, 108; `mp_sector` has eight).
     let n = count(s, h + 0x128)?;
-    s.records(h + 0x130, n, 84, 3)?;
+    s.records(h + 0x130, n, EXPOSURE_VOLUME, 3)?;
     planes(s, h, 0x138)?;
     let n = count(s, h + 0x148)?;
     s.records(h + 0x150, n, FOG_VOLUME, 15)?;
@@ -244,8 +269,10 @@ pub fn gfx_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
     let n = count(s, h + 0x1c8)?;
     s.records(h + 0x1d0, n, GENERIC_VOLUME, 3)?;
     planes(s, h, 0x1d8)?;
+    // (x64-zt's `unk` list: 48 bytes each; `mp_banzai`'s one puts its
+    // DPVS cell 48 bytes on.)
     let n = count(s, h + 0x1e8)?;
-    s.records(h + 0x1f0, n, 1, 0)?;
+    s.records(h + 0x1f0, n, 48, 3)?;
     planes(s, h, 0x1f8)?;
     let n = count(s, h + 0x208)?;
     s.records(h + 0x210, n, 144, 15)?;
@@ -316,11 +343,11 @@ pub fn gfx_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
         for i in 0..n {
             let d = t + SMODEL_DRAW * i;
             rec.smodel_models.push(s.asset_named(AssetType::XModel, d + 88)?);
-            for f in [120, 136] {
-                if s.ptr_at(d + f)?.is_inline() {
-                    return Err(crate::cursor::ReadError::Invalid("gfxworld posed static model (not read yet)", d + f));
-                }
-            }
+            // Posed bones (`GfxStaticModelBone`, 64: a 3x4 matrix and one
+            // more vec4; count at 128), then the siege animation (an asset).
+            let bones = count(s, d + 128)?;
+            s.records(d + 120, bones, 64, 15)?;
+            s.asset(AssetType::SAnim, d + 136)?;
         }
     }
     s.capture.world.gfx_worlds.push(rec);
@@ -331,8 +358,123 @@ pub fn gfx_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
     }
     let n = count(s, h + 0x540)?;
     s.records(h + 0x548, n, 68, 3)?;
-    let n = count(s, h + 0x558)?;
-    if let Some(t) = s.records(h + 0x560, n, 40, 7)? {
+    // The two umbra tome lists (0x558/0x560, 0x568/0x570), the siege
+    // animations (count at 0x578, `mp_sector`'s seven; asset pointers, 8
+    // each) and those that play by themselves (0x588: `SiegeAutoPlay`, 20
+    // each).
+    for (count_at, field) in [(0x558, 0x560), (0x568, 0x570)] {
+        umbra_tomes(s, h + count_at, h + field)?;
+    }
+    let n = count(s, h + 0x578)?;
+    if let Some(t) = s.records(h + 0x580, n, 8, 7)? {
+        for i in 0..n {
+            s.asset(AssetType::SAnim, t + 8 * i)?;
+        }
+    }
+    let n = count(s, h + 0x588)?;
+    s.records(h + 0x590, n, 20, 3)?;
+    let n = count(s, h + 0x598)?;
+    s.records(h + 0x5a0, n, 84, 3)?;
+    // Lit fog volumes (360: planeStart and planeCount first, then x64-zt's
+    // `GfxLitFogVolume`) and their planes (the 0x5c0 array: vec4s).
+    let n = count(s, h + 0x5a8)?;
+    s.records(h + 0x5b0, n, 360, 15)?;
+    planes(s, h, 0x5b8)?;
+    // Volume decals (`GfxVolumeDecal`, 184, the material at 152:
+    // `mp_nuketown_x`'s twelve).
+    let n = count(s, h + 0x5c8)?;
+    if let Some(t) = s.records(h + 0x5d0, n, VOLUME_DECAL, 7)? {
+        for i in 0..n {
+            s.asset(AssetType::Material, t + VOLUME_DECAL * i + 152)?;
+        }
+    }
+    image(s, h + 0x5d8)?;
+    // Water (`GfxWorldWaterDisk` at 0x5e0): the interactive waves (count at
+    // 0x5e4, 192 each, `mp_apartments`' one) and the grid memory (0x5f0
+    // bytes at 0x5f8: runtime, no file bytes).
+    let n = count(s, h + 0x5e4)?;
+    if let Some(t) = s.records(h + 0x5e8, n, INTERACTIVE_WATER, 7)? {
+        for i in 0..n {
+            interactive_water(s, t + INTERACTIVE_WATER * i)?;
+        }
+    }
+    let n = count(s, h + 0x5f0)?;
+    s.push(crate::stream::RUNTIME_VIRTUAL);
+    let r = s.array(h + 0x5f8, n, 15);
+    s.pop();
+    r?;
+    // The post-effect volumes: per effect its base settings (inline in the
+    // header), then (count, records) lists of modifiers ("Mod") and of
+    // boxes (six planes, settings, a name) that override or set them.
+    // Sizes read on `mp_crucible` and `mp_stronghold` (the records fill the
+    // file up to the next asset); `None`: not seen loaded yet.
+    s.no_loads(h + 0x600, 0x1610 - 0x600, &[])?;
+    s.no_loads(h + 0x1640, 0x1b40 - 0x1640, &[])?;
+    for &(count_at, size) in POST_FX_LISTS {
+        let n = count(s, h + count_at)?;
+        match size {
+            Some(size) => {
+                s.records(h + count_at + 8, n, size, 15)?;
+            }
+            None if n > 0 && s.ptr_at(h + count_at + 8)?.is_inline() => {
+                return Err(crate::cursor::ReadError::Invalid("gfxworld post-effect list (size not read yet; its data at)", s.pos()));
+            }
+            None => {}
+        }
+    }
+    s.no_loads(h + 0x1bb0, 0x1ff0 - 0x1bb0, &[])?;
+    let _ = at;
+    Ok(name)
+}
+
+/// An interactive wave water (192: bounds, 0x1c u32 count and 0x20 cells,
+/// 40 each; 0x28 u32 count and 0x30 outlines, 32 each with their points,
+/// 8 each, at 0; 0x38 u32 count and 0x40 wave clamps; 0x48 a reference;
+/// 0x50 its name; then settings). `mp_apartments`, `mp_metro`.
+const INTERACTIVE_WATER: usize = 192;
+
+fn interactive_water(s: &mut Stream, w: usize) -> Result<()> {
+    s.no_loads(w, INTERACTIVE_WATER, &[0x20, 0x30, 0x40, 0x48, 0x50, 0x90])?;
+    let n = count(s, w + 0x1c)?;
+    s.records(w + 0x20, n, 40, 3)?;
+    let n = count(s, w + 0x28)?;
+    if let Some(t) = s.records(w + 0x30, n, 32, 7)? {
+        for i in 0..n {
+            let k = count(s, t + 32 * i + 8)?;
+            s.records(t + 32 * i, k, 8, 3)?;
+        }
+    }
+    // Wave clamps (count at 0x38, 48 each: their outline's points, 8
+    // each, at 8 with the count at 0x10; their name at 0x28).
+    let n = count(s, w + 0x38)?;
+    if let Some(t) = s.records(w + 0x40, n, 48, 7)? {
+        for i in 0..n {
+            let r = t + 48 * i;
+            let k = count(s, r + 0x10)?;
+            s.records(r + 8, k, 8, 3)?;
+            s.string(r + 0x28)?;
+        }
+    }
+    if s.ptr_at(w + 0x48)?.is_inline() {
+        return Err(crate::cursor::ReadError::Invalid("interactive water field 0x48 (not read yet)", w + 0x48));
+    }
+    s.string(w + 0x50)?;
+    // Splines or emitters (count at 0x88, 72 each, their name at 0x40;
+    // `mp_banzai`'s river has five).
+    let n = count(s, w + 0x88)?;
+    if let Some(t) = s.records(w + 0x90, n, 72, 3)? {
+        for i in 0..n {
+            s.string(t + 72 * i + 0x40)?;
+        }
+    }
+    Ok(())
+}
+
+/// `GfxUmbraTome` lists (40 each: the tome's bytes, then its parameter
+/// volumes, 40 each).
+fn umbra_tomes(s: &mut Stream, count_at: usize, field: usize) -> Result<()> {
+    let n = count(s, count_at)?;
+    if let Some(t) = s.records(field, n, 40, 7)? {
         for i in 0..n {
             let u = t + 40 * i;
             let size = count(s, u)?;
@@ -341,20 +483,5 @@ pub fn gfx_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
             s.records(u + 0x20, k, 40, 3)?;
         }
     }
-    let n = count(s, h + 0x598)?;
-    s.records(h + 0x5a0, n, 84, 3)?;
-    // Lit fog volumes (360: planeStart and planeCount first, then x64-zt's
-    // `GfxLitFogVolume`) and their planes (the 0x5c0 array: vec4s).
-    let n = count(s, h + 0x5a8)?;
-    s.records(h + 0x5b0, n, 360, 15)?;
-    planes(s, h, 0x5b8)?;
-    let n = count(s, h + 0x5c8)?;
-    if let Some(t) = s.records(h + 0x5d0, n, 184, 7)? {
-        for i in 0..n {
-            s.asset(AssetType::Material, t + 184 * i + 152)?;
-        }
-    }
-    image(s, h + 0x5d8)?;
-    let _ = at;
-    Ok(name)
+    Ok(())
 }

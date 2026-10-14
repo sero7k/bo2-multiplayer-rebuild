@@ -36,6 +36,11 @@ enum U {
     Floats(usize),
     /// 197 animation names.
     Anims,
+    /// One struct of this size whose last 8 bytes are a pointer to an
+    /// asset of this type, the rest numbers (0x248, 0x28: vec3 origin,
+    /// angles, a word, then the model; `au_baseweapon_damage`'s
+    /// `wpn_t7_base_dm_mag_view`, loaded there).
+    Placed(usize, AssetType),
 }
 
 const MODEL: U = U::A(AssetType::XModel);
@@ -80,6 +85,7 @@ const UNIQUE_FIELDS: &[(usize, U, &str)] = &[
     (0x228, U::Str, "+0x228"),
     (0x230, U::Str, "+0x230"),
     (0x238, U::Str, "+0x238"),
+    (0x248, U::Placed(0x28, AssetType::XModel), "model4"),
     (0x358, U::A(AssetType::WeaponCamo), "camo"),
     (0x3b8, U::Anims, "anims"),
     (0x3e0, U::Floats(21), "locationDamageMultipliers"),
@@ -157,6 +163,14 @@ pub fn attachment_unique(s: &mut Stream, h: usize) -> Result<Option<String>> {
                 // u32s only: 4-aligned (later uniques' references to it land so).
                 if let Some(t) = s.array(h + off, size, 3)? {
                     s.no_loads(t, size, &[])?;
+                }
+            }
+            U::Placed(size, ty) => {
+                if let Some(t) = s.array(h + off, size, 7)? {
+                    s.no_loads(t, size - 8, &[])?;
+                    if let Some(n) = s.asset_named(ty, t + size - 8)? {
+                        links.push((label.to_string(), FieldValue::Asset { ty, name: n }));
+                    }
                 }
             }
             U::Floats(n) => {

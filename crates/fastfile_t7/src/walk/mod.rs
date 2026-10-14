@@ -34,6 +34,7 @@ pub mod bundle;
 pub mod capture;
 pub mod flame;
 pub mod fx;
+pub mod gap;
 pub mod gfxworld;
 pub mod image;
 pub mod material;
@@ -96,6 +97,9 @@ pub struct Walk {
     pub capture: capture::Capture,
     /// What `Options::resync` skipped.
     pub skipped: Vec<Skip>,
+    /// The gaps (`gap`: assets whose layout is not read yet but whose
+    /// extent is found) the walk stepped over.
+    pub gaps: Vec<gap::Gap>,
 }
 
 /// Reads one asset whose top-level struct is at file offset `h` (TEMP),
@@ -179,6 +183,8 @@ fn walker(ty: AssetType) -> Option<AssetFn> {
         T::Glasses => world_misc::glasses,
         T::ClipMap => world::clip_map,
         T::SAnim => world_misc::sanim,
+        T::StreamerHint => world_misc::streamer_hint,
+        T::ZBarrier => world_misc::zbarrier,
         _ => return weapon::walker(ty),
     })
 }
@@ -403,6 +409,29 @@ fn plausible_name(data: &[u8], at: usize) -> bool {
     }
 }
 
+/// `trial`, but every one of the next eight inline assets must read
+/// (a type without a walker, or a gap type, ends the trial early): runs of
+/// `-1` pointers and strings inside a gap read as a few rawfiles.
+fn trial_strict(zone: &Zone, index: usize, at: usize) -> bool {
+    let mut s = Stream::new(&zone.image);
+    s.seek(at);
+    let mut n = 0;
+    for a in zone.assets.assets.iter().skip(index) {
+        if !a.is_inline() {
+            continue;
+        }
+        let Some(ty) = a.asset_type().filter(|t| is_walkable(*t) && !gap::is_gap(*t)) else { return n > 0 };
+        if s.load_asset(ty).is_err() {
+            return false;
+        }
+        n += 1;
+        if n == 8 {
+            return true;
+        }
+    }
+    n > 0
+}
+
 /// Do the assets from `index` read from file offset `at` (on a scratch
 /// stream)? The first inline one must, the next two until one fails.
 fn trial(zone: &Zone, index: usize, at: usize) -> bool {
@@ -462,13 +491,57 @@ pub fn walk(zone: &Zone) -> Walk {
     walk_with(zone, Options::default())
 }
 
-/// `walk`, with `options`.
+/// `walk`, with `options`. A zone with gaps (`gap`) is walked again
+/// for each gap, with its VIRTUAL size fitted from the references after it.
 pub fn walk_with(zone: &Zone, options: Options) -> Walk {
+    let mut sizes: Vec<GapSize> = Vec::new();
+    loop {
+        let (mut w, fitted) = walk_pass(zone, options, &sizes);
+        for (g, (_, f)) in w.gaps.iter_mut().zip(&sizes) {
+            g.fitted = Some(*f);
+        }
+        match fitted {
+            // A gap whose byte count was right needs no second walk when
+            // no gap follows it.
+            Some((size, unchanged)) if !(unchanged && w.gaps.len() == sizes.len() + 1) => sizes.push(size),
+            Some(((_, f), _)) => {
+                if let Some(g) = w.gaps.last_mut() {
+                    g.fitted = Some(f);
+                }
+                return w;
+            }
+            None => return w,
+        }
+    }
+}
+
+/// A gap's fitted VIRTUAL size and (references landed, tried).
+type GapSize = (u64, (usize, usize));
+
+/// One walk; `sizes` are the fitted VIRTUAL sizes of the first gaps. Also
+/// the fit for the next gap: its size, and whether the size counted was
+/// already right.
+fn walk_pass(zone: &Zone, options: Options, sizes: &[GapSize]) -> (Walk, Option<(GapSize, bool)>) {
     let mut s = Stream::new(&zone.image);
+    s.keep_misses = true;
+    let mut gaps: Vec<gap::Gap> = Vec::new();
     let mut walked = Vec::new();
     let mut skipped: Vec<Skip> = Vec::new();
-    let finish = |s: &mut Stream, walked, skipped, stop| {
+    let finish = |s: &mut Stream, walked, skipped, gaps: Vec<gap::Gap>, stop| {
         s.settle_forward();
+        // The fit for the first gap without a size.
+        let fitted = gaps.get(sizes.len()).and_then(|g| {
+            let next = gaps.get(sizes.len() + 1).map_or(usize::MAX, |n| n.start);
+            let after = g.virtual_start + g.virtual_len;
+            let misses: Vec<(usize, u64)> = s.misses.iter().copied().filter(|m| (g.end..next).contains(&m.0)).collect();
+            if misses.is_empty() {
+                return Some(((g.virtual_len, (0, 0)), true));
+            }
+            let starts = s.starts_from(after);
+            let (d, n, tried) = gap::fit(&misses, &starts, g.virtual_len + 0x10000)?;
+            let len = g.virtual_len.checked_add_signed(-d)?;
+            Some(((len, (n, tried)), d == 0))
+        });
         if std::env::var_os("T7_DRIFT").is_some() {
             s.print_drift();
         }
@@ -484,7 +557,7 @@ pub fn walk_with(zone: &Zone, options: Options) -> Walk {
                 }
             }
         }
-        Walk {
+        (Walk {
             walked,
             skipped,
             stop,
@@ -494,13 +567,14 @@ pub fn walk_with(zone: &Zone, options: Options) -> Walk {
             physical_end: s.offset(PHYSICAL),
             streamer_end: s.offset(STREAMER),
             capture: s.capture.clone(),
-        }
+            gaps,
+        }, fitted)
     };
     let table = match asset_list(&mut s, zone) {
         Ok(t) => t,
         Err(error) => {
             let stop = Stop::Failed { index: 0, ty: AssetType::Localize, at: 0, error };
-            return finish(&mut s, walked, skipped, stop);
+            return finish(&mut s, walked, skipped, gaps, stop);
         }
     };
     let assets = &zone.assets.assets;
@@ -536,9 +610,26 @@ pub fn walk_with(zone: &Zone, options: Options) -> Walk {
         match result {
             Ok(()) => index += 1,
             Err(stop) => {
+                if let Some(ty) = a.asset_type().filter(|t| gap::is_gap(*t))
+                    && let Some((j, p)) = gap::resume_point(zone, index, at + 8)
+                {
+                    // Count the gap as VIRTUAL: its bytes but the header, or
+                    // the size fitted for it.
+                    s.push(VIRTUAL);
+                    s.align(7);
+                    let virtual_start = s.offset(VIRTUAL);
+                    let guess = (p - at).saturating_sub(ty.header_size()) as u64;
+                    let virtual_len = sizes.get(gaps.len()).map_or(guess, |f| f.0);
+                    s.skip(virtual_len);
+                    s.pop();
+                    gaps.push(gap::Gap { index, resumed_at: j, start: at, end: p, virtual_start, virtual_len, fitted: None });
+                    s.seek(p);
+                    index = j;
+                    continue;
+                }
                 let opaque = a.asset_type().is_some_and(is_opaque);
                 let resume = if options.resync || opaque { resync_point(zone, index, at + 8) } else { None };
-                let Some((j, p)) = resume else { return finish(&mut s, walked, skipped, stop) };
+                let Some((j, p)) = resume else { return finish(&mut s, walked, skipped, gaps, stop) };
                 let why = match &stop {
                     Stop::Failed { error, .. } => error.to_string(),
                     _ => "no walker".to_string(),
@@ -560,5 +651,5 @@ pub fn walk_with(zone: &Zone, options: Options) -> Walk {
         }
     }
     let stop = Stop::Done { end: s.pos() };
-    finish(&mut s, walked, skipped, stop)
+    finish(&mut s, walked, skipped, gaps, stop)
 }

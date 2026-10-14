@@ -149,6 +149,8 @@ pub(super) async fn walk_prepared_match(
                 "iw6" => crate::lane::load_iw6_world(path, &progress, material_seed),
                 // bo2mp: Infinite Warfare's maps.
                 "iw7" => crate::lane::load_iw7_world(path, &progress, material_seed),
+                // bo2mp: Black Ops III's maps.
+                "t7" => crate::lane::load_t7_world(path, &progress, material_seed),
                 _ => {
                     drop(material_seed);
                     LoadedWorld::with_gap(
@@ -163,11 +165,22 @@ pub(super) async fn walk_prepared_match(
                 let stage = progress.begin_scoped(StageId::MapAssets, "black ops ii rules", None);
                 // (Ghosts' surface list is Infinity Ward's, as CoD4's.)
                 crate::lane::t6_surface_list(&mut loaded, &zone_name, matches!(game, "iw3" | "iw6"));
-                crate::lane::attach_t6_rules(
-                    &mut loaded,
-                    &zone_name,
-                    asset_world::ForeignEntityGame::InfinityWard,
-                );
+                // bo2mp: an Infinite Warfare Zombies map plays Black Ops II
+                // Zombies.
+                // (bo2mp: and a Black Ops III Zombies map, which its lane
+                // registers there.)
+                if (game == "iw7" || game == "t7") && crate::lane::is_iw7_zombies_map(&zone_name) {
+                    crate::lane::attach_t6_zm_rules(&mut loaded, &zone_name);
+                } else {
+                    // bo2mp: Black Ops III's entities are Treyarch's (Black
+                    // Ops II's class names).
+                    let source = if game == "t7" {
+                        asset_world::ForeignEntityGame::Treyarch
+                    } else {
+                        asset_world::ForeignEntityGame::InfinityWard
+                    };
+                    crate::lane::attach_t6_rules(&mut loaded, &zone_name, source);
+                }
                 stage.done();
             }
             (loaded, Some(asset_core::AssetNamespace::T6))
@@ -389,7 +402,7 @@ pub(super) async fn walk_prepared_match(
     // bo2mp: on a Zombies map, the Mystery Box's guest guns' Pack-a-Punch
     // upgrades (their own games' upgraded weapons, else Black Ops II-style
     // copies), before anything resolves against the catalog.
-    let zm_upgrades = if crate::t6_rules() && crate::guest_guns() && zone_name.starts_with("zm_") {
+    let zm_upgrades = if crate::t6_rules() && crate::guest_guns() && (zone_name.starts_with("zm_") || crate::lane::is_iw7_zombies_map(&zone_name)) {
         guest_zm_upgrades(&mut weapons, &mut report)
     } else {
         Vec::new()

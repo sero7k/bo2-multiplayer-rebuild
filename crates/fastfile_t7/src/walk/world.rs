@@ -25,7 +25,9 @@ pub struct MapEntsRec {
     pub trigger_slabs: Span,
 }
 
-/// A static model the collision places (`cStaticModel_t`, 0x70).
+/// A static model the collision places (`cStaticModel_t`, 0x70: its model
+/// at 8, contents at 16, origin at 20, inverse scaled axes at 32, bounds at
+/// 68 and 80, posed bones at 96).
 #[derive(Clone, Debug, Default)]
 pub struct ClipStaticModel {
     pub model: Option<String>,
@@ -66,6 +68,8 @@ pub struct ClipMapRec {
     pub leafs: Span,
     pub verts: Span,
     pub tri_indices: Span,
+    /// The walkable-edge bits (one per triangle edge): (file offset, bytes).
+    pub walkable: Span,
     pub partitions: Span,
     pub aabb_trees: Span,
     pub cmodels: Span,
@@ -430,9 +434,10 @@ pub fn clip_map(s: &mut Stream, h: usize) -> Result<Option<String>> {
         for i in 0..n {
             let e = t + CLIP_STATIC_MODEL * i;
             let model = s.asset_named(AssetType::XModel, e + 8)?;
-            if s.ptr_at(e + 96)?.is_inline() {
-                return Err(crate::cursor::ReadError::Invalid("clip static model bones (not read yet)", e + 96));
-            }
+            // The posed bones (`DObjAnimMat`, 32: a quaternion, a
+            // translation and its weight; count at 104).
+            let bones = count(s, e + 104)?;
+            s.records(e + 96, bones, 32, 15)?;
             rec.static_models.push(ClipStaticModel { model, at: e });
         }
     }
@@ -444,7 +449,8 @@ pub fn clip_map(s: &mut Stream, h: usize) -> Result<Option<String>> {
     rec.verts = span(s, h + 0xe0, n, 12, 3)?;
     let tris = count(s, h + 0xe8)?;
     rec.tri_indices = span(s, h + 0xf0, tris, 12, 3)?;
-    s.array(h + 0xf8, (tris * 3).div_ceil(32) * 4, 3)?;
+    let bytes = (tris * 3).div_ceil(32) * 4;
+    rec.walkable = s.array(h + 0xf8, bytes, 3)?.map(|at| (at, bytes));
     let n = count(s, h + 0x100)?;
     rec.partitions = span(s, h + 0x108, n, 16, 3)?;
     let n = count(s, h + 0x110)?;

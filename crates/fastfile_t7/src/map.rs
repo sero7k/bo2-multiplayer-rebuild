@@ -89,6 +89,18 @@ pub struct StaticModel {
     pub scale: f32,
 }
 
+/// A static model the collision lists (`cStaticModel_t`): its model's name
+/// and its placement (axes and scale from the inverse scaled axes).
+#[derive(Clone, Debug, Default)]
+pub struct ClipStaticModel {
+    pub name: String,
+    pub contents: u32,
+    pub origin: [f32; 3],
+    /// Rows: the model's forward, left and up axes in the world.
+    pub axis: [[f32; 3]; 3],
+    pub scale: f32,
+}
+
 /// A brush sub-model (`*<n>`): its world surfaces and its bounds.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BrushModel {
@@ -160,9 +172,13 @@ pub struct MapClip {
     pub leafs: Vec<ClipLeaf>,
     pub verts: Vec<[f32; 3]>,
     pub tris: Vec<[u32; 3]>,
+    /// One bit per triangle edge (`3 * tri + k`).
+    pub walkable: Vec<u8>,
     pub partitions: Vec<ClipPartition>,
     pub aabb_trees: Vec<ClipAabb>,
     pub models: Vec<ClipModel>,
+    /// The static models that collide.
+    pub static_models: Vec<ClipStaticModel>,
 }
 
 /// The sun (the first sun volume's first state): pitch and yaw (degrees),
@@ -201,6 +217,9 @@ pub struct T7Map {
     pub static_models: Vec<StaticModel>,
     /// The entity string as the zone has it.
     pub entities: String,
+    /// The trigger models (`"model" "?N"`): each its hulls (middle, half
+    /// size).
+    pub trigger_models: Vec<Vec<([f32; 3], [f32; 3])>>,
     pub brush_models: Vec<BrushModel>,
     pub clip: Option<MapClip>,
     pub sun: Option<Sun>,
@@ -275,10 +294,25 @@ impl T7Map {
             let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
             out.entities = String::from_utf8_lossy(&raw[..end]).into_owned();
         }
+        if let Some(m) = cap.world.map_ents.first()
+            && let (Some((mat, mn)), Some((hat, hn))) = (m.trigger_models, m.trigger_hulls)
+        {
+            // TriggerModel (8: contents, u16 hull count, u16 first hull);
+            // TriggerHull (32: middle, half size, contents, slabs).
+            let image = &zone.image;
+            for i in 0..mn {
+                let at = mat + 8 * i;
+                let (count, first) = (u16_at(image, at + 4) as usize, u16_at(image, at + 6) as usize);
+                out.trigger_models.push(
+                    (first..(first + count).min(hn)).map(|h| (v3(image, hat + 32 * h), v3(image, hat + 32 * h + 12))).collect(),
+                );
+            }
+        }
         out.report.push(format!(
-            "entities: {} bytes, {} entities",
+            "entities: {} bytes, {} entities, {} trigger models",
             out.entities.len(),
-            out.entities.matches('{').count()
+            out.entities.matches('{').count(),
+            out.trigger_models.len()
         ));
         for im in &cap.images {
             if !im.name.starts_with(',') {
@@ -386,6 +420,14 @@ impl T7Map {
             });
         }
         self.sky_models = g.sky_models.iter().map(|m| bare(m).to_owned()).collect();
+        let mut mean = [0u64; 4];
+        for v in &self.vertices {
+            for (k, m) in mean.iter_mut().enumerate() {
+                *m += u64::from((v.color >> (8 * k)) & 0xff);
+            }
+        }
+        let n = self.vertices.len().max(1) as u64;
+        self.report.push(format!("world vertex colour: mean bytes {:?}", mean.map(|m| m / n)));
         self.report.push(format!(
             "world: {} vertices, {} indices, {} surfaces ({} without a material), {} materials, {} brush models, bounds {:?}..{:?}",
             self.vertices.len(),
@@ -662,6 +704,9 @@ fn read_clip(c: &ClipMapRec, image: &[u8]) -> Result<MapClip, String> {
     if let Some((at, n)) = c.tri_indices {
         out.tris = (0..n).map(|i| std::array::from_fn(|k| u32_at(image, at + 12 * i + 4 * k))).collect();
     }
+    if let Some((at, n)) = c.walkable {
+        out.walkable = image[at..at + n].to_vec();
+    }
     if let Some((at, n)) = c.partitions {
         out.partitions = (0..n).map(|i| ClipPartition { tri_count: image[at + 16 * i], first_tri: u32_at(image, at + 16 * i + 4) }).collect();
     }
@@ -678,6 +723,19 @@ fn read_clip(c: &ClipMapRec, image: &[u8]) -> Result<MapClip, String> {
                 }
             })
             .collect();
+    }
+    for m in &c.static_models {
+        let e = m.at;
+        let inv = [v3(image, e + 32), v3(image, e + 44), v3(image, e + 56)];
+        let len = (inv[0][0] * inv[0][0] + inv[0][1] * inv[0][1] + inv[0][2] * inv[0][2]).sqrt();
+        let scale = if len > 1e-6 { 1.0 / len } else { 1.0 };
+        out.static_models.push(ClipStaticModel {
+            name: m.model.as_deref().map(bare).unwrap_or_default().to_owned(),
+            contents: u32_at(image, e + 16),
+            origin: v3(image, e + 20),
+            axis: inv.map(|r| r.map(|x| x * scale)),
+            scale,
+        });
     }
     if let Some((at, n)) = c.cmodels {
         for i in 0..n {

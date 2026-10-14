@@ -54,6 +54,8 @@ pub fn check_map(game: &str, path: &Path) -> String {
         "iw6" => crate::lane::load_iw6_world(path, &progress, Default::default()),
         // bo2mp: Infinite Warfare's maps.
         "iw7" => crate::lane::load_iw7_world(path, &progress, Default::default()),
+        // bo2mp: Black Ops III's maps.
+        "t7" => crate::lane::load_t7_world(path, &progress, Default::default()),
         "iw4" => {
             let image = match asset_transport::open_zone(path) {
                 Ok(image) => image,

@@ -34,6 +34,8 @@ mod destructible;
 mod engine_sounds;
 mod darts;
 mod bo1_maps;
+// bo2mp: Zombies maps from other games (Infinite Warfare's).
+pub mod foreign_zm;
 mod fields;
 mod flight;
 mod fxanims;
@@ -753,6 +755,10 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
         objects.push(gsc_t6::compile("bo2mp/zm_bots", mp::ZM_BOTS)?);
         // bo2mp: Multiplayer's custom guns in the Mystery Box.
         objects.push(gsc_t6::compile("bo2mp/zm_guest_guns", mp::ZM_GUEST_GUNS)?);
+        // bo2mp: a Zombies map from another game: our map script.
+        if let Some(script) = foreign_zm::map_script(&inst.map, &objects)? {
+            objects.push(script);
+        }
     }
     let mut strings = Strings::default();
     // bo2mp: Black Ops II's linker binds a bare call to the engine's own

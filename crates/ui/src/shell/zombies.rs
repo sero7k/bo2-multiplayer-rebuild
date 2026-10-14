@@ -53,6 +53,9 @@ pub(crate) struct ZmMap {
     /// A Black Ops map (Zombies Declassified's port): listed only when the
     /// Zombies game has the pack (`IW4L_T6_EXTRA` in its `.env`).
     pub bo1: bool,
+    /// bo2mp: the game whose zone it is (`t6`; `iw7`: Infinite Warfare's
+    /// Zombies maps, played as Black Ops II Zombies, listed when installed).
+    pub game: &'static str,
     /// The Zombies rebuild's own screenshot of it (`docs/screenshots`).
     pub shot: &'static str,
     pub starts: &'static [ZmStart],
@@ -72,8 +75,22 @@ const SURVIVAL_DESC: &str = "Endless rounds in one part of the map. No bus, no s
 
 /// One BO1 map: its own story mode, at its own start.
 const fn bo1(map: &'static str, title: &'static str, place: &'static str, shot: &'static str, starts: &'static [ZmStart]) -> ZmMap {
-    ZmMap { map, title, place, bo1: true, shot, starts }
+    ZmMap { map, title, place, bo1: true, game: "t6", shot, starts }
 }
+
+/// bo2mp: one Infinite Warfare Zombies map, by Black Ops II's rules
+/// (`assets::lane::iw7_zombies`): its own start, its poster for pictures.
+const fn iw7(map: &'static str, title: &'static str, place: &'static str) -> ZmMap {
+    ZmMap { map, title, place, bo1: false, game: "iw7", shot: map, starts: IW7_STORY }
+}
+
+const IW7_STORY: &[ZmStart] = &[at(
+    "STORY",
+    STORY,
+    "",
+    "zclassic",
+    "The whole park by Black Ops II's rules: windows to board, debris to clear, the power, the Mystery Box, perks and Pack-a-Punch.",
+)];
 
 const BO1_STORY: &[ZmStart] = &[at("STORY", STORY, "", "zclassic", "The whole map, by Black Ops' rules: doors, the box, perks and Pack-a-Punch.")];
 
@@ -85,6 +102,7 @@ pub(crate) const MAPS: &[ZmMap] = &[
         title: "TRANZIT",
         place: "Hagerstown: a bus route through the fog",
         bo1: false,
+        game: "t6",
         shot: "zm_transit",
         starts: &[
             at("TRANZIT", STORY, "transit", "zclassic", "The whole map: ride the bus from the depot to the diner, the farm, the power station and town; build, turn the power on."),
@@ -108,6 +126,7 @@ pub(crate) const MAPS: &[ZmMap] = &[
         title: "NUKETOWN",
         place: "The test town, with a warhead on the way",
         bo1: false,
+        game: "t6",
         shot: "zm_nuked",
         starts: &[at("NUKETOWN", SURVIVAL, "nuked", "zstandard", "The test town, perks falling from the sky. Hold out round after round before the bombs fall.")],
     },
@@ -116,6 +135,7 @@ pub(crate) const MAPS: &[ZmMap] = &[
         title: "DIE RISE",
         place: "Shanghai: the broken towers",
         bo1: false,
+        game: "t6",
         shot: "zm_highrise",
         starts: &[at("DIE RISE", STORY, "rooftop", "zclassic", "Wrecked skyscrapers, elevators and the drop between them: the Jet Gun, the Sliquifier and the Trample Steam.")],
     },
@@ -124,6 +144,7 @@ pub(crate) const MAPS: &[ZmMap] = &[
         title: "MOB OF THE DEAD",
         place: "Alcatraz, 1933",
         bo1: false,
+        game: "t6",
         shot: "zm_prison",
         starts: &[
             at("MOB OF THE DEAD", STORY, "prison", "zclassic", "Four mobsters on the Rock: Afterlife, Cerberus and the plane to build."),
@@ -135,6 +156,7 @@ pub(crate) const MAPS: &[ZmMap] = &[
         title: "BURIED",
         place: "An old west town, deep underground",
         bo1: false,
+        game: "t6",
         shot: "zm_buried",
         starts: &[
             at("BURIED", STORY, "processing", "zclassic", "The buried town: the Giant, the Ghosts of the mansion and the Paralyzer."),
@@ -147,6 +169,7 @@ pub(crate) const MAPS: &[ZmMap] = &[
         title: "ORIGINS",
         place: "Northern France, 1918",
         bo1: false,
+        game: "t6",
         shot: "zm_tomb",
         starts: &[at("ORIGINS", STORY, "tomb", "zclassic", "The trenches and the dig site: giant robots, the generators and the four elemental staffs.")],
     },
@@ -159,7 +182,27 @@ pub(crate) const MAPS: &[ZmMap] = &[
     bo1("zm_cosmodrome", "ASCENSION", "A Soviet cosmodrome", "zm_bo1_ascension", BO1_STORY),
     bo1("zm_temple", "SHANGRI-LA", "A temple in the Himalayas", "zm_bo1_shangri", BO1_STORY),
     bo1("zm_moon", "MOON", "Griffin Station", "zm_bo1_moon", BO1_STORY),
+    iw7("cp_zmb", "ZOMBIES IN SPACELAND", "Spaceland: an 80s theme park"),
+    iw7("cp_rave", "RAVE IN THE REDWOODS", "Camp Lake Monroe, in the woods"),
+    iw7("cp_disco", "SHAOLIN SHUFFLE", "New York City, the 70s"),
+    iw7("cp_town", "ATTACK OF THE RADIOACTIVE THING", "Sunset Valley, the 50s"),
+    iw7("cp_final", "THE BEAST FROM BEYOND", "An outpost on a frozen planet"),
 ];
+
+/// bo2mp: the Infinite Warfare Zombies maps installed (their zones, with
+/// their material zones beside them), looked for once a run.
+pub(crate) fn iw7_installed() -> &'static [String] {
+    static SET: OnceLock<Vec<String>> = OnceLock::new();
+    SET.get_or_init(|| {
+        if PREVIEW.load(Ordering::Relaxed) {
+            return Vec::new();
+        }
+        let Ok(root) = asset_transport::games_root_from_env() else { return Vec::new() };
+        let found: Vec<String> = asset_transport::list_iw7_zombies_maps(&root).into_iter().map(|(m, _)| m).collect();
+        diag::info!(Ui, "bo2mp zombies: Infinite Warfare Zombies maps installed: {found:?}");
+        found
+    })
+}
 
 /// The starting rounds offered (Black Ops II's Custom Games steps).
 pub(crate) const ROUNDS: [u32; 5] = [1, 5, 10, 15, 20];
@@ -170,17 +213,23 @@ pub(crate) fn map(key: &str) -> &'static ZmMap {
 
 /// The map picker's pages: (title, maps by index into `MAPS`).
 pub(crate) fn pages(bo1: bool) -> Vec<(&'static str, Vec<usize>)> {
-    let pick = |want: bool| MAPS.iter().enumerate().filter(|(_, m)| m.bo1 == want).map(|(i, _)| i).collect::<Vec<_>>();
+    let pick = |want: bool| MAPS.iter().enumerate().filter(|(_, m)| m.bo1 == want && m.game == "t6").map(|(i, _)| i).collect::<Vec<_>>();
     let mut out = vec![("BLACK OPS II", pick(false))];
     if bo1 {
         out.push(("BLACK OPS", pick(true)));
+    }
+    // bo2mp: Infinite Warfare's, those installed.
+    let installed = iw7_installed();
+    let iw7: Vec<usize> = MAPS.iter().enumerate().filter(|(_, m)| m.game == "iw7" && installed.iter().any(|i| i == m.map)).map(|(i, _)| i).collect();
+    if !iw7.is_empty() {
+        out.push(("INFINITE WARFARE", iw7));
     }
     out
 }
 
 /// A start's name (a Black Ops map's one start is the map's own).
 pub(crate) fn start_name(m: &ZmMap, s: &ZmStart) -> &'static str {
-    if m.bo1 { m.title } else { s.name }
+    if m.bo1 || m.game != "t6" { m.title } else { s.name }
 }
 
 /// A start's line in a list: `TOWN · GRIEF` (a story mode is the map's
@@ -253,7 +302,11 @@ pub(crate) fn rows(s: &Shell) -> Vec<Row> {
                 start,
                 Row::new(
                     "CHANGE MAP",
-                    if st.bo1() { "Every Black Ops II Zombies map, and the nine Black Ops maps." } else { "Every Black Ops II Zombies map." },
+                    &format!(
+                        "Every Black Ops II Zombies map{}{}.",
+                        if st.bo1() { ", the nine Black Ops maps" } else { "" },
+                        if iw7_installed().is_empty() { "" } else { " and Infinite Warfare's, by Black Ops II's rules" }
+                    ),
                     Act::ZmPickMap,
                 ),
                 Row::new("CHANGE START", "Where you start, and the mode: story, Survival, Grief or Turned.", Act::ZmPickStart),
@@ -335,7 +388,7 @@ pub(crate) fn launch_spec(m: &ZmMap, start: usize, round: u32) -> ZmLaunch {
     if round > 1 {
         env.push(("IW4L_T6_START_ROUND".to_owned(), round.to_string()));
     }
-    ZmLaunch { args: vec!["map".to_owned(), format!("t6:{zone}")], env }
+    ZmLaunch { args: vec!["map".to_owned(), format!("{}:{zone}", m.game)], env }
 }
 
 // ---------------------------------------------------------------------------
@@ -556,7 +609,7 @@ pub(crate) fn start(shell: &Shell) -> Result<(), String> {
         // As Zombies' own front end starts a game: its start and mode
         // picked, the starting round, then `map t6:<zone>` here.
         let zone = spec.args.get(1).cloned().unwrap_or_default();
-        let map = zone.strip_prefix("t6:").unwrap_or(&zone).to_owned();
+        let map = zone.split_once(':').map_or(zone.as_str(), |(_, m)| m).to_owned();
         if let Some((_, v)) = spec.env.iter().find(|(k, _)| k == "IW4L_T6_START")
             && let Some((loc, mode)) = v.split_once(':')
         {
@@ -571,10 +624,16 @@ pub(crate) fn start(shell: &Shell) -> Result<(), String> {
         // away and the session swaps the map in, so its screens do not stay
         // over the game.)
         *ZM_LOAD.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ZmLoad {
-            map: zone.strip_prefix("t6:").unwrap_or(&zone).to_owned(),
+            map: map.clone(),
             title: m.title.to_uppercase(),
             mode: z.mode_title.to_uppercase(),
-            origin: if m.bo1 { "BLACK OPS ZOMBIES".to_owned() } else { "BLACK OPS II ZOMBIES".to_owned() },
+            origin: if m.bo1 {
+                "BLACK OPS ZOMBIES".to_owned()
+            } else if m.game == "iw7" {
+                "INFINITE WARFARE ZOMBIES".to_owned()
+            } else {
+                "BLACK OPS II ZOMBIES".to_owned()
+            },
             pictures: pictures(m, shell.zm_start),
         });
         // A public game: one of the server's that is open on this map and
@@ -737,6 +796,10 @@ pub(crate) fn pictures(m: &ZmMap, start: usize) -> Vec<String> {
         _ => "zsurvival",
     };
     let mut out = Vec::new();
+    // bo2mp: an Infinite Warfare map: its poster (`zm_theater_poster_zmb`).
+    if m.game == "iw7" {
+        return vec![format!("zmiw7:{}", m.map)];
+    }
     // (A Black Ops map: its own loading picture from Black Ops' files,
     // `loadscreen_zombie_sumpf`.)
     if m.bo1 {
@@ -755,7 +818,7 @@ pub(crate) fn pictures(m: &ZmMap, start: usize) -> Vec<String> {
 
 /// A picture name the Zombies screens ask for.
 pub(crate) fn is_zm_picture(name: &str) -> bool {
-    name.starts_with("zmshot:") || name.starts_with("zmlike:") || name.starts_with("zmbo1:") || name.starts_with("loadscreen_zm_") || name.starts_with("menu_zm_") || name.starts_with("hud_chalk_")
+    name.starts_with("zmshot:") || name.starts_with("zmlike:") || name.starts_with("zmbo1:") || name.starts_with("zmiw7:") || name.starts_with("loadscreen_zm_") || name.starts_with("menu_zm_") || name.starts_with("hud_chalk_")
 }
 
 /// Black Ops II's Zombies pictures are still being read (the first time
@@ -771,6 +834,13 @@ type Rgba = (u32, u32, Vec<u8>);
 /// A picture for the Zombies screens (read off the main thread; `None`
 /// until it is in, or when there is none).
 pub(crate) fn picture(name: &str) -> Option<Arc<Image>> {
+    // bo2mp: an Infinite Warfare map's poster, from its ui.ff.
+    if let Some(map) = name.strip_prefix("zmiw7:") {
+        let map = map.to_owned();
+        return crate::foreign_maps::picture_async(name, true, move || {
+            crate::foreign_maps::read_game_image("iw7", &[format!("loadscreen_{map}")]).map(crate::foreign_maps::upscale_map_shot)
+        });
+    }
     if let Some(stem) = name.strip_prefix("zmbo1:") {
         let stem = stem.to_owned();
         return crate::foreign_maps::picture_async(name, true, move || bo1_loadscreen(&stem).map(crate::foreign_maps::upscale_map_shot));
@@ -968,6 +1038,18 @@ mod tests {
     }
 
     #[test]
+    fn infinite_warfare_maps_load_their_own_zones() {
+        let s = spec("cp_zmb", 0, 1);
+        assert_eq!(s.args, vec!["map", "iw7:cp_zmb"]);
+        assert!(s.env.is_empty());
+        assert_eq!(spec("cp_final", 0, 10).env, env(&[("IW4L_T6_START_ROUND", "10")]));
+        assert_eq!(pictures(map("cp_rave"), 0), vec!["zmiw7:cp_rave"]);
+        assert!(is_zm_picture("zmiw7:cp_rave"));
+        assert_eq!(start_name(map("cp_zmb"), &map("cp_zmb").starts[0]), "ZOMBIES IN SPACELAND");
+        assert!(MAPS.iter().filter(|m| m.game == "iw7").all(|m| sim::is_foreign_zm_map(m.map)));
+    }
+
+    #[test]
     fn a_start_past_the_list_is_the_last() {
         assert_eq!(spec("zm_tomb", 9, 1), spec("zm_tomb", 0, 1));
     }
@@ -975,7 +1057,8 @@ mod tests {
     #[test]
     fn every_map_has_a_start_and_the_readme_count() {
         assert!(MAPS.iter().all(|m| !m.starts.is_empty()));
-        assert_eq!(MAPS.iter().filter(|m| !m.bo1).count(), 6);
+        assert_eq!(MAPS.iter().filter(|m| !m.bo1 && m.game == "t6").count(), 6);
+        assert_eq!(MAPS.iter().filter(|m| m.game == "iw7").count(), 5);
         assert_eq!(MAPS.iter().filter(|m| m.bo1).count(), 9);
         assert_eq!(map("zm_transit").starts.len(), 7);
         assert_eq!(pages(false).len(), 1);

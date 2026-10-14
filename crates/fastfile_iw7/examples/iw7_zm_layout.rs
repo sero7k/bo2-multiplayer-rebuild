@@ -15,11 +15,12 @@ fn main() {
         };
         let l = ZmLayout::read(&map);
         println!("== {}: {}", map.name, l.summary());
-        let at = |p: [f32; 3]| l.area_at(p).map_or("-", |a| a.name.as_str()).to_owned();
+        let at = |p: [f32; 3]| l.nearest_area(p).map_or("-", |a| a.name.as_str()).to_owned();
         for a in &l.areas {
             let ground = a.spawners.iter().filter(|s| s.ground).count();
             let free = a.spawners.iter().filter(|s| s.no_boards).count();
-            println!("area {} at {:?}: {} boxes, {} spawners ({ground} ground, {free} no boards)", a.name, a.origin, a.boxes.len(), a.spawners.len());
+            let ceiling = a.spawners.iter().filter(|s| s.ceiling).count();
+            println!("area {} at {:?}: {} boxes, {} spawners ({ground} ground, {ceiling} ceiling, {free} no boards)", a.name, a.origin, a.boxes.len(), a.spawners.len());
         }
         for s in &l.starts {
             println!("start {:?} in {}", s.origin, at(s.origin));
@@ -28,7 +29,7 @@ fn main() {
             println!("window {:?} yaw {:.0} in {} inside {:?} boards {:?} attack {}", w.outside.origin, w.outside.angles[1], at(w.outside.origin), w.inside.map(|i| i.origin), w.boards, w.attack.len());
         }
         for b in &l.blockers {
-            println!("blocker {} {:?} {} sides {:?} trigger {:?} brushes {:?}", b.group, b.kind, b.cost, b.sides.iter().map(|(s, a)| format!("{a}@{:?}", s.origin)).collect::<Vec<_>>(), b.trigger, b.brushes);
+            println!("blocker {} {:?} {} sides {:?} triggers {:?} brushes {:?}", b.group, b.kind, b.cost, b.sides.iter().map(|(s, a)| format!("{a}@{:?}", s.origin)).collect::<Vec<_>>(), b.triggers, b.brushes);
         }
         for m in &l.perks {
             println!("machine {} at {:?} yaw {:.0} in {}", m.name, m.spot.origin, m.spot.angles[1], at(m.spot.origin));

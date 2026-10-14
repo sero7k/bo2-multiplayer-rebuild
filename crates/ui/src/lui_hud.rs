@@ -66,7 +66,7 @@ pub(crate) fn zombies_turn(mp_front: bool, identity: Option<&frame::LaunchIdenti
 /// A Zombies map's zone (`t6:zm_transit`, `zm_prison`, `zombie_theater`).
 pub(crate) fn is_zombies_zone(zone: &str) -> bool {
     let map = zone.rsplit(':').next().unwrap_or(zone).to_ascii_lowercase();
-    map.starts_with("zm_") || map.starts_with("zombie_")
+    map.starts_with("zm_") || map.starts_with("zombie_") || sim::is_foreign_zm_map(&map)
 }
 
 struct LuiHud {

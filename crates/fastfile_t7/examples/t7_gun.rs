@@ -1,5 +1,8 @@
 //! Everything one Black Ops III gun needs, and where each piece is:
-//! `t7_gun <zone.ff> <weapon>` (e.g. `core_common.ff ar_standard_cp`).
+//! `t7_gun <zone.ff> <weapon>` (e.g. `core_common.ff ar_standard_mp`).
+//! Every gun is in `core_common` (campaign `_cp`, multiplayer `_mp` and
+//! zombies `_zm` variants, sharing models, animations and images); its
+//! streamed meshes and image parts are in `initial.xpak`.
 //!
 //! Walks the zone and prints the gun's manifest: its models -> LOD meshes
 //! (vertex data in the zone or an `.xpak` entry) -> materials -> images
@@ -10,7 +13,7 @@
 //!
 //! `T7_XPAK_DIR=<dir>`: where the `.xpak` packages are (default: the
 //! zone's directory). `T7_GUN_OUT=<dir>`: also exports the view model's
-//! images (`.dds` + `.png` of the top level) and every model's LOD 0 mesh
+//! images (`.dds` + `.png` of the top level) and every model's densest LOD mesh
 //! (`.obj`; `T7_GUN_LODS=all`: every LOD).
 //! Names starting with "," are placeholders (the asset is in another zone).
 
@@ -32,6 +35,9 @@ struct Ctx<'a> {
     loaded: HashSet<(T, String)>,
     out: Option<PathBuf>,
     all_lods: bool,
+    /// Images already written (an image the view model shares with an
+    /// attachment model listed earlier is still exported).
+    exported: std::cell::RefCell<BTreeSet<String>>,
 }
 
 fn main() {
@@ -48,10 +54,24 @@ fn main() {
     if !matches!(w.stop, Stop::Done { .. }) {
         eprintln!("(walk stopped early: {:?}; records up to there)", w.stop);
     }
+    for g in &w.gaps {
+        eprintln!(
+            "(stepped over assets {}..{} at {:#x}..{:#x}: layout not read; VIRTUAL size {:#x}{})",
+            g.index,
+            g.resumed_at,
+            g.start,
+            g.end,
+            g.virtual_len,
+            g.fitted.map_or(String::new(), |(n, t)| format!(", fitted: {n} of {t} references land"))
+        );
+    }
     let dir = std::env::var_os("T7_XPAK_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new(path).parent().unwrap_or(Path::new(".")).to_owned());
-    let (paks, bad) = XpakSet::open_dir(&dir).unwrap_or_default();
+    let (paks, bad) = XpakSet::open_dir(&dir).unwrap_or_else(|e| {
+        eprintln!("{}: {e}", dir.display());
+        (XpakSet::default(), Vec::new())
+    });
     for (p, e) in bad {
         eprintln!("{}: {e}", p.display());
     }
@@ -67,6 +87,7 @@ fn main() {
         loaded,
         out: std::env::var_os("T7_GUN_OUT").map(PathBuf::from),
         all_lods: std::env::var("T7_GUN_LODS").is_ok_and(|v| v == "all"),
+        exported: Default::default(),
     };
     let Some(r) = w
         .capture
@@ -84,7 +105,7 @@ fn main() {
     manifest(&ctx, r);
 }
 
-fn asset_fields<'a>(r: &'a WeaponRec, ty: T) -> Vec<(&'a str, &'a str)> {
+fn asset_fields(r: &WeaponRec, ty: T) -> Vec<(&str, &str)> {
     r.fields
         .iter()
         .filter_map(|(f, v)| match v {
@@ -252,6 +273,10 @@ fn model(c: &Ctx, name: &str, export_images: bool, seen: &mut BTreeSet<String>, 
         return;
     };
     println!("    {} bones, {} LODs", m.bones, m.lods.len());
+    // The model's LOD list runs coarsest first on the retail zones
+    // (`wpn_t7_arak_world`: index 0 is the 614-vertex `..._lod4`, index 7
+    // the 26049-vertex `..._lod0`): the densest mesh is the one exported.
+    let best = (0..m.lods.len()).max_by_key(|&i| c.cap.mesh(&m.lods[i].mesh).map_or(0, |me| me.vert_count));
     for (i, lod) in m.lods.iter().enumerate() {
         t.meshes += 1;
         let Some(me) = c.cap.mesh(&lod.mesh) else {
@@ -277,7 +302,7 @@ fn model(c: &Ctx, name: &str, export_images: bool, seen: &mut BTreeSet<String>, 
             me.surfaces.len()
         );
         if let Some(o) = &c.out
-            && (i == 0 || c.all_lods)
+            && (Some(i) == best || c.all_lods)
         {
             export_mesh(c, me, &lod.materials, o, &format!("{name}_lod{i}"));
         }
@@ -307,7 +332,9 @@ fn material(c: &Ctx, name: &str, export: bool, seen: &mut BTreeSet<String>, t: &
             t.images += 1;
         }
         println!("        {hash:08x} {img} {}", image_line(c, im, first, t));
-        if export && first && let Some(o) = &c.out {
+        if export && let Some(o) = &c.out
+            && c.exported.borrow_mut().insert(img.clone())
+        {
             export_image(c, im, o);
         }
     }

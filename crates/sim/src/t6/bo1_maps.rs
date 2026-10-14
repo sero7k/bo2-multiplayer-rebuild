@@ -25,7 +25,9 @@ const MAPS: &[&str] = &[
 ];
 
 pub(crate) fn is_bo1_map(map: &str) -> bool {
-    MAPS.contains(&map)
+    // (bo2mp: Black Ops III's The Giant is `zm_factory` too; played as
+    // another game's map, it is not the Black Ops map.)
+    MAPS.contains(&map) && !super::foreign_zm::is_foreign_zm_map(map)
 }
 
 /// Fixes still to do on this map.
