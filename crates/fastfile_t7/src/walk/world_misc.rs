@@ -128,7 +128,12 @@ pub fn sanim(s: &mut Stream, h: usize) -> Result<Option<String>> {
     s.no_loads(h, crate::AssetType::SAnim.header_size(), &[0, 8, 0x18, 0x20])?;
     let name = s.string(h)?;
     super::gfxworld::stream_wrapped(s, h + 8)?;
-    let n = s.u16_at(h + 0x64)? as usize;
+    // (The first list's count: 3 on every MP siege animation read, where
+    // the u16 at 0x66 is 1; `zm_zod`'s fungus pods carry 2 and 1, and their
+    // list holds three. The list is the two counts' sum when the first is
+    // under three; a 3 already counts the 1.)
+    let (a, b) = (s.u16_at(h + 0x64)? as usize, s.u16_at(h + 0x66)? as usize);
+    let n = if a < 3 { a + b } else { a };
     s.records(h + 0x18, n, 28, 3)?;
     let n = s.u16_at(h + 0x6c)? as usize;
     s.records(h + 0x20, n, 28, 3)?;
