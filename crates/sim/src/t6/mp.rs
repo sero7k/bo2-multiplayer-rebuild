@@ -27,6 +27,9 @@ pub(super) fn moab_kills() -> u32 {
     MOAB_KILLS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Our Zombies bots (`bo2mp/zm_bots`, Custom Games' BOTS).
+pub(super) const ZM_BOTS: &str = include_str!("scripts/zm_bots.gsc");
+
 /// Our optional M.O.A.B. (`bo2mp/moab`, off unless `scr_moab 1`).
 const MOAB: &str = include_str!("scripts/moab.gsc");
 
@@ -174,6 +177,14 @@ mod globallogic_tests {
 
 #[cfg(test)]
 mod moab_tests {
+    #[test]
+    fn the_zombies_bots_compile() {
+        let s = gsc_t6::compile("bo2mp/zm_bots", super::ZM_BOTS).expect("zm_bots.gsc compiles");
+        for f in ["main", "bot_life", "bot_revive", "bot_fight", "bot_rebuild", "bot_spend", "bot_follow"] {
+            assert!(s.functions.iter().any(|x| x.name == f), "{f}");
+        }
+    }
+
     #[test]
     fn the_moab_script_compiles_with_its_parts() {
         let s = gsc_t6::compile("bo2mp/moab", super::MOAB).expect("moab.gsc compiles");

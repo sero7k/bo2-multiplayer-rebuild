@@ -265,7 +265,7 @@ pub(crate) fn rows(s: &Shell) -> Vec<Row> {
                 r.push(round);
             }
             if s.zm_kind == ZmKind::Custom {
-                let mut bots = Row::new("BOTS", "Bots that play with you: they open doors, revive, buy perks and leave your trains alone.", Act::Cycle(Setting::ZmBots));
+                let mut bots = Row::new("BOTS", "Bots that play with you: they revive you, rebuild windows, buy perks and Pack-a-Punch, open doors near you and leave your trains alone.", Act::Cycle(Setting::ZmBots));
                 bots.value = Some(if s.zm_bots == 0 { "NONE".to_owned() } else { s.zm_bots.to_string() });
                 r.push(bots);
             }
@@ -552,7 +552,9 @@ pub(crate) fn start(shell: &Shell) -> Result<(), String> {
         {
             frame::set_bo2_zm_start(&map, loc, mode);
         }
-        sim::set_t6_party_size(0);
+        // (Custom Games' bots are players the first round waits for.)
+        let bots = if shell.zm_kind == ZmKind::Custom { shell.zm_bots as usize } else { 0 };
+        sim::set_t6_party_size(if bots > 0 { 1 + bots } else { 0 });
         sim::set_t6_game_settings(if round > 1 { vec![("startround".to_owned(), round as i32)] } else { Vec::new() });
         diag::info!(Ui, "bo2mp zombies: starting {line} here ({zone}, round {round})");
         // (Started as the front end starts a match: the front end is put

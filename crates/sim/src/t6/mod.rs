@@ -695,6 +695,9 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
     // bo2mp: the scripts the engine provides (multiplayer's _globallogic).
     if mp {
         objects.extend(mp::engine_scripts()?);
+    } else {
+        // bo2mp: Custom Games' Zombies bots.
+        objects.push(gsc_t6::compile("bo2mp/zm_bots", mp::ZM_BOTS)?);
     }
     let mut strings = Strings::default();
     // bo2mp: Black Ops II's linker binds a bare call to the engine's own
@@ -906,6 +909,10 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
         ("bg_gravity", "800"),
     ] {
         vm.dvars.insert(k.to_owned(), v.to_owned());
+    }
+    // bo2mp: Custom Games' Zombies bots (`bo2mp/zm_bots`).
+    if !mp {
+        vm.dvars.insert("bo2mp_zm_bots".to_owned(), zm_bots().to_string());
     }
     diag::info!(
         Sim,
@@ -1341,6 +1348,9 @@ pub(crate) fn start(world: &mut World) {
         };
         // bo2mp: the test aid's script last (BO2MP_DEBUG_GSC).
         let mut calls = calls;
+        if !mp_map {
+            calls.push(("bo2mp/zm_bots".to_owned(), "main", false));
+        }
         if mp_map {
             // bo2mp: the optional M.O.A.B. (off unless scr_moab 1).
             calls.push(("bo2mp/moab".to_owned(), "main", false));
