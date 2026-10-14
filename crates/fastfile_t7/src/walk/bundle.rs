@@ -13,6 +13,7 @@
 //! each pair's asset, the objects, then per object its pairs and their
 //! assets.)
 
+use super::capture::FieldValue;
 use crate::asset_type::AssetType;
 use crate::cursor::{ReadError, Result};
 use crate::stream::Stream;
@@ -85,13 +86,15 @@ const ACV_MODEL: usize = 48;
 /// `AttachmentCosmeticVariant` (0x18: `{ char* name; Variant* variants;
 /// u32 count }`), `Variant` 0xe0: four `{ XModel* model; XModel*
 /// adsModel; char* tag; vec3 position, rotation }` (48), then `char*
-/// shortDisplayName, longDisplayName, description; Material* icon`
-/// (HydraX's layout). Order: name, the variants, then per variant its
+/// shortDisplayName, longDisplayName, description; GfxImage* icon`
+/// (HydraX's layout; the icon is an image, read on `core_common`'s
+/// `acv_extbarrel_smg_standard`). Order: name, the variants, then per variant its
 /// models' fields and the four pointers, in field order.
 pub fn attachment_cosmetic_variant(s: &mut Stream, h: usize) -> Result<Option<String>> {
     s.no_loads(h, AssetType::AttachmentCosmeticVariant.header_size(), &[0, 8])?;
     let name = s.string(h)?;
     let n = s.u32_at(h + 0x10)? as usize;
+    let mut links = Vec::new();
     if let Some(t) = s.records(h + 8, n, ACV_VARIANT, 7)? {
         for i in 0..n {
             let v = t + ACV_VARIANT * i;
@@ -100,15 +103,27 @@ pub fn attachment_cosmetic_variant(s: &mut Stream, h: usize) -> Result<Option<St
             s.no_loads(v, ACV_VARIANT, &known)?;
             for m in 0..4 {
                 let vm = v + ACV_MODEL * m;
-                s.asset(AssetType::XModel, vm)?;
-                s.asset(AssetType::XModel, vm + 8)?;
-                s.string(vm + 16)?;
+                for (f, label) in [(0, "model"), (8, "adsModel")] {
+                    if let Some(n) = s.asset_named(AssetType::XModel, vm + f)? {
+                        links.push((format!("variant[{i}].{label}[{m}]"), FieldValue::Asset { ty: AssetType::XModel, name: n }));
+                    }
+                }
+                if let Some(t) = s.string_named(vm + 16)?.filter(|t| !t.is_empty()) {
+                    links.push((format!("variant[{i}].tag[{m}]"), FieldValue::Str(t)));
+                }
             }
-            for f in [0xc0, 0xc8, 0xd0] {
-                s.string(v + f)?;
+            for (f, label) in [(0xc0, "shortDisplayName"), (0xc8, "longDisplayName"), (0xd0, "description")] {
+                if let Some(t) = s.string_named(v + f)?.filter(|t| !t.is_empty()) {
+                    links.push((format!("variant[{i}].{label}"), FieldValue::Str(t)));
+                }
             }
-            s.asset(AssetType::Material, v + 0xd8)?;
+            if let Some(n) = s.asset_named(AssetType::Image, v + 0xd8)? {
+                links.push((format!("variant[{i}].icon"), FieldValue::Asset { ty: AssetType::Image, name: n }));
+            }
         }
+    }
+    if let Some(n) = &name {
+        s.capture.add_links(AssetType::AttachmentCosmeticVariant, n, links);
     }
     Ok(name)
 }
@@ -146,6 +161,12 @@ pub fn weapon_camo(s: &mut Stream, h: usize) -> Result<Option<String>> {
     s.no_loads(h, AssetType::WeaponCamo.header_size(), &[0, 8])?;
     let name = s.string(h)?;
     let n = s.u32_at(h + 0x10)? as usize;
+    let mut links = Vec::new();
+    let keep = |links: &mut Vec<(String, FieldValue)>, label: String, ty: AssetType, n: Option<String>| {
+        if let Some(n) = n {
+            links.push((label, FieldValue::Asset { ty, name: n }));
+        }
+    };
     if let Some(t) = s.records(h + 8, n, CAMO, 7)? {
         for i in 0..n {
             let c = t + CAMO * i;
@@ -157,15 +178,22 @@ pub fn weapon_camo(s: &mut Stream, h: usize) -> Result<Option<String>> {
                     let b = s.u32_at(cm)? as usize;
                     if let Some(bt) = s.records(cm + 8, b, CAMO_BASE, 7)? {
                         for j in 0..b {
-                            s.asset(AssetType::Material, bt + CAMO_BASE * j)?;
-                            s.asset(AssetType::Image, bt + CAMO_BASE * j + 8)?;
+                            let v = s.asset_named(AssetType::Material, bt + CAMO_BASE * j)?;
+                            keep(&mut links, format!("camo[{i}][{k}].base[{j}].material"), AssetType::Material, v);
+                            let v = s.asset_named(AssetType::Image, bt + CAMO_BASE * j + 8)?;
+                            keep(&mut links, format!("camo[{i}][{k}].base[{j}].mask"), AssetType::Image, v);
                         }
                     }
-                    s.asset(AssetType::Material, cm + 0x20)?;
-                    s.asset(AssetType::Image, cm + 0x48)?;
+                    let v = s.asset_named(AssetType::Material, cm + 0x20)?;
+                    keep(&mut links, format!("camo[{i}][{k}].material"), AssetType::Material, v);
+                    let v = s.asset_named(AssetType::Image, cm + 0x48)?;
+                    keep(&mut links, format!("camo[{i}][{k}].detailNormalMap"), AssetType::Image, v);
                 }
             }
         }
+    }
+    if let Some(n) = &name {
+        s.capture.add_links(AssetType::WeaponCamo, n, links);
     }
     Ok(name)
 }

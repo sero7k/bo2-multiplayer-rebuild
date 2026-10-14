@@ -114,8 +114,12 @@ pub fn string_table(s: &mut Stream, h: usize) -> Result<Option<String>> {
 /// 16 bytes of small fields }`, entries 16: `{ Material* material; u64 }`.
 /// Order: name, records, then per record its entries, each entry's
 /// material, then its image.
+///
+/// Map zones (`mp_nuketown_x`) also fill the header's four pointers at
+/// 0x28, 0x40, 0x58, 0x70 (`-2`, null in `mp_common`): images, loaded after
+/// the records.
 pub fn texture_combo(s: &mut Stream, h: usize) -> Result<Option<String>> {
-    s.no_loads(h, AssetType::TextureCombo.header_size(), &[0, 8])?;
+    s.no_loads(h, AssetType::TextureCombo.header_size(), &[0, 8, 0x28, 0x40, 0x58, 0x70])?;
     let name = s.string(h)?;
     let n = s.u64_at(h + 16)? as usize;
     if let Some(t) = s.records(h + 8, n, 0x30, 7)? {
@@ -130,6 +134,9 @@ pub fn texture_combo(s: &mut Stream, h: usize) -> Result<Option<String>> {
             }
             s.asset(AssetType::Image, r + 0x18)?;
         }
+    }
+    for at in [0x28, 0x40, 0x58, 0x70] {
+        s.asset(AssetType::Image, h + at)?;
     }
     Ok(name)
 }

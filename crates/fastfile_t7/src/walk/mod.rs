@@ -29,9 +29,12 @@
 
 pub mod ai;
 pub mod anim;
+pub mod attachment;
 pub mod bundle;
 pub mod capture;
+pub mod flame;
 pub mod fx;
+pub mod gfxworld;
 pub mod image;
 pub mod material;
 pub mod model;
@@ -41,6 +44,8 @@ pub mod sound;
 pub mod tables;
 pub mod weapon;
 pub mod weapon_fields;
+pub mod world;
+pub mod world_misc;
 
 use crate::asset_type::AssetType;
 use crate::cursor::{ReadError, Result, text};
@@ -153,7 +158,7 @@ fn walker(ty: AssetType) -> Option<AssetFn> {
         T::TagFx => bundle::tag_fx,
         T::NewLensFlareDef => fx::lens_flare,
         T::AimTable => placeholder::aim_table,
-        T::XCam => placeholder::xcam,
+        T::XCam => world_misc::xcam,
         T::CustomizationTable => placeholder::customization_table,
         T::MapTable => placeholder::map_table,
         T::Medal => tables::medal,
@@ -165,6 +170,15 @@ fn walker(ty: AssetType) -> Option<AssetFn> {
         T::BgCache => bundle::bg_cache,
         T::Leaderboard => bundle::leaderboard,
         T::CustomizationTableColor => placeholder::customization_table_color,
+        T::MapEnts => world::map_ents,
+        T::ComWorld => world::com_world,
+        T::GfxWorld => gfxworld::gfx_world,
+        T::GameWorld => world::game_world,
+        T::NavMesh => world::nav_mesh,
+        T::NavVolume => world::nav_volume,
+        T::Glasses => world_misc::glasses,
+        T::ClipMap => world::clip_map,
+        T::SAnim => world_misc::sanim,
         _ => return weapon::walker(ty),
     })
 }

@@ -26,6 +26,7 @@ pub mod world_t5;
 pub mod world_t6;
 pub mod world_iw3; // bo2mp: Call of Duty 4 maps
 pub mod world_iw7; // bo2mp: Infinite Warfare maps
+pub mod nav_soup; // bo2mp: walk graphs over collision triangles
 
 pub use asset_core::*;
 pub use asset_transport::{Iw5ZoneMemory, T5ZoneMemory, ZoneMemory};

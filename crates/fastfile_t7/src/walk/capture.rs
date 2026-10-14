@@ -78,6 +78,11 @@ pub struct SurfaceRec {
     /// Where its vertices and indices start in the mesh's shared data.
     pub base_vert: u32,
     pub base_index: u32,
+    /// `XSurfaceFlags` (0x2: skinned, the vertices have skin weights).
+    pub flags: u16,
+    /// Rigid vertex lists (unskinned surfaces): (boneOffset, vertCount,
+    /// triOffset, triCount), the vertices in order.
+    pub rigid: Vec<[u16; 4]>,
 }
 
 /// An `XModelMesh` (one LOD's geometry) loaded in the zone.
@@ -136,6 +141,12 @@ pub struct Capture {
     pub materials: Vec<MaterialRec>,
     pub images: Vec<ImageRec>,
     pub meshes: Vec<MeshRec>,
+    /// The map assets (`walk::world`).
+    pub world: crate::walk::world::WorldCapture,
+    /// What the fields of the assets whose walkers keep them name
+    /// (attachment uniques, cosmetic variants, weapon camos): (type, name)
+    /// -> (field, value), in stream order.
+    pub links: HashMap<(AssetType, String), Vec<(String, FieldValue)>>,
     by_name: HashMap<(AssetType, String), usize>,
 }
 
@@ -180,6 +191,14 @@ impl Capture {
         self.by_name
             .get(&(AssetType::Image, name.to_string()))
             .map(|&i| &self.images[i])
+    }
+    pub(crate) fn add_links(&mut self, ty: AssetType, name: &str, links: Vec<(String, FieldValue)>) {
+        self.links.insert((ty, name.to_string()), links);
+    }
+    /// What the fields of the asset `ty` `name` name (`links`); empty when
+    /// the walk did not keep them.
+    pub fn links(&self, ty: AssetType, name: &str) -> &[(String, FieldValue)] {
+        self.links.get(&(ty, name.to_string())).map_or(&[], Vec::as_slice)
     }
     /// The weapon whose variant or `WeaponDef` is called `name`.
     pub fn weapon(&self, name: &str) -> Option<&WeaponRec> {

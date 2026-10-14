@@ -11,18 +11,23 @@
 //! block, with the loader's alignment), checks every reference against what
 //! it has read, and reports where it has to stop.
 //!
-//! Streamed images and meshes keep their data in `.xpak` files (LZ4 per
-//! block; the zone has the entries' key/offset/size, `walk::image`), which
-//! this crate does not read yet; small images have their pixels in the zone.
+//! Streamed images and meshes keep their data in `.xpak` files, looked up
+//! by 64-bit key (`xpak`: hash table, LZ4 chunks); the zone has the
+//! entries' key/offset/size (`walk::image`, `walk::model`); small images
+//! have their pixels in the zone.
 #![forbid(unsafe_code)]
 
 pub mod asset_type;
 pub mod container;
 pub mod cursor;
+pub mod map;
+pub mod mesh;
 pub mod ptr;
 pub mod stream;
+pub mod texture;
 pub mod walk;
 pub mod xfile;
+pub mod xpak;
 pub mod zone;
 
 pub use asset_type::AssetType;

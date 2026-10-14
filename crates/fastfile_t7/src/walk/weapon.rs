@@ -36,6 +36,9 @@ use crate::stream::Stream;
 pub(super) fn walker(ty: AssetType) -> Option<AssetFn> {
     match ty {
         AssetType::Weapon => Some(weapon),
+        AssetType::Attachment => Some(super::attachment::attachment),
+        AssetType::AttachmentUnique => Some(super::attachment::attachment_unique),
+        AssetType::FlameTable => Some(super::flame::flame_table),
         _ => None,
     }
 }

@@ -406,6 +406,11 @@ pub struct MapEntsRec {
     /// IW7: `SpawnerList` records (Spawner, 56 bytes each).
     pub spawners: Option<Span>,
     pub spawner_count: u32,
+    /// IW7: the server triggers' models (`TriggerModel`, 32 bytes each:
+    /// the `?<n>` a trigger's or volume's `model` names) and their hulls
+    /// (`TriggerHull`, 32 bytes each).
+    pub trigger_models: Option<Span>,
+    pub trigger_hulls: Option<Span>,
     /// IW7: brush sub-models (`cmodel_t`, 56 bytes each).
     pub cmodels: Option<Span>,
     pub cmodel_count: u32,
@@ -419,6 +424,15 @@ pub struct MapEntsRec {
     /// and each one's model.
     pub dyn_ents: [Option<Span>; 2],
     pub dyn_ent_models: [Vec<Option<super::AssetId>>; 2],
+}
+
+/// A `PathData`: the AI path nodes (`pathnode_t`, 176 bytes each) and each
+/// node's links (`pathlink_s`, 12 bytes each).
+#[derive(Clone, Debug, Default)]
+pub struct PathDataRec {
+    pub name: String,
+    pub nodes: Option<Span>,
+    pub links: Vec<Option<Span>>,
 }
 
 /// A `clipMap_t`: its terrain triangles (brushes are not captured yet).
@@ -458,6 +472,8 @@ pub struct Capture {
     pub gfx_worlds: Vec<GfxWorldRec>,
     pub map_ents: Vec<MapEntsRec>,
     pub clip_maps: Vec<ClipMapRec>,
+    /// IW7: the AI path nodes (`PathData`; also listed in `others`).
+    pub path_datas: Vec<PathDataRec>,
     pub sound_banks: Vec<SoundBankRec>,
     /// IW7: world vertex parts (in the shared streams).
     pub gfx_world_trs: Vec<GfxWorldTrRec>,

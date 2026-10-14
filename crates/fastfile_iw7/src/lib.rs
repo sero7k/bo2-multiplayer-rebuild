@@ -21,6 +21,7 @@ pub mod texture;
 pub mod ui_image;
 pub mod walk;
 pub mod xfile;
+pub mod zombies;
 pub mod zone;
 
 pub use asset_type::AssetType;

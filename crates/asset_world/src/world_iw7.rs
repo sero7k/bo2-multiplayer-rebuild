@@ -7,10 +7,13 @@
 //! curve, cut into partitions of at most `PART_TRIS`, each with its own
 //! vertices (the partition's segment, `ClipPartition::first_vert_segment`,
 //! addresses them), and an AABB tree over the partitions (eight children per
-//! node, children contiguous, the root first). No brushes: the world's
-//! trace walks the tree alone.
+//! node, children contiguous, the root first). The world has no brushes;
+//! each brush model (`*1`, `*2`, ...: a door, a debris pile) gets one box
+//! brush of its bounds, about its own origin, for the entity that names it
+//! (a one-leaf tree with no brushes in it keeps them out of the world's
+//! own trace, which reaches the mesh through its forest of trees).
 
-use crate::clip_collision::{ClipCmodel, ClipCollision, ClipMapMaterial};
+use crate::clip_collision::{ClipBrush, ClipBspLeaf, ClipBspNode, ClipCmodel, ClipCollision, ClipMapMaterial};
 
 /// Triangles per partition.
 const PART_TRIS: usize = 32;
@@ -29,8 +32,9 @@ pub struct SoupTri {
     pub contents: u32,
 }
 
-/// The brush models' bounds (`cmodel_t`: midpoint, half size, radius);
-/// they get no brushes, only their place in the table (`*1`, `*2`, ...).
+/// The brush models' bounds (`cmodel_t`: midpoint, half size, radius), by
+/// their place in the table (`*1`, `*2`, ...; the first, the world, is
+/// skipped): each gets a box brush of them.
 pub type SoupCmodel = ([f32; 3], [f32; 3], f32);
 
 fn morton(p: [f32; 3], lo: [f32; 3], scale: [f32; 3]) -> u64 {
@@ -91,13 +95,31 @@ pub fn build_soup_clip_collision(tris: &[SoupTri], cmodels: &[SoupCmodel]) -> Cl
         num_brushes: 0,
     });
     for &(mid, half, radius) in cmodels.iter().skip(1) {
-        out.cmodels.push(ClipCmodel {
-            mins: std::array::from_fn(|k| mid[k] - half[k]),
-            maxs: std::array::from_fn(|k| mid[k] + half[k]),
-            radius,
-            first_brush: 0,
-            num_brushes: 0,
-        });
+        let (mins, maxs): ([f32; 3], [f32; 3]) = (std::array::from_fn(|k| mid[k] - half[k]), std::array::from_fn(|k| mid[k] + half[k]));
+        let solid = half.iter().all(|h| *h > 0.0 && h.is_finite());
+        let first = out.leafbrushes.len() as u32;
+        if solid && out.brushes.len() < usize::from(u16::MAX) {
+            out.leafbrushes.push(out.brushes.len() as u16);
+            out.brushes.push(ClipBrush {
+                planes: vec![
+                    [1.0, 0.0, 0.0, maxs[0]],
+                    [-1.0, 0.0, 0.0, -mins[0]],
+                    [0.0, 1.0, 0.0, maxs[1]],
+                    [0.0, -1.0, 0.0, -mins[1]],
+                    [0.0, 0.0, 1.0, maxs[2]],
+                    [0.0, 0.0, -1.0, -mins[2]],
+                ],
+                contents: IW7_SOLID,
+                plane_surface_flags: vec![0; 6],
+                glass_encoded: 0,
+            });
+        }
+        out.cmodels.push(ClipCmodel { mins, maxs, radius, first_brush: first, num_brushes: (out.leafbrushes.len() as u32 - first) as u16 });
+    }
+    if !out.brushes.is_empty() {
+        // One node every trace passes to one empty leaf.
+        out.nodes.push(ClipBspNode { plane: [0.0, 0.0, 1.0, -1.0e9], children: [-1, -1] });
+        out.leaves.push(ClipBspLeaf { first_brush: 0, num_brushes: 0, first_coll_aabb_index: 0, coll_aabb_count: 0 });
     }
     if keep.is_empty() {
         return out;
@@ -218,5 +240,17 @@ mod tests {
         let census = crate::world_iw3::spawn_ground_census(&clip, &[[10.0, 10.0, 40.0], [5000.0, 0.0, 40.0]]);
         assert_eq!(census.spawns, 2);
         assert_eq!(census.on_ground, 1, "{census}");
+    }
+
+    #[test]
+    fn brush_models_get_a_box_brush_the_world_does_not_list() {
+        let tris = vec![SoupTri { p: [[0.0, 0.0, 0.0], [64.0, 0.0, 0.0], [0.0, 64.0, 0.0]], surface_flags: 0, contents: IW7_SOLID }];
+        let clip = build_soup_clip_collision(&tris, &[([0.0; 3], [1.0; 3], 1.0), ([0.0; 3], [10.0, 20.0, 30.0], 37.0), ([0.0; 3], [0.0; 3], 0.0)]);
+        assert_eq!(clip.cmodels.len(), 3);
+        assert_eq!(clip.brushes.len(), 1);
+        assert_eq!((clip.cmodels[1].first_brush, clip.cmodels[1].num_brushes), (0, 1));
+        assert_eq!(clip.cmodels[2].num_brushes, 0);
+        assert_eq!(clip.brushes[0].planes[2], [0.0, 1.0, 0.0, 20.0]);
+        assert_eq!((clip.nodes.len(), clip.leaves.len(), clip.leaves[0].num_brushes), (1, 1, 0));
     }
 }

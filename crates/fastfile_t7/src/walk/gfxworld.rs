@@ -1,0 +1,360 @@
+//! `GfxWorld` (0x2040): the drawn world. Layout from x64-zt's T7
+//! `GfxWorld` (offsets checked by its asserts), record sizes and the
+//! stream order read on retail `mp_nuketown_x` (file offsets: there is no
+//! padding in the file, so a wrong size shows at once):
+//!
+//! * the stream info's AABB trees (48) and leaf refs (4);
+//! * the sun volumes (4536 each), then per volume: the four multi-res
+//!   shadow trees (`GfxStreamedShadowTreeBuffer`, 144 on retail: its mip
+//!   offsets and counts, the elements' name, their data when resident, the
+//!   fallback buffer, 56, and its elements), the four min/max trees (CPU
+//!   u16s, then the GPU image), the light indices, the four reflection probe
+//!   arrays (the probe image first, then `count + 1` configs of 328 and the
+//!   blends, 604, then the pixel data's `StreamWrappedBuffer`, 64), the four
+//!   probe volumes (three images and the pixel data), the four sky boxes
+//!   (the model is a reference; `GfxSkyBoxImage`, 72: image and pixels)
+//!   and the four exposure grids (probes of 80, then per probe its voxels,
+//!   12 bytes each, and its blends, 80, each with its faces);
+//! * the volumes and their planes (outdoor 424 with four shadow trees, fog
+//!   624, LUT 60, weather grime 120 with six images, generic 12);
+//! * the DPVS planes (20) and nodes (u32), the cells (56) with their AABB
+//!   trees (48, each with its static model indices);
+//! * the draw: the cookie image array (an inserted image), the positions
+//!   (12 per vertex), the vertex attributes (20 per vertex) and the indices,
+//!   all three in VIRTUAL;
+//! * brush models (64), material memory (16), the sorted surface indices,
+//!   the semi- and fully static model lists (u16), the surfaces (96, as
+//!   many as `surfaceCount`), the static model draw instances (152);
+//! * the LUT material (inserted), the umbra tomes, lens pack, lit fog
+//!   volumes and their planes, volume decals (184) and the decal reveal
+//!   image.
+
+use super::world::{Span, span};
+use crate::asset_type::AssetType;
+use crate::cursor::Result;
+use crate::stream::{PHYSICAL, Stream};
+
+pub const SURFACE: usize = 96;
+pub const SMODEL_DRAW: usize = 152;
+pub const BRUSH_MODEL: usize = 64;
+const SUN_VOLUME: usize = 4536;
+const SHADOW_TREE: usize = 144;
+const SHADOW_TREE_FALLBACK: usize = 56;
+const STREAM_WRAPPED: usize = 64;
+const PROBE_CONFIG: usize = 328;
+const PROBE_BLEND: usize = 604;
+const EXPOSURE_PROBE: usize = 80;
+const EXPOSURE_BLEND: usize = 80;
+const OUTDOOR_VOLUME: usize = 424;
+const FOG_VOLUME: usize = 624;
+const LUT_VOLUME: usize = 60;
+const GRIME_VOLUME: usize = 120;
+const GENERIC_VOLUME: usize = 12;
+const CELL: usize = 56;
+const AABB_TREE: usize = 48;
+
+/// What the walk keeps of a `GfxWorld`.
+#[derive(Clone, Debug, Default)]
+pub struct GfxWorldRec {
+    pub name: String,
+    pub header_at: usize,
+    pub vertex_count: usize,
+    /// Positions (12 bytes a vertex) and attributes (20 bytes a vertex).
+    pub positions: Option<(usize, usize)>,
+    pub attributes: Option<(usize, usize)>,
+    pub indices: Span,
+    pub surfaces: Span,
+    /// Per surface: its material's name.
+    pub surface_materials: Vec<Option<String>>,
+    pub smodels: Span,
+    /// Per static model draw instance: its model's name.
+    pub smodel_models: Vec<Option<String>>,
+    pub brush_models: Span,
+    /// The sky boxes' models (first sun volume).
+    pub sky_models: Vec<String>,
+    /// The sun's settings (first sun volume's first state): file offset.
+    pub sun_at: usize,
+}
+
+fn count(s: &Stream, at: usize) -> Result<usize> {
+    Ok(s.u32_at(at)? as usize)
+}
+
+/// A `StreamWrappedBuffer` at `b` (64): its name, and its data when
+/// resident (mode 0); streamed data is in the `.xpak`.
+pub(crate) fn stream_wrapped_body(s: &mut Stream, b: usize) -> Result<()> {
+    s.no_loads(b, STREAM_WRAPPED, &[0x28, 0x38])?;
+    s.string(b + 0x28)?;
+    if s.u8_at(b + 0x31)? == 0 {
+        let n = count(s, b + 0x34)?;
+        s.push(PHYSICAL);
+        let r = s.array(b + 0x38, n, 255);
+        s.pop();
+        r?;
+    }
+    Ok(())
+}
+
+pub(crate) fn stream_wrapped(s: &mut Stream, field: usize) -> Result<()> {
+    if let Some(b) = s.array(field, STREAM_WRAPPED, 7)? {
+        stream_wrapped_body(s, b)?;
+    }
+    Ok(())
+}
+
+/// `GfxStreamedShadowTreeBuffer*` at `field`.
+fn shadow_tree(s: &mut Stream, field: usize) -> Result<()> {
+    let Some(t) = s.array(field, SHADOW_TREE, 15)? else { return Ok(()) };
+    s.no_loads(t, SHADOW_TREE, &[0x28, 0x38, 0x40, 0x48, 0x88])?;
+    let mips = count(s, t + 0x54)?;
+    s.records(t + 0x40, mips, 4, 3)?;
+    s.records(t + 0x48, mips, 4, 3)?;
+    stream_wrapped_body(s, t)?;
+    // (The fallback is 16-aligned: a later tree's reference to it lands so.)
+    if let Some(f) = s.array(t + 0x88, SHADOW_TREE_FALLBACK, 15)? {
+        s.no_loads(f, SHADOW_TREE_FALLBACK, &[0])?;
+        let n = count(s, f + 8)? * count(s, f + 12)?;
+        s.array(f, n, 3)?;
+    }
+    Ok(())
+}
+
+fn image(s: &mut Stream, field: usize) -> Result<Option<String>> {
+    s.asset_named(AssetType::Image, field)
+}
+
+fn sun_volume(s: &mut Stream, v: usize, rec: &mut GfxWorldRec, first: bool) -> Result<()> {
+    for k in 0..4 {
+        shadow_tree(s, v + 1056 + 112 * k + 104)?;
+    }
+    for k in 0..4 {
+        let m = v + 1504 + 48 * k;
+        let n = count(s, m + 16)?;
+        s.records(m + 24, n, 2, 1)?;
+        image(s, m + 32)?;
+    }
+    let n = count(s, v + 1696)?;
+    s.records(v + 1704, n, 2, 1)?;
+    for k in 0..4 {
+        let r = v + 1712 + 40 * k;
+        image(s, r + 8)?;
+        let n = count(s, r + 32)?;
+        s.records(r + 16, n + 1, PROBE_CONFIG, 15)?;
+        let n = count(s, r + 36)?;
+        s.records(r + 24, n, PROBE_BLEND, 15)?;
+        stream_wrapped(s, r)?;
+    }
+    for k in 0..4 {
+        let p = v + 1872 + 32 * k;
+        for j in 0..3 {
+            image(s, p + 8 * j)?;
+        }
+        stream_wrapped(s, p + 24)?;
+    }
+    for k in 0..4 {
+        let b = v + 2000 + 24 * k;
+        if let Some(m) = s.asset_named(AssetType::XModel, b)?
+            && first
+        {
+            rec.sky_models.push(m);
+        }
+        if let Some(i) = s.array(b + 16, 72, 7)? {
+            image(s, i)?;
+            stream_wrapped_body(s, i + 8)?;
+        }
+    }
+    for k in 0..4 {
+        let g = v + 2096 + 16 * k;
+        let n = count(s, g)?;
+        let Some(t) = s.records(g + 8, n, EXPOSURE_PROBE, 7)? else { continue };
+        for i in 0..n {
+            let e = t + EXPOSURE_PROBE * i;
+            let voxels = s.u16_at(e + 40)? as usize * s.u16_at(e + 42)? as usize * s.u16_at(e + 44)? as usize;
+            s.records(e + 48, voxels, 12, 1)?;
+            let blends = s.u16_at(e + 56)? as usize;
+            if let Some(b) = s.records(e + 64, blends, EXPOSURE_BLEND, 7)? {
+                for j in 0..blends {
+                    let faces = count(s, b + EXPOSURE_BLEND * j + 60)?;
+                    s.records(b + EXPOSURE_BLEND * j + 64, faces, 16, 3)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `planes` (vec4 each) of a volume list.
+fn planes(s: &mut Stream, h: usize, count_at: usize) -> Result<()> {
+    let n = count(s, h + count_at)?;
+    s.records(h + count_at + 8, n, 16, 3)?;
+    Ok(())
+}
+
+pub fn gfx_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
+    let name = s.string(h)?;
+    s.string(h + 8)?;
+    let mut rec = GfxWorldRec { name: name.clone().unwrap_or_default(), header_at: h, ..Default::default() };
+    // Stream info.
+    let n = count(s, h + 0x20)?;
+    s.records(h + 0x28, n, 48, 15)?;
+    let n = count(s, h + 0x30)?;
+    s.records(h + 0x38, n, 4, 3)?;
+    // Coronas (32 each).
+    let n = count(s, h + 0xd8)?;
+    s.records(h + 0xe0, n, 32, 3)?;
+    // Sun volumes.
+    let n = count(s, h + 0xe8)?;
+    if let Some(t) = s.records(h + 0xf0, n, SUN_VOLUME, 15)? {
+        rec.sun_at = t + 16;
+        for i in 0..n {
+            sun_volume(s, t + SUN_VOLUME * i, &mut rec, i == 0)?;
+        }
+    }
+    planes(s, h, 0xf8)?;
+    let n = count(s, h + 0x108)?;
+    if let Some(t) = s.records(h + 0x110, n, OUTDOOR_VOLUME, 15)? {
+        for i in 0..n {
+            for k in 0..4 {
+                shadow_tree(s, t + OUTDOOR_VOLUME * i + 8 + 104 * k + 88)?;
+            }
+        }
+    }
+    planes(s, h, 0x118)?;
+    let n = count(s, h + 0x128)?;
+    s.records(h + 0x130, n, 84, 3)?;
+    planes(s, h, 0x138)?;
+    let n = count(s, h + 0x148)?;
+    s.records(h + 0x150, n, FOG_VOLUME, 15)?;
+    planes(s, h, 0x158)?;
+    let n = count(s, h + 0x168)?;
+    s.records(h + 0x170, n, 44, 15)?;
+    planes(s, h, 0x178)?;
+    let n = count(s, h + 0x188)?;
+    s.records(h + 0x190, n, LUT_VOLUME, 3)?;
+    planes(s, h, 0x198)?;
+    let n = count(s, h + 0x1a8)?;
+    if let Some(t) = s.records(h + 0x1b0, n, GRIME_VOLUME, 7)? {
+        for i in 0..n {
+            for j in 0..6 {
+                image(s, t + GRIME_VOLUME * i + 72 + 8 * j)?;
+            }
+        }
+    }
+    planes(s, h, 0x1b8)?;
+    let n = count(s, h + 0x1c8)?;
+    s.records(h + 0x1d0, n, GENERIC_VOLUME, 3)?;
+    planes(s, h, 0x1d8)?;
+    let n = count(s, h + 0x1e8)?;
+    s.records(h + 0x1f0, n, 1, 0)?;
+    planes(s, h, 0x1f8)?;
+    let n = count(s, h + 0x208)?;
+    s.records(h + 0x210, n, 144, 15)?;
+    // DPVS planes and nodes (the scene entities' cell bits are runtime).
+    let n = count(s, h + 0x10)?;
+    s.records(h + 0x230, n, 20, 3)?;
+    let n = count(s, h + 0x14)?;
+    s.records(h + 0x238, n, 4, 3)?;
+    let cells = count(s, h + 0x228)?;
+    if let Some(t) = s.records(h + 0x250, cells, CELL, 7)? {
+        for c in 0..cells {
+            let cell = t + CELL * c;
+            let n = count(s, cell + 24)?;
+            if let Some(trees) = s.records(cell + 32, n, AABB_TREE, 7)? {
+                for i in 0..n {
+                    let a = trees + AABB_TREE * i;
+                    let k = s.u16_at(a + 30)? as usize;
+                    s.records(a + 32, k, 2, 1)?;
+                }
+            }
+            let portals = count(s, cell + 40)?;
+            if portals > 0 && s.ptr_at(cell + 48)?.is_inline() {
+                return Err(crate::cursor::ReadError::Invalid("gfxworld cell portals (not read yet)", cell + 48));
+            }
+        }
+    }
+    // The draw.
+    image(s, h + 0x260)?;
+    rec.vertex_count = count(s, h + 0x268)?;
+    // (The positions, attributes and indices are in VIRTUAL: the later
+    // references land so.)
+    for (field, size_at, slot) in [(0x270, 0x26c, 0), (0x288, 0x280, 1)] {
+        let n = count(s, h + size_at)?;
+        let at = s.array(h + field, n, 15)?.map(|at| (at, n));
+        if slot == 0 {
+            rec.positions = at;
+        } else {
+            rec.attributes = at;
+        }
+    }
+    let n = count(s, h + 0x298)?;
+    rec.indices = s.array(h + 0x2a0, 2 * n, 15)?.map(|at| (at, n));
+    let n = count(s, h + 0x2b0)?;
+    rec.brush_models = span(s, h + 0x2b8, n, BRUSH_MODEL, 3)?;
+    let n = count(s, h + 0x2dc)?;
+    if let Some(t) = s.records(h + 0x2e0, n, 16, 7)? {
+        for i in 0..n {
+            s.asset(AssetType::Material, t + 16 * i)?;
+        }
+    }
+    // DPVS (the vis arrays are runtime).
+    let surfaces = count(s, h + 0x18)?;
+    let static_surfaces = count(s, h + 0x300)?;
+    s.records(h + 0x408, static_surfaces, 2, 1)?;
+    let n = count(s, h + 0x418)?;
+    s.records(h + 0x420, n, 2, 1)?;
+    let n = count(s, h + 0x41c)?;
+    s.records(h + 0x428, n, 2, 1)?;
+    rec.surfaces = span(s, h + 0x430, surfaces, SURFACE, 7)?;
+    if let Some((t, n)) = rec.surfaces {
+        for i in 0..n {
+            rec.surface_materials.push(s.asset_named(AssetType::Material, t + SURFACE * i + 72)?);
+        }
+    }
+    let smodels = count(s, h + 0x2fc)?;
+    rec.smodels = span(s, h + 0x438, smodels, SMODEL_DRAW, 7)?;
+    if let Some((t, n)) = rec.smodels {
+        for i in 0..n {
+            let d = t + SMODEL_DRAW * i;
+            rec.smodel_models.push(s.asset_named(AssetType::XModel, d + 88)?);
+            for f in [120, 136] {
+                if s.ptr_at(d + f)?.is_inline() {
+                    return Err(crate::cursor::ReadError::Invalid("gfxworld posed static model (not read yet)", d + f));
+                }
+            }
+        }
+    }
+    s.capture.world.gfx_worlds.push(rec);
+    let at = s.capture.world.gfx_worlds.len() - 1;
+    // Materials, umbra, lenses, lit fog, decals.
+    for f in [0x520, 0x528, 0x530, 0x538] {
+        s.asset(AssetType::Material, h + f)?;
+    }
+    let n = count(s, h + 0x540)?;
+    s.records(h + 0x548, n, 68, 3)?;
+    let n = count(s, h + 0x558)?;
+    if let Some(t) = s.records(h + 0x560, n, 40, 7)? {
+        for i in 0..n {
+            let u = t + 40 * i;
+            let size = count(s, u)?;
+            s.array(u + 8, size, 15)?;
+            let k = count(s, u + 0x18)?;
+            s.records(u + 0x20, k, 40, 3)?;
+        }
+    }
+    let n = count(s, h + 0x598)?;
+    s.records(h + 0x5a0, n, 84, 3)?;
+    // Lit fog volumes (360: planeStart and planeCount first, then x64-zt's
+    // `GfxLitFogVolume`) and their planes (the 0x5c0 array: vec4s).
+    let n = count(s, h + 0x5a8)?;
+    s.records(h + 0x5b0, n, 360, 15)?;
+    planes(s, h, 0x5b8)?;
+    let n = count(s, h + 0x5c8)?;
+    if let Some(t) = s.records(h + 0x5d0, n, 184, 7)? {
+        for i in 0..n {
+            s.asset(AssetType::Material, t + 184 * i + 152)?;
+        }
+    }
+    image(s, h + 0x5d8)?;
+    let _ = at;
+    Ok(name)
+}

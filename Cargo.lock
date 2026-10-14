@@ -2849,7 +2849,10 @@ version = "0.1.0"
 name = "fastfile_t7"
 version = "0.1.0"
 dependencies = [
+ "bcdec_rs",
  "flate2",
+ "lz4_flex",
+ "png",
 ]
 
 [[package]]

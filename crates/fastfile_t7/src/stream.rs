@@ -400,7 +400,8 @@ impl<'a> Stream<'a> {
             self.refs.resolved += 1;
         } else {
             self.refs.unresolved += 1;
-            if self.refs.unresolved <= 200 && std::env::var_os("T7_MISSES").is_some() {
+            // (`T7_MISSES=all`: every one, not the first 200.)
+            if std::env::var("T7_MISSES").is_ok_and(|v| self.refs.unresolved <= 200 || v == "all") {
                 let near = (offset.saturating_sub(64)..offset + 64).filter(|v| self.starts.contains(v)).collect::<Vec<_>>();
                 eprintln!(
                     "MISS field {field:#x} (virt {:x?}) want {offset:#x} (file {:x?}) virt now {:#x} starts near {near:x?}",

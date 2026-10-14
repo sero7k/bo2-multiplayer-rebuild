@@ -52,7 +52,9 @@ pub const SPECS: &[Spec] = &[
     Spec { ty: T::ImpactSound, size: 0x20, fields: &[(0x8, A(T::SurfaceSoundDef)), (0x10, A(T::EntitySoundImpacts)), (0x18, A(T::EntitySoundImpacts))] },
     Spec { ty: T::EntityFxImpacts, size: 0x218, fields: &[(0x38, A(T::Fx)), (0x40, A(T::Fx)), (0x48, A(T::Fx)), (0x50, A(T::Fx)), (0x58, A(T::Fx)), (0x60, A(T::Fx)), (0x68, A(T::Fx)), (0x70, A(T::Fx)), (0x78, A(T::Fx)), (0x80, A(T::Fx)), (0x88, A(T::Fx)), (0x90, A(T::Fx)), (0x98, A(T::Fx)), (0xa0, A(T::Fx)), (0xa8, A(T::Fx)), (0xb0, A(T::Fx)), (0xb8, A(T::Fx)), (0xc0, A(T::Fx)), (0xc8, A(T::Fx)), (0xd0, A(T::Fx)), (0xd8, A(T::Fx)), (0xe0, A(T::Fx)), (0xe8, A(T::Fx)), (0xf0, A(T::Fx)), (0xf8, A(T::Fx)), (0x100, A(T::Fx)), (0x108, A(T::Fx)), (0x110, A(T::Fx)), (0x118, A(T::Fx)), (0x120, A(T::Fx)), (0x128, A(T::Fx)), (0x130, A(T::Fx)), (0x138, A(T::Fx)), (0x140, A(T::Fx)), (0x148, A(T::Fx)), (0x150, A(T::Fx)), (0x158, A(T::Fx)), (0x160, A(T::Fx)), (0x168, A(T::Fx)), (0x170, A(T::Fx)), (0x178, A(T::Fx)), (0x180, A(T::Fx)), (0x188, A(T::Fx)), (0x190, A(T::Fx)), (0x198, A(T::Fx)), (0x1a0, A(T::Fx)), (0x1a8, A(T::Fx)), (0x1b0, A(T::Fx)), (0x1b8, A(T::Fx)), (0x1c0, A(T::Fx)), (0x1c8, A(T::Fx)), (0x1d0, A(T::Fx)), (0x1d8, A(T::Fx)), (0x1e0, A(T::Fx)), (0x1e8, A(T::Fx)), (0x1f0, A(T::Fx)), (0x1f8, A(T::Fx)), (0x200, A(T::Fx)), (0x208, A(T::Fx)), (0x210, A(T::Fx))] },
     Spec { ty: T::EntitySoundImpacts, size: 0x110, fields: &[] },
-    Spec { ty: T::Laser, size: 0x70, fields: &[(0x38, A(T::Fx))] },
+    // 0x08: the laser's material (read on core_common's
+    // `steadyaim_viewmodel_laser`, ",el/gfx_laser_dust_em").
+    Spec { ty: T::Laser, size: 0x70, fields: &[(0x8, A(T::Material)), (0x38, A(T::Fx))] },
     Spec { ty: T::Beam, size: 0x2b0, fields: &[(0x270, A(T::Fx)), (0x278, A(T::Fx)), (0x280, A(T::Fx)), (0x288, A(T::Fx)), (0x290, A(T::Fx)), (0x298, Str), (0x2a0, Str)] },
     Spec { ty: T::Tracer, size: 0x98, fields: &[] },
     Spec { ty: T::PhysPreset, size: 0x78, fields: &[(0x28, Str), (0x60, A(T::Fx)), (0x68, A(T::ImpactFx)), (0x70, A(T::ImpactSound))] },

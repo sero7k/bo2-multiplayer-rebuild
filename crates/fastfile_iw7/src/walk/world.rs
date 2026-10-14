@@ -12,7 +12,7 @@ use crate::layout as L;
 use crate::stream::{RUNTIME, TEMP, VIRTUAL};
 use crate::walk::weapon::fx_combined;
 use crate::walk::{
-    ClipMapRec, ComLightRec, ComWorldRec, GfxLightMapRec, GfxWorldRec, GfxWorldTrRec, MapEntsRec, Span,
+    ClipMapRec, ComLightRec, ComWorldRec, GfxLightMapRec, GfxWorldRec, GfxWorldTrRec, MapEntsRec, PathDataRec, Span,
 };
 
 /// `count` elements of `elem` bytes a pointer field names (inline or a
@@ -678,24 +678,27 @@ pub(super) fn gfxworld(w: &mut Walker, h: usize) -> Result<AssetId> {
 
 /// `MapTriggers`: models (their physics assets when inline), hulls, slabs,
 /// windings, winding points.
-fn triggers(w: &mut Walker, t: usize) -> Result<()> {
+/// A `MapTriggers`: where its models and hulls are (`None` when not inline).
+fn triggers(w: &mut Walker, t: usize) -> Result<(Option<Span>, Option<Span>)> {
     use L::MapTriggers as M;
     use L::TriggerModel as TM;
     let n = u32f(w, t + M::count)?;
-    if let Some(at) = w.inline_array(t + M::models, TM::SIZE * n, 7)? {
+    let models = w.inline_array(t + M::models, TM::SIZE * n, 7)?;
+    if let Some(at) = models {
         for i in 0..n {
             w.asset(AssetType::PhysicsAsset, at + TM::SIZE * i + TM::physicsAsset)?;
         }
     }
+    let models = models.map(|pos| Span { pos, len: TM::SIZE * n });
     let n = u32f(w, t + M::hullCount)?;
-    w.blob(t + M::hulls, L::TriggerHull::SIZE * n, 3)?;
+    let hulls = arr(w, t + M::hulls, n, L::TriggerHull::SIZE, 3)?;
     let n = u32f(w, t + M::slabCount)?;
     w.blob(t + M::slabs, L::TriggerSlab::SIZE * n, 3)?;
     let n = u32f(w, t + M::windingCount)?;
     w.blob(t + M::windings, L::TriggerWinding::SIZE * n, 3)?;
     let n = u32f(w, t + M::windingPointCount)?;
     w.blob(t + M::windingPoints, L::TriggerWindingPoint::SIZE * n, 3)?;
-    Ok(())
+    Ok((models, hulls))
 }
 
 fn clip_info(w: &mut Walker, info: usize) -> Result<()> {
@@ -722,7 +725,7 @@ pub(super) fn mapents(w: &mut Walker, h: usize) -> Result<AssetId> {
         None => String::new(),
     };
     let mut rec = MapEntsRec { name: name.clone(), entity_string, ..Default::default() };
-    triggers(w, h + M::trigger)?;
+    (rec.trigger_models, rec.trigger_hulls) = triggers(w, h + M::trigger)?;
     triggers(w, h + M::clientTrigger__trigger)?;
     {
         let n = u32f(w, h + M::clientTrigger__trigger__count)?;
@@ -960,11 +963,14 @@ pub(super) fn pathdata(w: &mut Walker, h: usize) -> Result<AssetId> {
     w.s.push(VIRTUAL);
     let name = w.xstr(h + P::name)?.unwrap_or_default();
     let n = u32f(w, h + P::nodeCount)?;
+    let mut rec = PathDataRec { name: name.clone(), ..Default::default() };
     if let Some(at) = w.inline_array(h + P::nodes, N::SIZE * n, 7)? {
+        rec.nodes = Some(Span { pos: at, len: N::SIZE * n });
         for i in 0..n {
             let node = at + N::SIZE * i;
             let k = u16f(w, node + N::constant__totalLinkCount)?;
-            w.blob(node + N::constant__Links, L::pathlink_s::SIZE * k, 3)?;
+            let links = w.blob(node + N::constant__Links, L::pathlink_s::SIZE * k, 3)?;
+            rec.links.push(links.map(|pos| Span { pos, len: L::pathlink_s::SIZE * k }));
         }
     }
     let n = u32f(w, h + P::visBytes)?;
@@ -1001,6 +1007,7 @@ pub(super) fn pathdata(w: &mut Walker, h: usize) -> Result<AssetId> {
         w.blob(h + field, n, 0)?;
     }
     w.s.pop();
+    w.cap.path_datas.push(rec);
     Ok(w.name_only(AssetType::PathData, name))
 }
 

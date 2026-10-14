@@ -66,7 +66,7 @@ asset_types! {
     Sound = 0x0a, "sound", 0x220b0;
     SoundPatch = 0x0b, "sound_patch", 0x0;
     ClipMap = 0x0c, "clipmap", 0x2d0;
-    ComWorld = 0x0d, "comworld", 0x68;
+    ComWorld = 0x0d, "comworld", 0x88;
     GameWorld = 0x0e, "gameworld", 0x50;
     MapEnts = 0x0f, "map_ents", 0x48;
     GfxWorld = 0x10, "gfxworld", 0x2040;
@@ -84,8 +84,8 @@ asset_types! {
     PlayerSounds = 0x1c, "playersounds", 0x0;
     PlayerFx = 0x1d, "playerfx", 0x0;
     SharedWeaponSounds = 0x1e, "sharedweaponsounds", 0xf0;
-    Attachment = 0x1f, "attachment", 0x0;
-    AttachmentUnique = 0x20, "attachmentunique", 0x0;
+    Attachment = 0x1f, "attachment", 0x220;
+    AttachmentUnique = 0x20, "attachmentunique", 0x840;
     WeaponCamo = 0x21, "weaponcamo", 0x18;
     CustomizationTable = 0x22, "customizationtable", 0x28;
     CustomizationTableFeImages = 0x23, "customizationtable_feimages", 0x0;
@@ -105,7 +105,7 @@ asset_types! {
     StructuredTable = 0x31, "structuredtable", 0x0;
     Leaderboard = 0x32, "leaderboard", 0x30;
     Ddl = 0x33, "ddl", 0x0;
-    Glasses = 0x34, "glasses", 0x0;
+    Glasses = 0x34, "glasses", 0x58;
     TextureList = 0x35, "texturelist", 0x0;
     ScriptParseTree = 0x36, "scriptparsetree", 0x18;
     KeyValuePairs = 0x37, "keyvaluepairs", 0x18;
@@ -134,13 +134,13 @@ asset_types! {
     BehaviorTree = 0x4e, "behaviortree", 0x28;
     BehaviorStateMachine = 0x4f, "behaviorstatemachine", 0x20;
     Ttf = 0x50, "ttf", 0x20020;
-    SAnim = 0x51, "sanim", 0x0;
+    SAnim = 0x51, "sanim", 0x70;
     LightDescription = 0x52, "lightdescription", 0x240;
     Shellshock = 0x53, "shellshock", 0xb0;
     XCam = 0x54, "xcam", 0xa8;
     BgCache = 0x55, "bgcache", 0x18;
     TextureCombo = 0x56, "texturecombo", 0x80;
-    FlameTable = 0x57, "flametable", 0x0;
+    FlameTable = 0x57, "flametable", 0x218;
     Bitfield = 0x58, "bitfield", 0x20;
     AttachmentCosmeticVariant = 0x59, "attachmentcosmeticvariant", 0x18;
     MapTable = 0x5a, "maptable", 0x28;
@@ -150,8 +150,8 @@ asset_types! {
     Objective = 0x5e, "objective", 0x70;
     ObjectiveList = 0x5f, "objectivelist", 0x18;
     UmbraTome = 0x60, "umbratome", 0x0;
-    NavMesh = 0x61, "navmesh", 0x0;
-    NavVolume = 0x62, "navvolume", 0x0;
+    NavMesh = 0x61, "navmesh", 0x68;
+    NavVolume = 0x62, "navvolume", 0x48;
     BinaryHtml = 0x63, "binaryhtml", 0x0;
     Laser = 0x64, "laser", 0x70;
     Beam = 0x65, "beam", 0x2b0;

@@ -141,6 +141,32 @@ pub struct SpawnPoint {
     pub angles: [f32; 3],
 }
 
+/// A brush sub-model (`*<n>`: a door, a debris pile): its world surfaces
+/// (`GfxBrushModel`) and its bounds.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BrushModel {
+    pub first_surface: u32,
+    pub surface_count: u32,
+    pub mins: [f32; 3],
+    pub maxs: [f32; 3],
+}
+
+/// An AI path node (`pathnode_t`) and its links (node, distance,
+/// negotiation link).
+#[derive(Clone, Debug, Default)]
+pub struct PathNode {
+    pub kind: u16,
+    pub spawnflags: u16,
+    pub targetname: String,
+    pub target: String,
+    pub script_noteworthy: String,
+    pub script_linkname: String,
+    pub animscript: String,
+    pub origin: [f32; 3],
+    pub yaw: f32,
+    pub links: Vec<(u16, f32, bool)>,
+}
+
 /// A primary light (`ComPrimaryLight`): the sun is type 1.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PrimaryLight {
@@ -199,6 +225,14 @@ pub struct Iw7Map {
     /// added).
     pub entities: String,
     pub lights: Vec<PrimaryLight>,
+    /// The server triggers' hulls by `?<n>` (a volume's or trigger's
+    /// `model`): each hull's midpoint and half size, about the entity's
+    /// origin.
+    pub trigger_hulls: Vec<Vec<([f32; 3], [f32; 3])>>,
+    /// The brush sub-models by `*<n>` (0 is the world itself).
+    pub brush_models: Vec<BrushModel>,
+    /// The AI path nodes (`PathData`), in node order.
+    pub path_nodes: Vec<PathNode>,
     pub mins: [f32; 3],
     pub maxs: [f32; 3],
     /// What was read and what was missing, line by line.
@@ -546,10 +580,71 @@ impl Iw7Map {
             }
             out.entities = entity_text(&m.entity_string, &out.spawns);
         }
-        out.report.push(format!("entities: {} spawn points", out.spawns.len()));
+        // Trigger volumes, brush models and path nodes (the Zombies layout
+        // needs them).
+        if let Some(m) = map.cap.map_ents.first()
+            && let (Some(models), Some(hulls)) = (m.trigger_models, m.trigger_hulls)
+        {
+            use L::TriggerHull as H;
+            use L::TriggerModel as TM;
+            let hulls = hulls.get(image);
+            for t in models.get(image).chunks_exact(TM::SIZE) {
+                let (first, n) = (usize::from(u16_at(t, TM::firstHull)), usize::from(u16_at(t, TM::hullCount)));
+                let model: Vec<([f32; 3], [f32; 3])> = (first..first + n)
+                    .map_while(|k| hulls.get(H::SIZE * k..H::SIZE * (k + 1)))
+                    .map(|hl| (v3(hl, H::bounds__midPoint), v3(hl, H::bounds__halfSize)))
+                    .collect();
+                out.trigger_hulls.push(model);
+            }
+        }
+        if let Some(at) = g.models {
+            use L::GfxBrushModel as B;
+            for i in 0..g.model_count as usize {
+                let b = &image[at + B::SIZE * i..at + B::SIZE * (i + 1)];
+                let (mid, half) = (v3(b, B::bounds__midPoint), v3(b, B::bounds__halfSize));
+                out.brush_models.push(BrushModel {
+                    first_surface: u32_at(b, B::startSurfIndex),
+                    surface_count: u32_at(b, B::surfaceCount),
+                    mins: std::array::from_fn(|k| mid[k] - half[k]),
+                    maxs: std::array::from_fn(|k| mid[k] + half[k]),
+                });
+            }
+        }
+        if let Some(p) = map.cap.path_datas.first()
+            && let Some(nodes) = p.nodes
+        {
+            use L::pathlink_s as K;
+            use L::pathnode_t as N;
+            for (i, n) in nodes.get(image).chunks_exact(N::SIZE).enumerate() {
+                let links = p.links.get(i).copied().flatten().map_or(&[][..], |s| s.get(image));
+                out.path_nodes.push(PathNode {
+                    kind: u16_at(n, N::constant__type),
+                    spawnflags: u16_at(n, N::constant__spawnflags),
+                    targetname: sstr(u32_at(n, N::constant__targetname)),
+                    target: sstr(u32_at(n, N::constant__target)),
+                    script_noteworthy: sstr(u32_at(n, N::constant__script_noteworthy)),
+                    script_linkname: sstr(u32_at(n, N::constant__script_linkName)),
+                    animscript: sstr(u32_at(n, N::constant__animscript)),
+                    origin: v3(n, N::constant__vLocalOrigin),
+                    yaw: f32_at(n, N::constant__orientation__yaw_orient__fLocalAngle),
+                    links: links
+                        .chunks_exact(K::SIZE)
+                        .map(|k| (u16_at(k, K::nodeNum), f32_at(k, K::fDist), k[K::negotiationLink] != 0))
+                        .collect(),
+                });
+            }
+        }
+        out.report.push(format!(
+            "entities: {} spawn points, {} trigger models, {} brush models, {} path nodes ({} links)",
+            out.spawns.len(),
+            out.trigger_hulls.len(),
+            out.brush_models.len(),
+            out.path_nodes.len(),
+            out.path_nodes.iter().map(|n| n.links.len()).sum::<usize>()
+        ));
         if out.name.starts_with("cp_") {
-            let census: Vec<String> = zombies_census(&out.entities).into_iter().map(|(what, n)| format!("{what} {n}")).collect();
-            out.report.push(format!("zombies layout: {}", census.join(", ")));
+            let layout = crate::zombies::ZmLayout::read(&out);
+            out.report.push(format!("zombies layout: {}", layout.summary()));
         }
         Ok(out)
     }
@@ -632,39 +727,6 @@ fn zombies_starts(text: &str) -> Vec<(String, String)> {
         }
     }
     out
-}
-
-/// What an Infinite Warfare Zombies map places for its game, by the names
-/// its scripts look them up by: (what, count). For the report, and for
-/// whoever maps them onto Black Ops II's Zombies structs.
-pub fn zombies_census(entities: &str) -> Vec<(&'static str, usize)> {
-    let mut by: HashMap<String, usize> = HashMap::new();
-    for block in entities.split('{').skip(1) {
-        let body = block.split('}').next().unwrap_or("");
-        for l in body.lines() {
-            if let Some((k, v)) = l.trim().split_once(' ')
-                && matches!(k.trim_matches('"'), "targetname" | "script_noteworthy")
-            {
-                *by.entry(v.trim().trim_matches('"').to_owned()).or_default() += 1;
-            }
-        }
-    }
-    let n = |names: &[&str]| names.iter().map(|k| by.get(*k).copied().unwrap_or(0)).sum::<usize>();
-    vec![
-        ("player starts (default_player_start)", n(&["default_player_start"])),
-        ("player respawns (player_respawn_loc)", n(&["player_respawn_loc"])),
-        ("windows / barriers (window_entrance)", n(&["window_entrance"])),
-        ("buyable doors and debris (door_buy, debris_*)", n(&["door_buy", "debris_750", "debris_1000", "debris_1250", "debris_1500", "debris_2000"])),
-        ("team doors (team_door_switch)", n(&["team_door_switch"])),
-        ("magic wheel spots (zmb_magic_wheel_spinner / spinner)", n(&["spinner"])),
-        ("power switches (generator)", n(&["generator"])),
-        ("crafting stations", n(&["crafting_station"])),
-        ("fast travel portals", n(&["fast_travel"])),
-        ("spawn volumes (spawn_volume)", n(&["spawn_volume"])),
-        ("zone volumes (mini_zone)", n(&["mini_zone"])),
-        ("zombie spawn spots (ground / wall / ceiling)", n(&["low", "medium", "high"])),
-        ("dog spawners", n(&["dog_spawner"])),
-    ]
 }
 
 /// An `imagefile` range: from the pak, or from a copy of just that range

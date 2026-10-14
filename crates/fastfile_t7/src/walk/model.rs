@@ -54,7 +54,9 @@ const SHARED_DATA_ALIGN: u64 = 255;
 /// all 4800 references landing; whether the 16-alignment is on the nodes
 /// or the leaves the references cannot tell.)
 pub fn xmodel_mesh(s: &mut Stream, h: usize) -> Result<Option<String>> {
-    s.no_loads(h, AssetType::XModelMesh.header_size(), &[0, 0x68, 0x70])?;
+    // 0x0c..0x3c is the part bits (a bone mask: all-ones words are not
+    // pointers); the pointers are the name, the surfaces and the shared data.
+    s.no_loads(h + 0x40, AssetType::XModelMesh.header_size() - 0x40, &[0x28, 0x30])?;
     let name = s.string(h)?;
     let mut rec = MeshRec {
         name: name.clone().unwrap_or_else(String::new),
@@ -77,12 +79,16 @@ pub fn xmodel_mesh(s: &mut Stream, h: usize) -> Result<Option<String>> {
     if let Some(t) = s.records(h + 0x68, n, SURFACE, 7)? {
         for i in 0..n {
             let surf = t + SURFACE * i;
-            s.no_loads(surf, SURFACE, &[0x10, 0x18, 0x58])?;
+            // (0x20..0x50 is the part bits: all-ones words are no pointers.)
+            s.no_loads(surf, 0x20, &[0x10, 0x18])?;
+            s.no_loads(surf + 0x50, 0x10, &[8])?;
             surface_shared(s, surf + 0x10, None)?;
             let lists = s.u8_at(surf + 1)? as usize;
+            let mut rigid = Vec::new();
             if let Some(v) = s.records(surf + 0x18, lists, RIGID_VERT_LIST, 7)? {
                 for k in 0..lists {
                     let list = v + RIGID_VERT_LIST * k;
+                    rigid.push([s.u16_at(list)?, s.u16_at(list + 2)?, s.u16_at(list + 4)?, s.u16_at(list + 6)?]);
                     if let Some(tree) = s.array(list + 8, COLLISION_TREE, 7)? {
                         s.no_loads(tree, COLLISION_TREE, &[0x20, 0x30])?;
                         let nodes = s.u32_at(tree + 0x18)? as usize;
@@ -99,6 +105,8 @@ pub fn xmodel_mesh(s: &mut Stream, h: usize) -> Result<Option<String>> {
                 tri_count: s.u16_at(surf + 6)?,
                 base_vert: s.u32_at(surf + 8)?,
                 base_index: s.u32_at(surf + 0xc)?,
+                flags: s.u16_at(surf + 2)?,
+                rigid,
             });
         }
     }
@@ -131,7 +139,8 @@ const GEOM_INFO: usize = 72;
 pub fn xmodel(s: &mut Stream, h: usize) -> Result<Option<String>> {
     let mut known: Vec<usize> = vec![0, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0xc8, 0xd8, 0xe8, 0x110, 0x128, 0x130, 0x138, 0x148];
     known.extend((0..8).map(|i| 0x88 + 8 * i));
-    s.no_loads(h, AssetType::XModel.header_size(), &known)?;
+    // (0x154.. is the combined part bits: all-ones words are no pointers.)
+    s.no_loads(h, 0x150, &known)?;
     let name = s.string(h)?;
     let bones = s.u8_at(h + 8)? as usize + s.u16_at(h + 0xa)? as usize;
     let non_root = bones.saturating_sub(s.u8_at(h + 9)? as usize);
@@ -179,7 +188,9 @@ pub fn xmodel(s: &mut Stream, h: usize) -> Result<Option<String>> {
             s.records(c, tris, COLL_TRI, 3)?;
         }
     }
-    s.records(h + 0xe8, bones, BONE_INFO, 3)?;
+    // Bone info for the model's own bones, not its cosmetic ones (0x0a;
+    // `mp_nuketown_x`'s character models: 121 + 185).
+    s.records(h + 0xe8, s.u8_at(h + 8)? as usize, BONE_INFO, 3)?;
     // The collision LOD: a mesh asset (`-2` like the LOD meshes).
     rec.collision_mesh = s.asset_named(AssetType::XModelMesh, h + 0x110)?;
     rec.phys_preset = s.asset_named(AssetType::PhysPreset, h + 0x128)?;
