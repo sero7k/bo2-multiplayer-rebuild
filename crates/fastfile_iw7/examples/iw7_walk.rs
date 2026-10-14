@@ -14,7 +14,7 @@ fn main() {
         let mut w = fastfile_iw7::walk::Walker::new(&zone.image, &zone.assets, &zone.header.stream_files);
         let stop = w.walk().err();
         println!(
-            "{path}: walked {}/{} pos {:#x}/{:#x} VIRTUAL {:#x} (block {:#x}) unresolved {} stop {:?}",
+            "{path}: walked {}/{} pos {:#x}/{:#x} VIRTUAL {:#x} (block {:#x}) unresolved {} forward {}/{} stop {:?}",
             w.cap.walked,
             zone.assets.assets.len(),
             w.stream_pos(),
@@ -22,6 +22,8 @@ fn main() {
             w.virtual_offset(),
             zone.header.block_sizes[VIRTUAL as usize],
             w.unresolved.get(),
+            w.unresolved_forward(),
+            w.forward.len(),
             stop
         );
         if std::env::var_os("IW7_LIST").is_some() {

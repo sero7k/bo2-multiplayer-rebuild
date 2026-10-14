@@ -18,6 +18,7 @@ mod material;
 mod misc;
 mod model;
 mod physics;
+mod weapon;
 
 use std::collections::HashMap;
 
@@ -105,6 +106,9 @@ pub struct Walker<'a> {
     pub first_suspect: std::cell::Cell<Option<(usize, usize)>>,
     /// Asset references that named no slot read so far (VIRTUAL drift).
     pub unresolved: std::cell::Cell<usize>,
+    /// References past what has been read so far: pointers are only
+    /// offsets, so a zone may name data (even asset headers) it loads later.
+    pub forward: Vec<(u64, AssetType)>,
     pub first_unresolved: std::cell::Cell<Option<(usize, usize, u64)>>,
     pub last_resolved: std::cell::Cell<Option<(usize, u64)>>,
     pub slot_pos: HashMap<u64, usize>,
@@ -148,6 +152,7 @@ impl<'a> Walker<'a> {
             first_suspect: Default::default(),
             unresolved: Default::default(),
             first_unresolved: Default::default(),
+            forward: Vec::new(),
             last_resolved: Default::default(),
             slot_pos: HashMap::new(),
             good_until: Default::default(),
@@ -338,6 +343,10 @@ impl<'a> Walker<'a> {
                 offset,
             } => {
                 let r = self.resolve_slot(ty, offset as u64);
+                if r.is_none() && offset as u64 >= self.s.offset(VIRTUAL) {
+                    self.forward.push((offset as u64, ty));
+                    return Ok(None);
+                }
                 if r.is_some() && self.first_unresolved.get().is_none() {
                     self.last_resolved.set(Some((self.s.pos(), offset as u64)));
                 }
@@ -353,13 +362,16 @@ impl<'a> Walker<'a> {
                         .filter(|(k, id)| id.ty == ty && k.abs_diff(v) <= 0x200)
                         .min_by_key(|(k, _)| k.abs_diff(v))
                         .map(|(k, _)| (*k, self.slot_pos.get(k).copied().unwrap_or(0)));
-                    #[cfg(test)]
                     if std::env::var_os("IW7_MISSES").is_some() {
+                        let ti = self.list.asset_index_of(Ptr::Ref { block: VIRTUAL, offset: v as u32 });
                         eprintln!(
-                            "MISS at {:#x} want {v:#x} {:?} near {:x?}",
+                            "MISS at {:#x} want {v:#x} {:?} near {:x?} table {:?} (table at {:#x}) walked {}",
                             self.s.pos(),
                             ty,
-                            near
+                            near,
+                            ti.map(|i| (i, self.list.assets[i].asset_type())),
+                            self.list.asset_table_virtual,
+                            self.cap.walked
                         );
                     }
                     if let Some((k, p)) = near
@@ -441,6 +453,10 @@ impl<'a> Walker<'a> {
         use AssetType as T;
         match ty {
             T::RawFile => misc::raw_file(self, h),
+            T::NetConstStrings => misc::net_const_strings(self, h),
+            T::LightDef => misc::light_def(self, h),
+            T::Tracer => misc::tracer(self, h),
+            T::ScriptFile => misc::script_file(self, h),
             T::StreamingInfo => misc::streaming_info(self, h),
             T::VertexShader => material::shader(self, ty, h, false),
             T::PixelShader | T::HullShader | T::DomainShader | T::ComputeShader => material::shader(self, ty, h, true),
@@ -453,6 +469,16 @@ impl<'a> Walker<'a> {
             T::PhysicsAsset => physics::physics_asset(self, h),
             T::PhysicsSfxEventAsset | T::PhysicsVfxEventAsset => physics::event_asset(self, ty, h),
             T::XAnimProceduralBones => physics::procedural_bones(self, h),
+            T::Weapon => weapon::weapon(self, h),
+            T::AnimPackage => weapon::anim_package(self, h),
+            T::Attachment => weapon::attachment(self, h),
+            T::Rumble => misc::rumble(self, h),
+            T::RumbleGraph => misc::name_only(self, ty, h),
+            T::Laser => misc::laser(self, h),
+            T::Reticle => misc::reticle(self, h),
+            T::Gesture => misc::gesture(self, h),
+            T::SfxPackage => weapon::sfx_package(self, h),
+            T::VfxPackage => weapon::vfx_package(self, h),
             _ => Err(ReadError::Invalid(ty.name(), h)),
         }
     }
@@ -511,6 +537,11 @@ impl<'a> Walker<'a> {
             self.cap.walked = i + 1;
         }
         Ok(())
+    }
+
+    /// Forward references that never named an asset by the walk's end.
+    pub fn unresolved_forward(&self) -> usize {
+        self.forward.iter().filter(|(v, ty)| self.resolve_slot(*ty, *v).is_none()).count()
     }
 
     pub fn slot_list(&self) -> Vec<(u64, AssetId)> {

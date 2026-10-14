@@ -96,3 +96,98 @@ pub(super) fn streaming_info(w: &mut Walker, h: usize) -> Result<AssetId> {
     w.s.pop();
     Ok(w.name_only(AssetType::StreamingInfo, name))
 }
+
+pub(super) fn net_const_strings(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::NetConstStrings as N;
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + N::name)?.unwrap_or_default();
+    let n = w.s.u32_at(h + N::entryCount)? as usize;
+    strings(w, h + N::stringList, n)?;
+    w.s.pop();
+    Ok(w.name_only(AssetType::NetConstStrings, name))
+}
+
+pub(super) fn light_def(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::GfxLightDef as G;
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + G::name)?.unwrap_or_default();
+    w.xstr(h + G::iesProfile)?;
+    w.s.pop();
+    Ok(w.name_only(AssetType::LightDef, name))
+}
+
+pub(super) fn tracer(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::TracerDef as T;
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + T::name)?.unwrap_or_default();
+    w.asset(AssetType::Material, h + T::material)?;
+    w.s.pop();
+    Ok(w.name_only(AssetType::Tracer, name))
+}
+
+/// A script: its name, then its source (compressed) and bytecode in the
+/// SCRIPT block.
+pub(super) fn script_file(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::ScriptFile as S;
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + S::name)?.unwrap_or_default();
+    w.s.push(crate::stream::SCRIPT);
+    let compressed = w.s.u32_at(h + S::compressedLen)? as usize;
+    w.blob(h + S::buffer, compressed, 0)?;
+    let bytecode = w.s.u32_at(h + S::bytecodeLen)? as usize;
+    w.blob(h + S::bytecode, bytecode, 0)?;
+    w.s.pop();
+    w.s.pop();
+    Ok(w.name_only(AssetType::ScriptFile, name))
+}
+
+pub(super) fn rumble(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::RumbleInfo as R;
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + R::name)?.unwrap_or_default();
+    w.asset(AssetType::RumbleGraph, h + R::highRumbleGraph)?;
+    w.asset(AssetType::RumbleGraph, h + R::lowRumbleGraph)?;
+    w.s.pop();
+    Ok(w.name_only(AssetType::Rumble, name))
+}
+
+/// Assets whose only pointer is their name (rumble graphs).
+pub(super) fn name_only(w: &mut Walker, ty: AssetType, h: usize) -> Result<AssetId> {
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h)?.unwrap_or_default();
+    w.s.pop();
+    Ok(w.name_only(ty, name))
+}
+
+pub(super) fn laser(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::LaserDef as D;
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + D::name)?.unwrap_or_default();
+    w.asset(AssetType::Material, h + D::laserMaterial)?;
+    w.asset(AssetType::Material, h + D::laserLightMaterial)?;
+    super::weapon::fx_combined(w, h + D::beamEffect)?;
+    super::weapon::fx_combined(w, h + D::laserEndEffect)?;
+    w.s.pop();
+    Ok(w.name_only(AssetType::Laser, name))
+}
+
+pub(super) fn reticle(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::ReticleDef as D;
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + D::name)?.unwrap_or_default();
+    w.xstr(h + D::widgetName)?;
+    w.s.pop();
+    Ok(w.name_only(AssetType::Reticle, name))
+}
+
+/// `GESTURE_ASSET_NUM`.
+const GESTURE_ANIMS: usize = 18;
+
+pub(super) fn gesture(w: &mut Walker, h: usize) -> Result<AssetId> {
+    use L::Gesture as G;
+    w.s.push(VIRTUAL);
+    let name = w.xstr(h + G::name)?.unwrap_or_default();
+    super::weapon::asset_array(w, AssetType::XAnimParts, h + G::anims, GESTURE_ANIMS)?;
+    w.s.pop();
+    Ok(w.name_only(AssetType::Gesture, name))
+}
