@@ -39,10 +39,10 @@ fn main() {
         }
         for a in &zone.assets {
             if let iw3::zone::Asset::RawFile(r) = a
-                && (r.name.contains("vision") || r.name.contains("createart"))
+                && (r.name.contains("vision") || r.name.contains("createart") || std::env::var("PROBE_RAW").is_ok_and(|v| v == "all"))
             {
                 println!("rawfile {} ({} bytes)", r.name, r.data.len());
-                if std::env::var("PROBE_RAW").is_ok() {
+                if std::env::var("PROBE_RAW").is_ok_and(|v| v != "all") {
                     println!("{}", String::from_utf8_lossy(&r.data));
                 }
             }
@@ -81,6 +81,37 @@ fn main() {
         println!("reflection probes: {}", world.reflection_probes.len());
         for p in world.reflection_probes.iter().take(2) {
             if let Some(img) = p.image.and_then(|i| zone.image(i)) {
+                // Face-major (each face's mips together) or mip-major? Face
+                // 0's top level box-filtered to 32x32 against the bytes
+                // after it (face-major: face 0's second level).
+                if let Some(d) = img.load_def.as_ref().filter(|d| d.data.len() >= 64 * 64 * 4 * 2) {
+                    let top = &d.data[..64 * 64 * 4];
+                    let next = &d.data[64 * 64 * 4..];
+                    let mut diff = [0f64; 2];
+                    for y in 0..32 {
+                        for x in 0..32 {
+                            for c in 0..4 {
+                                let at = |xx: usize, yy: usize| f64::from(top[(yy * 64 + xx) * 4 + c]);
+                                let avg = (at(2 * x, 2 * y) + at(2 * x + 1, 2 * y) + at(2 * x, 2 * y + 1) + at(2 * x + 1, 2 * y + 1)) / 4.0;
+                                diff[0] += (avg - f64::from(next[(y * 32 + x) * 4 + c])).abs();
+                                // Mip-major: face 1's top level follows; compare its corner too.
+                                diff[1] += (avg - f64::from(next[(y * 64 + x) * 4 + c])).abs();
+                            }
+                        }
+                    }
+                    let mut mean = [0f64; 4];
+                    for px in top.chunks_exact(4) {
+                        for c in 0..4 {
+                            mean[c] += f64::from(px[c]) / 4096.0;
+                        }
+                    }
+                    println!(
+                        "  probe layout: face-major diff {:.1}, mip-major diff {:.1} (mean per channel); face 0 mean bgra {:?}",
+                        diff[0] / 4096.0,
+                        diff[1] / 4096.0,
+                        mean.map(f64::round)
+                    );
+                }
                 println!(
                     "  probe {:?}: {} {:?} {}x{} {:?}",
                     p.origin,
