@@ -1138,6 +1138,47 @@ fn load_t7_guests(z: T7Zone, material_seed: MaterialCatalog) -> T7Guests {
     T7Guests { weapons, fpv, world_guns, xanims, material_seed, report }
 }
 
+/// bo2mp `iw4l check-guns`: each Black Ops III gun's fire sound and its
+/// animations' notetrack sounds against mp_common's sound bank (an alias
+/// is playable when it names a sound in the banks).
+pub(crate) fn t7_sound_check(weapons: &asset_game::WeaponRegistry) -> Vec<String> {
+    let Some(path) = asset_transport::games_root_from_env().ok().and_then(|r| asset_audio::bo3_mp_common(&r)) else {
+        return vec!["t7 sounds: Black Ops III's mp_common is not installed".into()];
+    };
+    let bank = match asset_audio::bo3_weapon_sounds(&path) {
+        Ok(b) => b,
+        Err(e) => return vec![format!("t7 sounds: {e}")],
+    };
+    let playable = |alias: &str| {
+        bank.sound_in(NS, alias)
+            .is_some_and(|s| s.aliases.iter().any(|a| a.loaded.is_bound() || a.streamed.is_some()))
+    };
+    let (mut fire_ok, mut guns, mut nt_ok, mut nt_all) = (0, 0, 0, 0);
+    let mut missing = Vec::new();
+    for i in 1..=weapons.len() as u32 {
+        if weapons.namespace_of(i) != Some(NS) {
+            continue;
+        }
+        let Some(sounds) = weapons.sounds_of(i) else { continue };
+        guns += 1;
+        let fire = sounds.fire_player.as_deref().or(sounds.fire.as_deref());
+        if fire.is_some_and(playable) {
+            fire_ok += 1;
+        } else {
+            missing.push(format!("{} fire `{}`", weapons.name_of(i), fire.unwrap_or("-")));
+        }
+        for (_, alias) in &sounds.notetrack_sound_map {
+            nt_all += 1;
+            nt_ok += usize::from(playable(alias));
+        }
+    }
+    vec![format!(
+        "t7 sounds: {} alias lists; fire sound playable for {fire_ok} of {guns} weapons; notetrack sounds {nt_ok} of {nt_all}{}",
+        bank.sounds.len(),
+        if missing.is_empty() { String::new() } else { format!("; missing: {}", missing.iter().take(8).cloned().collect::<Vec<_>>().join(", ")) }
+    )]
+}
+
 /// bo2mp `iw4l check-guns`: every Black Ops III gun animation decoded by
 /// the engine's decoder, and whether its quaternions came out unit length.
 pub(crate) fn t7_anim_check(xanims: &XAnimBuild) -> String {

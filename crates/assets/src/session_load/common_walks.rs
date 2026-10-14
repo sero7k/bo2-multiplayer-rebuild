@@ -1207,6 +1207,7 @@ fn load_guest_check(game: &str, ns: asset_core::AssetNamespace, progress: &LoadP
     // reads them.
     if game == "t7" {
         let mut guests = crate::lane::walk_t7_guest_guns(true, MaterialCatalog::default(), progress);
+        guests.report.extend(crate::lane::t7_sound_check(&guests.weapons));
         guests.report.push(crate::lane::t7_anim_check(&guests.xanims));
         let fpv_names = (0..guests.fpv.len()).filter_map(|i| guests.fpv.name_at(i).map(str::to_owned)).collect();
         return GuestCheckLoad { weapons: guests.weapons, fpv_names, xanims: guests.xanims, report: guests.report };

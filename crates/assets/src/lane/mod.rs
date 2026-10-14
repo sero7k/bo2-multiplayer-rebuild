@@ -33,7 +33,7 @@ mod legacy_guns;
 // bo2mp: Black Ops III's guns as guest guns.
 mod t7;
 mod t7_fields;
-pub(crate) use t7::{T7Guests, build_t7_guest_guns, prefetch_t7_guest_guns, t7_anim_check, walk_t7_guest_guns};
+pub(crate) use t7::{T7Guests, build_t7_guest_guns, prefetch_t7_guest_guns, t7_anim_check, t7_sound_check, walk_t7_guest_guns};
 pub(crate) use legacy_guns::{
     Legacy, LegacyGuests, build_legacy_guest_guns, legacy_common_mp, load_legacy_guests, prefetch_legacy_guest_guns,
 };
