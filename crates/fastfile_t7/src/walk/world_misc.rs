@@ -21,10 +21,12 @@ fn count(s: &Stream, at: usize) -> Result<usize> {
 /// 0x48 A* (16: { u32; u32 n; frame28* })  frames: origin + quaternion
 /// 0x50 B* (32: { u32; u32; u32 n; u32; frame48*; f32; u32 })
 /// 0x60 C* (8 each)
+/// 0x68 F* (16 each, count at 0x70: `zm_castle`'s and `zm_island`'s outro
+///      cameras, two each; null on the MP cameras)
 /// 0x78 D* (16 each, count at 0x80), 0x88 E* (16 each, count at 0x90)
 /// ```
 pub fn xcam(s: &mut Stream, h: usize) -> Result<Option<String>> {
-    s.no_loads(h, crate::AssetType::XCam.header_size(), &[0, 8, 0x48, 0x50, 0x60, 0x78, 0x88])?;
+    s.no_loads(h, crate::AssetType::XCam.header_size(), &[0, 8, 0x48, 0x50, 0x60, 0x68, 0x78, 0x88])?;
     let name = s.string(h)?;
     s.string(h + 8)?;
     let n = count(s, h + 0x18)?;
@@ -50,6 +52,10 @@ pub fn xcam(s: &mut Stream, h: usize) -> Result<Option<String>> {
     }
     let n = count(s, h + 0x24)?;
     s.records(h + 0x60, n, 8, 3)?;
+    // (`zm_castle`'s `c_cas_01_outro_3rd_sh010_cam`: two records of u32 ids
+    // and counts between its frames and the list at 0x78.)
+    let n = count(s, h + 0x70)?;
+    s.records(h + 0x68, n, 16, 3)?;
     // Two lists of 16-byte records (u32 ids and counts; `zm_factory`'s
     // intro camera: five at 0x78, count at 0x80, three at 0x88, count at
     // 0x90).

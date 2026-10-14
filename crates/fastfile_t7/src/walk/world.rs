@@ -168,9 +168,10 @@ const UMBRA_TOME: usize = 0x50;
 /// u32 probeCount; u32* probeGuids; u32 probeExploderCount;
 /// ComProbeExploder* (16: { hash; u32 n; triggers (28 each) });
 /// u32 umbraTomeCount; ComUmbraTome* (0x50: x64-zt's 0x40 and 16 zero
-/// bytes) }`, loaded in that order.
+/// bytes); u32 count; a second ComUmbraTome* (0x70, `zm_genesis`) }`,
+/// loaded in that order.
 pub fn com_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
-    s.no_loads(h, AssetType::ComWorld.header_size(), &[0, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60])?;
+    s.no_loads(h, AssetType::ComWorld.header_size(), &[0, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70])?;
     let name = s.string(h)?;
     let n = count(s, h + 0xc)?;
     let lights = span(s, h + 0x10, n, PRIMARY_LIGHT, 3)?;
@@ -193,7 +194,21 @@ pub fn com_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
         }
     }
     let n = count(s, h + 0x58)?;
-    if let Some(t) = s.records(h + 0x60, n, UMBRA_TOME, 7)? {
+    umbra_tomes(s, h + 0x60, n, 4)?;
+    // A second list of tomes (count at 0x68): `zm_genesis`'s eleven
+    // `tome_trigger_*`, each 12 hulls and one 24-byte record at 0x20 (its
+    // list at 0x28 null); null on the other maps read.
+    let n = count(s, h + 0x68)?;
+    umbra_tomes(s, h + 0x70, n, 24)?;
+    s.capture.world.com_worlds.push(ComWorldRec { name: name.clone().unwrap_or_default(), lights });
+    Ok(name)
+}
+
+/// `n` `ComUmbraTome`s at `field`: each its name, its hulls (24 each), two
+/// lists (`first` bytes and 4 each, the count at 0x18; the second may be
+/// null) and its named groups (16 each, a string first).
+fn umbra_tomes(s: &mut Stream, field: usize, n: usize, first: usize) -> Result<()> {
+    if let Some(t) = s.records(field, n, UMBRA_TOME, 7)? {
         for i in 0..n {
             let u = t + UMBRA_TOME * i;
             s.no_loads(u, UMBRA_TOME, &[0, 0x10, 0x20, 0x28, 0x38])?;
@@ -201,7 +216,7 @@ pub fn com_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
             let v = count(s, u + 8)?;
             s.records(u + 0x10, v, 24, 3)?;
             let k = count(s, u + 0x18)?;
-            s.records(u + 0x20, k, 4, 3)?;
+            s.records(u + 0x20, k, first, 3)?;
             s.records(u + 0x28, k, 4, 3)?;
             let g = count(s, u + 0x30)?;
             if let Some(gt) = s.records(u + 0x38, g, 16, 7)? {
@@ -211,8 +226,7 @@ pub fn com_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
             }
         }
     }
-    s.capture.world.com_worlds.push(ComWorldRec { name: name.clone().unwrap_or_default(), lights });
-    Ok(name)
+    Ok(())
 }
 
 /// `pathnode_t` (224 on retail: x64-zt's constant part, 120, then the
