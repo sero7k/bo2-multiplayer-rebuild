@@ -259,6 +259,9 @@ pub(crate) struct Shell {
     pub vote_maps: Vec<String>,
     pub vote: Option<usize>,
     pub leaderboard: bool,
+    /// A yes / no question up, and YES (0) or NO (1) in focus.
+    pub ask: Option<Ask>,
+    pub ask_focus: usize,
 }
 
 impl Default for Shell {
@@ -293,6 +296,8 @@ impl Default for Shell {
             vote_maps: Vec::new(),
             vote: None,
             leaderboard: false,
+            ask: None,
+            ask_focus: 1,
         }
     }
 }
@@ -400,7 +405,7 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
                 r.push(row);
             }
             if c.player.can_prestige {
-                r.push(Row::new("ENTER PRESTIGE", "Back to level 1 with the next prestige icon. Press twice to confirm.", Act::Prestige));
+                r.push(Row::new("ENTER PRESTIGE", "Back to level 1 with the next prestige icon.", Act::Prestige));
             } else {
                 r.push(Row::new("PRESTIGE", "Reach level 155 to enter the next prestige.", Act::Prestige));
             }
@@ -431,7 +436,31 @@ pub(crate) fn look_kind(screen: Screen) -> cards::Kind {
     if screen == Screen::EmblemPick { cards::Kind::Emblem } else { cards::Kind::Card }
 }
 
+/// A yes / no question over a screen (NO first in focus).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Ask {
+    Prestige,
+}
+
+impl Ask {
+    pub(crate) fn text(self) -> (&'static str, &'static str) {
+        match self {
+            Ask::Prestige => ("ENTER PRESTIGE?", "You go back to level 1 with the next prestige icon. Your unlocks start over."),
+        }
+    }
+}
+
 impl Shell {
+    /// YES to a question.
+    fn answer(&mut self, ask: Ask, now: f64) {
+        match ask {
+            Ask::Prestige => {
+                bridge::request(Request::Prestige);
+                self.note("Prestige entered.", now);
+            }
+        }
+    }
+
     fn go(&mut self, screen: Screen) {
         self.screen = screen;
         self.focus = 0;
@@ -648,11 +677,9 @@ impl Shell {
             Act::Prestige => {
                 if !c.player.can_prestige {
                     self.note("Reach level 155 to enter the next prestige.", now);
-                } else if self.note.as_ref().is_some_and(|(t, _)| t.starts_with("Press again")) {
-                    bridge::request(Request::Prestige);
-                    self.note("Prestige entered.", now);
                 } else {
-                    self.note("Press again to enter the next prestige.", now);
+                    self.ask = Some(Ask::Prestige);
+                    self.ask_focus = 1;
                 }
             }
             Act::Quit => {
@@ -765,6 +792,8 @@ pub(crate) enum Hit {
     /// A picker's page arrow: -1 or +1.
     PageStep(i32),
     Back,
+    /// A yes / no question's YES (0) or NO (1).
+    Ask(usize),
 }
 
 #[derive(Default)]
@@ -1013,6 +1042,37 @@ fn shell_input(
     }
     let confirm = keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space) || keys.just_pressed(KeyCode::NumpadEnter) || pad(GamepadButton::South);
     let back = keys.just_pressed(KeyCode::Escape) || keys.just_pressed(KeyCode::Backspace) || pad(GamepadButton::East);
+    // A yes / no question is up: it has the keys until it is answered.
+    if let Some(kind) = shell.ask {
+        if dir.1 != 0 {
+            shell.ask_focus ^= 1;
+        }
+        let mut pick = confirm;
+        for (hit, i) in &hits {
+            if let Hit::Ask(k) = *hit
+                && *i != Interaction::None
+            {
+                if shell.ask_focus != k {
+                    shell.ask_focus = k;
+                }
+                if mouse.just_pressed(MouseButton::Left) {
+                    pick = true;
+                }
+            }
+        }
+        if back || mouse.just_pressed(MouseButton::Right) {
+            shell.ask = None;
+            sounds.write(frame::UiPlaySound { alias: "cac_cmn_backout".to_owned() });
+        } else if pick {
+            let yes = shell.ask_focus == 0;
+            shell.ask = None;
+            sounds.write(frame::UiPlaySound { alias: "uin_navigation_select_main".to_owned() });
+            if yes {
+                shell.answer(kind, now);
+            }
+        }
+        return;
+    }
     let prev_tab = keys.just_pressed(KeyCode::KeyQ) || pad(GamepadButton::LeftTrigger);
     let next_tab = keys.just_pressed(KeyCode::KeyE) || pad(GamepadButton::RightTrigger);
     // Tabs / pages.

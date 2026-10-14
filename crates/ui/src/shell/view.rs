@@ -1160,6 +1160,9 @@ pub(crate) fn shell_view(
             if shell.screen != Screen::Main {
                 footer(c, &mut cx, &shell, &cat, &online);
             }
+            if let Some(ask) = shell.ask {
+                question(c, &mut cx, ask, shell.ask_focus);
+            }
             if let Some((note, _)) = &shell.note {
                 c.spawn((
                     Node { padding: UiRect::axes(cx.px(22.0), cx.px(10.0)), border: UiRect::left(cx.px(3.0)), ..abs(Some(72.0), None, None, Some(84.0), &cx) },
@@ -1169,4 +1172,58 @@ pub(crate) fn shell_view(
                 .with_child((Text::new(note.clone()), cx.bold(21.0), TextColor(WHITE)));
             }
         });
+}
+
+/// A yes / no question over the screen: the screen dimmed, a box in the
+/// middle with the question, what it means, and YES / NO.
+pub(crate) fn question(c: &mut Kids, cx: &mut Ctx, ask: super::Ask, focus: usize) {
+    let (title, body) = ask.text();
+    let [r, g, b] = cx.pal.shade;
+    c.spawn((
+        Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+        BackgroundColor(Color::srgba(r, g, b, 0.72)),
+        GlobalZIndex(40),
+    ));
+    let (w, h) = (720.0, 330.0);
+    c.spawn((
+        Node {
+            width: cx.px(w),
+            min_height: cx.px(h),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(cx.px(32.0)),
+            row_gap: cx.px(10.0),
+            border: UiRect::all(cx.px(1.0)).with_top(cx.px(4.0)),
+            ..abs(Some((cx.w - w) * 0.5), Some((cx.h - h) * 0.5), None, None, cx)
+        },
+        BackgroundColor(cx.pal.panel.with_alpha(0.97)),
+        BorderColor { top: cx.pal.accent, ..BorderColor::all(cx.pal.line) },
+        GlobalZIndex(41),
+    ))
+    .with_children(|p| {
+        p.spawn((Text::new(title), cx.bold(56.0), TextColor(WHITE)));
+        p.spawn((Text::new(body), cx.regular(23.0), TextColor(TEXT)));
+        p.spawn(Node { flex_grow: 1.0, min_height: cx.px(24.0), ..default() });
+        for (i, label) in ["YES", "NO"].into_iter().enumerate() {
+            let on = i == focus;
+            let mut e = p.spawn((
+                Hit::Ask(i),
+                Button,
+                Node {
+                    width: cx.px(300.0),
+                    height: cx.px(52.0),
+                    padding: UiRect::horizontal(cx.px(20.0)),
+                    align_items: AlignItems::Center,
+                    border: UiRect::left(cx.px(4.0)),
+                    ..default()
+                },
+                BorderColor::all(if on { cx.pal.accent } else { Color::NONE }),
+            ));
+            if on {
+                e.insert(fade_right(cx.pal.accent_a(0.30), cx.pal.accent_a(0.0)));
+            } else {
+                e.insert(BackgroundColor(cx.pal.panel_soft));
+            }
+            e.with_child((Text::new(label), cx.bold(28.0), TextColor(if on { WHITE } else { TEXT.with_alpha(0.72) })));
+        }
+    });
 }

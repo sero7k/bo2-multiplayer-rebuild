@@ -638,6 +638,11 @@ pub(crate) fn pictures(m: &ZmMap, start: usize) -> Vec<String> {
         _ => "zsurvival",
     };
     let mut out = Vec::new();
+    // (A Black Ops map: its own loading picture from Black Ops' files,
+    // `loadscreen_zombie_sumpf`.)
+    if m.bo1 {
+        out.push(format!("zmbo1:{}", m.map.trim_start_matches("zm_")));
+    }
     if !s.loc.is_empty() {
         out.push(format!("loadscreen_{}_{}_{}", m.map, s.mode, s.loc));
         out.push(format!("menu_{}_{}_{}", m.map, group, s.loc));
@@ -651,7 +656,7 @@ pub(crate) fn pictures(m: &ZmMap, start: usize) -> Vec<String> {
 
 /// A picture name the Zombies screens ask for.
 pub(crate) fn is_zm_picture(name: &str) -> bool {
-    name.starts_with("zmshot:") || name.starts_with("zmlike:") || name.starts_with("loadscreen_zm_") || name.starts_with("menu_zm_")
+    name.starts_with("zmshot:") || name.starts_with("zmlike:") || name.starts_with("zmbo1:") || name.starts_with("loadscreen_zm_") || name.starts_with("menu_zm_")
 }
 
 /// Black Ops II's Zombies pictures are still being read (the first time
@@ -667,6 +672,10 @@ type Rgba = (u32, u32, Vec<u8>);
 /// A picture for the Zombies screens (read off the main thread; `None`
 /// until it is in, or when there is none).
 pub(crate) fn picture(name: &str) -> Option<Arc<Image>> {
+    if let Some(stem) = name.strip_prefix("zmbo1:") {
+        let stem = stem.to_owned();
+        return crate::foreign_maps::picture_async(name, true, move || bo1_loadscreen(&stem).map(crate::foreign_maps::upscale_map_shot));
+    }
     if let Some(stem) = name.strip_prefix("zmshot:") {
         let path = match &state().install {
             Some(Ok(Install { shots: Some(dir), .. })) => dir.join(format!("{stem}.jpg")),
@@ -683,6 +692,28 @@ pub(crate) fn picture(name: &str) -> Option<Arc<Image>> {
         };
         found.map(crate::foreign_maps::upscale_map_shot)
     })
+}
+
+/// A Black Ops Zombies map's loading picture (`loadscreen_zombie_<stem>`
+/// in its IWDs), cached once read.
+fn bo1_loadscreen(stem: &str) -> Option<Rgba> {
+    let cache = Path::new("iw4l-artifacts/cache/map-pictures").join(format!("t5_zombie_{stem}.png"));
+    if let Ok(img) = image::open(&cache) {
+        let img = img.to_rgba8();
+        return Some((img.width(), img.height(), img.into_raw()));
+    }
+    let found = crate::foreign_maps::read_game_image("t5", &[format!("loadscreen_zombie_{stem}")]);
+    match &found {
+        Some((w, h, data)) => {
+            diag::info!(Ui, "bo2mp zombies: Black Ops' loading picture for {stem} ({w}x{h})");
+            if let Some(img) = image::RgbaImage::from_raw(*w, *h, data.clone()) {
+                let _ = std::fs::create_dir_all(cache.parent()?);
+                let _ = img.save(&cache);
+            }
+        }
+        None => diag::warn!(Ui, "bo2mp zombies: no loadscreen_zombie_{stem} in Black Ops' files"),
+    }
+    found
 }
 
 fn read_jpg(path: &Path) -> Option<Rgba> {
@@ -870,6 +901,6 @@ mod tests {
         assert_eq!(p[1], "menu_zm_prison_zencounter_cellblock");
         assert_eq!(p.last().unwrap(), "zmshot:zm_prison");
         assert!(p.iter().all(|n| is_zm_picture(n)));
-        assert_eq!(pictures(map("zm_moon"), 0), vec!["zmlike:loadscreen_zm_moon", "zmshot:zm_bo1_moon"]);
+        assert_eq!(pictures(map("zm_moon"), 0), vec!["zmbo1:moon", "zmlike:loadscreen_zm_moon", "zmshot:zm_bo1_moon"]);
     }
 }

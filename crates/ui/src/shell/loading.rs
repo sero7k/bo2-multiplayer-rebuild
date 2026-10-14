@@ -40,12 +40,24 @@ const TIPS: &[&str] = &[
 ];
 
 const ZM_TIPS: &[&str] = &[
-    "Every zombie you kill brings points: spend them on doors, wall guns and the Mystery Box.",
-    "Knifing a zombie is worth more points than shooting it.",
-    "Perk machines need the power on first.",
-    "A Max Ammo refills every player's weapons, grenades included.",
-    "Revive a downed teammate before the timer runs out, or they wait for the next round.",
-    "The Pack-a-Punch upgrades a gun once you find it.",
+    "Quick Revive lets you revive yourself in solo games (three times) and helps you revive teammates faster in co-op.",
+    "Juggernog lets you take more hits before you go down.",
+    "Speed Cola makes your reloads faster.",
+    "Double Tap makes your guns fire faster.",
+    "A knife kill is worth 130 points, more than any shot.",
+    "Headshot kills are worth more points than body kills.",
+    "Rebuilding a barrier earns points, up to a limit each round.",
+    "The Mystery Box costs 950 points a spin. When the teddy bear shows up, it moves somewhere else on the map.",
+    "Insta-Kill: for 30 seconds, any hit kills a zombie.",
+    "Double Points: every point you earn is doubled for 30 seconds.",
+    "Carpenter rebuilds every barrier on the map and gives every player 200 points.",
+    "Nuke kills every zombie on the map and gives every player 400 points.",
+    "Max Ammo refills every player's ammunition.",
+    "Perk machines need the power turned on first.",
+    "The Pack-a-Punch upgrades your gun for 5000 points: more damage and more ammo.",
+    "Revive a downed teammate before the bar runs out, or they bleed out and wait for the next round.",
+    "Train the zombies into a group and lead them in a loop to buy time.",
+    "Hold a corner with a teammate covering the other way: zombies come from every window.",
 ];
 
 #[derive(Default)]

@@ -17,7 +17,8 @@ use super::theme::*;
 use super::view::{Ctx, header, menu_rows};
 use super::{Act, Hit, Row, bridge, window_scale};
 
-/// What is up: 0 nothing, 1 the pause menu, 2 Choose Class.
+/// What is up: 0 nothing, 1 the pause menu, 2 Choose Class, 3 Options,
+/// 4 a yes / no question over the pause menu (`ASK`).
 static UP: AtomicU8 = AtomicU8::new(0);
 /// The server asked for Choose Class / for its menus closed.
 static SERVER_OPEN: AtomicBool = AtomicBool::new(false);
@@ -60,25 +61,79 @@ fn respond(menu: &str, response: &str) {
 #[derive(Default)]
 pub(crate) struct InGame {
     focus: usize,
-    /// END GAME was pressed once (again to confirm).
-    confirm: bool,
     held: Option<i32>,
     next_at: f64,
 }
 
-fn rows(up: u8, st: &InGame) -> Vec<Row> {
+/// The question the yes / no box asks: END GAME or RESTART LEVEL.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ask {
+    EndGame,
+    Restart,
+    Leave,
+}
+
+static ASK: AtomicU8 = AtomicU8::new(0);
+
+fn ask() -> Ask {
+    match ASK.load(Ordering::Relaxed) {
+        1 => Ask::Restart,
+        2 => Ask::Leave,
+        _ => Ask::EndGame,
+    }
+}
+
+/// He hosts the game (a listen server): only the host ends it or restarts
+/// it; the others can only leave.
+static HOST: AtomicBool = AtomicBool::new(true);
+
+fn host() -> bool {
+    HOST.load(Ordering::Relaxed)
+}
+
+/// A Zombies game is being played (its pause menu is red, with RESTART
+/// LEVEL in place of CHOOSE CLASS).
+static ZM: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn zombies() -> bool {
+    ZM.load(Ordering::Relaxed)
+}
+
+/// The pause menu's rows' actions.
+const RESUME: usize = 0;
+const CLASS: usize = 1;
+const END: usize = 2;
+const OPTIONS: usize = 3;
+const RESTART: usize = 4;
+const YES: usize = 5;
+const NO: usize = 6;
+const LEAVE: usize = 7;
+
+fn rows(up: u8) -> Vec<Row> {
     let row = |label: &str, sub: &str, act: Act| Row { label: label.to_owned(), sub: sub.to_owned(), value: None, act };
     match up {
-        1 => vec![
-            row("RESUME", "Back to the match.", Act::Choose(0)),
-            row("CHOOSE CLASS", "Your next life spawns with it.", Act::Choose(1)),
-            row("OPTIONS", "Graphics, sound and controls.", Act::Choose(3)),
-            row(
-                if st.confirm { "END GAME — PRESS AGAIN" } else { "END GAME" },
-                "Ends the match for everyone and goes back to the lobby.",
-                Act::Choose(2),
-            ),
+        1 if zombies() && host() => vec![
+            row("RESUME GAME", "Back to the game.", Act::Choose(RESUME)),
+            row("RESTART LEVEL", "The map again from the first round.", Act::Choose(RESTART)),
+            row("OPTIONS", "Graphics, sound and controls.", Act::Choose(OPTIONS)),
+            row("END GAME", "Ends the game for everyone.", Act::Choose(END)),
         ],
+        1 if zombies() => vec![
+            row("RESUME GAME", "Back to the game.", Act::Choose(RESUME)),
+            row("OPTIONS", "Graphics, sound and controls.", Act::Choose(OPTIONS)),
+            row("LEAVE GAME", "You leave; the game goes on for the others.", Act::Choose(LEAVE)),
+        ],
+        1 => vec![
+            row("RESUME", "Back to the match.", Act::Choose(RESUME)),
+            row("CHOOSE CLASS", "Your next life spawns with it.", Act::Choose(CLASS)),
+            row("OPTIONS", "Graphics, sound and controls.", Act::Choose(OPTIONS)),
+            if host() {
+                row("END GAME", "Ends the match for everyone and goes back to the lobby.", Act::Choose(END))
+            } else {
+                row("LEAVE GAME", "You leave; the match goes on for the others.", Act::Choose(LEAVE))
+            },
+        ],
+        4 => vec![row("YES", "", Act::Choose(YES)), row("NO", "", Act::Choose(NO))],
         2 => classes::book()
             .map(|b| {
                 b.classes
@@ -95,9 +150,10 @@ fn rows(up: u8, st: &InGame) -> Vec<Row> {
 /// The Options tab he is on in a match.
 static OPT_TAB: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-/// In a match: no front end, no load, a match set up.
+/// In a match: no front end, no load, a match set up (or a Zombies map
+/// played).
 fn in_match(front: bool, loading: bool, setup: bool) -> bool {
-    !front && !loading && setup
+    !front && !loading && (setup || zombies())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -115,7 +171,13 @@ pub(crate) fn ingame_input(
     time: Res<Time>,
     mut st: Local<InGame>,
     mut sounds: MessageWriter<frame::UiPlaySound>,
+    (identity, mut exec, role): (Option<Res<frame::LaunchIdentity>>, MessageWriter<frame::UiExecCommand>, Option<Res<frame::RuntimeRole>>),
 ) {
+    HOST.store(role.as_deref().is_none_or(|r| r.runs_authority()), Ordering::Relaxed);
+    ZM.store(
+        setup.is_none() && identity.as_deref().is_some_and(|i| crate::lui_hud::is_zombies_zone(&i.zone)),
+        Ordering::Relaxed,
+    );
     if !bridge::enabled() || !in_match(front.is_some(), loading.is_some(), setup.is_some()) {
         UP.store(0, Ordering::Relaxed);
         SERVER_OPEN.store(false, Ordering::Relaxed);
@@ -143,7 +205,6 @@ pub(crate) fn ingame_input(
         if esc {
             up = 1;
             st.focus = 0;
-            st.confirm = false;
             sounds.write(frame::UiPlaySound { alias: "uin_main_pause".to_owned() });
         }
         publish(&st);
@@ -153,7 +214,7 @@ pub(crate) fn ingame_input(
     // The menu sounds: a move (focus, tab, a setting changed), a choice, a
     // step back; the last one this frame is heard.
     let mut sound: Option<&'static str> = None;
-    let rows = rows(up, &st);
+    let rows = rows(up);
     let n = rows.len().max(1);
     st.focus = st.focus.min(n - 1);
     let stick = pads.iter().find_map(|p| {
@@ -183,7 +244,6 @@ pub(crate) fn ingame_input(
     if dir != 0 {
         let was = st.focus;
         st.focus = ((st.focus as i32 + dir).rem_euclid(n as i32)) as usize;
-        st.confirm = false;
         if st.focus != was {
             sound = Some("uin_navigation_click");
         }
@@ -243,7 +303,6 @@ pub(crate) fn ingame_input(
         if *i != Interaction::None {
             if st.focus != hit.0 {
                 st.focus = hit.0;
-                st.confirm = false;
                 sound = Some("uin_navigation_click");
             }
             if mouse.just_pressed(MouseButton::Left) {
@@ -267,22 +326,50 @@ pub(crate) fn ingame_input(
         sound = Some("uin_navigation_select_main");
         match up {
             1 => match k {
-                0 => up = 0,
-                1 => {
+                RESUME => up = 0,
+                CLASS => {
                     up = 2;
                     st.focus = 0;
                 }
-                3 => {
+                OPTIONS => {
                     up = 3;
                     st.focus = 0;
                     OPT_TAB.store(0, Ordering::Relaxed);
                 }
-                _ if st.confirm => {
-                    respond("popup_leavegame", "endround");
-                    up = 0;
+                // (A question first, NO in focus.)
+                RESTART | END | LEAVE => {
+                    ASK.store(
+                        match k {
+                            RESTART => 1,
+                            LEAVE => 2,
+                            _ => 0,
+                        },
+                        Ordering::Relaxed,
+                    );
+                    up = 4;
+                    st.focus = 1;
                 }
-                _ => st.confirm = true,
+                _ => {}
             },
+            4 => {
+                let asked = ask();
+                up = 1;
+                st.focus = asked_row(asked);
+                if k == YES {
+                    up = 0;
+                    match asked {
+                        Ask::EndGame => respond("popup_leavegame", "endround"),
+                        Ask::Restart => {
+                            diag::info!(Ui, "bo2mp shell: restart level");
+                            exec.write(frame::UiExecCommand { text: "map_restart".to_owned() });
+                        }
+                        Ask::Leave => {
+                            diag::info!(Ui, "bo2mp shell: leaving the game");
+                            exec.write(frame::UiExecCommand { text: "disconnect".to_owned() });
+                        }
+                    }
+                }
+            }
             _ => {
                 respond("changeclass", &format!("custom{k}"));
                 up = 0;
@@ -291,8 +378,12 @@ pub(crate) fn ingame_input(
     } else if back {
         let was = up;
         up = if up == 1 { 0 } else { 1 };
-        st.focus = if was == 3 { 2 } else if up == 1 { 1 } else { 0 };
-        st.confirm = false;
+        st.focus = match was {
+            3 => 2,
+            4 => asked_row(ask()),
+            _ if up == 1 && !zombies() => 1,
+            _ => 0,
+        };
         sound = Some("cac_cmn_backout");
     }
     if let Some(alias) = sound {
@@ -330,12 +421,14 @@ pub(crate) fn ingame_view(
     };
     // (The row under the mouse is the one in focus: input set it.)
     let focus = hits.iter().find(|(_, i)| **i != Interaction::None).map(|(h, _)| h.0);
-    let st_rows = rows(up, &InGame::default());
+    let st_rows = rows(up);
+    let zm = zombies();
     let book = classes::book();
     let (area, s) = window_scale(&windows);
     let pad = crate::pad_glyphs::pad_active();
     let key = format!(
-        "{up}|{focus:?}|{}|{area:?}|{pad}|{}|{}|{}|{}",
+        "{up}|{zm}|{}|{focus:?}|{}|{area:?}|{pad}|{}|{}|{}|{}",
+        ASK.load(Ordering::Relaxed),
         FOCUS.load(Ordering::Relaxed),
         OPT_TAB.load(Ordering::Relaxed),
         super::options::snapshot().revision,
@@ -350,21 +443,23 @@ pub(crate) fn ingame_view(
         commands.entity(e).despawn();
     }
     let focus = FOCUS.load(Ordering::Relaxed) as usize;
-    let mut cx = Ctx { s, w: area.x / s, h: area.y / s, fonts: &fonts, pics: &mut pics, icons: icons.as_deref(), images: &mut images, pad, pal: super::theme::Palette::MULTIPLAYER };
+    let mut cx = Ctx { s, w: area.x / s, h: area.y / s, fonts: &fonts, pics: &mut pics, icons: icons.as_deref(), images: &mut images, pad, pal: if zm { Palette::ZOMBIES } else { Palette::MULTIPLAYER } };
+    let [r, g, b] = cx.pal.shade;
     commands
         .spawn((
             GameRoot,
             GlobalZIndex(15_000),
             Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
             BackgroundGradient::from(LinearGradient::to_right(vec![
-                ColorStop::new(Color::srgba(0.008, 0.016, 0.035, 0.94), Val::Percent(0.0)),
-                ColorStop::new(Color::srgba(0.008, 0.016, 0.035, 0.72), Val::Percent(45.0)),
-                ColorStop::new(Color::srgba(0.008, 0.016, 0.035, 0.45), Val::Percent(100.0)),
+                ColorStop::new(Color::srgba(r, g, b, 0.94), Val::Percent(0.0)),
+                ColorStop::new(Color::srgba(r, g, b, 0.72), Val::Percent(45.0)),
+                ColorStop::new(Color::srgba(r, g, b, if up == 4 { 0.80 } else { 0.45 }), Val::Percent(100.0)),
             ])),
         ))
         .with_children(|c| {
             header(c, &cx, &[match up {
-                1 => "PAUSED",
+                1 | 4 if zm => "ZOMBIES",
+                1 | 4 => "PAUSED",
                 3 => "OPTIONS",
                 _ => "CHOOSE CLASS",
             }]);
@@ -381,10 +476,19 @@ pub(crate) fn ingame_view(
                 ..default()
             })
             .with_children(|col| {
-                let mut rows = st_rows.clone();
-                if up == 1 && CONFIRM.load(Ordering::Relaxed) {
-                    rows[3].label = "END GAME — PRESS AGAIN".to_owned();
+                // (Under the question: the pause menu, dimmed, not clickable.)
+                if up == 4 {
+                    let asked = asked_row(ask());
+                    for (i, r) in rows(1).iter().enumerate() {
+                        col.spawn((
+                            Node { width: cx.px(520.0), height: cx.px(56.0), padding: UiRect::left(cx.px(24.0)), align_items: AlignItems::Center, border: UiRect::left(cx.px(4.0)), ..default() },
+                            BorderColor::all(if i == asked { cx.pal.accent_a(0.5) } else { Color::NONE }),
+                        ))
+                        .with_child((Text::new(r.label.clone()), cx.bold(30.0), TextColor(if i == asked { TEXT } else { FAINT })));
+                    }
+                    return;
                 }
+                let mut rows = st_rows.clone();
                 if up == 3 {
                     for r in &mut rows {
                         r.sub.clear();
@@ -393,6 +497,9 @@ pub(crate) fn ingame_view(
                 // (Rows are hit by `GameHit`, not the front end's `Hit`.)
                 menu_rows(col, &cx, &rows, focus, if up == 3 { 760.0 } else { 520.0 }, false);
             });
+            if up == 4 {
+                question(c, &mut cx, &st_rows, focus);
+            }
             if up == 2
                 && let Some(b) = book.as_ref()
                 && let Some(class) = b.classes.get(focus)
@@ -423,10 +530,53 @@ pub(crate) fn ingame_view(
         });
 }
 
-/// The row in focus and END GAME's confirm, as input left them (for the
-/// view).
+/// The pause menu's row a question was asked from.
+fn asked_row(a: Ask) -> usize {
+    rows(1).iter().position(|r| r.act == Act::Choose(match a {
+        Ask::Restart => RESTART,
+        Ask::Leave => LEAVE,
+        Ask::EndGame => END,
+    })).unwrap_or(0)
+}
+
+/// The yes / no box over the pause menu: the question, what it means, and
+/// YES / NO (NO first in focus), in the screen's colours.
+fn question(c: &mut super::view::Kids, cx: &mut Ctx, rows: &[Row], focus: usize) {
+    let (title, body) = match ask() {
+        Ask::Restart => ("RESTART LEVEL?", "The map starts over from the first round. Everyone's progress in this game is lost."),
+        Ask::EndGame if zombies() => ("END GAME?", "The game ends for everyone in it."),
+        Ask::EndGame => ("END GAME?", "The match ends for everyone and goes back to the lobby."),
+        Ask::Leave => ("LEAVE GAME?", "You leave the game and go back to the menu. It goes on for the others."),
+    };
+    let (w, h) = (720.0, 330.0);
+    c.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: cx.px((cx.w - w) * 0.5),
+            top: cx.px((cx.h - h) * 0.5),
+            width: cx.px(w),
+            min_height: cx.px(h),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(cx.px(32.0)),
+            row_gap: cx.px(10.0),
+            border: UiRect::all(cx.px(1.0)).with_top(cx.px(4.0)),
+            ..default()
+        },
+        BackgroundColor(cx.pal.panel.with_alpha(0.97)),
+        BorderColor { top: cx.pal.accent, ..BorderColor::all(cx.pal.line) },
+        GlobalZIndex(15_100),
+    ))
+    .with_children(|p| {
+        p.spawn((Text::new(title), cx.bold(56.0), TextColor(WHITE)));
+        p.spawn((Text::new(body), cx.regular(23.0), TextColor(TEXT)));
+        p.spawn(Node { flex_grow: 1.0, min_height: cx.px(24.0), ..default() });
+        p.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(6.0), ..default() })
+            .with_children(|col| menu_rows(col, cx, rows, focus, 300.0, false));
+    });
+}
+
+/// The row in focus, as input left it (for the view).
 static FOCUS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-static CONFIRM: AtomicBool = AtomicBool::new(false);
 
 /// The rows' hits are the front end's `Hit::Row`; in a match they are read
 /// as `GameHit` (added beside them).
@@ -443,7 +593,6 @@ pub(crate) fn tag_hits(mut commands: Commands, rows: Query<(Entity, &Hit), (Adde
 
 pub(crate) fn publish(st: &InGame) {
     FOCUS.store(st.focus, Ordering::Relaxed);
-    CONFIRM.store(st.confirm, Ordering::Relaxed);
 }
 
 /// The preview: a menu up as if he had opened it.

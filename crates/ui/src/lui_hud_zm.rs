@@ -446,7 +446,8 @@ fn menu_input(
     let pad_start = io.pads.iter().any(|p| p.just_pressed(P::Start));
     // (The front end always has a menu up, inside its black cover.)
     if !hud.frontend && hud.host.open_menus().is_empty() {
-        if io.keys.just_pressed(KeyCode::Escape) || pad_start {
+        // (With the shell on, its own pause menu opens in a Zombies game.)
+        if (io.keys.just_pressed(KeyCode::Escape) || pad_start) && !crate::shell::bridge::enabled() {
             hud.host
                 .root_event("open_ingame_menu", &[("menuName", Value::str("class"))]);
         }
@@ -2469,6 +2470,12 @@ fn lui_hud(
     if !capturing {
         menu_input(hud, &io, console_open, pointer, scale);
     }
+    // The shell's pause menu's answers (END GAME), as BO2's menus send them.
+    if !hud.frontend {
+        for (menu, response) in crate::shell::ingame::take_responses() {
+            hud.host.push_call(hks_t6::host::EngineCall::MenuResponse(menu, response));
+        }
+    }
     engine_calls(hud, &mut io, local.as_deref());
     public_match(hud, &mut io);
     private_party(hud, &mut io);
@@ -2506,7 +2513,7 @@ fn lui_hud(
         *io.menus = state;
     }
     // A solo game pauses under its menus (Black Ops II's solo pause).
-    let pause = open && !hud.frontend && io.role.as_deref() == Some(&frame::RuntimeRole::Listen);
+    let pause = (open || crate::shell::ingame::open()) && !hud.frontend && io.role.as_deref() == Some(&frame::RuntimeRole::Listen);
     if io.paused.0 != pause {
         io.paused.0 = pause;
         diag::info!(
