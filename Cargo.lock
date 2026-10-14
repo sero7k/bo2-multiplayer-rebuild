@@ -6511,6 +6511,7 @@ dependencies = [
  "asset_transport",
  "asset_world",
  "assets",
+ "audio",
  "bcdec_rs",
  "bevy",
  "bo2_profile",
