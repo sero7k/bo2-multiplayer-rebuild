@@ -43,6 +43,11 @@ impl<'a> Stream<'a> {
         }
     }
 
+    /// Debug: moves the stream to file offset `pos`.
+    pub fn seek(&mut self, pos: usize) {
+        self.pos = pos;
+    }
+
     pub fn data(&self) -> &'a [u8] {
         self.data
     }

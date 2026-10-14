@@ -507,6 +507,7 @@ impl<'a> Walker<'a> {
             T::Scriptable => scriptable::scriptable(self, h),
             T::PlayerAnim => playeranim::playeranim(self, h),
             T::Suit => suit::suit(self, h),
+            T::SuitAnimPackage => suit::suit_anim_package(self, h),
             T::Vehicle => vehicle::vehicle(self, h),
             T::SpaceshipTarget => spaceship::spaceship(self, h),
             T::Rumble => misc::rumble(self, h),
@@ -538,7 +539,23 @@ impl<'a> Walker<'a> {
     /// read (the capture keeps what came before).
     pub fn walk(&mut self) -> std::result::Result<(), WalkStop> {
         let table = self.list.asset_table_virtual;
+        // Debug: `IW7_START=<index>,<hex file offset>` starts the walk at a
+        // table entry whose data begins at that offset (references made
+        // before it will not resolve).
+        let start = std::env::var("IW7_START").ok().and_then(|v| {
+            let (i, p) = v.split_once(',')?;
+            Some((i.parse::<usize>().ok()?, usize::from_str_radix(p.trim_start_matches("0x"), 16).ok()?))
+        });
+        if let Some((_, p)) = start {
+            self.s.seek(p);
+        }
         for (i, entry) in self.list.assets.iter().enumerate() {
+            if let Some((first, _)) = start
+                && i < first
+            {
+                self.cap.starts.push(0);
+                continue;
+            }
             let ty = entry.asset_type();
             let start = self.s.pos();
             self.cap.starts.push(start);
