@@ -131,6 +131,11 @@ impl JupMap {
                     .push(format!("tile {k}: no zone (only {} found)", names.len()));
                 continue;
             };
+            if !tiles::drawn(name) {
+                out.report
+                    .push(format!("tile {k} {name}: another state, left out"));
+                continue;
+            }
             let image = match read_image(&src.zone(name), oodle) {
                 Ok(i) => i,
                 Err(e) => {

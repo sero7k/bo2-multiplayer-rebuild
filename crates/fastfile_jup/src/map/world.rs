@@ -28,7 +28,9 @@
 //! triangles, +0x24 u32 its bits' offset in the surface's packed triangles.
 //! Each corner is `ceil(log2(entries))` bits, least significant first, an
 //! entry of the index list. Tables run surface by surface (a surface's first
-//! has first triangle 0) in packed-triangle order, and the index list too.
+//! has first triangle 0), and the index list and the packed triangles with
+//! them; that is the records' packed-triangle order (+0x40) but for a few
+//! surfaces whose tables come later.
 
 use super::index::{f32_at, find_all, u16_at, u32_at, u64_at, v3_at};
 
@@ -227,6 +229,9 @@ pub fn read_surfaces(
     let mut out: Vec<WorldSurface> = Vec::with_capacity(pending.len());
     let mut table = 0usize;
     let mut list = 0usize;
+    // The packed triangles run in table order (not each record's own
+    // offset where a surface's tables come late).
+    let mut packed = 0usize;
     while !pending.is_empty() {
         if table >= b.table_count {
             return Err(format!(
@@ -242,9 +247,9 @@ pub fn read_surfaces(
         while table < b.table_count && u16_at(z, b.tables + TABLE * table + 0x20) != 0 {
             table += 1;
         }
-        // Its surface: the tables run in packed-triangle order but for a few
-        // surfaces placed later, so the first nearby one whose packed bytes
-        // and vertices fit them.
+        // Its surface: the tables run in the records' packed-triangle order
+        // but for a few surfaces placed later, so the first nearby one whose
+        // packed bytes and vertices fit them.
         let (need, most) = group_needs(z, b, first, table);
         let pick = pending
             .iter()
@@ -266,7 +271,7 @@ pub fn read_surfaces(
             let bit_at = u32_at(z, e + 0x24) as usize;
             used = used.max(x + entries);
             let nb = bits_for(entries);
-            let base = b.packed + r.packed_at + bit_at;
+            let base = b.packed + packed + bit_at;
             let mut bp = 0usize;
             for _ in 0..ntri {
                 let mut tri = [0u16; 3];
@@ -292,6 +297,7 @@ pub fn read_surfaces(
             }
         }
         list += used;
+        packed += r.packed_size;
         let mut s = WorldSurface {
             index: si,
             zone,

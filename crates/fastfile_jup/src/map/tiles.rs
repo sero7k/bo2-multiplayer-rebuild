@@ -34,6 +34,14 @@ pub fn names(src: &MapSources) -> Vec<String> {
     filter(&src.name, &all)
 }
 
+/// Whether a streamed world zone is part of the map as it first stands: a
+/// swap zone's other states (`_swap_dest_`: destroyed, `_swap_t_`: the
+/// in-between) are left out, the default (`_swap_dflt_`) and the single
+/// states are kept.
+pub fn drawn(name: &str) -> bool {
+    !(name.contains("_swap_dest_") || name.contains("_swap_t_"))
+}
+
 /// The finest-level world zones of `map` among `stems`, in name order.
 pub fn filter(map: &str, stems: &[String]) -> Vec<String> {
     let prefix = format!("{map}_");
@@ -61,6 +69,14 @@ pub fn filter(map: &str, stems: &[String]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn swap_states() {
+        assert!(super::drawn("mp_jup_escape5_lighthouse_swap_dflt_0_tr"));
+        assert!(super::drawn("mp_jup_escape5_submarine_swap_1_0_tr"));
+        assert!(!super::drawn("mp_jup_escape5_lighthouse_swap_dest_0_tr"));
+        assert!(!super::drawn("mp_jup_escape5_water_tower_02_swap_t_0_tr"));
+    }
+
     #[test]
     fn rebirth_order() {
         let stems: Vec<String> = [
