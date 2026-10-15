@@ -3262,36 +3262,41 @@ fn fire_weapon(
         let weapons = weapons.as_deref()?;
         let bank = sound_bank.as_deref()?;
         let weapon = fire.event.payload.weapon;
+        // (Each with its namespace: a guest gun copied from a Black Ops II
+        // gun fires its own game's sounds.)
+        let keys = [
+            asset_game::WeaponSoundSlot::Fire,
+            asset_game::WeaponSoundSlot::FirePlayer,
+            asset_game::WeaponSoundSlot::FireLast,
+            asset_game::WeaponSoundSlot::FireLastPlayer,
+        ]
+        .map(|slot| weapons.0.weapon_sound_key(weapon, slot, &bank.0));
         audio::select_cg_fire_alias(
             last_shot,
             own_gun,
-            weapons
-                .0
-                .weapon_sound_alias(weapon, asset_game::WeaponSoundSlot::Fire, &bank.0),
-            weapons
-                .0
-                .weapon_sound_alias(weapon, asset_game::WeaponSoundSlot::FirePlayer, &bank.0),
-            weapons
-                .0
-                .weapon_sound_alias(weapon, asset_game::WeaponSoundSlot::FireLast, &bank.0),
-            weapons.0.weapon_sound_alias(
-                weapon,
-                asset_game::WeaponSoundSlot::FireLastPlayer,
-                &bank.0,
-            ),
+            keys[0].map(|(_, a)| a),
+            keys[1].map(|(_, a)| a),
+            keys[2].map(|(_, a)| a),
+            keys[3].map(|(_, a)| a),
         )
-        .map(|alias| (alias, own_gun))
+        .map(|alias| {
+            let ns = keys.iter().flatten().find(|(_, a)| *a == alias).map(|(ns, _)| *ns);
+            (alias, ns, own_gun)
+        })
     });
-    if let (Some((alias, player_view)), Some(sounds)) = (alias, sounds.as_deref_mut()) {
+    if let (Some((alias, alias_ns, player_view)), Some(sounds)) = (alias, sounds.as_deref_mut()) {
         combat.last_fire_alias = Some(alias.to_owned());
 
         let sound_origin = flash_target
             .map(|target| target.orientation.origin)
             .unwrap_or(fire.event.payload.origin);
         sounds.write(audio::WeaponSound {
-            namespace: weapons
-                .as_deref()
-                .and_then(|w| w.0.borrowed_namespace_of(fire.event.payload.weapon))
+            namespace: alias_ns
+                .or_else(|| {
+                    weapons
+                        .as_deref()
+                        .and_then(|w| w.0.borrowed_namespace_of(fire.event.payload.weapon))
+                })
                 .unwrap_or(asset_core::AssetNamespace::Iw4),
             alias: alias.to_owned(),
             origin_inches: (!player_view).then_some(sound_origin),

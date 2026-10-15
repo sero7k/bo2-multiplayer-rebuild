@@ -449,6 +449,8 @@ fn request_named(
     alias: &str,
     set: &mut MatchRequests,
 ) {
+    // (A guest gun names its own game's sounds as `<game>:<alias>`.)
+    let (ns, alias) = asset_game::alias_namespace(ns, alias);
     let keys = clip_keys_for_alias(bank, ns, alias);
     if keys.is_empty() {
         set.missing.insert(alias.to_owned());

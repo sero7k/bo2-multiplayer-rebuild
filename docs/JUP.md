@@ -106,10 +106,32 @@ it is not.
 - Rebirth Island's ambience: the 37 stereo `wz23` streams of
   `mp_jup_escape5` of 90–97 s (beds), chained one after another.
 
-Not named yet, so these events keep Black Ops II's stand-ins (or the
-nearest MW3 sound, said in the route): the plate insert itself (the armor
-box's refill plays), plates full, squads remaining, gas tick/enter, the
-circle closed, the loadout crate landing, the first spawn.
+- Alias links (`fastfile_jup::sound::alias_links`): an alias's record is
+  its name hash, the hash of the alias played with it (a gun's fire is a
+  chain of layers, each naming the next) and a block-15 pointer to its
+  sndasset's asset-list entry, then a u32 of flags whose top two bits are
+  clear: 0x3FFFFFFF on most interface and voice sounds, 0x1FFFC080,
+  0x3FF04080 ... elsewhere. Read only with 0x3FFFFFFF at first, `ingame`
+  showed 78,960 links and `ingame_shared_mp` 63,061; with any flags,
+  135,078 and 141,056 (`eqp_armor_plates_insert_plr`, `iw9_mp_radiation_tick`
+  and the guns' layers were among the missed).
+- A bank's aliases also have headers (0x30 bytes: -2, the name hash, f32
+  near and far distances, u16 count, 0xFFFF), in runs **sorted by name**:
+  a hash between two named ones shares their prefix
+  (`C:\RE-Tools\jup\sfx\tables.py` lists them; `br_circle_closing`,
+  `br_circle_effect_lp`, then an unnamed one (`br_circle_nuke`, found so),
+  then `br_circle_proximity_lp` ...). Names found this way and with
+  `jup_alias_brute` under the neighbours' prefixes: `match_start_tick`,
+  `uin_mp_splash_game_mode`, `iw9_mp_radiation_tick`,
+  `eqp_armor_plates_{open,insert,close}_{plr,npc}`, `mp_slam_gulag_closed`,
+  `mp_hq_respawn_disabled`, `mp_care_package_drop_lp`,
+  `mp_care_package_med_impact(_metal, _swtn)`, `ui_mp_resurgence_timer(_tick)`,
+  `uin_iw9_br_gulag_winner_redeploy`, `br_circle_effect_lp`.
+
+Not named yet, so these events keep Black Ops II's stand-ins: the circle
+closed, the final circle, gas entered, squads remaining and the top
+squads (the announcer says the last three: `vo_final_circle`,
+`vo_in_gas`, `vo_squads_left_*`).
 
 ## Emblems and calling cards (`cards.rs`, probe `jup_cards`)
 
@@ -267,13 +289,28 @@ the other named guns are not listed in Create-a-Class, for bots or in the box.
   masks. The colour map built is the tint darkened by the occlusion.
 - In the match the gun is a copy of a Black Ops II gun (the B23R) with its
   own models, name and handling (semi-automatic, 15 rounds): Black Ops
-  II's view animations, arms, effects, sounds and HUD pictures
+  II's view animations, arms, effects and HUD pictures
   (`WeaponRegistry::borrowed_namespace_of`). The models are one bone,
   `tag_weapon` at the receiver's grip tag, with `tag_flash` and
   `tag_brass`.
+- Its sounds are MW3's (`asset_audio::JUP_GUN_SOUNDS`, read from `ingame`
+  into every match's bank when the install is set). The gun's sound
+  package (`jup_pi_mike93_sfxpackage`, type 93, `ingame_shared_mp`) lists
+  alias hashes; those aliases are in `ingame` (the zone every mode loads),
+  their names recovered by hashing: `wpn_pi_mike93_fire_npc` (mono, eight
+  variants) -> `_fire_npc_mech`; `wpn_pi_mike93_fire_plr_transient` ->
+  `_shot` -> `_mech` -> `_lfe` (each record names the next layer; the
+  long tails `_fire_plr_atmo` / `_fire_npc_atmo` are added after the last);
+  `_fire_plr_last_mech` (the last round) and `_first_*` chains; foley
+  `wfoly_plr_pi_mike93_{raise,drop}(_quick)_01`, `_reload_{magout,magin,
+  slide_release,hand}`, `_reload(_empty,_fast,_drum)_NN`, `_inspect_NN`.
+  The copy keeps the B23R's animations: its notetrack sounds are replaced
+  by word (`GuestCopy::notetrack_remap`: mag out / in, slide, hand), slots
+  name `jup:#<hash>` (`asset_game::alias_namespace`). Each layer plays as
+  the secondary of the one before.
 - Not read: Modern Warfare III's view animations (animpkg, xanims), its
-  weapon numbers, and its weapon sounds: the gun's sound package
-  (`jup_pi_mike93_sfxpackage` in `ingame_shared_mp`) names a handful of
-  `ingame_shared_mp` aliases (shells, a 0.46 s stereo sound twice) and
-  otherwise hashes no alias or sndasset of the zones read names.
+  weapon numbers, and two of its sounds: `wpn_pi_mike93_ads_up` /
+  `_ads_down` (their records point at other aliases' headers, not a
+  sndasset) and `weap_pickup_pistol_npc` (in `ingame_shared_mp`): the
+  B23R's play there.
 - `iw4l check-guns` (`BO2MP_CHECK_GUNS=jup`) reads and builds the models.

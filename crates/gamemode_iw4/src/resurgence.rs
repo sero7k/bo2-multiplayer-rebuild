@@ -739,10 +739,10 @@ pub const SOUNDS: &[SoundRoute] = &[
         then: None,
         t6: "",
     },
-    // first spawn
+    // first spawn (the game mode's splash)
     SoundRoute {
         key: "match_start",
-        jup: &[],
+        jup: &["uin_mp_splash_game_mode"],
         then: None,
         t6: "mpl_hit_alert",
     },
@@ -781,10 +781,10 @@ pub const SOUNDS: &[SoundRoute] = &[
         then: None,
         t6: "",
     },
-    // a second of gas
+    // a second of gas (the radiation's damage tick)
     SoundRoute {
         key: "gas_tick",
-        jup: &[],
+        jup: &["iw9_mp_radiation_tick"],
         then: None,
         t6: "mpl_hit_alert_low",
     },
@@ -823,10 +823,10 @@ pub const SOUNDS: &[SoundRoute] = &[
         then: None,
         t6: "uin_alert_slideout",
     },
-    // the redeploy's last seconds
+    // the redeploy's last seconds (Resurgence's own timer tick)
     SoundRoute {
         key: "redeploy_tick",
-        jup: &["ui_mp_timer_countdown"],
+        jup: &["ui_mp_resurgence_timer_tick"],
         then: None,
         t6: "mpl_ui_timer_countdown",
     },
@@ -857,10 +857,10 @@ pub const SOUNDS: &[SoundRoute] = &[
         then: None,
         t6: "",
     },
-    // dead with redeploys off
+    // dead with redeploys off (the gulag-closed slam: no way back)
     SoundRoute {
         key: "redeploy_disabled",
-        jup: &[],
+        jup: &["mp_slam_gulag_closed"],
         then: None,
         t6: "",
     },
@@ -963,17 +963,17 @@ pub const SOUNDS: &[SoundRoute] = &[
         then: None,
         t6: "uin_alert_slideout",
     },
-    // a plate in (the armor box's refill: MW3's plate insert is not named yet)
+    // a plate in
     SoundRoute {
         key: "plate_insert",
-        jup: &["iw9_armor_crate_use"],
+        jup: &["eqp_armor_plates_insert_plr"],
         then: None,
         t6: "fly_riotshield_impact_npc",
     },
-    // plates full
+    // plates full (the vest closed after the last plate)
     SoundRoute {
         key: "plates_full",
-        jup: &[],
+        jup: &["eqp_armor_plates_close_plr"],
         then: None,
         t6: "",
     },
@@ -1078,7 +1078,7 @@ pub const SOUNDS: &[SoundRoute] = &[
     // the loadout crate is down
     SoundRoute {
         key: "loadout_landed",
-        jup: &[],
+        jup: &["mp_care_package_med_impact"],
         then: None,
         t6: "mpl_supply_crate_land",
     },

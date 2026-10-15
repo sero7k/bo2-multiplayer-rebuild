@@ -31,8 +31,11 @@
 //! `0x0F_0000_0000 | (base + 16 * asset index) + 1`, the base being 8 plus
 //! the script-string table's bytes (pointers and strings, as they are in
 //! the zone image) rounded up to 8. The 16 bytes before that pointer are the
-//! alias's name hash and (likely) its secondary alias's (0: none); a u32
-//! 0x3FFFFFFF follows it. Alias names are FNV-1a
+//! alias's name hash and the hash of the alias played with it (0: none; a
+//! gun's fire sound is a chain of layers, each naming the next); a u32 of
+//! flags follows it, its top two bits clear (0x3FFFFFFF on most interface
+//! and voice sounds; 0x1FFFC080, 0x3FF04080 ... on the guns' layers of
+//! `ingame`). Alias names are FNV-1a
 //! 64-bit hashes of the alias as written (offset basis 0xCBF29CE484222325,
 //! no mask) — not the asset-name hash of `hash.rs`.
 //!
@@ -242,6 +245,9 @@ pub fn find_sndassets(zone: &[u8], from: usize) -> Vec<SndAsset> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AliasLink {
     pub alias: u64,
+    /// The alias played with it (0: none): a gun's fire sound is a chain
+    /// of layers, each naming the next.
+    pub next: u64,
     /// Index among the zone's sndassets (in asset-list order).
     pub sndasset: usize,
     /// Where the pointer is in the zone.
@@ -249,8 +255,9 @@ pub struct AliasLink {
 }
 
 /// The alias -> sndasset links of a zone: every encoded block-15 pointer
-/// that lands on a type-193 entry of the asset list and is followed by
-/// 0x3FFFFFFF, with the alias hash 16 bytes before it.
+/// that lands on a type-193 entry of the asset list and is followed by a
+/// u32 below 0x40000000 (the alias's flags), with the alias hash 16 bytes
+/// before it.
 pub fn alias_links(zone: &[u8], list: &AssetList) -> Vec<AliasLink> {
     let mut ordinal = vec![usize::MAX; list.types.len()];
     let mut n = 0usize;
@@ -273,7 +280,9 @@ pub fn alias_links(zone: &[u8], list: &AssetList) -> Vec<AliasLink> {
         if v >> 32 == BLOCK15
             && off >= list.block15_base
             && (off - list.block15_base).is_multiple_of(16)
-            && zone.get(at + 8..at + 12) == Some(&[0xff, 0xff, 0xff, 0x3f][..])
+            && zone.get(at + 11).is_some_and(|&b| b < 0x40)
+            // (Not a hash: an array of pointers to sndassets.)
+            && u64_at(zone, at - 16) >> 40 != 0
         {
             let idx = ((off - list.block15_base) / 16) as usize;
             if let Some(&o) = ordinal.get(idx)
@@ -281,6 +290,7 @@ pub fn alias_links(zone: &[u8], list: &AssetList) -> Vec<AliasLink> {
             {
                 out.push(AliasLink {
                     alias: u64_at(zone, at - 16),
+                    next: u64_at(zone, at - 8),
                     sndasset: o,
                     at,
                 });
@@ -406,14 +416,27 @@ mod tests {
         }
         let list = asset_list(&z).unwrap();
         assert_eq!(list.types, vec![59, 193, 193]);
-        z.extend(0xABCDu64.to_le_bytes());
+        z.extend(0xABCD_0000_0000u64.to_le_bytes());
         z.extend(0u64.to_le_bytes());
         let ptr = (BLOCK15 << 32) | (8 + 16 * 2 + 1);
         z.extend(ptr.to_le_bytes());
         z.extend(0x3fff_ffffu32.to_le_bytes());
         z.extend(0u32.to_le_bytes());
+        // A gun's layer: other flags, and the next layer's hash.
+        z.extend(0x5A5A_0000_0000u64.to_le_bytes());
+        z.extend(0xABCD_0000_0000u64.to_le_bytes());
+        z.extend(((BLOCK15 << 32) | (8 + 16 + 1)).to_le_bytes());
+        z.extend(0x1fff_c080u32.to_le_bytes());
+        z.extend(0u32.to_le_bytes());
+        // Not flags: no link.
+        z.extend(0x7777_0000_0000u64.to_le_bytes());
+        z.extend(0u64.to_le_bytes());
+        z.extend(ptr.to_le_bytes());
+        z.extend(0xffff_ffffu32.to_le_bytes());
         let l = alias_links(&z, &list);
-        assert_eq!(l.len(), 1);
-        assert_eq!((l[0].alias, l[0].sndasset), (0xABCD, 1));
+        assert_eq!(l.len(), 2);
+        assert_eq!((l[0].alias, l[0].sndasset), (0xABCD_0000_0000, 1));
+        assert_eq!((l[1].alias, l[1].sndasset), (0x5A5A_0000_0000, 0));
+        assert_eq!((l[0].next, l[1].next), (0, 0xABCD_0000_0000));
     }
 }

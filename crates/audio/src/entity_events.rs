@@ -549,7 +549,8 @@ impl NotetrackSoundTable {
                 .unwrap_or(asset_core::AssetNamespace::Iw4);
             for (note, action) in weapons.notetrack_actions_of(weapon) {
                 let sound = action.sound_alias.as_deref().map(|alias| {
-                    match bank.index_in(namespace, alias) {
+                    let (ns, name) = asset_game::alias_namespace(namespace, alias);
+                    match bank.index_in(ns, name) {
                         Some(index) => NotetrackSound::Bound(index),
                         None => {
                             unbound += 1;

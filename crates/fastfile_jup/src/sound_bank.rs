@@ -160,6 +160,9 @@ pub struct SoundBank {
     pub sounds: Vec<Sound>,
     /// Alias hash -> its sounds (several: the alias's variants).
     pub aliases: HashMap<u64, Vec<usize>>,
+    /// Alias hash -> the alias played with it (a gun's next fire layer),
+    /// when it names one.
+    pub next: HashMap<u64, u64>,
     /// Sndasset name hash -> sound.
     pub by_name: HashMap<u64, usize>,
     packages: Vec<PathBuf>,
@@ -205,9 +208,15 @@ impl SoundBank {
         }
         let links = sound::alias_links(zone, &list);
         for AliasLink {
-            alias, sndasset, ..
+            alias,
+            next,
+            sndasset,
+            ..
         } in &links
         {
+            if *next != 0 {
+                self.next.entry(*alias).or_insert(*next);
+            }
             let v = self.aliases.entry(*alias).or_default();
             let s = base + sndasset;
             if !v.contains(&s) {

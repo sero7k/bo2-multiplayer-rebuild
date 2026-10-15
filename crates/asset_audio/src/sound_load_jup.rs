@@ -68,12 +68,15 @@ pub(crate) fn jup_sounds_wanted() -> Option<bool> {
     }
 }
 
-/// Whether a composed bank already holds Resurgence's sounds.
+/// Whether a composed bank already holds Resurgence's sounds (its drop
+/// music: the MW3 guns' sounds are in the other banks too).
 pub fn has_jup_sounds(catalog: &SoundCatalog) -> bool {
     catalog
-        .sounds
-        .iter()
-        .any(|s| s.namespace == Some(AssetNamespace::Jup))
+        .index_in(
+            AssetNamespace::Jup,
+            &jup_alias_key("mus_mx_mp_br_ri_infil_1_intro"),
+        )
+        .is_some()
 }
 
 /// The Modern Warfare III install, when it is set and looks like one
@@ -158,8 +161,149 @@ pub fn jup_resurgence_sounds(install: &Path, with_map: bool) -> Result<Arc<Sound
     Ok(catalog)
 }
 
+/// The zone Modern Warfare III's guns' sounds are read from: `ingame`,
+/// the guns' fire layers (`wpn_pi_mike93_fire_plr_transient`, `_shot`,
+/// `_mech`, `_lfe`, `_atmo` ...) and their foley (`wfoly_plr_pi_mike93_
+/// reload_magout` ...).
+pub const JUP_GUN_ZONE: &str = "ingame";
+
+/// A Modern Warfare III gun's own sounds, in the slots of the Black Ops II
+/// gun it is a copy of (see `asset_game::GuestCopy`): alias names (or
+/// `#<hash>`), "" for none (the slot keeps its donor's sound).
+#[derive(Clone, Copy, Debug)]
+pub struct JupGunSounds {
+    /// The gun (`jp12_pi_mike93`).
+    pub gun: &'static str,
+    /// Fired, heard in the world (another player's shot).
+    pub fire: &'static str,
+    /// Fired, in first person: the head of its layers.
+    pub fire_player: &'static str,
+    /// The last round, in first person (the slide locking back).
+    pub fire_last_player: &'static str,
+    pub raise_player: &'static str,
+    pub first_raise_player: &'static str,
+    pub putaway_player: &'static str,
+    pub pickup: &'static str,
+    pub pickup_player: &'static str,
+    pub ads_up: &'static str,
+    pub ads_down: &'static str,
+    /// The donor's notetrack sounds by a word of their alias, played as
+    /// this gun's (the first pair whose word the alias holds; the others
+    /// keep the donor's).
+    pub notes: &'static [(&'static str, &'static str)],
+    /// Layers played together (alias, the one played with it) where the
+    /// zone's chain stops short (its end is in no zone read): the shot's
+    /// low end into the long tail.
+    pub layers: &'static [(&'static str, &'static str)],
+}
+
+impl JupGunSounds {
+    /// Every alias it names (the layers' chains are followed when read).
+    pub fn aliases(&self) -> impl Iterator<Item = &'static str> {
+        [
+            self.fire,
+            self.fire_player,
+            self.fire_last_player,
+            self.raise_player,
+            self.first_raise_player,
+            self.putaway_player,
+            self.pickup,
+            self.pickup_player,
+            self.ads_up,
+            self.ads_down,
+        ]
+        .into_iter()
+        .chain(self.notes.iter().map(|(_, a)| *a))
+        .chain(self.layers.iter().flat_map(|(a, b)| [*a, *b]))
+        .filter(|a| !a.is_empty())
+    }
+}
+
+/// The Modern Warfare III guns played and their sounds (in the install's
+/// `ingame`; names recovered by hashing, see docs/JUP.md).
+pub const JUP_GUN_SOUNDS: &[JupGunSounds] = &[JupGunSounds {
+    gun: "jp12_pi_mike93",
+    // (Mono, eight variants) -> fire_npc_mech (-> fire_npc_atmo, below).
+    fire: "wpn_pi_mike93_fire_npc",
+    // transient -> shot -> mech -> lfe (-> atmo, below).
+    fire_player: "wpn_pi_mike93_fire_plr_transient",
+    // last_mech -> transient -> shot -> mech -> lfe.
+    fire_last_player: "wpn_pi_mike93_fire_plr_last_mech",
+    raise_player: "wfoly_plr_pi_mike93_raise_quick_01",
+    first_raise_player: "wfoly_plr_pi_mike93_raise_01",
+    putaway_player: "wfoly_plr_pi_mike93_drop_quick_01",
+    // (`weap_pickup_pistol_npc` is in `ingame_shared_mp`, not read.)
+    pickup: "",
+    pickup_player: "weap_pickup_pistol_plr",
+    // (`wpn_pi_mike93_ads_up` and `_ads_down` name other aliases, not a
+    // sound of their own: not followed yet, the donor's play.)
+    ads_up: "",
+    ads_down: "",
+    notes: &[
+        ("magout", "wfoly_plr_pi_mike93_reload_magout"),
+        ("mag_out", "wfoly_plr_pi_mike93_reload_magout"),
+        ("clipout", "wfoly_plr_pi_mike93_reload_magout"),
+        ("clip_out", "wfoly_plr_pi_mike93_reload_magout"),
+        ("magin", "wfoly_plr_pi_mike93_reload_magin"),
+        ("mag_in", "wfoly_plr_pi_mike93_reload_magin"),
+        ("clipin", "wfoly_plr_pi_mike93_reload_magin"),
+        ("clip_in", "wfoly_plr_pi_mike93_reload_magin"),
+        ("slide", "wfoly_plr_pi_mike93_reload_slide_release"),
+        ("chamber", "wfoly_plr_pi_mike93_reload_slide_release"),
+        ("release", "wfoly_plr_pi_mike93_reload_slide_release"),
+        ("lift", "wfoly_plr_pi_mike93_reload_hand"),
+        ("grab", "wfoly_plr_pi_mike93_reload_hand"),
+        ("hand", "wfoly_plr_pi_mike93_reload_hand"),
+        ("raise", "wfoly_plr_pi_mike93_raise_quick_01"),
+        ("pullout", "wfoly_plr_pi_mike93_raise_quick_01"),
+        ("drop", "wfoly_plr_pi_mike93_drop_quick_01"),
+        ("putaway", "wfoly_plr_pi_mike93_drop_quick_01"),
+    ],
+    layers: &[
+        ("wpn_pi_mike93_fire_plr_lfe", "wpn_pi_mike93_fire_plr_atmo"),
+        ("wpn_pi_mike93_fire_npc_mech", "wpn_pi_mike93_fire_npc_atmo"),
+    ],
+}];
+
+/// The gun sounds of the install (`JUP_GUN_ZONE`, only the aliases
+/// [`JUP_GUN_SOUNDS`] name and the layers chained from them, each layer the
+/// secondary of the one before), read once per process.
+pub fn jup_gun_sounds(install: &Path) -> Result<Arc<SoundCatalog>, String> {
+    type GunCache = Mutex<HashMap<PathBuf, Arc<SoundCatalog>>>;
+    static CACHE: OnceLock<GunCache> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(hit) = cache.lock().ok().and_then(|c| c.get(install).cloned()) {
+        return Ok(hit);
+    }
+    let hash = |a: &str| u64::from_str_radix(&jup_alias_key(a)[1..], 16).ok();
+    let keep: HashSet<u64> = JUP_GUN_SOUNDS
+        .iter()
+        .flat_map(JupGunSounds::aliases)
+        .filter_map(hash)
+        .collect();
+    let extra: HashMap<u64, u64> = JUP_GUN_SOUNDS
+        .iter()
+        .flat_map(|g| g.layers.iter())
+        .filter_map(|(a, b)| Some((hash(a)?, hash(b)?)))
+        .collect();
+    let catalog = Arc::new(load_jup(install, &[JUP_GUN_ZONE], Some((keep, extra)))?);
+    if let Ok(mut c) = cache.lock() {
+        c.insert(install.to_path_buf(), catalog.clone());
+    }
+    Ok(catalog)
+}
+
 /// The sounds of some zones of the install, every alias under `#<hash>`.
 pub fn load_sound_catalog_jup(install: &Path, zones: &[&str]) -> Result<SoundCatalog, String> {
+    load_jup(install, zones, None)
+}
+
+/// Aliases kept, and layers added to the zone's chains.
+type Keep = (HashSet<u64>, HashMap<u64, u64>);
+
+/// The sounds of some zones; with `keep`, only those aliases and the
+/// layers chained from them (each the secondary of the one before).
+fn load_jup(install: &Path, zones: &[&str], keep: Option<Keep>) -> Result<SoundCatalog, String> {
     let oodle = oodle_for(install)?;
     let zone_dir = install.join("zone");
     let mut bank = SoundBank::new();
@@ -188,9 +332,34 @@ pub fn load_sound_catalog_jup(install: &Path, zones: &[&str]) -> Result<SoundCat
     catalog.set_capture_zone(owner);
     let (mut playable, mut missing) = (0usize, 0usize);
     let mut have = Vec::new();
-    let mut hashes: Vec<u64> = bank.aliases.keys().copied().collect();
+    // A layer's next: the zone's chain, else one added.
+    let next_of = |h: u64| -> Option<u64> {
+        let (_, extra) = keep.as_ref()?;
+        bank.next
+            .get(&h)
+            .copied()
+            .filter(|n| bank.aliases.contains_key(n))
+            .or_else(|| extra.get(&h).copied())
+    };
+    let mut hashes: Vec<u64> = match &keep {
+        None => bank.aliases.keys().copied().collect(),
+        Some((wanted, _)) => {
+            // The wanted aliases and every layer chained from them.
+            let mut set = HashSet::new();
+            for &w in wanted {
+                let mut at = Some(w);
+                while let Some(h) = at.filter(|h| set.insert(*h)) {
+                    at = next_of(h);
+                }
+            }
+            set.into_iter()
+                .filter(|h| bank.aliases.contains_key(h))
+                .collect()
+        }
+    };
     hashes.sort_unstable();
     for h in hashes {
+        let secondary = next_of(h).map(|n| format!("#{n:016x}"));
         let mut rows = Vec::new();
         for &si in &bank.aliases[&h] {
             let s = &bank.sounds[si];
@@ -205,6 +374,7 @@ pub fn load_sound_catalog_jup(install: &Path, zones: &[&str]) -> Result<SoundCat
             }
             rows.push(CapturedAlias {
                 alias_name: format!("#{h:016x}"),
+                secondary: secondary.clone(),
                 file_type: Some(2),
                 file_exists: Some(1),
                 streamed: Some((
@@ -246,7 +416,11 @@ pub fn load_sound_catalog_jup(install: &Path, zones: &[&str]) -> Result<SoundCat
         });
     }
     catalog.finalize();
-    if let Ok(mut s) = available().lock() {
+    // (What Resurgence's script may play: the guns' sounds are not asked
+    // for, and `jup_has` reads Resurgence's zones while this is empty.)
+    if keep.is_none()
+        && let Ok(mut s) = available().lock()
+    {
         s.extend(have);
     }
     diag::info!(
