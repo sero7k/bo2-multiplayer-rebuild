@@ -194,6 +194,8 @@ struct Materials<'a> {
     images: HashMap<String, Option<usize>>,
     decoded: usize,
     failures: Vec<String>,
+    /// bo2mp: Black Ops III's own look (`super::t7_look`), when on.
+    looks: Option<super::t7_look::Looks>,
 }
 
 impl Materials<'_> {
@@ -245,11 +247,22 @@ impl Materials<'_> {
         let m = &self.map.materials[index];
         let draw = t7_draw(&m.name, &m.technique_set, model);
         let mut textures = Vec::new();
-        if let Some((hash, name)) = colour_map(self.map, &m.textures)
+        // bo2mp: Black Ops III's look (`super::t7_look`): its colour map as
+        // its G-buffer makes it, its normal and specular maps.
+        let look = match (self.looks.as_mut(), super::t7_look::Looks::cover(&draw)) {
+            (Some(looks), Some(cover)) => looks.link(self.map, &mut self.catalog, index, cover),
+            _ => [None; 3],
+        };
+        let m = &self.map.materials[index];
+        if let Some(slot) = look[0] {
+            textures.push(MaterialTextureBinding { name_hash: 0xa0ab_1041, name_start: 0, name_end: 0, sampler_state: 0x13, semantic: TS_COLOR_MAP, image: Some(slot) });
+        } else if let Some((hash, name)) = colour_map(self.map, &m.textures)
             && let Some(slot) = self.image(&name)
         {
             textures.push(MaterialTextureBinding { name_hash: hash, name_start: 0, name_end: 0, sampler_state: 0x13, semantic: TS_COLOR_MAP, image: Some(slot) });
         }
+        textures.extend(super::t7_look::Looks::bindings(&look));
+        let m = &self.map.materials[index];
         let index_in_catalog = self.catalog.link_material(AuthoredMaterial {
             name: AssetRef::Real(format!("t7:{}{}", m.name, if model { "#m" } else { "" })),
             namespace: AssetNamespace::T6,
@@ -650,6 +663,7 @@ fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, progress: &
         images: HashMap::new(),
         decoded: 0,
         failures: Vec::new(),
+        looks: super::t7_look::on().then(|| super::t7_look::Looks::new(texture_max())),
     };
     let surface_materials: Vec<Option<usize>> =
         map.surfaces.iter().enumerate().map(|(i, s)| if hidden[i] { None } else { s.material.and_then(|m| b.material(m, false)) }).collect();
@@ -752,6 +766,7 @@ fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, progress: &
         b.failures.len(),
         if b.failures.is_empty() { String::new() } else { format!(" (first: {})", b.failures.iter().take(4).cloned().collect::<Vec<_>>().join("; ")) },
     ));
+    report.push(b.looks.as_ref().map_or_else(|| "t7 look: off (BO2MP_T7_MATERIALS=0): colour maps only".to_owned(), super::t7_look::Looks::report));
     let mut materials = std::mem::take(&mut b.catalog);
     drop(b);
     stage.done();
