@@ -142,7 +142,7 @@ weights, so not used for a baked light) and the light grid for models. A
 sun map is baked at load from the world's and placed models' triangles
 round the spawn points (the same bake), and the sun's shafts drawn through
 it. Water, lava flow, tiles and flags keep their own shaders.
-`BO2MP_BO3_EXPOSURE` (default 2) scales BO2's exposure into BO3's tone
+`BO2MP_BO3_EXPOSURE` (default 1.2) scales BO2's exposure into BO3's tone
 curve.
 
 ## Not done
