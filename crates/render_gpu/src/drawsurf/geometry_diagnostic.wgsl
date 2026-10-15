@@ -676,16 +676,21 @@ fn t7_reveal(texel_a: f32, vertex_a: f32) -> f32 {
     return saturate((texel_a - lo) / max(hi - lo, 0.0001));
 }
 
-// The tone curve (a filmic fit) of light times the exposure, gamma-encoded
-// for the frame (which then takes Black Ops II's roll-off, bloom and grade).
+// Black Ops III's tone curve (its final pass, `bloom_apply_lut`, fxc
+// disassembly of core_patch's programs): the light times the exposure plus
+// 0.00873, its log2 mapped to 0..1 (times 0.072703 plus 0.598206: 0.0033
+// to 46), through a fifth-order polynomial: display values, which its
+// colour table then grades. Written to the frame without Black Ops II's
+// roll-off: the final pass's unroll and roll-off give it back as it is.
 fn t7_tone(c: vec3<f32>, exposure: f32) -> vec3<f32> {
-    let x = max(c * exposure, vec3(0.0));
-    let a = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
-    return pow(saturate(a), vec3(1.0 / 2.2));
+    let x = max(c * exposure, vec3(0.0)) + vec3(0.00873);
+    let t = saturate(log2(x) * 0.072703 + 0.598206);
+    let p = (((7.712947 * t - 19.311527) * t + 14.275167) * t - 2.490045) * t + 0.878083;
+    return saturate(p * t - 0.06691);
 }
 
 fn t7_out(c: vec3<f32>) -> vec3<f32> {
-    return bo2_final(t7_tone(c, t7_exposure()));
+    return bo2_finish(t7_tone(c, t7_exposure()), t6, t6_lut, t6_lut_sampler);
 }
 
 // The tone curve's exposure: Black Ops III's map's (row 254 x); on a Black
@@ -1980,7 +1985,7 @@ fn fragment_sky(in: SkyOut) -> @location(0) vec4<f32> {
         let sky7 = t7_fog_core(fogged, far7, view.world_position, true, j7, g7, sky_lut);
         let bo2_7 = sky_lights.v[(T7_ROW + 1u) * 4u + 1u].z > 0.5;
         let e7 = sky_lights.v[T7_ROW * 4u].x * select(1.0, sky_t6.sun_dir_exposure.w, bo2_7);
-        let t7_x = bo2_rolloff(t7_tone(sky7, e7));
+        let t7_x = t7_tone(sky7, e7);
         return vec4(bo2_finish(t7_x, sky_t6, sky_lut, sky_lut_sampler), 1.0);
     }
     let sky_x = bo2_rolloff(sqrt(max(fogged * sky_t6.sun_dir_exposure.w, vec3(0.0))));

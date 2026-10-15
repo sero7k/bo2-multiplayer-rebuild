@@ -15,7 +15,7 @@
 //! here is a tint or layer weights, not free for a baked light) and the
 //! light grid for models. `t7_bo2` in the shader says which.
 //!
-//! `BO2MP_BO3_EXPOSURE` scales the exposure (default 1: Black Ops II's own
+//! `BO2MP_BO3_EXPOSURE` scales the exposure (default 2: Black Ops II's own
 //! into the tone curve), `BO2MP_T7_HAZE` and `BO2MP_T7_SHAFTS` the shafts.
 
 use asset_core::{T6Blend, T6Draw};
@@ -129,7 +129,7 @@ pub(super) fn apply(
     // light over the sun colour drawn (1: Black Ops II's own), the sun
     // map's axes and packing, the test view, and the Black Ops II flag.
     let m = map.rows();
-    let user = env_scale("BO2MP_BO3_EXPOSURE", 1.0).max(0.01);
+    let user = env_scale("BO2MP_BO3_EXPOSURE", 2.0).max(0.01);
     let mut a = [0f32; 16];
     a[0] = user;
     a[1] = 1.0;
