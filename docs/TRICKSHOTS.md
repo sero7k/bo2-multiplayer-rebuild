@@ -36,6 +36,24 @@ Swap and cancel tricks in all five titles exploit the same pattern. The viewmode
 
 ---
 
+## 1a. Black Ops II's own weapon rules (from the original game's code)
+
+Read from the original game's player weapon code for reference (behaviour only; nothing of it is in this repo) and checked against the owner's footage of the original game and an input replay in our build (`BO2MP_INPUT_REPLAY`, `BO2MP_WEAPON_TRACE`). Our weapon tick follows them whenever Black Ops II's rules are on (`weapon_iw4::bo2_switch_rules`); other games' guns keep Infinity Ward's. Tests: `crates/weapon_iw4/src/bo2_rules_tests.rs`.
+
+- **Frame order:** timers, then (unless a burst is going out) sprint, offhand, **weapon change, then reload**, melee ...; then the rechamber check; then the state step; then the fire check.
+- **Timer expiry:** in every timed state, a timer that runs out with the shot limit reached (semi-auto 1, burst N, automatic never), the trigger down and the selected weapon in hand is held at 1 ms (0 in the alternate-switch states); otherwise it is 0 and, with the trigger up and no burst going, the shot count clears. This is the semi-automatic "let go first" lock; the fire check itself needs only the trigger down. Shot count and the burst latch are **not** reset by a weapon change.
+- **Swap back during a drop:** the held weapon is ready at once (timers 0, idle), with no raise. Because the change check runs first in the frame, the reload, rechamber and fire checks of the same frame see the gun ready:
+  - with the trigger held, a semi-automatic fires on that frame (the **instaswap**);
+  - a gun still needing its rechamber starts it on that frame instead.
+- **Rechamber mark:** kept per held gun, set when a bolt/pump gun fires (after `iShotsBeforeRechamber` shots when it has one, counted per player), cleared only when the rechamber's whole timer has run (or a reload commits ammo). A weapon change does not clear it. So a pump skipped by a quick swap plays when the gun is next ready, and swapping away mid-pump and back restarts the pump from the top (the **Moni NAC**). `iRechamberBoltTime` is the bolt point inside the rechamber.
+- **Change admitted:** from reload and rechamber states always; from firing only when its timer is 0 (between an automatic's shots); never while a burst is going out (the whole check block is skipped) — so a **Select Fire** swap is clean in full-auto and waits for the burst in burst mode. The client refuses the Select Fire toggle while the gun is going down, mid-toggle, knifing or in an offhand.
+- **Swap during a raise:** the new drop starts at once on the full drop time. A swap to a third weapon during a drop changes which weapon comes up.
+- **Reload interrupted by a swap and swapped back:** the gun is ready; the reload does not resume (ammo already added stays).
+- **Switch timers:** empty clip → `iEmptyDropTime` / `iEmptyRaiseTime` with the empty drop/raise (a quick drop stays quick); raise order empty, first, quick, plain.
+- Not yet done: BO2's client ignores further weapon-select presses after one made during a reload until the viewmodel is idle again; the DSR 50's bolt-pull pull-out is not yet tied to the rule that picks it.
+
+---
+
 ## 2. Technique catalogue
 
 Each entry uses this format: **Aliases | Titles (origin) | Setup | Input | Timing | Animation | Mechanic | Result | Limits/patches | Evidence**.
