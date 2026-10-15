@@ -747,6 +747,12 @@ fn legacy_model_draw(technique_set: &str, sort_key: u8, state: Option<[u32; 2]>)
     if draw.blend == T6Blend::Sky {
         draw.blend = T6Blend::Opaque;
     }
+    // bo2mp: World at War's water cut-away (`mc_water_cutaway`: Shrine's
+    // editor block marking where the dynamic water is cut) is never drawn
+    // in the game; drawn it was a white slab over the pond.
+    if technique_set.trim_start_matches(',').split('_').any(|t| t == "cutaway") {
+        draw.blend = T6Blend::ShadowOnly;
+    }
     // The reflex and holo sights' reticle: a glowing dot, added on unlit.
     if technique_set.split('_').any(|t| t.contains("reflex") || t.contains("holo")) && draw.blend != T6Blend::Opaque {
         draw.unlit = true;
