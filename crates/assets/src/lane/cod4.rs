@@ -1548,7 +1548,13 @@ pub(crate) fn build_legacy_world(
             if let Some(look) = &look
                 && let Some(model) = look.capture.world.as_ref()
             {
-                if let Some(mut rows) = super::t6::world_fog_rows(model) {
+                // bo2mp: the map's own createart fog when it sets one (the
+                // model map's, Nuketown Zombies' on Dome, washed the whole
+                // map white once fog drew); the model's only where it has
+                // none.
+                if fog.is_some() {
+                    report.push("bo2 look: fog is the map's own".to_owned());
+                } else if let Some(mut rows) = super::t6::world_fog_rows(model) {
                     // Its fog colours are HDR for the model map's exposure
                     // (2^-exposure, a quarter to an eighth); this map draws
                     // at exposure 1, so they take that scale here (at 1 the
