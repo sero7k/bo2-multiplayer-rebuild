@@ -169,13 +169,16 @@ fn f32_at(z: &[u8], o: usize) -> f32 {
 
 /// The model's header after its mesh: a hash, `-2`, the surface count.
 fn model_header(z: &[u8], from: usize, surfaces: &[usize]) -> Option<usize> {
-    (from..from.saturating_add(0x8000).min(z.len().saturating_sub(0x18))).find(|&o| {
-        let h = u64_at(z, o);
-        h != 0
-            && !crate::hash::is_ref(h)
-            && u64_at(z, o + 8) == FOLLOW
-            && surfaces.contains(&usize::from(u16::from_le_bytes([z[o + 0x10], z[o + 0x11]])))
-    })
+    (from..from
+        .saturating_add(0x8000)
+        .min(z.len().saturating_sub(0x18)))
+        .find(|&o| {
+            let h = u64_at(z, o);
+            h != 0
+                && !crate::hash::is_ref(h)
+                && u64_at(z, o + 8) == FOLLOW
+                && surfaces.contains(&usize::from(u16::from_le_bytes([z[o + 0x10], z[o + 0x11]])))
+        })
 }
 
 /// The model's name: the first plain string after its header.
@@ -295,7 +298,11 @@ pub fn read_part(z: &[u8]) -> Result<PartModel, String> {
     // count it names.)
     let mut meshes = Vec::new();
     let mut at = h.data_start;
-    for _ in h.assets.iter().take_while(|a| a.kind == zone::asset_type::XMODEL_SURFS) {
+    for _ in h
+        .assets
+        .iter()
+        .take_while(|a| a.kind == zone::asset_type::XMODEL_SURFS)
+    {
         let rec = surfs::parse(z, at).map_err(|e| e.to_string())?;
         at = rec.end;
         meshes.push(rec);
