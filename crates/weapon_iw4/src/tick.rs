@@ -88,6 +88,8 @@ pub struct CapturedCombatInput {
     pub shots_per_fire: i32,
     pub burst_cooldown_ms: i32,
     pub bolt_action: bool,
+    /// bo2mp: shots before the rechamber (0 = every shot).
+    pub shots_before_rechamber: i32,
     pub rechamber_time_ms: i32,
     pub rechamber_bolt_time_ms: i32,
 
@@ -263,6 +265,8 @@ pub struct WeaponCombatFacts {
     pub burst_cooldown_ms: i32,
 
     pub bolt_action: bool,
+    /// bo2mp: Black Ops II `iShotsBeforeRechamber` (0 = every shot).
+    pub shots_before_rechamber: i32,
 
     pub rechamber_time_ms: i32,
 
@@ -426,6 +430,7 @@ impl WeaponCombatFacts {
             shots_per_fire: 0,
             burst_cooldown_ms: 0,
             bolt_action: false,
+            shots_before_rechamber: 0,
             rechamber_time_ms: 0,
             rechamber_bolt_time_ms: 0,
             rechamber_bolt_delay_ms: 0,
@@ -552,6 +557,7 @@ impl WeaponCombatFacts {
             shots_per_fire: input.shots_per_fire,
             burst_cooldown_ms: input.burst_cooldown_ms,
             bolt_action: input.bolt_action,
+            shots_before_rechamber: input.shots_before_rechamber,
             rechamber_time_ms: input.rechamber_time_ms,
             rechamber_bolt_time_ms: input.rechamber_bolt_time_ms,
             rechamber_bolt_delay_ms: input.rechamber_bolt_delay_ms,
@@ -808,6 +814,9 @@ pub struct WeaponCmd {
     /// `iEmptyRaiseTime` (`switch_raise_time_ms` is then that time): Black
     /// Ops II raises it with the empty raise, ahead of a quick raise.
     pub switch_raise_empty: bool,
+    /// bo2mp: the player's shots since his last rechamber (Black Ops II
+    /// keeps one count per player, for `shots_before_rechamber`).
+    pub rechamber_shot_count: u8,
 
     pub offhand: crate::offhand::OffhandCmd,
 
@@ -848,6 +857,7 @@ impl Default for WeaponCmd {
             alternate_switch: false,
             switch_quick_raise_time_ms: 0,
             switch_raise_empty: false,
+            rechamber_shot_count: 0,
             offhand: crate::offhand::OffhandCmd::default(),
             perks0: 0,
             perk_weap_reload_multiplier: PERK_WEAP_RELOAD_MULTIPLIER_DEFAULT,
@@ -1152,7 +1162,7 @@ pub fn weapon_ordinary(
 
     if event.is_none() {
         event = if bo2 {
-            bo2_check_for_rechamber(hand, facts, cmd, delayed_action)
+            bo2_check_for_rechamber(hand, facts, &mut *cmd, delayed_action)
         } else {
             weapon_check_for_rechamber(hand, facts, cmd, delayed_action)
         };
@@ -1305,7 +1315,11 @@ pub fn weapon_ordinary(
     let delayed_fire =
         delayed_action && hand.weaponstate == WeaponState::Firing as i32 && hand.weapon_delay == 0;
 
-    if ready_idle || mid_burst_continue || delayed_fire {
+    // bo2mp: a gun still needing its rechamber does not fire: it waits in
+    // ready for the rechamber (an automatic bolt gun held down, the
+    // SRM-1216, rechambers after its cylinder instead of firing on).
+    let needs_rechamber = bo2 && facts.bolt_action && hand.rechamber_pending && !delayed_fire;
+    if (ready_idle || mid_burst_continue || delayed_fire) && !needs_rechamber {
         let trigger = match fire_ty {
             FireType::FullAuto => attack || delayed_fire,
             // bo2mp: Black Ops II fires a semi-automatic whenever the trigger
@@ -1403,7 +1417,15 @@ pub fn weapon_ordinary(
             };
             hand.clip -= used;
             if facts.bolt_action {
-                hand.rechamber_pending = true;
+                if bo2 && facts.shots_before_rechamber > 0 {
+                    // bo2mp: the SRM-1216 rechambers after its cylinder's shots.
+                    cmd.rechamber_shot_count = cmd.rechamber_shot_count.saturating_add(1);
+                    if i32::from(cmd.rechamber_shot_count) >= facts.shots_before_rechamber {
+                        hand.rechamber_pending = true;
+                    }
+                } else {
+                    hand.rechamber_pending = true;
+                }
             }
             crate::weap_anim::set_fps_fire_anim(
                 &mut hand.weap_anim,
@@ -1585,7 +1607,7 @@ fn bo2_timer_expired(
 fn bo2_check_for_rechamber(
     hand: &mut WeaponHandState,
     facts: &WeaponCombatFacts,
-    cmd: &WeaponCmd,
+    cmd: &mut WeaponCmd,
     delayed_action: bool,
 ) -> Option<WeaponTickEvent> {
     if !facts.bolt_action {
@@ -1613,6 +1635,7 @@ fn bo2_check_for_rechamber(
     let rechamber = if rechamber > 0 { rechamber } else { 1 };
     hand.weaponstate = WeaponState::Rechambering as i32;
     hand.weapon_time = rechamber;
+    cmd.rechamber_shot_count = 0;
     let bolt = facts.rechamber_bolt_delay_ms;
     hand.weapon_delay = if bolt != 0 && bolt < rechamber { bolt } else { 1 };
     crate::weap_anim::set_rechamber_anim(&mut hand.weap_anim, cmd.f_weapon_pos_frac > 0.0);

@@ -63,6 +63,7 @@ pub(crate) fn validated_facts(
         },
 
         bolt_action: f.bolt_action,
+        shots_before_rechamber: f.shots_before_rechamber,
         rechamber_time_ms: f.rechamber_time_ms,
         rechamber_bolt_time_ms: f.rechamber_bolt_time_ms,
         rechamber_bolt_delay_ms: f.rechamber_bolt_delay_ms,

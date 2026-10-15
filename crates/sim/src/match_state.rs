@@ -119,6 +119,10 @@ pub struct ClientMatchState {
     /// swap plays when the gun next comes up, and a swap-back restarts it.
     pub(crate) rechamber_weapons: Vec<u32>,
 
+    /// bo2mp: his shots since his last rechamber (Black Ops II counts them
+    /// per player for a gun's `iShotsBeforeRechamber`).
+    pub(crate) rechamber_shot_count: u8,
+
     pub(crate) weapon_shot_count: u8,
     pub(crate) burst_latch: bool,
     pub(crate) burst_latch_secondary: bool,
@@ -280,6 +284,7 @@ impl ClientMatchState {
             ammo_by_weapon: self.ammo_by_weapon.clone(),
             taped_mag_spent: self.taped_mag_spent.clone(),
             rechamber_weapons: self.rechamber_weapons.clone(),
+            rechamber_shot_count: self.rechamber_shot_count,
             weapon_shot_count: self.weapon_shot_count,
             burst_latch: self.burst_latch,
             burst_latch_secondary: self.burst_latch_secondary,
@@ -334,6 +339,7 @@ impl ClientMatchState {
         self.ammo_by_weapon = meta.ammo_by_weapon.clone();
         self.taped_mag_spent = meta.taped_mag_spent.clone();
         self.rechamber_weapons = meta.rechamber_weapons.clone();
+        self.rechamber_shot_count = meta.rechamber_shot_count;
         self.weapon_shot_count = meta.weapon_shot_count;
         self.burst_latch = meta.burst_latch;
         self.burst_latch_secondary = meta.burst_latch_secondary;

@@ -436,6 +436,7 @@ pub(crate) fn advance_weapon_command(
                     })
                     .unwrap_or(0)
             },
+            rechamber_shot_count: meta.rechamber_shot_count,
             switch_raise_empty: {
                 let w = if cmd.weapon != 0 {
                     u32::from(cmd.weapon)
@@ -623,6 +624,7 @@ pub(crate) fn advance_weapon_command(
         meta.burst_latch = hand0.burst_latch;
         meta.rechamber_pending = hand0.rechamber_pending;
         if weapon_iw4::bo2_switch_rules() {
+            meta.rechamber_shot_count = wcmd.rechamber_shot_count;
             // bo2mp: the mark belongs to the gun this command began with
             // (a finished putaway leaves the old gun's mark in the hand);
             // the next command loads the new gun's.

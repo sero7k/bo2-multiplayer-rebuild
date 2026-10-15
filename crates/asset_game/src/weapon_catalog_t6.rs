@@ -378,6 +378,7 @@ fn t6_body_facts(w: &asset_t6::WeaponRef) -> WeaponBodyFacts {
     // spending ammo, so it fires with an empty clip.
     f.unlimited_ammo = w.def_u8(d::unlimitedAmmo) != 0 || w.def_u8(d::overheatWeapon) != 0;
     f.bolt_action = w.def_u8(d::bBoltAction) != 0;
+    f.shots_before_rechamber = w.def_i32(d::iShotsBeforeRechamber).max(0);
     f.retrievable = w.def_u8(d::bRetrievable) != 0;
     f.segmented_reload = w.def_u8(d::bSegmentedReload) != 0;
     f.sprint_raise_time_ms = w.def_i32(d::sprintInTime);

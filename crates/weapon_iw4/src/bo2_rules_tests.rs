@@ -17,6 +17,7 @@ const SHOTGUN: u32 = 1;
 const SNIPER: u32 = 2;
 const SMG: u32 = 3;
 const SMG_BURST: u32 = 4;
+const SRM: u32 = 5;
 
 /// Remington 870 MCS (common_mp.ff): pump, a rechamber after every shot.
 fn shotgun() -> WeaponCombatFacts {
@@ -80,12 +81,31 @@ fn smg(fire_type: FireType) -> WeaponCombatFacts {
     }
 }
 
+/// SRM-1216 (common_mp.ff): automatic, rechambers after its 4 shots.
+fn srm() -> WeaponCombatFacts {
+    WeaponCombatFacts {
+        fire_type: FireType::FullAuto as i32,
+        fire_time_ms: 128,
+        bolt_action: true,
+        shots_before_rechamber: 4,
+        rechamber_time_ms: 550,
+        rechamber_bolt_time_ms: 550,
+        rechamber_bolt_delay_ms: 200,
+        drop_time_ms: 400,
+        raise_time_ms: 550,
+        clip_size: 16,
+        start_ammo: 64,
+        ..WeaponCombatFacts::default()
+    }
+}
+
 fn facts_for(weapon: u32) -> WeaponCombatFacts {
     match weapon {
         SHOTGUN => shotgun(),
         SNIPER => sniper(),
         SMG => smg(FireType::FullAuto),
         SMG_BURST => smg(FireType::BurstFire3),
+        SRM => srm(),
         _ => WeaponCombatFacts::default(),
     }
 }
@@ -106,6 +126,7 @@ struct Player {
     old_buttons: u32,
     frame: u32,
     log: Vec<(u32, WeaponTickEvent)>,
+    rechamber_shots: u8,
 }
 
 impl Player {
@@ -130,6 +151,7 @@ impl Player {
             old_buttons: 0,
             frame: 0,
             log: Vec::new(),
+            rechamber_shots: 0,
         }
     }
 
@@ -160,9 +182,11 @@ impl Player {
             switch_raise_time_ms: target.raise_time_ms,
             switch_quick_raise_time_ms: target.quick_raise_time_ms,
             switch_raise_empty: target.empty_raise_time_ms > 0 && target_clip <= 0,
+            rechamber_shot_count: self.rechamber_shots,
             ..WeaponCmd::default()
         };
         let ev = weapon_ordinary(&mut self.hand, &facts, &mut cmd);
+        self.rechamber_shots = cmd.rechamber_shot_count;
         // ... and stores them back with the gun the frame began with.
         let (c, s, m) = (self.hand.clip, self.hand.stock, self.hand.rechamber_pending);
         let g = self.gun(started);
@@ -432,5 +456,21 @@ fn infinity_ward_rules_unchanged() {
         let f = p.frame;
         p.step();
         assert_eq!(p.shots_since(f), 0, "needs a fresh pull");
+    });
+}
+
+/// The SRM-1216 fires its 4 shots and then rechambers (it used to pump
+/// after every shot).
+#[test]
+fn the_srm_rechambers_after_four_shots() {
+    with_test_rules(true, || {
+        let mut p = Player::new(SRM, &[]);
+        p.buttons |= BUTTON_ATTACK;
+        p.run_until(120, |p| p.state() == WeaponState::Rechambering);
+        assert_eq!(p.shots_since(0), 4);
+        assert_eq!(p.gun(SRM).clip, 12);
+        p.run_until(120, |p| p.state() == WeaponState::Firing);
+        p.frames(1);
+        assert_eq!(p.shots_since(0), 5, "fires again after the rechamber");
     });
 }

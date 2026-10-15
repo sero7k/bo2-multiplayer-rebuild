@@ -38,6 +38,7 @@ pub struct ClientSnapshotMeta {
 
     /// bo2mp: the guns still needing their pump or bolt pulled.
     pub rechamber_weapons: Vec<u32>,
+    pub rechamber_shot_count: u8,
 
     pub weapon_shot_count: u8,
     pub burst_latch: bool,

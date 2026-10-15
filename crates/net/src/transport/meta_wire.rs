@@ -1465,6 +1465,7 @@ fn encode_client_meta(out: &mut WireWriter, meta: &ClientSnapshotMeta) {
     for weapon in &meta.rechamber_weapons {
         out.put_u32(*weapon);
     }
+    out.put_u8(meta.rechamber_shot_count);
     out.put_u8(meta.weapon_shot_count);
     out.put_u8(u8::from(meta.burst_latch) | (u8::from(meta.burst_latch_secondary) << 1));
     out.put_u8(
@@ -1642,6 +1643,7 @@ fn decode_client_meta(input: &mut WireReader<'_>) -> Result<ClientSnapshotMeta, 
     for _ in 0..rechamber_rows {
         rechamber_weapons.push(input.get_u32()?);
     }
+    let rechamber_shot_count = input.get_u8()?;
     let weapon_shot_count = input.get_u8()?;
     let burst_latch_hands = input.get_u8()?;
     let burst_latch = burst_latch_hands & 1 != 0;
@@ -1748,6 +1750,7 @@ fn decode_client_meta(input: &mut WireReader<'_>) -> Result<ClientSnapshotMeta, 
         ammo_by_weapon,
         taped_mag_spent,
         rechamber_weapons,
+        rechamber_shot_count,
         weapon_shot_count,
         burst_latch,
         burst_latch_secondary,

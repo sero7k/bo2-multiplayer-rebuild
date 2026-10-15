@@ -273,6 +273,11 @@ pub struct WeaponBodyFacts {
 
     pub bolt_action: bool,
 
+    /// bo2mp: Black Ops II `iShotsBeforeRechamber`: a bolt gun that fires
+    /// this many shots before it rechambers (the SRM-1216's cylinder); 0 =
+    /// after every shot.
+    pub shots_before_rechamber: i32,
+
     /// bo2zm: Black Ops II `bRetrievable` (equipment and knives the player
     /// picks back up; the scripts' `getretrievableweapons`).
     pub retrievable: bool,
@@ -1888,6 +1893,7 @@ impl WeaponCatalog {
                 no_partial_reload: geometry.no_partial_reload,
                 unlimited_ammo: false,
                 bolt_action: geometry.bolt_action,
+                shots_before_rechamber: 0,
                 retrievable: false,
                 t6_weap_type: 0,
                 segmented_reload: geometry.segmented_reload,
