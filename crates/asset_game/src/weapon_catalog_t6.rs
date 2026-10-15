@@ -362,7 +362,11 @@ fn t6_body_facts(w: &asset_t6::WeaponRef) -> WeaponBodyFacts {
     }
     f.min_player_damage = w.def_i32(d::minPlayerDamage);
     f.rechamber_time_ms = w.def_i32(d::iRechamberTime);
-    f.rechamber_bolt_time_ms = w.def_i32(d::iRechamberBoltTime);
+    // Black Ops II's `iRechamberBoltTime` is the bolt point inside the
+    // rechamber (its weapon delay: the casing ejects there), as in Black
+    // Ops; it has no one-handed rechamber time of its own.
+    f.rechamber_bolt_time_ms = w.def_i32(d::iRechamberTime);
+    f.rechamber_bolt_delay_ms = w.def_i32(d::iRechamberBoltTime);
     f.reload_show_rocket_time_ms = w.def_i32(d::reloadShowRocketTime);
     f.reload_add_time_ms = w.def_i32(d::iReloadAddTime);
     f.reload_empty_add_time_ms = w.def_i32(d::iReloadEmptyAddTime);
