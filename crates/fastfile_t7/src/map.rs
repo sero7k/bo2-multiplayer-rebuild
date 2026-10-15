@@ -59,6 +59,83 @@ pub struct MapMaterial {
     pub name: String,
     pub technique_set: String,
     pub textures: Vec<(u32, String)>,
+    /// bo2mp: the material's own numbers by the name its shaders give them
+    /// (`colorTint`, `glossRange`, `detailScale1`, `baseNormalHeight`, ...):
+    /// its `$Globals` buffers read with the layout its technique's programs
+    /// declare (`crate::dxbc`). Empty when the technique set's programs are
+    /// not in the zone.
+    pub constants: HashMap<String, Vec<f32>>,
+    /// bo2mp: the texture slots its technique set's pixel programs bind
+    /// (`colorMap`, `specColorMap`, `glossMap`, `detailMap1`, ...).
+    pub bound: Vec<String>,
+}
+
+impl MapMaterial {
+    /// A constant's first `N` floats.
+    pub fn constant<const N: usize>(&self, name: &str) -> Option<[f32; N]> {
+        let v = self.constants.get(name)?;
+        (v.len() >= N).then(|| std::array::from_fn(|k| v[k]))
+    }
+    /// The image in the texture slot called `slot` (by `R_HashString`),
+    /// engine placeholders (`$...`) left out.
+    pub fn texture(&self, slot: &str) -> Option<&str> {
+        let h = hash_string(slot);
+        self.textures.iter().find(|(k, n)| *k == h && !n.starts_with('$')).map(|(_, n)| n.as_str())
+    }
+    /// The placeholder or image in the slot, as the zone names it.
+    pub fn texture_raw(&self, slot: &str) -> Option<&str> {
+        let h = hash_string(slot);
+        self.textures.iter().find(|(k, _)| *k == h).map(|(_, n)| n.as_str())
+    }
+}
+
+/// `R_HashString`: case-folded, each byte xor 33 times the running hash
+/// (the texture table's slot names).
+pub fn hash_string(s: &str) -> u32 {
+    s.bytes().fold(0u32, |h, c| u32::from(c.to_ascii_lowercase()) ^ h.wrapping_mul(33))
+}
+
+/// bo2mp: a material's named constants and bound texture slots, from its
+/// technique set's programs (`MapMaterial::constants`).
+fn material_constants(cap: &Capture, image: &[u8], m: &crate::walk::capture::MaterialRec) -> (HashMap<String, Vec<f32>>, Vec<String>) {
+    let mut constants: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut bound: Vec<String> = Vec::new();
+    let Some(ts) = m.techset.as_deref().and_then(|t| cap.techset(t)) else { return (constants, bound) };
+    let reflect = |p: Option<(usize, usize)>| p.and_then(|(at, n)| image.get(at..at + n)).and_then(crate::dxbc::reflect);
+    let mut reflected: Vec<[Option<crate::dxbc::Reflection>; 2]> = Vec::with_capacity(12);
+    for t in &ts.programs {
+        reflected.push(match t {
+            Some([vs, ps]) => [reflect(*vs), reflect(*ps)],
+            None => [None, None],
+        });
+    }
+    for r in reflected.iter().filter_map(|r| r[1].as_ref()) {
+        for (name, _) in &r.textures {
+            if !bound.contains(name) {
+                bound.push(name.clone());
+            }
+        }
+    }
+    for (slot, data) in &m.globals {
+        let t = usize::from(*slot) / 6;
+        // The program of that technique whose `$Globals` is this buffer's
+        // size (the pixel program first), else any technique's.
+        let fits = |r: &crate::dxbc::Reflection| r.globals().is_some_and(|g| g.size as usize == data.len());
+        let layout = reflected
+            .get(t)
+            .and_then(|r| [&r[1], &r[0]].into_iter().flatten().find(|r| fits(r)))
+            .or_else(|| reflected.iter().flat_map(|r| [&r[1], &r[0]]).flatten().find(|r| fits(r)))
+            .and_then(crate::dxbc::Reflection::globals);
+        let Some(g) = layout else { continue };
+        for v in &g.variables {
+            let (o, n) = (v.offset as usize, v.size as usize);
+            if o + n > data.len() || n == 0 || n % 4 != 0 || constants.contains_key(&v.name) {
+                continue;
+            }
+            constants.insert(v.name.clone(), data[o..o + n].chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect());
+        }
+    }
+    (constants, bound)
 }
 
 /// One model surface: positions, normals, UVs and triangles.
@@ -287,6 +364,18 @@ impl T7Map {
         out.read_world(&cap, image)?;
         out.read_models(&cap, image, src);
         out.read_clip(&cap, image);
+        // bo2mp: the materials' named constants and bound texture slots.
+        let mut named = 0;
+        for i in 0..out.materials.len() {
+            let n = out.materials[i].name.clone();
+            if let Some(m) = cap.material(&n).or_else(|| cap.material(&format!(",{n}"))) {
+                let (c, b) = material_constants(&cap, image, m);
+                named += usize::from(!c.is_empty());
+                out.materials[i].constants = c;
+                out.materials[i].bound = b;
+            }
+        }
+        out.report.push(format!("materials: {named} of {} with their constants named by their shaders", out.materials.len()));
         if let Some(m) = cap.world.map_ents.first()
             && let Some((at, n)) = m.entity_string
         {
@@ -337,6 +426,7 @@ impl T7Map {
                 name: name.to_owned(),
                 technique_set: m.techset.as_deref().map(bare).unwrap_or_default().to_owned(),
                 textures: m.textures.iter().map(|(h, i)| (*h, bare(i).to_owned())).collect(),
+                ..Default::default()
             });
             self.materials.len() - 1
         });

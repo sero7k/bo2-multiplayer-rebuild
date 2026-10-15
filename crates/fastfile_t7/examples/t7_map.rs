@@ -18,6 +18,19 @@ fn main() {
                     for l in &m.report {
                         println!("  {l}");
                     }
+                    if dump == "materials" {
+                        for mm in &m.materials {
+                            println!("  material {} techset {} binds {:?}", mm.name, mm.technique_set, mm.bound);
+                            for (h, i) in &mm.textures {
+                                println!("    {h:#010x} {i}");
+                            }
+                            let mut c: Vec<_> = mm.constants.iter().collect();
+                            c.sort_by(|a, b| a.0.cmp(b.0));
+                            for (k, v) in c {
+                                println!("    {k} = {v:?}");
+                            }
+                        }
+                    }
                     if dump == "ents" {
                         println!("{}", m.entities);
                     }

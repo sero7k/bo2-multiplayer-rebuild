@@ -20,6 +20,7 @@
 pub mod asset_type;
 pub mod container;
 pub mod cursor;
+pub mod dxbc;
 pub mod map;
 pub mod mesh;
 pub mod ptr;

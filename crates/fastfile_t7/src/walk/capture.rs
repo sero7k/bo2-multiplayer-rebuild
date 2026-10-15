@@ -183,6 +183,15 @@ pub struct MaterialRec {
     pub globals: Vec<(u8, Vec<u8>)>,
 }
 
+/// bo2mp: a `MaterialTechniqueSet` loaded in the zone: per technique (12),
+/// its first draw method's vertex and pixel programs (file offset, bytes),
+/// for `crate::dxbc::reflect`.
+#[derive(Clone, Debug, Default)]
+pub struct TechsetRec {
+    pub name: String,
+    pub programs: [Option<[Option<(usize, usize)>; 2]>; 12],
+}
+
 /// A `GfxImage` loaded in the zone.
 #[derive(Clone, Debug, Default)]
 pub struct ImageRec {
@@ -209,6 +218,8 @@ pub struct Capture {
     pub models: Vec<ModelRec>,
     pub materials: Vec<MaterialRec>,
     pub images: Vec<ImageRec>,
+    /// bo2mp: technique sets.
+    pub techsets: Vec<TechsetRec>,
     pub meshes: Vec<MeshRec>,
     /// bo2mp: animations (`walk::anim`), kept only when `keep_anims` is on.
     pub anims: Vec<AnimRec>,
@@ -257,6 +268,19 @@ impl Capture {
         self.by_name
             .insert((AssetType::Material, r.name.clone()), self.materials.len());
         self.materials.push(r);
+    }
+    pub(crate) fn add_techset(&mut self, r: TechsetRec) {
+        self.by_name
+            .insert((AssetType::TechniqueSet, r.name.clone()), self.techsets.len());
+        self.techsets.push(r);
+    }
+    /// bo2mp: the technique set called `name` (with or without its `,`).
+    pub fn techset(&self, name: &str) -> Option<&TechsetRec> {
+        let bare = name.trim_start_matches(',');
+        [bare.to_string(), format!(",{bare}")]
+            .iter()
+            .find_map(|n| self.by_name.get(&(AssetType::TechniqueSet, n.clone())))
+            .map(|&i| &self.techsets[i])
     }
     pub(crate) fn add_image(&mut self, r: ImageRec) {
         self.by_name

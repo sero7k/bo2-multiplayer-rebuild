@@ -67,30 +67,39 @@ const TEXTURE_DEF: usize = 32;
 const SAMPLER_DEF: usize = 8;
 const CONSTANT_DEF: usize = 32;
 
-/// A shader stage: struct, name, extraDef, program (aligned 4).
-fn shader(s: &mut Stream, field: usize) -> Result<()> {
+/// A shader stage: struct, name, extraDef, program (aligned 4). bo2mp:
+/// where its program is (file offset, bytes) when it loaded here.
+fn shader(s: &mut Stream, field: usize) -> Result<Option<(usize, usize)>> {
     if let Some(sh) = s.array(field, SHADER, 7)? {
         s.no_loads(sh, SHADER, &[0, 8, 0x18])?;
         s.string(sh)?;
         s.string(sh + 8)?;
         let size = s.u32_at(sh + 0x20)? as usize;
-        s.array(sh + 0x18, size, 3)?;
+        return Ok(s.array(sh + 0x18, size, 3)?.map(|at| (at, size)));
     }
-    Ok(())
+    Ok(None)
 }
 
-fn technique(s: &mut Stream, field: usize) -> Result<()> {
+/// bo2mp: a technique's first draw method's vertex and pixel programs.
+type Programs = Option<[Option<(usize, usize)>; 2]>;
+
+fn technique(s: &mut Stream, field: usize) -> Result<Programs> {
     if !s.ptr_at(field)?.is_inline() {
-        return s.array(field, 0, 0).map(drop);
+        return s.array(field, 0, 0).map(|_| None);
     }
-    let Some(t) = s.array(field, TECHNIQUE, 7)? else { return Ok(()) };
+    let Some(t) = s.array(field, TECHNIQUE, 7)? else { return Ok(None) };
+    let mut programs: Programs = None;
     for m in 0..DRAW_METHODS {
         let d = t + 8 + DRAW_METHOD * m;
         s.no_loads(d, DRAW_METHOD, &[0x08, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40, 0x50])?;
-        shader(s, d + 0x18)?;
+        let vs = shader(s, d + 0x18)?;
         s.array(d + 0x08, VERTEX_DECL, 3)?;
-        for stage in [0x20, 0x28, 0x30, 0x38, 0x40] {
+        let ps = shader(s, d + 0x20)?;
+        for stage in [0x28, 0x30, 0x38, 0x40] {
             shader(s, d + stage)?;
+        }
+        if programs.is_none() && (vs.is_some() || ps.is_some()) {
+            programs = Some([vs, ps]);
         }
         let n = s.u8_at(d + 0x48)? as usize;
         if let Some(a) = s.records(d + 0x50, n, ARG, 7)? {
@@ -105,14 +114,16 @@ fn technique(s: &mut Stream, field: usize) -> Result<()> {
     }
     s.string(t)?;
     s.array(t + 0x2c8, STATE_MAP, 3)?;
-    Ok(())
+    Ok(programs)
 }
 
 pub fn technique_set(s: &mut Stream, h: usize) -> Result<Option<String>> {
     let name = s.string(h)?;
+    let mut rec = super::capture::TechsetRec { name: name.clone().unwrap_or_default(), ..Default::default() };
     for i in 0..TECHNIQUES {
-        technique(s, h + 0x10 + 8 * i)?;
+        rec.programs[i] = technique(s, h + 0x10 + 8 * i)?;
     }
+    s.capture.add_techset(rec);
     Ok(name)
 }
 
