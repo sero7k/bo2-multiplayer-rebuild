@@ -807,15 +807,45 @@ pub(crate) fn picture_async(
         return None;
     }
     let key = key.to_owned();
-    std::thread::Builder::new()
+    READS_IN_FLIGHT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let spawned = std::thread::Builder::new()
         .name("ui-picture".into())
         .spawn(move || {
-            let image = read().map(|p| picture_image(p, srgb));
-            diag::info!(Ui, "picture `{key}`: {}", if image.is_some() { "read from its game" } else { "not found" });
+            struct Done;
+            impl Drop for Done {
+                fn drop(&mut self) {
+                    READS_IN_FLIGHT.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            let _done = Done;
+            let started = std::time::Instant::now();
+            let (found, cached) = crate::picture_cache::read_through(&key, read);
+            let image = found.map(|p| picture_image(p, srgb));
+            diag::info!(
+                Ui,
+                "picture `{key}`: {} ({:.0} ms)",
+                match (image.is_some(), cached) {
+                    (true, true) => "from the cache",
+                    (true, false) => "read from its game",
+                    (false, true) => "not found (kept miss)",
+                    (false, false) => "not found",
+                },
+                started.elapsed().as_secs_f64() * 1000.0
+            );
             store_picture(key, image);
-        })
-        .ok();
+        });
+    if spawned.is_err() {
+        READS_IN_FLIGHT.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
     None
+}
+
+/// Pictures being read from their games right now (a menu does not give
+/// up on a picture while one is: the first read of a zone can be slow).
+static READS_IN_FLIGHT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub(crate) fn picture_reads_in_flight() -> usize {
+    READS_IN_FLIGHT.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// bo2mp: which other games' guns Create-a-Class lists (an installed game

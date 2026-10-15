@@ -27,6 +27,7 @@ pub mod hud_nuke; // bo2mp: the Tactical Nuke's KEM STRIKE INBOUND banner
 pub mod hud_medals; // bo2mp: Black Ops' medal notification
 pub(crate) mod hud_cards; // bo2mp: MW2/MW3 calling cards and emblems in the HUD
 mod jup_cards; // bo2mp: Modern Warfare III's (2023) emblems and calling cards
+mod picture_cache; // bo2mp: other games' menu pictures kept on disk
 mod jup_hud; // bo2mp: Modern Warfare III's (2023) Warzone HUD pictures
 pub(crate) mod hud_warzone; // bo2mp: the Warzone HUD (Resurgence)
 pub(crate) mod hud_prematch; // bo2mp: the match's start countdown

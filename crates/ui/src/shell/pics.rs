@@ -34,7 +34,12 @@ impl ShellPics {
         // (An async read is asked again until it is in; one never found is
         // given up after a while.)
         if let Some(n) = self.tried.get_mut(name) {
-            *n += 1;
+            // (Not counted while other games' pictures are still being
+            // read: Black Ops III's or Ghosts' first icon walks a whole
+            // zone, and a picture given up on then never showed.)
+            if crate::foreign_maps::picture_reads_in_flight() == 0 {
+                *n += 1;
+            }
             if *n >= 600 {
                 return None;
             }
