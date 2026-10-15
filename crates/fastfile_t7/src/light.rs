@@ -240,7 +240,10 @@ pub struct Bake {
     pub probes: Vec<Probe>,
     /// The map's bounds (the probes' boxes but the map-wide one).
     pub bounds: [[f32; 3]; 2],
-    /// Probe cube to world axes: world = (c.x, c.y, sign * c.z) (`CUBE_Z`).
+    /// The sky's light (times `skyScale`) over the probes' in the same
+    /// directions (the map-wide probe's upper four faces against the sky
+    /// there): the probes are baked in exposure-relative units.
+    pub probe_units: f32,
     pub report: Vec<String>,
 }
 
@@ -282,8 +285,12 @@ impl Bake {
         };
         let mut probes = Vec::new();
         if let Some(p) = &refs.probes {
-            let face: usize = (0..p.levels).map(|k| crate::texture::level_size(p.format, p.size >> k, p.size >> k).unwrap_or(0)).sum();
-            let last: usize = (0..p.levels - 1).map(|k| crate::texture::level_size(p.format, p.size >> k, p.size >> k).unwrap_or(0)).sum();
+            // (Mip-major: every face of every probe at level 0, then level
+            // 1, ...; read on mp_redwood, whose faces are then world +X..-Z.)
+            let lsize = |k: u32| crate::texture::level_size(p.format, p.size >> k, p.size >> k).unwrap_or(0);
+            let face: usize = (0..p.levels).map(lsize).sum();
+            let last: usize = (0..p.levels - 1).map(|k| lsize(k) * 6 * p.count as usize).sum();
+            let lsz = lsize(p.levels - 1);
             match paks.read(p.key) {
                 Ok(d) if d.len() >= face * 6 * p.count as usize => {
                     for i in 0..p.count as usize {
@@ -292,7 +299,7 @@ impl Bake {
                         let mut faces = [[0f32; 3]; 6];
                         for (f, out) in faces.iter_mut().enumerate() {
                             // The smallest level: 4x4 or less, one block.
-                            let at = (6 * i + f) * face + last;
+                            let at = last + (6 * i + f) * lsz;
                             let px = bc6_block(&d[at..at + 16]);
                             let s = (p.size >> (p.levels - 1)).clamp(1, 4) as usize;
                             let mut sum = [0f32; 3];
@@ -345,6 +352,21 @@ impl Bake {
             lo = map.mins;
             hi = map.maxs;
         }
+        // The sky against the map-wide probe: its +Z face's mean against the
+        // sky's mean over the same face.
+        let mut probe_units = 1.0;
+        if let (Some(sky), Some(g)) = (sky.as_ref(), probes.first()) {
+            let s = 16u32;
+            let cube = sky_cube(sky, s);
+            let lum = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+            let face = 4usize;
+            let sky_up: f32 = cube[face * (s * s) as usize..(face + 1) * (s * s) as usize].iter().map(|c| lum([c[0], c[1], c[2]])).sum::<f32>() / (s * s) as f32;
+            let probe_up = lum(g.faces[face]);
+            if sky_up > 0.0 && probe_up > 1e-4 {
+                probe_units = sky_up / probe_up;
+            }
+            report.push(format!("sky over probe (up face): {sky_up:.2} / {probe_up:.3} = {probe_units:.1}"));
+        }
         if let Some(g) = probes.first() {
             report.push(format!(
                 "probes: {} (global probe faces {:.2?}), local boxes over {lo:.0?}..{hi:.0?}",
@@ -352,7 +374,7 @@ impl Bake {
                 g.faces.iter().map(|f| 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2]).collect::<Vec<_>>()
             ));
         }
-        Ok(Bake { sky, probes, bounds: [lo, hi], report })
+        Ok(Bake { sky, probes, bounds: [lo, hi], probe_units, report })
     }
 
     /// The ambient light at `p` for a surface facing `n` (unit): the probe
@@ -418,7 +440,7 @@ pub fn probe_faces(map: &T7Map, index: usize, mip: u32) -> Result<ProbeFaces, St
     let s = (p.size >> mip).max(1);
     let bw = s.div_ceil(4) as usize;
     let mut texels = Vec::new();
-    let level_major = std::env::var("T7_CUBE_ORDER").is_ok_and(|v| v == "level");
+    let level_major = !std::env::var("T7_CUBE_ORDER").is_ok_and(|v| v == "face");
     for f in 0..6 {
         let at = if level_major {
             (0..mip).map(|k| lsize(k) * 6 * p.count as usize).sum::<usize>() + (6 * index + f) * lsize(mip)
