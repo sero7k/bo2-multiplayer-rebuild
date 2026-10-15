@@ -497,7 +497,7 @@ impl T7Map {
                 gloss[i] = (g[0] + t * (g[1] - g[0])).clamp(0.0, 1.0);
             }
         };
-        let threads = std::thread::available_parallelism().map_or(4, usize::from).clamp(1, 16);
+        let threads = std::thread::available_parallelism().map_or(4, |n| usize::from(n) / 2).clamp(1, 8);
         let rows_each = (h as usize).div_ceil(threads).max(1);
         let wu = w as usize;
         std::thread::scope(|sc| {
