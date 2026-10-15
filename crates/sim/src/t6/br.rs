@@ -27,8 +27,10 @@ pub fn set_resurgence(squad_size: Option<u8>) {
     }
 }
 
+/// The next (or this) match is Resurgence: set from the menu, or
+/// `BO2MP_BR=<squad size>` for a test run.
 pub fn resurgence_on() -> bool {
-    SETUP.lock().is_ok_and(|s| s.is_some())
+    rules().is_some()
 }
 
 /// bo2mp: how to ask Modern Warfare III's sounds whether an alias is there.
