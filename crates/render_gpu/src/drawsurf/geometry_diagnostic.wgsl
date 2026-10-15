@@ -775,15 +775,14 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
             // 6 - 8 * gloss, plus the sun's highlight e^((R.L - 0.99925) *
             // (2^(9.3775 * gloss) + 7)) times the sun's colour, its
             // visibility and 0.625 (envMapParms.w); both times the specular
-            // colour and the fresnel lerp(0.8, 2, (1 - |N.V|)^2.5) (the
-            // usual envMapParms of these maps' materials; Black Ops II's
-            // look keeps it a touch under CoD4's strongest).
+            // colour and the fresnel lerp(0.8, 2, 1 - |N.V|) (envMapParms
+            // 0.8 2 1: most of these maps' materials carry it).
             let spec_g = raw_texel(st3.rgb);
             let env_g = textureSampleLevel(probe_cubes, probe_sampler, r3, i32(in.probe), clamp(6.0 - 8.0 * gloss3, 0.0, 6.0)).rgb;
             let power = exp2(gloss3 * 9.377518) + 7.0;
             let lobe = saturate(exp((dot(r3, t6.sun_dir_exposure.xyz) - 0.99925) * power));
             let sun_spec = t6.sun_color.rgb * (sun_vis * lobe * 0.625);
-            let fres = mix(0.8, 2.0, pow(1.0 - abs(dot(n_iw3, v3)), 2.5));
+            let fres = mix(0.8, 2.0, 1.0 - abs(dot(n_iw3, v3)));
             let g = sqrt(lit_iw3) + (env_g + sun_spec) * spec_g * fres;
             lit_iw3 = g * g;
         } else {
