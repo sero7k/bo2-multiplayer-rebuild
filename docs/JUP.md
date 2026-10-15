@@ -166,6 +166,26 @@ The game shows them at runtime through `crates/ui/src/jup_cards.rs`
 (`jup:<name>`, a frame `jup:<name>#<n>`), from `$BO2_JUP_INSTALL` or the
 game folders file's `jup` line.
 
+## The Warzone HUD's pictures (`crates/ui/src/jup_hud.rs`, probe `jup_hud_pics`)
+
+The in-game HUD pictures are images (type 21) in `ingame`, `ingame_br`,
+`ingame_shared_mp` and `ingame_base_mp`, named by hash only; the LUI scripts
+that name and place them are compiled and not read. `jup_hud_pics <install>
+<out> [max side] <zone>...` writes a zone's pictures as contact sheets (8 by
+8 cells in asset order, `JUP_ONLY=0x30` and `JUP_LARGEST=512` keep the
+UI-sized BC7 ones) with a TSV of cell to hash; the HUD's were picked from
+those by eye. 1.21: `ingame` 85 images (map and objective icons), `ingame_br`
+4,095 (733 BC7 of 512 or less: contracts, pings, loadout drops, buy station,
+gas, plates, squad), `ingame_shared_mp` 2,201 (ammo, plates, cash, hit
+markers, kill skulls), `ingame_base_mp` 2,429 (plate bar segments, rings,
+armor break). UI pictures are white or grey glyphs (format 0x30, BC7, most
+with a single streamed group in the zone `.xpak`s), drawn tinted.
+
+`jup_hud::PICTURES` is the table (our name, zone, hash); the Warzone HUD
+(`hud_warzone`, Resurgence only) draws them in `shell::wz_theme::HUD`'s
+colours and a plain shape for any the install lacks. All 46 read in about 4 s
+off the main thread on 1.21.
+
 ## Maps (`fastfile_jup::map`, `assets::lane::jup_map`)
 
 Played: Rebirth Island (`mp_jup_escape5`, Resurgence) and Tokyo
