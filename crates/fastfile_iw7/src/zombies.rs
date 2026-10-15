@@ -137,9 +137,8 @@ pub struct Blocker {
     pub brushes: Vec<(u32, [f32; 3])>,
     /// The name its pieces share (the interactions' and trigger's target).
     pub group: String,
-    /// The placed models that stand in its brushes (`find_props`): what is
-    /// seen of it (Spaceland's shop doors, gates, planter rows across a
-    /// path), its brushes being clip only.
+    /// Its props (`find_props`): what is seen of it, its brushes being clip
+    /// only.
     pub props: Vec<BlockerProp>,
 }
 
@@ -153,9 +152,7 @@ pub struct BlockerProp {
     pub axis: [[f32; 3]; 3],
 }
 
-/// How much of a placed model's box must lie in a blocker's brush for the
-/// model to be part of it.
-const PROP_INSIDE: f32 = 0.4;
+
 
 /// A machine by its IW7 interaction name (`perk_machine_tough`).
 #[derive(Clone, Debug, PartialEq)]
@@ -236,56 +233,21 @@ impl ZmLayout {
         out
     }
 
-    /// Each blocker's placed models: those whose box (the model's bounds
-    /// where it stands) has its middle in one of the blocker's brushes
-    /// (a little grown) and `PROP_INSIDE` of its volume in it. IW7's
-    /// blocker brushes (`script_brushmodel` named by the group) hold no
-    /// surfaces on cp_zmb: they only clip; the doors and piles seen there
-    /// are placed models, which the game's scripts take away with the
-    /// clip. A model is given to one blocker at most.
+    /// Each blocker's props: the scriptables its group names
+    /// (`cp_zmb_barrier_*`: Spaceland's park wall panels; Rave's
+    /// `cp_rave_doorbuy_*` boards and rocks), drawn as placed models by
+    /// `Iw7Map::load`. IW7's blocker brushes (`script_brushmodel` of the
+    /// group) hold no surfaces: they only clip; the scripts take the
+    /// scriptable away with the clip.
     pub fn find_props(&mut self, map: &Iw7Map) {
-        let mut taken = vec![false; map.static_models.len()];
         for b in &mut self.blockers {
-            b.props.clear();
-            for &(n, origin) in &b.brushes {
-                let Some(bm) = map.brush_models.get(n as usize) else { continue };
-                let lo: [f32; 3] = std::array::from_fn(|k| origin[k] + bm.mins[k]);
-                let hi: [f32; 3] = std::array::from_fn(|k| origin[k] + bm.maxs[k]);
-                if (0..3).any(|k| hi[k] - lo[k] <= 0.0) {
-                    continue;
-                }
-                let brush_volume: f32 = (0..3).map(|k| hi[k] - lo[k]).product();
-                for (i, sm) in map.static_models.iter().enumerate() {
-                    if taken[i] {
-                        continue;
-                    }
-                    let Some(model) = map.models.get(sm.model) else { continue };
-                    // The model's box where it stands.
-                    let (mut mlo, mut mhi) = ([f32::MAX; 3], [f32::MIN; 3]);
-                    for c in 0..8 {
-                        let local = [0, 1, 2].map(|k| if c >> k & 1 == 0 { model.mins[k] } else { model.maxs[k] });
-                        for k in 0..3 {
-                            let p = sm.origin[k] + (local[0] * sm.axis[0][k] + local[1] * sm.axis[1][k] + local[2] * sm.axis[2][k]) * sm.scale;
-                            mlo[k] = mlo[k].min(p);
-                            mhi[k] = mhi[k].max(p);
-                        }
-                    }
-                    let mid: [f32; 3] = std::array::from_fn(|k| (mlo[k] + mhi[k]) * 0.5);
-                    if !(0..3).all(|k| mid[k] >= lo[k] - 4.0 && mid[k] <= hi[k] + 4.0) {
-                        continue;
-                    }
-                    let size: [f32; 3] = std::array::from_fn(|k| (mhi[k] - mlo[k]).max(1.0));
-                    let volume: f32 = size.iter().product();
-                    let inside: f32 = (0..3).map(|k| (mhi[k].min(hi[k] + 4.0) - mlo[k].max(lo[k] - 4.0)).max(0.0).min(size[k])).product();
-                    // (A building whose middle falls in a doorway is not
-                    // the door.)
-                    if inside < PROP_INSIDE * volume || volume > 4.0 * brush_volume {
-                        continue;
-                    }
-                    taken[i] = true;
-                    b.props.push(BlockerProp { index: i, origin: sm.origin, axis: sm.axis.map(|r| r.map(|v| v * sm.scale)) });
-                }
-            }
+            b.props = map
+                .static_models
+                .iter()
+                .enumerate()
+                .filter(|(_, sm)| sm.scriptable.and_then(|k| map.scriptables.get(k as usize)).is_some_and(|sc| sc.targetname == b.group))
+                .map(|(index, sm)| BlockerProp { index, origin: sm.origin, axis: sm.axis.map(|r| r.map(|v| v * sm.scale)) })
+                .collect();
         }
     }
 
