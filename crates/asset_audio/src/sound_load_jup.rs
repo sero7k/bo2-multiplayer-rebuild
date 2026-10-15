@@ -301,9 +301,127 @@ pub fn load_sound_catalog_jup(install: &Path, zones: &[&str]) -> Result<SoundCat
 /// Aliases kept, and layers added to the zone's chains.
 type Keep = (HashSet<u64>, HashMap<u64, u64>);
 
+/// One alias's clips as the catalog keeps them: its hash, its next layer
+/// (a secondary alias), and per clip its package (index into
+/// [`JupRows::packages`]) and row text (see the module docs).
+struct AliasRows {
+    hash: u64,
+    secondary: Option<u64>,
+    clips: Vec<(u32, String)>,
+}
+
+/// What some zones' sounds come to: every alias with the clips the install
+/// has, and how many had none.
+struct JupRows {
+    packages: Vec<String>,
+    aliases: Vec<AliasRows>,
+    missing: usize,
+    streams: usize,
+}
+
 /// The sounds of some zones; with `keep`, only those aliases and the
 /// layers chained from them (each the secondary of the one before).
+///
+/// Reading the zones (Resurgence's are 400 MB inflated) and the packages'
+/// indexes takes many seconds, and comes to the same rows each time for
+/// the same install: the rows are kept in the game's cache
+/// (`iw4l-artifacts/cache/jup_sound`), found by the zones' and packages'
+/// sizes and times and this code's own text, and read from there after.
 fn load_jup(install: &Path, zones: &[&str], keep: Option<Keep>) -> Result<SoundCatalog, String> {
+    let zone_dir = install.join("zone");
+    let started = std::time::Instant::now();
+    let key = rows_key(&zone_dir, zones, keep.is_some());
+    let cached = key.as_deref().and_then(|k| {
+        let bytes = asset_transport::cache_get(ROWS_KIND, k)?;
+        let rows = decode_rows(&bytes);
+        if rows.is_none() {
+            diag::warn!(Zone, "sound bank: MW3 (2023) cache {k} unreadable; reading the zones");
+        }
+        rows
+    });
+    let from_cache = cached.is_some();
+    let rows = match cached {
+        Some(rows) => rows,
+        None => {
+            let rows = read_rows(install, zones, keep.as_ref())?;
+            if let Some(k) = &key
+                && let Err(e) = asset_transport::cache_put(ROWS_KIND, k, &encode_rows(&rows))
+            {
+                diag::warn!(Zone, "sound bank: MW3 (2023) cache {k} not written: {e}");
+            }
+            rows
+        }
+    };
+    let owner = ZoneOwner::from_zone_path(&zone_dir.join(format!(
+        "{}.ff",
+        zones.first().copied().unwrap_or("ingame_br")
+    )));
+    let mut catalog = SoundCatalog::default();
+    catalog.set_capture_game(ZoneGame::T6);
+    catalog.set_capture_zone(owner);
+    let mut playable = 0usize;
+    let mut have = Vec::with_capacity(rows.aliases.len());
+    for a in &rows.aliases {
+        let name = format!("#{:016x}", a.hash);
+        let secondary = a.secondary.map(|n| format!("#{n:016x}"));
+        let clips: Vec<CapturedAlias> = a
+            .clips
+            .iter()
+            .filter_map(|(package, clip)| {
+                Some(CapturedAlias {
+                    alias_name: name.clone(),
+                    secondary: secondary.clone(),
+                    file_type: Some(2),
+                    file_exists: Some(1),
+                    streamed: Some((rows.packages.get(*package as usize)?.clone(), clip.clone())),
+                    vol_min: 1.0,
+                    vol_max: 1.0,
+                    pitch_min: 1.0,
+                    pitch_max: 1.0,
+                    dist_min: 0.0,
+                    dist_max: 100_000.0,
+                    probability: 1.0,
+                    ..CapturedAlias::default()
+                })
+            })
+            .collect();
+        if clips.is_empty() {
+            continue;
+        }
+        playable += clips.len();
+        have.push(a.hash);
+        catalog.ingest_sound(CapturedSound {
+            name,
+            aliases: clips,
+            game: ZoneGame::T6,
+            zone: owner,
+            namespace: Some(AssetNamespace::Jup),
+        });
+    }
+    catalog.finalize();
+    // (What Resurgence's script may play: the guns' sounds are not asked
+    // for, and `jup_has` reads Resurgence's zones while this is empty.)
+    if keep.is_none()
+        && let Ok(mut s) = available().lock()
+    {
+        s.extend(have);
+    }
+    diag::info!(
+        Zone,
+        "sound bank: MW3 (2023) {}: {} aliases, {playable} clips, {} without a stream ({} streams found in the packages){} in {:.1}s",
+        install.display(),
+        catalog.sounds.len(),
+        rows.missing,
+        rows.streams,
+        if from_cache { ", from the cache," } else { "" },
+        started.elapsed().as_secs_f32()
+    );
+    Ok(catalog)
+}
+
+/// The zones' aliases and their clips' rows, read from the zones and the
+/// packages' indexes.
+fn read_rows(install: &Path, zones: &[&str], keep: Option<&Keep>) -> Result<JupRows, String> {
     let oodle = oodle_for(install)?;
     let zone_dir = install.join("zone");
     let mut bank = SoundBank::new();
@@ -323,25 +441,17 @@ fn load_jup(install: &Path, zones: &[&str], keep: Option<Keep>) -> Result<SoundC
     let streams = bank
         .index_packages(&zone_dir, LANG)
         .map_err(|e| format!("{}: {e}", zone_dir.display()))?;
-    let owner = ZoneOwner::from_zone_path(&zone_dir.join(format!(
-        "{}.ff",
-        zones.first().copied().unwrap_or("ingame_br")
-    )));
-    let mut catalog = SoundCatalog::default();
-    catalog.set_capture_game(ZoneGame::T6);
-    catalog.set_capture_zone(owner);
-    let (mut playable, mut missing) = (0usize, 0usize);
-    let mut have = Vec::new();
+    let mut missing = 0usize;
     // A layer's next: the zone's chain, else one added.
     let next_of = |h: u64| -> Option<u64> {
-        let (_, extra) = keep.as_ref()?;
+        let (_, extra) = keep?;
         bank.next
             .get(&h)
             .copied()
             .filter(|n| bank.aliases.contains_key(n))
             .or_else(|| extra.get(&h).copied())
     };
-    let mut hashes: Vec<u64> = match &keep {
+    let mut hashes: Vec<u64> = match keep {
         None => bank.aliases.keys().copied().collect(),
         Some((wanted, _)) => {
             // The wanted aliases and every layer chained from them.
@@ -358,9 +468,11 @@ fn load_jup(install: &Path, zones: &[&str], keep: Option<Keep>) -> Result<SoundC
         }
     };
     hashes.sort_unstable();
+    let mut packages: Vec<String> = Vec::new();
+    let mut package_index: HashMap<String, u32> = HashMap::new();
+    let mut aliases = Vec::with_capacity(hashes.len());
     for h in hashes {
-        let secondary = next_of(h).map(|n| format!("#{n:016x}"));
-        let mut rows = Vec::new();
+        let mut clips = Vec::new();
         for &si in &bank.aliases[&h] {
             let s = &bank.sounds[si];
             let a = &s.asset;
@@ -372,64 +484,175 @@ fn load_jup(install: &Path, zones: &[&str], keep: Option<Keep>) -> Result<SoundC
                 missing += 1;
                 continue;
             }
-            rows.push(CapturedAlias {
-                alias_name: format!("#{h:016x}"),
-                secondary: secondary.clone(),
-                file_type: Some(2),
-                file_exists: Some(1),
-                streamed: Some((
-                    package.to_string_lossy().into_owned(),
-                    format!(
-                        "{:016x}:{}:{}:{}:{}:{}:{}:{}:{}",
-                        entry.key,
-                        entry.offset,
-                        entry.size,
-                        entry.decompressed,
-                        u8::from(entry.compressed),
-                        a.table_len,
-                        a.rate,
-                        a.channels,
-                        a.frames
-                    ),
-                )),
-                vol_min: 1.0,
-                vol_max: 1.0,
-                pitch_min: 1.0,
-                pitch_max: 1.0,
-                dist_min: 0.0,
-                dist_max: 100_000.0,
-                probability: 1.0,
-                ..CapturedAlias::default()
+            let package = package.to_string_lossy().into_owned();
+            let pi = *package_index.entry(package.clone()).or_insert_with(|| {
+                packages.push(package);
+                (packages.len() - 1) as u32
             });
-            playable += 1;
+            clips.push((
+                pi,
+                format!(
+                    "{:016x}:{}:{}:{}:{}:{}:{}:{}:{}",
+                    entry.key,
+                    entry.offset,
+                    entry.size,
+                    entry.decompressed,
+                    u8::from(entry.compressed),
+                    a.table_len,
+                    a.rate,
+                    a.channels,
+                    a.frames
+                ),
+            ));
         }
-        if rows.is_empty() {
-            continue;
+        aliases.push(AliasRows { hash: h, secondary: next_of(h), clips });
+    }
+    Ok(JupRows { packages, aliases, missing, streams })
+}
+
+/// The cache kind of the rows.
+const ROWS_KIND: &str = "jup_sound";
+/// The rows' layout's number.
+const ROWS_FORMAT: u32 = 1;
+
+/// The cache key of some zones' rows: over the zones' and the packages'
+/// names, sizes and times, whether only the guns' are kept, and the code
+/// that reads them. `None` when the folder cannot be listed.
+fn rows_key(zone_dir: &Path, zones: &[&str], kept: bool) -> Option<String> {
+    const CODE: &[&str] = &[
+        include_str!("sound_load_jup.rs"),
+        include_str!("../../fastfile_jup/src/sound_bank.rs"),
+        include_str!("../../fastfile_jup/src/sound.rs"),
+        include_str!("../../fastfile_jup/src/xsub.rs"),
+    ];
+    let fnv = |mut h: u64, b: &[u8]| {
+        for &x in b {
+            h ^= u64::from(x);
+            h = h.wrapping_mul(0x0100_0000_01b3);
         }
-        have.push(h);
-        catalog.ingest_sound(CapturedSound {
-            name: format!("#{h:016x}"),
-            aliases: rows,
-            game: ZoneGame::T6,
-            zone: owner,
-            namespace: Some(AssetNamespace::Jup),
-        });
+        h
+    };
+    let stamp = |meta: &std::fs::Metadata| {
+        let written = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_secs());
+        (meta.len(), written)
+    };
+    let mut h = fnv(0xcbf2_9ce4_8422_2325, &ROWS_FORMAT.to_le_bytes());
+    h = fnv(h, &[u8::from(kept)]);
+    for code in CODE {
+        h = fnv(h, code.as_bytes());
     }
-    catalog.finalize();
-    // (What Resurgence's script may play: the guns' sounds are not asked
-    // for, and `jup_has` reads Resurgence's zones while this is empty.)
-    if keep.is_none()
-        && let Ok(mut s) = available().lock()
-    {
-        s.extend(have);
+    for z in zones {
+        let (len, written) = std::fs::metadata(zone_dir.join(format!("{z}.ff"))).map_or((0, 0), |m| stamp(&m));
+        h = fnv(h, z.as_bytes());
+        h = fnv(h, &len.to_le_bytes());
+        h = fnv(h, &written.to_le_bytes());
     }
-    diag::info!(
-        Zone,
-        "sound bank: MW3 (2023) {}: {} aliases, {playable} clips, {missing} without a stream ({streams} streams found in the packages)",
-        install.display(),
-        catalog.sounds.len()
-    );
-    Ok(catalog)
+    let mut subs: Vec<(String, u64, u64)> = std::fs::read_dir(zone_dir)
+        .ok()?
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_ascii_lowercase();
+            if !name.ends_with(".xsub") {
+                return None;
+            }
+            let (len, written) = stamp(&e.metadata().ok()?);
+            Some((name, len, written))
+        })
+        .collect();
+    subs.sort();
+    for (name, len, written) in &subs {
+        h = fnv(h, name.as_bytes());
+        h = fnv(h, &len.to_le_bytes());
+        h = fnv(h, &written.to_le_bytes());
+    }
+    Some(format!("{}-{h:016x}", if kept { "guns" } else { "zones" }))
+}
+
+fn encode_rows(rows: &JupRows) -> Vec<u8> {
+    let mut out = Vec::new();
+    let u64s = |out: &mut Vec<u8>, v: u64| out.extend_from_slice(&v.to_le_bytes());
+    let text = |out: &mut Vec<u8>, s: &str| {
+        out.extend_from_slice(&(s.len() as u64).to_le_bytes());
+        out.extend_from_slice(s.as_bytes());
+    };
+    out.extend_from_slice(&ROWS_FORMAT.to_le_bytes());
+    u64s(&mut out, rows.packages.len() as u64);
+    for p in &rows.packages {
+        text(&mut out, p);
+    }
+    u64s(&mut out, rows.aliases.len() as u64);
+    for a in &rows.aliases {
+        u64s(&mut out, a.hash);
+        u64s(&mut out, a.secondary.unwrap_or(u64::MAX));
+        u64s(&mut out, a.clips.len() as u64);
+        for (p, clip) in &a.clips {
+            out.extend_from_slice(&p.to_le_bytes());
+            text(&mut out, clip);
+        }
+    }
+    u64s(&mut out, rows.missing as u64);
+    u64s(&mut out, rows.streams as u64);
+    out
+}
+
+/// A cursor over the rows' bytes.
+struct Bytes<'a> {
+    b: &'a [u8],
+    at: usize,
+}
+
+impl<'a> Bytes<'a> {
+    fn take(&mut self, n: usize) -> Option<&'a [u8]> {
+        let s = self.b.get(self.at..self.at.checked_add(n)?)?;
+        self.at += n;
+        Some(s)
+    }
+    fn u32(&mut self) -> Option<u32> {
+        Some(u32::from_le_bytes(self.take(4)?.try_into().ok()?))
+    }
+    fn u64(&mut self) -> Option<u64> {
+        Some(u64::from_le_bytes(self.take(8)?.try_into().ok()?))
+    }
+    /// A count (never more than the bytes left could hold).
+    fn count(&mut self) -> Option<usize> {
+        usize::try_from(self.u64()?).ok().filter(|&n| n <= self.b.len() - self.at)
+    }
+    fn text(&mut self) -> Option<String> {
+        let n = self.count()?;
+        String::from_utf8(self.take(n)?.to_vec()).ok()
+    }
+}
+
+fn decode_rows(b: &[u8]) -> Option<JupRows> {
+    let mut r = Bytes { b, at: 0 };
+    if r.u32()? != ROWS_FORMAT {
+        return None;
+    }
+    let n = r.count()?;
+    let packages = (0..n).map(|_| r.text()).collect::<Option<Vec<_>>>()?;
+    let n = r.count()?;
+    let mut aliases = Vec::with_capacity(n);
+    for _ in 0..n {
+        let hash = r.u64()?;
+        let secondary = Some(r.u64()?).filter(|&s| s != u64::MAX);
+        let m = r.count()?;
+        let mut clips = Vec::with_capacity(m);
+        for _ in 0..m {
+            let p = r.u32()?;
+            if p as usize >= packages.len() {
+                return None;
+            }
+            clips.push((p, r.text()?));
+        }
+        aliases.push(AliasRows { hash, secondary, clips });
+    }
+    let missing = usize::try_from(r.u64()?).ok()?;
+    let streams = usize::try_from(r.u64()?).ok()?;
+    (r.at == b.len()).then_some(JupRows { packages, aliases, missing, streams })
 }
 
 /// A clip (see the module docs): its package entry read, decompressed and
@@ -489,6 +712,23 @@ pub fn read_jup_clip(package: &str, clip: &str) -> Result<Pcm, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rows_read_back_as_written() {
+        let rows = JupRows {
+            packages: vec!["a.xsub".into(), "b.xsub".into()],
+            aliases: vec![
+                AliasRows { hash: 1, secondary: Some(2), clips: vec![(0, "00:1:2:3:1:4:48000:2:960".into()), (1, "x".into())] },
+                AliasRows { hash: 2, secondary: None, clips: Vec::new() },
+            ],
+            missing: 3,
+            streams: 4,
+        };
+        let bytes = encode_rows(&rows);
+        let back = decode_rows(&bytes).unwrap();
+        assert_eq!(encode_rows(&back), bytes);
+        assert!(decode_rows(&bytes[..bytes.len() - 1]).is_none());
+    }
 
     #[test]
     fn alias_keys() {
