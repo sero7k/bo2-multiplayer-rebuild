@@ -6,8 +6,8 @@
 //!   the sun volume's sky `StreamWrappedBuffer` (an `.xpak` entry: the
 //!   image record itself has none). Its `$Globals` hold `skyScale`. The sky
 //!   pixel shader (`sky_latlong_*hdr`, fxc disassembly) looks it up by the
-//!   view direction d: `u = 0.5 - atan2(d.y, d.x) / 2pi`, `v = acos(d.z) /
-//!   pi` (row 0 straight up), times `skyScale`;
+//!   view direction d with x and y swapped: `u = 0.5 - atan2(d.x, d.y) /
+//!   2pi`, `v = acos(d.z) / pi` (row 0 straight up), times `skyScale`;
 //! * the reflection probes: one BC6H cube array (`count` probes x 6 faces,
 //!   each face its whole mip chain, 256 px and 7 levels on the MP maps) in
 //!   the probe array's buffer, and one 328-byte config per probe (config 0
@@ -137,7 +137,7 @@ impl SkyPicture {
     pub fn at(&self, d: [f32; 3]) -> [f32; 3] {
         let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(1e-6);
         let (x, y, z) = (d[0] / n, d[1] / n, d[2] / n);
-        let u = 0.5 - y.atan2(x) / std::f32::consts::TAU;
+        let u = 0.5 - x.atan2(y) / std::f32::consts::TAU;
         let v = z.clamp(-1.0, 1.0).acos() / std::f32::consts::PI;
         let (w, h) = (self.width as f32, self.height as f32);
         let fx = (u * w - 0.5).rem_euclid(w);
@@ -166,9 +166,10 @@ impl SkyPicture {
         let (x, y) = (at % self.width as usize, at / self.width as usize);
         let u = (x as f32 + 0.5) / self.width as f32;
         let v = (y as f32 + 0.5) / self.height as f32;
+        // (u = 0.5 - atan2(x, y) / 2pi: atan2(x, y) = phi.)
         let phi = (0.5 - u) * std::f32::consts::TAU;
         let theta = v * std::f32::consts::PI;
-        ([theta.sin() * phi.cos(), theta.sin() * phi.sin(), theta.cos()], best)
+        ([theta.sin() * phi.sin(), theta.sin() * phi.cos(), theta.cos()], best)
     }
 }
 
