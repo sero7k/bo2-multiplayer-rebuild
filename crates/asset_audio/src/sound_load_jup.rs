@@ -34,10 +34,10 @@ pub const JUP_INSTALL_ENV: &str = "BO2_JUP_INSTALL";
 /// The zones Resurgence's sounds come from: the battle royale's own
 /// (gameplay, interface, music), its English voice lines, and Rebirth
 /// Island's English ones. (The map zone, `mp_jup_escape5`, holds the
-/// island's emitters; 270 MB to inflate, so it is read only with the map.)
+/// island's emitters and ambience; 270 MB to inflate, read once with them.)
 pub const RESURGENCE_ZONES: &[&str] = &["ingame_br", "eng_ingame_br", "eng_mp_jup_escape5"];
 
-/// Rebirth Island's map zone (its ambience emitters), read when that map is played.
+/// Rebirth Island's map zone (its ambience emitters), read with Resurgence's sounds.
 pub const REBIRTH_MAP_ZONE: &str = "mp_jup_escape5";
 
 /// Language packs asked first.
@@ -96,13 +96,24 @@ fn available() -> &'static Mutex<HashSet<u64>> {
     SET.get_or_init(Default::default)
 }
 
-/// Whether a read install has this alias (a name, or `#<hash>`), with a
-/// clip to play. False until [`jup_resurgence_sounds`] has run.
+/// Whether the install has this alias (a name, or `#<hash>`), with a clip
+/// to play. The first question reads Resurgence's sounds (and Rebirth
+/// Island's zone) when the install is set and they are not read yet, so the
+/// match script knows its sounds before the match's sound bank is composed.
 pub fn jup_has(alias: &str) -> bool {
     let key = jup_alias_key(alias);
     let Ok(h) = u64::from_str_radix(&key[1..], 16) else {
         return false;
     };
+    static READ: OnceLock<()> = OnceLock::new();
+    READ.get_or_init(|| {
+        if available().lock().is_ok_and(|s| s.is_empty())
+            && let Some(install) = jup_install()
+            && let Err(e) = jup_resurgence_sounds(&install, true)
+        {
+            diag::warn!(Zone, "sound bank: MW3 (2023) {}: {e}", install.display());
+        }
+    });
     available().lock().is_ok_and(|s| s.contains(&h))
 }
 

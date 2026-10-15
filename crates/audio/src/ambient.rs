@@ -426,11 +426,9 @@ pub(crate) fn install_sound_bank(
                     };
                     let loaded = found.map(|found| {
                         // bo2mp: Resurgence takes in Modern Warfare III's (2023)
-                        // sounds; Rebirth Island's own zone with that map.
-                        asset_audio::want_jup_sounds(
-                            sim::resurgence_on(),
-                            zone.eq_ignore_ascii_case(asset_audio::REBIRTH_MAP_ZONE),
-                        );
+                        // sounds, Rebirth Island's own zone with them (its
+                        // ambience plays on whatever map the mode is on).
+                        asset_audio::want_jup_sounds(sim::resurgence_on(), true);
                         let sources = gather_sound_sources(&games, &found.path);
                         let LoadedSoundBank { catalog, gaps, .. } =
                             compose_sound_bank(sources, &zone, namespace, map);
