@@ -72,6 +72,34 @@ fn main() {
         match paks.read(key) {
             Ok(d) => {
                 println!("probes: {count} x 6 faces of {size}px, {levels} levels, {} bytes ({} wanted)", d.len(), face * 6 * count);
+                // The brightest texel of probe 0 (the map's global probe) as
+                // a direction, by D3D's cube face convention.
+                let (mut best, mut dir) = (0f32, [0f32; 3]);
+                for f in 0..6 {
+                    let at = f * face;
+                    let bw = size / 4;
+                    for (i, b) in d[at..at + bw * bw * 16].chunks_exact(16).enumerate() {
+                        for (k, c) in bc6(b).iter().enumerate() {
+                            let v = lum(*c);
+                            if v > best {
+                                best = v;
+                                let (x, y) = (i % bw * 4 + k % 4, i / bw * 4 + k / 4);
+                                let (u, w) = ((x as f32 + 0.5) / size as f32 * 2.0 - 1.0, (y as f32 + 0.5) / size as f32 * 2.0 - 1.0);
+                                dir = match f {
+                                    0 => [1.0, -w, -u],
+                                    1 => [-1.0, -w, u],
+                                    2 => [u, 1.0, w],
+                                    3 => [u, -1.0, -w],
+                                    4 => [u, -w, 1.0],
+                                    _ => [-u, -w, -1.0],
+                                };
+                            }
+                        }
+                    }
+                }
+                let n = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
+                let dir = dir.map(|v| v / n);
+                println!("probe 0 brightest {best:.2} toward {dir:?} (D3D cube axes)");
                 for p in 0..count.min(12) {
                     let mut means = Vec::new();
                     for f in 0..6 {
