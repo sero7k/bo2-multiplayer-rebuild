@@ -105,9 +105,17 @@ names, no other map zone more than one). Start one with `map jup:<zone>`.
   zone `.xpak` indexes (levels placed from the top: BC1 streams to 2x2).
   Terrain (virtual textures) and materials whose pictures are shared tables
   draw without a picture.
-- Collision: the drawn world inside the play area (not sea sheets wider
-  than 16384 units, not the far backdrop tiles); the zone's `col_map` is not
-  read. Spawns: made over the walkable floor of the play area (no path
-  nodes or entity text for these two maps).
-- Not read yet: placed static models, the sky, lightmaps, `col_map`,
-  `map_ents`.
+- Sheets wider than 16384 units (Rebirth's sea, sea bed and far vista
+  ground: 15 surfaces) are not drawn: they stretched the world's bounds to
+  ±144k (the far plane with them) and lay over the island. Bounds are those
+  of what is drawn (Rebirth about -26k..11k by -17k..21k).
+- Collision: the drawn world inside the play area (not the far backdrop
+  tiles); the zone's `col_map` is not read. Spawns: made over the map's path
+  nodes when the install has its entity text
+  (`jupiter/Assets/MapEnts/SpawnVars/<map>.d3dbsp`: Tokyo), else over the
+  walkable floor of the play area (Rebirth).
+- Not read yet: placed static models, the sky (it clears black), the sea,
+  lightmaps, `col_map`, the zone's `map_ents`.
+- A hidden test run spawns with `BO2MP_AUTOCLASS=class_smg` (the console's
+  `spawn 0` waits for a class menu nobody answers):
+  `iw4l map jup:mp_jup_escape5 --cmds "wait world; wait 50s; force_match_start &; …"`.
