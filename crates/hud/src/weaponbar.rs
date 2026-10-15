@@ -457,7 +457,7 @@ fn paint_offhand(
         image.to_owned(),
         weapons
             .0
-            .namespace_of(index)
+            .borrowed_namespace_of(index)
             .expect("owned weapon has a namespace"),
         args.color,
         Draw2dOp::StretchPic,
@@ -1008,7 +1008,7 @@ fn paint_action_slot(
         material.to_owned(),
         weapons
             .0
-            .namespace_of(weapon)
+            .borrowed_namespace_of(weapon)
             .expect("owned weapon namespace"),
         args.color,
         Draw2dOp::StretchPic,

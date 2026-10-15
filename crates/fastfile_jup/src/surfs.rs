@@ -18,10 +18,10 @@
 //!        the later surfaces point back at the first's)
 //!   0x80 ptr rigid ranges (-2: `range count` 12-byte records)
 //!   0xb0 f32 centre[3], extents[3] (half sizes): positions are 21-bit
-//!        fractions of twice the largest extent about the centre
-//!   0xc8 ptr 12 bytes (not read)
-//! then: blob struct and bytes; per surface its rigid ranges and its
-//! 12 bytes.
+//!        fractions spanning the largest extent either side of the centre
+//!   0xc8 ptr 12 bytes per rigid range (not read)
+//! then: blob struct and bytes; per surface its rigid ranges and 12
+//! bytes for each of them.
 //! packet (40 bytes): 0x00 16 bytes (bounds), 0x10 12 bytes,
 //!   0x1c u32 first entry in the packet vertex list,
 //!   0x20 u16 first triangle, u8 vertex count, u8 triangle count,
@@ -202,7 +202,7 @@ pub fn parse(zone: &[u8], at: usize) -> Result<SurfsRec, SurfsError> {
             }
         }
         if tail_follows {
-            cur += 12;
+            cur += 12 * surfaces[i].ranges.len().max(1);
         }
     }
     if blob.is_none() && streamed.is_none() {
@@ -237,7 +237,8 @@ pub fn f16(h: u16) -> f32 {
 
 /// One packed position: the extents are half sizes, a 21-bit fraction
 /// runs from the centre minus the largest of them to the centre plus it
-/// (a 96-unit door model measures 96, not 48).
+/// (a 96-unit door model measures 96, not 48; a gun's part models fit
+/// their receiver's attach tags, stored as plain floats, only so).
 #[must_use]
 pub fn position(raw: u64, centre: [f32; 3], extents: [f32; 3]) -> [f32; 3] {
     let scale = extents[0].max(extents[1]).max(extents[2]);

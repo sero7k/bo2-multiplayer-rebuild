@@ -9,6 +9,8 @@
 //! - [`oodle`]: the [`Decompressor`] trait both go through. The game's own
 //!   `oo2core_8_win64.dll` is loaded at runtime on Windows (`oodle_dll`, the
 //!   only module with `unsafe`); nothing of Oodle is shipped.
+//! - [`surfs`] / [`gun`]: model meshes, and a gun's part models put
+//!   together on their receiver.
 //! - [`sound`] / [`sound_bank`]: the sndasset records and alias links of
 //!   a zone, their streams in the packages, Opus decoded to PCM.
 //!
@@ -17,6 +19,8 @@
 
 pub mod cards;
 pub mod container;
+pub mod frame;
+pub mod gun;
 pub mod hash;
 pub mod map;
 pub mod image;

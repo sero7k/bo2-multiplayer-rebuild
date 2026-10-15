@@ -217,8 +217,9 @@ impl ImageRun {
 pub fn dxgi(format: u8) -> Option<u32> {
     match format {
         0x25 | 0x2a => Some(71), // BC1_UNORM (0x25: calling cards; a 1024x1024 one is 512 KiB)
-        0x2f => Some(83), // BC5_UNORM
-        0x30 => Some(98), // BC7_UNORM
+        // (0x2f: guns' normal maps, x y z in red green blue; read as BC5
+        // they are noise.)
+        0x2f | 0x30 => Some(98), // BC7_UNORM
         _ => None,
     }
 }

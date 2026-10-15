@@ -3291,7 +3291,7 @@ fn fire_weapon(
         sounds.write(audio::WeaponSound {
             namespace: weapons
                 .as_deref()
-                .and_then(|w| w.0.namespace_of(fire.event.payload.weapon))
+                .and_then(|w| w.0.borrowed_namespace_of(fire.event.payload.weapon))
                 .unwrap_or(asset_core::AssetNamespace::Iw4),
             alias: alias.to_owned(),
             origin_inches: (!player_view).then_some(sound_origin),
@@ -3533,7 +3533,7 @@ fn tick_missile_present_state(
                     if let Some(sounds) = sounds.as_deref_mut() {
                         sounds.write(audio::WeaponSound {
                             namespace: weapons
-                                .namespace_of(row.weapon)
+                                .borrowed_namespace_of(row.weapon)
                                 .unwrap_or(asset_core::AssetNamespace::Iw4),
                             alias: alias.to_owned(),
                             origin_inches: Some(row.origin),
@@ -3639,7 +3639,7 @@ fn explosion(
         sounds.write(audio::WeaponSound {
             namespace: weapons
                 .as_deref()
-                .and_then(|w| w.0.namespace_of(payload.weapon))
+                .and_then(|w| w.0.borrowed_namespace_of(payload.weapon))
                 .unwrap_or(asset_core::AssetNamespace::Iw4),
             alias: alias.to_owned(),
             origin_inches: Some(payload.origin),

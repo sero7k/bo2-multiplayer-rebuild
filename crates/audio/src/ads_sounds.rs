@@ -59,7 +59,7 @@ pub(crate) fn play_ads_sounds(
         return;
     };
     // Only Black Ops II's guns name these.
-    if weapons.0.namespace_of(ps.weapon) != Some(asset_core::AssetNamespace::T6) {
+    if weapons.0.borrowed_namespace_of(ps.weapon) != Some(asset_core::AssetNamespace::T6) {
         return;
     }
     let scoped = weapons.0.overlay_is_hud_iris(ps.weapon);

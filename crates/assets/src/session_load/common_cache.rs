@@ -392,6 +392,12 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
         let wanted = crate::t6_rules() && crate::guest_guns();
         pool.spawn(async move { crate::lane::prefetch_t7_guest_guns(wanted) })
     };
+    // bo2mp: Modern Warfare III's (2023) guns: their part zones and
+    // global_stream_mp's materials read ahead.
+    let jup_prefetch = {
+        let wanted = crate::t6_rules() && crate::guest_guns();
+        pool.spawn(async move { crate::lane::prefetch_jup_guest_guns(wanted) })
+    };
     let legacy_prefetch = [crate::lane::Legacy::T4, crate::lane::Legacy::Iw3].map(|game| {
         let wanted = crate::t6_rules() && crate::guest_guns();
         pool.spawn(async move { crate::lane::prefetch_legacy_guest_guns(game, wanted) })
@@ -512,6 +518,19 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
         pool.spawn(async move { crate::lane::build_t7_guest_guns(prefetch, material_seed, &progress) }).await
     };
     common_report.extend(t7_guest_report);
+    // bo2mp: Modern Warfare III's guest guns' models, after Black Ops III's
+    // on the same pool (their weapons are made per match from Black Ops
+    // II's, `lane::jup_guest_rows`).
+    let crate::lane::JupGuests {
+        fpv: jup_guest_fpv,
+        world_guns: jup_guest_world_guns,
+        material_seed,
+        report: jup_guest_report,
+    } = {
+        let prefetch = jup_prefetch.await;
+        pool.spawn(async move { crate::lane::build_jup_guest_guns(prefetch, material_seed) }).await
+    };
+    common_report.extend(jup_guest_report);
     let mut legacy_guests = Vec::new();
     let mut material_seed = material_seed;
     for prefetch in legacy_prefetch {
@@ -805,6 +824,11 @@ async fn prepare_common(key: CommonKey) -> Arc<CommonSet> {
             weapons.len(),
             weapons.namespace_count(asset_core::AssetNamespace::T7)
         ));
+    }
+    if jup_guest_fpv.len() + jup_guest_world_guns.len() > 0 {
+        let fpv = fpv_meshes.absorb(jup_guest_fpv);
+        let world = world_weapons.absorb(jup_guest_world_guns);
+        common_report.push(format!("jup guest guns absorbed: fpv=+{fpv} world_guns=+{world}"));
     }
     for (guests, xanim_n) in legacy_guests.into_iter().zip(legacy_xanim_n) {
         if guests.weapons.is_empty() {

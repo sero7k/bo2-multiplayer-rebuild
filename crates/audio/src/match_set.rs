@@ -485,7 +485,7 @@ fn request_weapon_aliases(
     set: &mut MatchRequests,
 ) -> usize {
     let sounds = registry.sounds_of(weapon);
-    let ns = registry.namespace_of(weapon).unwrap_or(AssetNamespace::Iw4);
+    let ns = registry.borrowed_namespace_of(weapon).unwrap_or(AssetNamespace::Iw4);
     let mut n = 0usize;
     if let Some(aliases) = sounds {
         for alias in aliases.reachable_aliases() {

@@ -38,6 +38,11 @@ pub const JUP_NAMES: &[(&str, &str, &str, &str)] = &[
     ("jp12_pi_mike93", "Renetti", "weapon_pistol", "secondary"),
 ];
 
+/// The guns played as guest guns (their models, materials and handling are
+/// built by the match, `assets::lane::jup_gun`); the other names wait for
+/// theirs.
+pub const JUP_PLAYED: &[&str] = &["jp12_pi_mike93"];
+
 /// A Modern Warfare III gun's public name by its internal name, with or
 /// without `jup_` and `_mp` (`jup_jp01_ar_golf36_mp` -> `Holger 556`).
 #[must_use]
