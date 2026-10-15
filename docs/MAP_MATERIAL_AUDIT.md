@@ -128,6 +128,31 @@ are missing.
 | suburban | 357 | 4 | 0 |
 | subway | 494 | 3 | 0 |
 
+## Re-run with CoD4 and rendered frames (PC, 15 Oct)
+
+All 21 CoD4 and 23 World at War maps were run three ways: the lane's
+census (`map_check_probe`, now ending `textures missing: world N/M
+materials (T tris), props P/Q [...]`), the full match load
+(`legacy_texture_probe`: lane, BO2 rules, common zones, merge and
+finalize, then each drawn world batch's and placed prop's colour binding),
+and real frames (`iw4l --cmds "wait world; wait 25; screenshot <name>;
+quit" map iw3:<map>`). No IWD image was missing or failed to decode on
+either game, the IWD load order was correct, and nothing was lost in the
+merge. The missing textures were five other faults:
+
+| Cause | Maps | Fix |
+|---|---|---|
+| `wc_water` keeps the shader's placeholder `case64blue` (a blue grid of numbers) in its colour slot. The game's water shader draws from its constants and normal map. | 12 CoD4 maps (Backlot, Bog, Broadcast, Cargoship, Convoy, Creek, Farm, Overgrown, Shipment, Showdown, Strike, Vacant) and 21 WaW maps (every one with a pond, stream or puddle) | Drawn as its `waterColor`, less the shader's least sky reflection (`envMapParms.x`), blended by its alpha. |
+| `,mc/lambert1`, a common_mp reference that only `code_post_gfx_mp` defines | 7 CoD4 maps (Bloc, Bog, Carentan, Cargoship, Crossfire, Shipment, Vacant), 3–17 prop surfaces each | `code_post_gfx_mp` and `localized_code_post_gfx_mp` are read as common zones too. |
+| `,mc/mtl_fx_dest_atlas` (destructibles), defined in `localized_code_post_gfx_mp` | Downfall (15 surfaces) and Roundhouse (853) | As above. |
+| Borrowed BO2 sky drawn at brightness 1; the cube is HDR for the model map's exposure | All 23 WaW maps in the BO2 look (white skies on Makin, Airfield, Castle, ...) | The sky row takes the model's `skyColorParm.y × 2^-exposure` (0.08–0.34). |
+| Tool and editor surfaces drawn: `wc_tools` (`caulk_shadow`, `aa_default`) and `mc_water_cutaway` (`water_dynamic_editor`, a white slab) | caulk on Bloc, Broadcast, Cargoship (1308 tris), Airfield, Castle, Hangar, Outskirts; aa_default on Showdown; cut-away on Shrine | Shadow-only (not drawn in colour). |
+
+Still open: `mp_nachtfeuer` `,*34n_96_5n_2` (2 triangles) is defined in no
+zone of this install. The census and probes match by name and do not
+check pixels; a picture that decodes but looks wrong (for example a
+greyscale `_c`) is not counted.
+
 ## Method
 
 Two offline probes, run sequentially, with
