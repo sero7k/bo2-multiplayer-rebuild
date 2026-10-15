@@ -43,8 +43,8 @@ pub(crate) fn map(c: &Catalog) -> Result<(String, String), String> {
 pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
     let mut r = vec![
         Row::new(
-            "START RESURGENCE",
-            "Drop in with your squad. Last squad standing wins.",
+            "RESURGENCE — REBIRTH ISLAND",
+            "Start: drop in with your squad. Last squad standing wins.",
             Act::BrStart,
         ),
         Row::new("SQUAD SIZE", "", Act::Cycle(Setting::BrSquadSize)),

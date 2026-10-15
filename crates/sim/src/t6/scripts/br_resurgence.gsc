@@ -465,7 +465,10 @@ br_end( winner )
     foreach ( player in level.players )
     {
         if ( isdefined( player.br_squad ) && player.br_squad == winner )
+        {
             player br_snd( "victory" );
+            player br_snd( "music_exfil" );
+        }
         else
             player br_snd( "defeat" );
     }
@@ -1030,6 +1033,7 @@ br_circle()
 
         level.br_closing = 1;
         br_snd_all( "circle_collapsing" );
+        br_snd_all( br_circle_music( i ) );
 
         foreach ( player in level.players )
             player br_hud_flash( "THE CIRCLE IS CLOSING" );
@@ -1060,6 +1064,24 @@ br_circle()
     }
 
     level.br_phase = level.br_phases.size;
+}
+
+// The circle's music by how far the match is: low, med, high, then the
+// final loop for the last circle.
+br_circle_music( i )
+{
+    n = level.br_phases.size;
+
+    if ( i >= n - 1 )
+        return "music_circle_final";
+
+    if ( i * 3 < n )
+        return "music_circle_low";
+
+    if ( i * 3 < n * 2 )
+        return "music_circle_med";
+
+    return "music_circle_high";
 }
 
 br_elapsed()

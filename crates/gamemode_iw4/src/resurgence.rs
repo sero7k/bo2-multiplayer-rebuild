@@ -393,6 +393,12 @@ pub enum BrSound {
     LootRare,
     LootLegendary,
     IslandAmbience,
+    PrelobbyMusic,
+    CircleMusicLow,
+    CircleMusicMed,
+    CircleMusicHigh,
+    CircleMusicFinal,
+    ExfilMusic,
 }
 
 /// One match sound: our event, its Modern Warfare III alias (played once
@@ -422,7 +428,12 @@ const fn route(
 
 pub const SOUNDS: &[SoundRoute] = &[
     route(BrSound::MatchStart, "match_start", "", "mpl_hit_alert"),
-    route(BrSound::InfilMusic, "infil_music", "", ""),
+    route(
+        BrSound::InfilMusic,
+        "infil_music",
+        "mus_mx_mp_br_ri_infil_1_intro",
+        "",
+    ),
     route(
         BrSound::CircleCollapsing,
         "circle_collapsing",
@@ -521,6 +532,42 @@ pub const SOUNDS: &[SoundRoute] = &[
     route(BrSound::LootRare, "loot_rare", "", ""),
     route(BrSound::LootLegendary, "loot_legendary", "", ""),
     route(BrSound::IslandAmbience, "ambience", "", ""),
+    route(
+        BrSound::PrelobbyMusic,
+        "music_prelobby",
+        "mus_mx_mp_br_ri_prelobby_outro_intro",
+        "",
+    ),
+    route(
+        BrSound::CircleMusicLow,
+        "music_circle_low",
+        "mus_mx_mp_br_ri_circle_close_low_1_intro",
+        "",
+    ),
+    route(
+        BrSound::CircleMusicMed,
+        "music_circle_med",
+        "mus_mx_mp_br_ri_circle_close_med_1_intro",
+        "",
+    ),
+    route(
+        BrSound::CircleMusicHigh,
+        "music_circle_high",
+        "mus_mx_mp_br_ri_circle_close_high_1_intro",
+        "",
+    ),
+    route(
+        BrSound::CircleMusicFinal,
+        "music_circle_final",
+        "mus_mx_mp_br_ri_circle_close_final_loop_1_intro",
+        "mus_time_running_out",
+    ),
+    route(
+        BrSound::ExfilMusic,
+        "music_exfil",
+        "mus_mx_mp_br_ri_exfil_1_intro",
+        "mus_victory",
+    ),
 ];
 
 pub fn sound(event: BrSound) -> Option<&'static SoundRoute> {
