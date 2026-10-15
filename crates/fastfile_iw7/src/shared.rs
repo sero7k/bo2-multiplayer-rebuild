@@ -73,6 +73,51 @@ pub fn common_zones(dir: &Path) -> Vec<PathBuf> {
     .collect()
 }
 
+/// The zones a Zombies map's (`cp_*`) shared pictures and materials are
+/// in, beside it, in the order the game loads them over the map (a patch
+/// before the zone it patches): Zombies' own common zones (`common_cp`,
+/// `global_cp` and their technique-set zones: the doors, debris, arcade
+/// cabinets, signs and Spaceland's neon the maps share), then the zones
+/// both modes load (`common`), then the multiplayer core zones as a last
+/// resort (props and glass both modes' maps place).
+pub fn common_zones_cp(dir: &Path) -> Vec<PathBuf> {
+    [
+        "patch_common_cp",
+        "common_cp",
+        "techsets_common_cp",
+        "patch_global_cp",
+        "global_cp",
+        "techsets_global_cp",
+        "patch_common",
+        "common",
+        "techsets_common",
+        "patch_common_core_mp",
+        "common_core_mp",
+        "techsets_common_core_mp",
+        "patch_global_core_mp",
+        "global_core_mp",
+        "techsets_global_core_mp",
+        // (`flat_nml`, the flat normal map the Zombies maps' painted metal
+        // and glass name, and `black`: global_mp's.)
+        "patch_global_mp",
+        "global_mp",
+        "techsets_global_mp",
+        "patch_common_mp",
+        "common_mp",
+        "techsets_common_mp",
+    ]
+    .iter()
+    .map(|z| dir.join(format!("{z}.ff")))
+    .filter(|p| p.is_file())
+    .collect()
+}
+
+/// The common zones for a map by its name: Zombies' (`cp_*`,
+/// `common_zones_cp`) or multiplayer's (`common_zones`).
+pub fn common_zones_for(dir: &Path, map: &str) -> Vec<PathBuf> {
+    if map.trim_start_matches("iw7_").starts_with("cp_") { common_zones_cp(dir) } else { common_zones(dir) }
+}
+
 impl SharedZones {
     /// Reads `zones` (a name already known keeps its first record).
     pub fn read(zones: &[PathBuf]) -> Self {

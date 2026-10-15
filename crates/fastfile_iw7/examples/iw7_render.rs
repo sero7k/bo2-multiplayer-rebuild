@@ -153,6 +153,9 @@ struct Shade<'a> {
     layers: [Option<(&'a Tex, bool)>; 2],
     /// (material + 1, placed model + 1), for `IW7_RENDER_PICK`.
     id: (u32, u32),
+    /// A model material's own light (`fastfile_iw7::glow`), linear and
+    /// already in the page's exposure.
+    glow: Option<&'a Tex>,
 }
 
 fn draw_tri(cam: &Cam, t: &mut Target, tri: [V; 3], sh: &Shade) {
@@ -255,7 +258,8 @@ fn raster(cam: &Cam, t: &mut Target, tri: [(V, [f32; 3]); 3], sh: &Shade) {
                 // Unlit (no lightmap): emissive-ish, as the fallback draws it.
                 [1.0; 3]
             };
-            let out: [f32; 3] = std::array::from_fn(|k| (base[k] * light[k]).max(0.0).sqrt());
+            let g = sh.glow.map_or([0.0; 4], |t| t.sample(uv));
+            let out: [f32; 3] = std::array::from_fn(|k| (base[k] * light[k] + g[k]).max(0.0).sqrt());
             match sh.kind {
                 Kind::Blend => {
                     let a = texel[3] * c[3];
@@ -370,6 +374,35 @@ fn main() {
         })
         .collect();
     println!("layered materials: {}", layer_texs.iter().filter(|l| l[0].is_some() || l[1].is_some()).count());
+    // Model materials' glow, in the page's exposure, hue kept under 2.5
+    // as the game's lane does (`IW7_RENDER_NOGLOW` leaves it out).
+    let glow_exposure = pages.iter().flatten().next().map_or(1.0, |p| p.exposure);
+    let glows: HashMap<usize, Tex> = if std::env::var("IW7_RENDER_NOGLOW").is_ok() {
+        HashMap::new()
+    } else {
+        map.materials
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| fastfile_iw7::glow::emissive(m).is_some())
+            .filter_map(|(i, m)| {
+                let g = map.glow(m, tex_size).ok()?;
+                let px = g
+                    .light
+                    .iter()
+                    .map(|l| {
+                        let mut v = l.map(|c| c * glow_exposure);
+                        let peak = v.iter().copied().fold(0.0, f32::max);
+                        if peak > 2.5 {
+                            v = v.map(|c| c * 2.5 / peak);
+                        }
+                        [v[0], v[1], v[2], 1.0]
+                    })
+                    .collect();
+                Some((i, Tex { w: g.width as usize, h: g.height as usize, px }))
+            })
+            .collect()
+    };
+    println!("glowing materials: {}", glows.len());
     if std::env::var("IW7_RENDER_NMDUMP").is_ok() {
         let mut seen = std::collections::BTreeMap::new();
         for mm in &map.materials {
@@ -402,7 +435,20 @@ fn main() {
     }
 
     // The camera.
-    let spawns: Vec<_> = map.spawns.iter().filter(|s| s.classname.contains("spawn")).collect();
+    // (A Zombies map has no spawn list: its player starts, from the
+    // entities.)
+    let starts: Vec<fastfile_iw7::map::SpawnPoint> = fastfile_iw7::map::parse_entities(&map.entities)
+        .into_iter()
+        .filter(|e| e.get("classname").is_some_and(|c| c == "info_player_start"))
+        .filter_map(|e| {
+            let v = |k: &str| -> Option<[f32; 3]> {
+                let v: Vec<f32> = e.get(k)?.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+                (v.len() == 3).then(|| [v[0], v[1], v[2]])
+            };
+            Some(fastfile_iw7::map::SpawnPoint { classname: "info_player_start_spawn".to_owned(), origin: v("origin")?, angles: v("angles").unwrap_or_default(), ..Default::default() })
+        })
+        .collect();
+    let spawns: Vec<_> = map.spawns.iter().filter(|s| s.classname.contains("spawn")).chain(starts.iter()).collect();
     let cam = if view == "top" {
         let pts: Vec<[f32; 3]> = if spawns.is_empty() { vec![map.mins, map.maxs] } else { spawns.iter().map(|s| s.origin).collect() };
         let lo = [0, 1].map(|k| pts.iter().map(|p| p[k]).fold(f32::MAX, f32::min));
@@ -463,6 +509,7 @@ fn main() {
                 lit,
                 layers: s.material.map_or([None, None], |m| layer_texs[m]),
                 id: (s.material.map_or(0, |m| m as u32 + 1), 0),
+                glow: None,
             };
             for k in 0..s.tri_count as usize {
                 let v = |j: usize| -> Option<V> {
@@ -553,6 +600,7 @@ fn main() {
                     lit,
                     layers: [None, None],
                     id: (surf.material.map_or(0, |k| k as u32 + 1), i as u32 + 1),
+                    glow: surf.material.and_then(|k| glows.get(&k)).filter(|_| matches!(kind, Kind::Opaque)),
                 };
                 let vert = |ix: u16| -> Option<V> {
                     let v = surf.verts.get(usize::from(ix))?;

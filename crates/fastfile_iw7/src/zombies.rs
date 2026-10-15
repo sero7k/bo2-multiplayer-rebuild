@@ -137,7 +137,22 @@ pub struct Blocker {
     pub brushes: Vec<(u32, [f32; 3])>,
     /// The name its pieces share (the interactions' and trigger's target).
     pub group: String,
+    /// Its props (`find_props`): what is seen of it, its brushes being clip
+    /// only.
+    pub props: Vec<BlockerProp>,
 }
+
+/// A placed model that is part of a blocker: its index among the map's
+/// placed models (`Iw7Map::static_models`) and where it stands.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BlockerProp {
+    pub index: usize,
+    pub origin: [f32; 3],
+    /// Rows: the model's forward, left and up axes (scaled by its scale).
+    pub axis: [[f32; 3]; 3],
+}
+
+
 
 /// A machine by its IW7 interaction name (`perk_machine_tough`).
 #[derive(Clone, Debug, PartialEq)]
@@ -213,7 +228,27 @@ fn area_name(link: &str) -> String {
 impl ZmLayout {
     /// The layout of a map read by [`Iw7Map::load`].
     pub fn read(map: &Iw7Map) -> Self {
-        Self::from_parts(&parse_entities(&map.entities), &map.trigger_hulls, &map.path_nodes)
+        let mut out = Self::from_parts(&parse_entities(&map.entities), &map.trigger_hulls, &map.path_nodes);
+        out.find_props(map);
+        out
+    }
+
+    /// Each blocker's props: the scriptables its group names
+    /// (`cp_zmb_barrier_*`: Spaceland's park wall panels; Rave's
+    /// `cp_rave_doorbuy_*` boards and rocks), drawn as placed models by
+    /// `Iw7Map::load`. IW7's blocker brushes (`script_brushmodel` of the
+    /// group) hold no surfaces: they only clip; the scripts take the
+    /// scriptable away with the clip.
+    pub fn find_props(&mut self, map: &Iw7Map) {
+        for b in &mut self.blockers {
+            b.props = map
+                .static_models
+                .iter()
+                .enumerate()
+                .filter(|(_, sm)| sm.scriptable.and_then(|k| map.scriptables.get(k as usize)).is_some_and(|sc| sc.targetname == b.group))
+                .map(|(index, sm)| BlockerProp { index, origin: sm.origin, axis: sm.axis.map(|r| r.map(|v| v * sm.scale)) })
+                .collect();
+        }
     }
 
     pub fn from_parts(ents: &[Ent], trigger_hulls: &[Vec<([f32; 3], [f32; 3])>], nodes: &[crate::map::PathNode]) -> Self {
@@ -314,7 +349,7 @@ impl ZmLayout {
                 .filter(|e| e.is("classname", "script_brushmodel"))
                 .filter_map(|e| Some((model_index(e.get("model")?, '*')?, e.origin())))
                 .collect();
-            out.blockers.push(Blocker { kind, cost, sides, triggers, brushes, group: g });
+            out.blockers.push(Blocker { kind, cost, sides, triggers, brushes, group: g, props: Vec::new() });
         }
 
         for e in ents.iter().filter(|e| e.is("targetname", "interaction")) {
@@ -377,13 +412,14 @@ impl ZmLayout {
     /// One line: what it found.
     pub fn summary(&self) -> String {
         format!(
-            "{} player starts, {} respawns, {} areas ({} spawners), {} windows, {} debris/doors, {} perk machines, {} wheel spots, pack-a-punch {}, {} portals, {} generators, {} wall weapons, {} dog spots, {} traversals",
+            "{} player starts, {} respawns, {} areas ({} spawners), {} windows, {} debris/doors ({} placed models in them), {} perk machines, {} wheel spots, pack-a-punch {}, {} portals, {} generators, {} wall weapons, {} dog spots, {} traversals",
             self.starts.len(),
             self.respawns.len(),
             self.areas.len(),
             self.areas.iter().map(|a| a.spawners.len()).sum::<usize>(),
             self.windows.len(),
             self.blockers.len(),
+            self.blockers.iter().map(|b| b.props.len()).sum::<usize>(),
             self.perks.len(),
             self.wheels.len(),
             if self.pap.is_some() { "yes" } else { "no" },

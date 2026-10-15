@@ -13,6 +13,7 @@ pub mod asset_type;
 pub mod container;
 pub mod cursor;
 pub mod layout;
+pub mod glow;
 pub mod light;
 pub mod look;
 pub mod map;

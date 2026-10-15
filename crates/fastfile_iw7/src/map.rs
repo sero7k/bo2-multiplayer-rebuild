@@ -137,6 +137,11 @@ pub struct StaticModel {
     pub lighting_origin: [f32; 3],
     /// Its index among the world's placed models.
     pub index: u32,
+    /// `GfxStaticModelDrawInst::flags`.
+    pub draw_flags: u16,
+    /// A scriptable drawn as a prop: its index in `Iw7Map::scriptables`
+    /// (`index` is then `u32::MAX`).
+    pub scriptable: Option<u32>,
 }
 
 /// A spawn point from the zone's spawn list.
@@ -148,6 +153,20 @@ pub struct SpawnPoint {
     pub script_noteworthy: String,
     pub origin: [f32; 3],
     pub angles: [f32; 3],
+}
+
+/// A scriptable instance: its definition's and model's names, where it
+/// stands and its script name.
+#[derive(Clone, Debug, Default)]
+pub struct ScriptableInstance {
+    pub def: String,
+    pub model: String,
+    pub origin: [f32; 3],
+    pub angles: [f32; 3],
+    pub targetname: String,
+    /// The def's models: those its model events set (in order), then the
+    /// rest of its model list.
+    pub def_models: Vec<String>,
 }
 
 /// A brush sub-model (`*<n>`: a door, a debris pile): its world surfaces
@@ -225,13 +244,22 @@ impl MapSources {
             .map(|z| (dir.join(format!("{z}.ff")), Some(dir.join(format!("techsets_{z}.ff"))).filter(|p| p.is_file())))
             .filter(|(p, _)| p.is_file())
             .collect();
-        Self { zone: zone.to_owned(), techsets, pak_dir: dir, shared_ranges: None, extra_zones: Vec::new(), model_zones, shared: None }
+        // A Zombies map's own patch zone (`patch_cp_zmb.ff`: 1449 pictures
+        // on cp_zmb, among them signs and posters the map names): read for
+        // what the map zone lacks.
+        let extra_zones = if stem.trim_start_matches("iw7_").starts_with("cp_") {
+            [dir.join(format!("patch_{}.ff", stem.trim_start_matches("iw7_")))].into_iter().filter(|p| p.is_file()).collect()
+        } else {
+            Vec::new()
+        };
+        Self { zone: zone.to_owned(), techsets, pak_dir: dir, shared_ranges: None, extra_zones, model_zones, shared: None }
     }
 
     /// With the common zones beside the map read for the pictures and
     /// materials it names but does not hold (`crate::shared`).
     pub fn with_common(mut self) -> Self {
-        let zones = crate::shared::common_zones(&self.pak_dir);
+        let stem = self.zone.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let zones = crate::shared::common_zones_for(&self.pak_dir, &stem);
         self.shared = Some(std::sync::Arc::new(crate::shared::SharedZones::read(&zones)));
         self
     }
@@ -265,6 +293,10 @@ pub struct Iw7Map {
     /// and the probes' origins.
     pub probe_image: Option<String>,
     pub probe_origins: Vec<[f32; 3]>,
+    /// The map's scriptable instances (`MapEnts::scriptableMapEnts`):
+    /// destructible and scripted props (Zombies maps' buyable blockers
+    /// among them), not among the placed models.
+    pub scriptables: Vec<ScriptableInstance>,
     /// The server triggers' hulls by `?<n>` (a volume's or trigger's
     /// `model`): each hull's midpoint and half size, about the entity's
     /// origin.
@@ -602,12 +634,62 @@ impl Iw7Map {
         // 39): drawn once (twice, its faces flickered through each other).
         let mut placed_at: std::collections::HashSet<(usize, [i64; 12])> = std::collections::HashSet::new();
         let mut doubled = 0usize;
+        // What is placed: the world's placed models, then the scriptables
+        // drawn as props (`Iw7Map::scriptables`, `scriptable_prop_model`).
+        struct Placing {
+            name: String,
+            origin: [f32; 3],
+            axis: [[f32; 3]; 3],
+            scale: f32,
+            cull_dist: f32,
+            lighting_origin: [f32; 3],
+            index: u32,
+            draw_flags: u16,
+            scriptable: Option<u32>,
+        }
+        let mut placing: Vec<Placing> = Vec::new();
         if let Some(at) = g.smodels {
             use L::GfxStaticModelDrawInst as D;
             for i in 0..g.smodel_count as usize {
                 let d = &image[at + D::SIZE * i..at + D::SIZE * (i + 1)];
                 let Some(id) = g.smodel_models.get(i).copied().flatten() else { continue };
-                let name = bare(map.cap.name_of(id)).to_owned();
+                let origin = v3(d, D::placement__origin);
+                placing.push(Placing {
+                    name: bare(map.cap.name_of(id)).to_owned(),
+                    origin,
+                    axis: [v3(d, D::placement__axis), v3(d, D::placement__axis + 12), v3(d, D::placement__axis + 24)],
+                    scale: f32_at(d, D::placement__scale),
+                    cull_dist: f32::from(u16_at(d, D::cullDist)),
+                    lighting_origin: g
+                        .smodel_insts
+                        .map(|at| v3(image, at + L::GfxStaticModelInst::SIZE * i + L::GfxStaticModelInst::lightingOrigin))
+                        .filter(|p| p.iter().all(|c| c.is_finite()))
+                        .unwrap_or(origin),
+                    index: i as u32,
+                    draw_flags: u16_at(d, D::flags),
+                    scriptable: None,
+                });
+            }
+        }
+        out.scriptables = read_scriptables(&map, image);
+        for (k, sc) in out.scriptables.iter().enumerate() {
+            let Some(name) = scriptable_prop_model(sc) else { continue };
+            placing.push(Placing {
+                name: name.to_owned(),
+                origin: sc.origin,
+                axis: axis_of(sc.angles),
+                scale: 1.0,
+                cull_dist: 0.0,
+                lighting_origin: sc.origin,
+                index: u32::MAX,
+                draw_flags: 0,
+                scriptable: Some(k as u32),
+            });
+        }
+        let scriptables_placed = placing.iter().filter(|p| p.scriptable.is_some()).count();
+        {
+            for pl in &placing {
+                let name = pl.name.clone();
                 let model = match model_index.get(&name) {
                     Some(m) => *m,
                     None => {
@@ -685,13 +767,7 @@ impl Iw7Map {
                     }
                 };
                 let Some(model) = model else { continue };
-                let axis = [v3(d, D::placement__axis), v3(d, D::placement__axis + 12), v3(d, D::placement__axis + 24)];
-                let origin = v3(d, D::placement__origin);
-                let lighting_origin = g
-                    .smodel_insts
-                    .map(|at| v3(image, at + L::GfxStaticModelInst::SIZE * i + L::GfxStaticModelInst::lightingOrigin))
-                    .filter(|p| p.iter().all(|c| c.is_finite()))
-                    .unwrap_or(origin);
+                let (axis, origin, lighting_origin) = (pl.axis, pl.origin, pl.lighting_origin);
                 let q = |v: f32| (v * 64.0).round() as i64;
                 let key: [i64; 12] = std::array::from_fn(|k| if k < 3 { q(origin[k]) } else if k < 12 { q(axis[(k - 3) / 3][(k - 3) % 3] * 64.0) } else { 0 });
                 if !placed_at.insert((model, key)) {
@@ -702,15 +778,17 @@ impl Iw7Map {
                     model,
                     origin,
                     axis,
-                    scale: f32_at(d, D::placement__scale),
-                    cull_dist: f32::from(u16_at(d, D::cullDist)),
+                    scale: pl.scale,
+                    cull_dist: pl.cull_dist,
                     lighting_origin,
-                    index: i as u32,
+                    index: pl.index,
+                    draw_flags: pl.draw_flags,
+                    scriptable: pl.scriptable,
                 });
             }
         }
         out.report.push(format!(
-            "world: {} vertices, {} indices, {} surfaces, {} materials ({} not defined{}); {} static models placed of {}, {} meshes{}",
+            "world: {} vertices, {} indices, {} surfaces, {} materials ({} not defined{}); {} static models placed of {} (and {} scriptables), {} meshes{}",
             out.vertices.len(),
             out.indices.len(),
             out.surfaces.len(),
@@ -719,6 +797,7 @@ impl Iw7Map {
             if missing_materials.is_empty() { String::new() } else { format!(": {}", missing_materials.join(", ")) },
             out.static_models.len(),
             g.smodel_count,
+            scriptables_placed,
             out.models.len(),
             if no_mesh.is_empty() { String::new() } else { format!("; no mesh for {}", no_mesh.join(", ")) },
         ));
@@ -1152,4 +1231,78 @@ pub fn entity_text(raw: &str, spawns: &[SpawnPoint]) -> String {
         out.push_str("}\n");
     }
     out
+}
+
+
+/// The scriptable instances of a map zone (`MapEnts::scriptableMapEnts`),
+/// each with its def and that def's models. An instance whose def
+/// reference names a def loaded before (only the first instance of a def
+/// names it) takes the one before it: the instances are stored by def.
+fn read_scriptables(map: &Walked, image: &[u8]) -> Vec<ScriptableInstance> {
+    use crate::layout as L;
+    use L::ScriptableInstance as I;
+    let mut out = Vec::new();
+    let Some(m) = map.cap.map_ents.first() else { return out };
+    let Some(span) = m.scriptables else { return out };
+    let sstr = |i: u32| map.zone.assets.script_strings.get(i as usize).cloned().flatten().unwrap_or_default();
+    let mut last_def = String::new();
+    for (i, r) in span.get(image).chunks_exact(I::SIZE).enumerate() {
+        let name = |id: Option<&Option<AssetId>>| id.copied().flatten().map(|id| bare(map.cap.name_of(id)).to_owned()).unwrap_or_default();
+        let origin = v3(r, I::contextHeader__context__initialOrigin);
+        let targetname = sstr(u32_at(r, I::targetname));
+        // (An unused slot: nowhere, no name.)
+        if origin == [0.0; 3] && targetname.is_empty() && m.scriptable_defs.get(i).copied().flatten().is_none() {
+            continue;
+        }
+        let mut def = name(m.scriptable_defs.get(i));
+        if def.is_empty() || def.starts_with("<ref") {
+            def = last_def.clone();
+        }
+        last_def = def.clone();
+        let mut def_models: Vec<String> = Vec::new();
+        for d in map.cap.scriptable_defs.iter().filter(|d| !def.is_empty() && bare(&d.name) == def) {
+            for id in d.event_models.iter().chain(&d.models).flatten() {
+                let n = bare(map.cap.name_of(*id)).to_owned();
+                if !n.is_empty() && !n.starts_with("<ref") && n.chars().all(|c| c.is_ascii_graphic()) && !def_models.contains(&n) {
+                    def_models.push(n);
+                }
+            }
+        }
+        out.push(ScriptableInstance {
+            def,
+            model: name(m.scriptable_models.get(i)),
+            origin,
+            angles: v3(r, I::contextHeader__context__initialAngles),
+            targetname,
+            def_models,
+        });
+    }
+    out
+}
+
+/// The scriptables Black Ops II's Zombies kit stands in for (its own
+/// Pack-a-Punch, Mystery Box, perk machines, power switch and window
+/// boards are placed on their spots): not drawn as props.
+const SCRIPTABLES_REPLACED: &[&str] = &["pap_machine", "magicwheel", "magic_wheel", "perk_machine", "power_switch", "wood_board", "zmb_core_wood"];
+
+/// Scriptables not drawn, by their def's exact name: Spaceland's entrance
+/// gate, which its scripts open as the match starts (drawn as it stands in
+/// the zone, it closed the arch).
+const SCRIPTABLES_SCRIPTED: &[&str] = &["zmb_main_entrance_gate", "zmb_main_entrance_gate_light_only"];
+
+/// The model a scriptable is drawn as (a prop, as it stands when the map
+/// is running): its own, else its def's lit one (`*_on`, `*_animated`, a
+/// neon colour) before an unlit one (`*_off`); `None` for one Black Ops
+/// II's kit replaces or one with no model.
+pub fn scriptable_prop_model(sc: &ScriptableInstance) -> Option<&str> {
+    let replaced = |n: &str| SCRIPTABLES_REPLACED.iter().any(|w| n.contains(w));
+    if replaced(&sc.def) || SCRIPTABLES_SCRIPTED.contains(&sc.def.as_str()) {
+        return None;
+    }
+    if !sc.model.is_empty() && !sc.model.starts_with("<ref") {
+        return (!replaced(&sc.model)).then_some(sc.model.as_str());
+    }
+    let lit = |n: &&String| n.contains("_on") || n.contains("animated") || n.contains("neon_") && !n.ends_with("_off");
+    let pick = sc.def_models.iter().find(lit).or_else(|| sc.def_models.iter().find(|n| !n.ends_with("_off"))).or_else(|| sc.def_models.first())?;
+    (!replaced(pick)).then_some(pick.as_str())
 }
