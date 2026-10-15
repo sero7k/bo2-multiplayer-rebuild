@@ -335,6 +335,20 @@ impl T7Map {
             let (w, h) = (c.w, c.h);
             let mut rgba = c.px.clone();
             let mut any_alpha = false;
+            // A reveal decal (`gbuffer_decal` with `revealMap`) covers by its
+            // reveal map at `uv * revealScale` against a threshold its vertex
+            // alpha sets (`alphaRevealSoftEdge`, `alphaRevealRamp`), not by
+            // its colour's alpha: here the reveal map, as at full vertex
+            // alpha less a soft edge.
+            let reveal = match (cover, known && binds("revealMap")) {
+                (Cover::Alpha, true) => match self.slot(m, "revealMap", max_dim)? {
+                    Slot::Image(r) => Some(r),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let reveal_scale = m.constant::<2>("revealScale").filter(|s| s.iter().all(|v| *v > 0.0)).unwrap_or([1.0; 2]);
+            let soft = m.constant::<1>("alphaRevealSoftEdge").map_or(0.1, |v| v[0]).clamp(0.02, 1.0);
             for y in 0..h {
                 for x in 0..w {
                     let o = ((y * w + x) * 4) as usize;
@@ -347,6 +361,10 @@ impl T7Map {
                     }
                     if cover == Cover::Opaque {
                         rgba[o + 3] = 255;
+                    } else if let Some(r) = &reveal {
+                        let (u, v) = ((x as f32 + 0.5) / w as f32 * reveal_scale[0], (y as f32 + 0.5) / h as f32 * reveal_scale[1]);
+                        let a = ((r.sample(u, v, 0) - 0.5 + soft) / (2.0 * soft)).clamp(0.0, 1.0);
+                        rgba[o + 3] = (a * 255.0).round() as u8;
                     }
                     any_alpha |= rgba[o + 3] < 250;
                 }
