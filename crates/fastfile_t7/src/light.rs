@@ -48,8 +48,9 @@ pub struct LightRefs {
 /// and the plane count, word 8 a priority (0.001 for the map-wide one, 0.1
 /// or 0.01 for local ones), word 10 a mask of the lighting states it holds;
 /// then at 0x40, 0xd0 and 0x160 one bank of settings per lighting state
-/// (36 words). The volume holds a point when every plane has it on its
-/// back (`n . p <= d`).
+/// (36 words). The volume holds a point when every plane has it on the
+/// same side (which side the planes face is not known: of a closed volume
+/// only one side holds anything).
 #[derive(Clone, Debug)]
 pub struct FogVolume {
     pub planes: Vec<[f32; 4]>,
@@ -62,9 +63,15 @@ pub const FOG_VOLUME: usize = 624;
 const FOG_BANKS: [usize; 3] = [0x40, 0xd0, 0x160];
 
 impl FogVolume {
-    /// How far outside the volume `p` is (0 inside).
-    pub fn outside(&self, p: [f32; 3]) -> f32 {
-        self.planes.iter().map(|q| q[0] * p[0] + q[1] * p[1] + q[2] * p[2] - q[3]).fold(0.0, f32::max)
+    /// How many of `points` the volume holds.
+    pub fn holds(&self, points: &[[f32; 3]]) -> usize {
+        if self.planes.is_empty() {
+            return 0;
+        }
+        let side = |p: &[f32; 3], sign: f32| self.planes.iter().all(|q| sign * (q[0] * p[0] + q[1] * p[1] + q[2] * p[2] - q[3]) <= 0.0);
+        let back = points.iter().filter(|p| side(p, 1.0)).count();
+        let front = points.iter().filter(|p| side(p, -1.0)).count();
+        back.max(front)
     }
 
     /// The bank of lighting state `state`, when it reads as atmospheric

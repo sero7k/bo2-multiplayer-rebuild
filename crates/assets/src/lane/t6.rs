@@ -1509,6 +1509,32 @@ impl ZoneLane for T6Lane {
                 ));
                 let (min, max) = (draw.stats.min, draw.stats.max);
                 let props = build_props(&capture, world, &linked.local, &areas, collision.as_ref(), &mut report);
+                // bo2mp: Black Ops III's look (`BO2MP_BO3_LOOK=1`; off, the
+                // map is drawn as before).
+                if super::bo3_look::on()
+                    && let Some(sun) = world.sun.as_ref()
+                {
+                    let spawn_points: Vec<[f32; 3]> = capture
+                        .map_ents
+                        .iter()
+                        .flat_map(|text| asset_t6::parse_entities(text))
+                        .filter(|e| {
+                            let c = e.classname();
+                            c.starts_with("mp_") && c.contains("_spawn")
+                        })
+                        .filter_map(|e| e.vec3("origin"))
+                        .collect();
+                    super::bo3_look::apply(
+                        &mut draw,
+                        &materials,
+                        &props.0,
+                        &props.1,
+                        &spawn_points,
+                        sun.dir,
+                        sun.color,
+                        &mut report,
+                    );
+                }
                 // bo2zm M2: guns, arms, animations, effects and sound from
                 // every zone the map loads.
                 let stage = progress.begin_scoped(StageId::MapAssets, "weapons, effects, sound", None);

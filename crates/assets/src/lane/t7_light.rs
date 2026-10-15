@@ -50,7 +50,7 @@ const MARGIN: f32 = 3000.0;
 
 /// A test view (`BO2MP_T7_VIEW`): 1 the sun's visibility, 2 the ambient
 /// light, 3 the albedo, 4 the light (no albedo); 0 the picture.
-fn view() -> f32 {
+pub(super) fn view() -> f32 {
     match std::env::var("BO2MP_T7_VIEW").as_deref().map(str::trim) {
         Ok("sun") => 1.0,
         Ok("ambient") => 2.0,
@@ -350,7 +350,7 @@ impl Fog {
             if v.bank(0).is_none() {
                 continue;
             }
-            let n = spawns.iter().filter(|p| v.outside(**p) <= 0.0).count();
+            let n = v.holds(spawns);
             if best.is_none_or(|(bn, bp, _)| (n, v.priority) > (bn, bp)) {
                 best = Some((n, v.priority, i));
             }
