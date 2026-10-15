@@ -1164,9 +1164,14 @@ pub fn check_guest_guns() -> Vec<String> {
         ("iw6", asset_core::AssetNamespace::Iw6),
         ("s1", asset_core::AssetNamespace::S1),
         ("t7", asset_core::AssetNamespace::T7),
+        ("jup", asset_core::AssetNamespace::Jup),
     ] {
         // (`BO2MP_CHECK_GUNS=iw5,t4` checks only those games.)
         if std::env::var("BO2MP_CHECK_GUNS").is_ok_and(|only| !only.split(',').any(|g| g.trim() == game)) {
+            continue;
+        }
+        if game == "jup" {
+            out.extend(crate::lane::jup_check());
             continue;
         }
         out.extend(check_guest_game(game, ns));
