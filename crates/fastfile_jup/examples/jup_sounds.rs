@@ -9,6 +9,8 @@
 //!   --wav <dir>        decode the hits of --names (or --alias) into <dir>/<alias>[_n].wav
 //!   --alias <name|0xhash>  an alias to decode (repeatable)
 //!   --lang <xx>        language packs to prefer (default eng)
+//!   --all <zone>       decode every alias whose sounds come from this zone (repeatable)
+//!   --first            decode only each alias's first variant
 //! ```
 //! Reads only; WAVs go where you say.
 use std::collections::HashMap;
@@ -26,6 +28,8 @@ fn main() {
     let (mut names_file, mut tsv, mut wav_dir) = (None, None, None);
     let mut picks: Vec<String> = Vec::new();
     let mut lang = "eng".to_owned();
+    let mut all_zones: Vec<String> = Vec::new();
+    let mut first_only = false;
     while let Some(x) = a.next() {
         match x.as_str() {
             "--names" => names_file = a.next(),
@@ -33,6 +37,8 @@ fn main() {
             "--wav" => wav_dir = a.next(),
             "--alias" => picks.extend(a.next()),
             "--lang" => lang = a.next().unwrap_or(lang),
+            "--all" => all_zones.extend(a.next()),
+            "--first" => first_only = true,
             _ => zones.push(x),
         }
     }
@@ -94,18 +100,33 @@ fn main() {
         }
         std::fs::write(&f, out).expect("write tsv");
     }
+    if !all_zones.is_empty() {
+        let mut keys: Vec<u64> = bank
+            .aliases
+            .iter()
+            .filter(|(_, v)| all_zones.contains(&bank.zones[bank.sounds[v[0]].zone]))
+            .map(|(k, _)| *k)
+            .collect();
+        keys.sort_unstable();
+        println!("{} aliases from {}", keys.len(), all_zones.join(", "));
+        picks.extend(keys.iter().map(|k| match names.get(k) {
+            Some(n) => n.clone(),
+            None => format!("0x{k:016x}"),
+        }));
+    }
     if let Some(dir) = wav_dir {
         let dir = PathBuf::from(dir);
         std::fs::create_dir_all(&dir).expect("wav dir");
         for p in &picks {
             let (h, label) = match p.strip_prefix("0x") {
-                Some(x) => (u64::from_str_radix(x, 16).unwrap_or(0), p.clone()),
+                Some(x) => (u64::from_str_radix(x, 16).unwrap_or(0), x.to_owned()),
                 None => (alias_hash(p), p.clone()),
             };
             let Some(v) = bank.alias_by_hash(h) else {
                 println!("{label}: no such alias");
                 continue;
             };
+            let v = if first_only { &v[..1] } else { v };
             for (i, &si) in v.iter().enumerate() {
                 let s = &bank.sounds[si];
                 match bank.decode(s, oodle.as_ref()) {
