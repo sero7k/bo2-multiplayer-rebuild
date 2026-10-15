@@ -393,15 +393,33 @@ impl Bake {
             if let Some(s) = map.sun {
                 let (p, y) = (s.pitch.to_radians(), s.yaw.to_radians());
                 let fwd = [p.cos() * y.cos(), p.cos() * y.sin(), -p.sin()];
-                let back = fwd.map(|v| -v);
-                report.push(format!(
-                    "sun angles {:.1} {:.1}: forward {fwd:.3?} sky glow {:.1}, backward {back:.3?} sky glow {:.1}",
-                    s.pitch,
-                    s.yaw,
-                    sky.glow(fwd, 0.97),
-                    sky.glow(back, 0.97)
-                ));
+                let mut line = format!("sun angles {:.1} {:.1} colour {:.3?} intensity {:.1}:", s.pitch, s.yaw, s.color, s.intensity);
+                for (name, d) in [
+                    ("fwd", fwd),
+                    ("-fwd", fwd.map(|v| -v)),
+                    ("fwd z-", [fwd[0], fwd[1], -fwd[2]]),
+                    ("-fwd z-", [-fwd[0], -fwd[1], fwd[2]]),
+                    ("yx", [fwd[1], fwd[0], fwd[2]]),
+                    ("-yx", [-fwd[1], -fwd[0], -fwd[2]]),
+                ] {
+                    line.push_str(&format!(" {name} {d:.2?} {:.0};", sky.glow(d, 0.995)));
+                }
+                report.push(line);
             }
+            // The brightest sky above the horizon (a 5 degree cone's mean).
+            let mut best = (0f32, [0f32; 3]);
+            for yy in 0..24 {
+                for xx in 0..96 {
+                    let phi = xx as f32 / 96.0 * std::f32::consts::TAU;
+                    let theta = (yy as f32 + 0.5) / 24.0 * std::f32::consts::FRAC_PI_2;
+                    let d = [theta.sin() * phi.sin(), theta.sin() * phi.cos(), theta.cos()];
+                    let g = sky.glow(d, 0.996);
+                    if g > best.0 {
+                        best = (g, d);
+                    }
+                }
+            }
+            report.push(format!("sky's brightest above the horizon: {:.0} toward {:.3?}", best.0, best.1));
         }
         if let Some(g) = probes.first() {
             report.push(format!(
