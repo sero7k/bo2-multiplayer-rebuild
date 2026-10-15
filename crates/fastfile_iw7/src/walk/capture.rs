@@ -462,6 +462,14 @@ pub struct ClipMapRec {
     pub havok_world_shape: Option<Span>,
 }
 
+/// IW7: a scriptable def's models.
+#[derive(Clone, Debug, Default)]
+pub struct ScriptableDefRec {
+    pub name: String,
+    pub models: Vec<Option<AssetId>>,
+    pub event_models: Vec<Option<AssetId>>,
+}
+
 #[derive(Default, Debug)]
 pub struct Capture {
     pub techsets: Vec<TechniqueSetRec>,
@@ -480,6 +488,11 @@ pub struct Capture {
     pub com_worlds: Vec<ComWorldRec>,
     pub gfx_worlds: Vec<GfxWorldRec>,
     pub map_ents: Vec<MapEntsRec>,
+    /// IW7: each scriptable def walked (its name, model list and the
+    /// models its model events set, in walk order).
+    pub scriptable_defs: Vec<ScriptableDefRec>,
+    /// (The model events' models as they are walked.)
+    pub scriptable_event_models: Vec<Option<AssetId>>,
     pub clip_maps: Vec<ClipMapRec>,
     /// IW7: the AI path nodes (`PathData`; also listed in `others`).
     pub path_datas: Vec<PathDataRec>,

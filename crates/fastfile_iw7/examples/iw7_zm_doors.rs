@@ -48,7 +48,7 @@ fn main() {
     println!("static model flags: {flags:x?}");
     println!("{} scriptables:", map.scriptables.len());
     for sc in &map.scriptables {
-        println!("  scriptable {} model {} at {:?} angles {:?} targetname {}", sc.def, sc.model, sc.origin, sc.angles, sc.targetname);
+        println!("  scriptable {:?} model {:?} at {:?} angles {:?} targetname {} def models {:?}", sc.def, sc.model, sc.origin, sc.angles, sc.targetname, sc.def_models);
     }
     let mut classes = std::collections::BTreeMap::new();
     for e in &ents {

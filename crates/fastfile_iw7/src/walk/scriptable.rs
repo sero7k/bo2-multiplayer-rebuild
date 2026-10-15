@@ -71,7 +71,8 @@ fn event(w: &mut Walker, e: usize) -> Result<()> {
             w.xstr(d + L::ScriptableEventScriptDef::notification)?;
         }
         0x4 => {
-            w.asset(T::XModel, d + L::ScriptableEventModelDef::model)?;
+            let id = w.asset(T::XModel, d + L::ScriptableEventModelDef::model)?;
+            w.cap.scriptable_event_models.push(id);
         }
         0x5 => {
             w.xstr(d + L::ScriptableEventCollisionDef::collmapName)?;
@@ -258,9 +259,12 @@ pub(super) fn scriptable(w: &mut Walker, h: usize) -> Result<AssetId> {
     }
     w.asset(AssetType::Scriptable, h + D::nextScriptableDef)?;
     let n = w.s.u32_at(h + D::numParts)? as usize;
+    let first_event_model = w.cap.scriptable_event_models.len();
     parts(w, h + D::parts, n)?;
     let n = w.s.u32_at(h + D::numXModels)? as usize;
-    asset_array(w, AssetType::XModel, h + D::models, n)?;
+    let models = asset_array(w, AssetType::XModel, h + D::models, n)?;
+    let event_models = w.cap.scriptable_event_models.split_off(first_event_model.min(w.cap.scriptable_event_models.len()));
+    w.cap.scriptable_defs.push(super::capture::ScriptableDefRec { name: name.clone(), models, event_models });
     if dbg {
         eprintln!("scriptable {name} done pos {:#x} virt {:#x}", w.s.pos(), w.s.offset(VIRTUAL));
     }

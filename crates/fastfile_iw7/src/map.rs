@@ -161,6 +161,9 @@ pub struct ScriptableInstance {
     pub origin: [f32; 3],
     pub angles: [f32; 3],
     pub targetname: String,
+    /// The def's models: those its model events set (in order), then the
+    /// rest of its model list.
+    pub def_models: Vec<String>,
 }
 
 /// A brush sub-model (`*<n>`: a door, a debris pile): its world surfaces
@@ -828,8 +831,19 @@ impl Iw7Map {
             use L::ScriptableInstance as I;
             for (i, r) in span.get(image).chunks_exact(I::SIZE).enumerate() {
                 let name = |id: Option<&Option<AssetId>>| id.copied().flatten().map(|id| bare(map.cap.name_of(id)).to_owned()).unwrap_or_default();
+                let def = name(m.scriptable_defs.get(i));
+                let mut def_models: Vec<String> = Vec::new();
+                for d in map.cap.scriptable_defs.iter().filter(|d| !def.is_empty() && bare(&d.name) == def) {
+                    for id in d.event_models.iter().chain(&d.models).flatten() {
+                        let n = bare(map.cap.name_of(*id)).to_owned();
+                        if !n.is_empty() && !def_models.contains(&n) {
+                            def_models.push(n);
+                        }
+                    }
+                }
                 out.scriptables.push(ScriptableInstance {
-                    def: name(m.scriptable_defs.get(i)),
+                    def_models,
+                    def,
                     model: name(m.scriptable_models.get(i)),
                     origin: v3(r, I::contextHeader__context__initialOrigin),
                     angles: v3(r, I::contextHeader__context__initialAngles),
