@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 pub mod guest;
+pub mod jup_names;
 pub mod progression;
 
 /// The class slots (the menus' CoD.CACUtility.loadoutSlotNames and the
