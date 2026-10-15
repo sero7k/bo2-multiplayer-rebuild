@@ -122,6 +122,7 @@ pub fn material(s: &mut Stream, h: usize) -> Result<Option<String>> {
     s.no_loads(h, AssetType::Material.header_size(), &skip)?;
     let name = s.string(h)?;
     let mut colour_consts = None;
+    let mut globals: Vec<(u8, Vec<u8>)> = Vec::new();
     for i in 0..CONSTANT_BUFFER_SLOTS {
         if let Some(c) = s.array(h + CONSTANT_BUFFERS + 8 * i, CONSTANT_BUFFER, 15)? {
             s.no_loads(c, CONSTANT_BUFFER, &[0x28, 0x38])?;
@@ -131,6 +132,16 @@ pub fn material(s: &mut Stream, h: usize) -> Result<Option<String>> {
             s.pop();
             let data = r?;
             let buffer = s.string(c + 0x38)?;
+            if buffer.as_deref() == Some("$Globals")
+                && let Some(at) = data
+                && !globals.iter().any(|(_, d): &(u8, Vec<u8>)| d.len() == size && (0..size).all(|k| s.u8_at(at + k).is_ok_and(|b| b == d[k])))
+            {
+                let mut d = vec![0u8; size];
+                for (k, b) in d.iter_mut().enumerate() {
+                    *b = s.u8_at(at + k)?;
+                }
+                globals.push((i as u8, d));
+            }
             if colour_consts.is_none()
                 && size >= 192
                 && buffer.as_deref() == Some("$Globals")
@@ -147,6 +158,7 @@ pub fn material(s: &mut Stream, h: usize) -> Result<Option<String>> {
     let mut rec = MaterialRec {
         name: name.clone().unwrap_or_else(String::new),
         colour_consts,
+        globals,
         ..Default::default()
     };
     rec.techset = s.asset_named(AssetType::TechniqueSet, h + 0x278)?;
@@ -163,16 +175,7 @@ pub fn material(s: &mut Stream, h: usize) -> Result<Option<String>> {
     // The sampler table is 16-aligned.
     s.records(h + 0x288, samplers, SAMPLER_DEF, 15)?;
     let constants = s.u8_at(h + 0x272)? as usize;
-    if let Some(c) = s.records(h + 0x290, constants, CONSTANT_DEF, 15)? {
-        for i in 0..constants {
-            let d = c + CONSTANT_DEF * i;
-            let mut raw = [0u8; CONSTANT_DEF];
-            for (k, b) in raw.iter_mut().enumerate() {
-                *b = s.u8_at(d + k)?;
-            }
-            rec.constants.push(raw);
-        }
-    }
+    s.records(h + 0x290, constants, CONSTANT_DEF, 15)?;
     s.asset(AssetType::Material, h + 0x298)?;
     s.capture.add_material(rec);
     Ok(name)

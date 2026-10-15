@@ -73,10 +73,9 @@ fn main() {
                 for (h, i) in &m.textures {
                     println!("    {h:#010x} {i}");
                 }
-                for c in &m.constants {
-                    let w: Vec<String> = c.chunks_exact(4).map(|b| format!("{:08x}", u32::from_le_bytes(b.try_into().unwrap()))).collect();
-                    let f: Vec<f32> = c[16..].chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect();
-                    println!("    const {} {f:?}", w.join(" "));
+                for (slot, d) in &m.globals {
+                    let f: Vec<String> = d.chunks_exact(4).map(|b| format!("{}", f32::from_le_bytes(b.try_into().unwrap()))).collect();
+                    println!("    globals {slot} ({} bytes): {}", d.len(), f.join(" "));
                 }
             }
         }
