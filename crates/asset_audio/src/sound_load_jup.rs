@@ -10,7 +10,7 @@
 //! row (`<package path>`, `<key hex>:<offset>:<size>:<decoded>:<compressed>:
 //! <seek table>:<rate>:<channels>:<frames>`) and is decoded when played:
 //! the package entry through the game's own Oodle DLL, the Opus packets by
-//! `opus-decoder` (pure Rust).
+//! `rusty-opus` (pure Rust).
 //!
 //! The install is `$BO2_JUP_INSTALL`, else the `jup` line of the game
 //! folders file. Nothing of the game is copied.

@@ -1,7 +1,9 @@
 //! Modern Warfare III's sounds by alias, read from the owner's install: the
 //! sndassets and alias links of some zones ([`crate::sound`]), the KAPI
 //! packages holding their streams, and the Opus decode to 16-bit PCM
-//! (`opus-decoder`, pure Rust, MIT/Apache-2.0).
+//! (`rusty-opus`, pure Rust, BSD-3-Clause: some 100x faster than the
+//! `opus-decoder` crate first used, which decoded at 2.4x real time, too
+//! slow for a minute of music when it is first played; same output).
 //!
 //! A stream's package row is found by its key in any `.xsub` of the zone
 //! folder; the same key is in every language's pack (`eng_`, `ens_`), so the
@@ -117,15 +119,21 @@ pub fn decode_opus<'a>(
     } else {
         48000
     };
-    let mut dec = opus_decoder::OpusDecoder::new(out_rate, ch)
+    let mut dec = rusty_opus::OpusDecoder::new(out_rate as i32, ch)
         .map_err(|e| SoundError::Opus(e.to_string()))?;
-    let mut buf = vec![0i16; dec.max_frame_size_per_channel() * ch];
+    // 120 ms, the longest an Opus packet holds.
+    let max = out_rate as usize * 120 / 1000;
+    let mut buf = vec![0f32; max * ch];
     let mut samples = Vec::with_capacity(frames as usize * ch);
     for p in packets {
         let n = dec
-            .decode(p, &mut buf, false)
+            .decode(p, max, &mut buf)
             .map_err(|e| SoundError::Opus(e.to_string()))?;
-        samples.extend_from_slice(&buf[..n * ch]);
+        samples.extend(
+            buf[..n * ch]
+                .iter()
+                .map(|&x| (x * 32768.0).round().clamp(-32768.0, 32767.0) as i16),
+        );
     }
     let want = frames as usize * ch;
     if want > 0 && samples.len() > want {
