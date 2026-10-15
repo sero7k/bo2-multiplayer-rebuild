@@ -2731,7 +2731,10 @@ br_hud_hint( text )
     if ( !isdefined( self.br_hud_use ) )
         return;
 
-    if ( text == "" )
+    // (The Warzone HUD draws it as its prompt: `hint` in `bo2mp_br`.)
+    self.br_hint = text;
+
+    if ( text == "" || isdefined( self.br_wzhud ) )
     {
         self.br_hud_use.alpha = 0;
         return;
@@ -2878,6 +2881,9 @@ br_hud_publish()
 
     if ( isdefined( self.br_ev_victim ) )
         s = s + "|ev=" + self.br_ev_victim;
+
+    if ( isdefined( self.br_hint ) && self.br_hint != "" )
+        s = s + "|hint=" + self.br_hint;
 
     foreach ( mate in br_squad_members( self.br_squad ) )
     {

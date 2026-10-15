@@ -82,6 +82,9 @@ pub(crate) struct Br {
     pub breaks: i32,
     pub kill_events: i32,
     pub victim: String,
+    /// What he can use where he stands (the script's prompt: a buy
+    /// station, loot, a contract tablet, a loadout drop), "" for nothing.
+    pub hint: String,
     pub mates: Vec<Mate>,
 }
 
@@ -133,6 +136,7 @@ pub(crate) fn parse(s: &str) -> Option<Br> {
             "eb" => b.breaks = n(),
             "ek" => b.kill_events = n(),
             "ev" => b.victim = v.to_owned(),
+            "hint" => b.hint = v.to_owned(),
             "m" => {
                 let mut p = v.splitn(4, ',');
                 let state = p.next().and_then(|s| s.chars().next()).unwrap_or('a');
@@ -200,6 +204,35 @@ fn contract_picture(label: &str) -> &'static str {
     } else {
         "contract"
     }
+}
+
+/// The prompt's picture by what it offers.
+fn hint_picture(hint: &str) -> &'static str {
+    let h = hint.to_ascii_uppercase();
+    if h.starts_with("BUY STATION") {
+        "buy_station"
+    } else if h.contains("LOADOUT") {
+        "loadout_crate"
+    } else if h.contains("CONTRACT") {
+        "contract"
+    } else if h.contains("SUPPLY BOX") {
+        "contract_scavenger"
+    } else if h.contains("UPLOADING") {
+        "contract_recon"
+    } else if h.contains("WEAPON") {
+        "ammo_rifle"
+    } else {
+        "ping"
+    }
+}
+
+/// A buy station's prompt ("BUY STATION   <item>  $<price>" then its
+/// controls) as (item, price, controls).
+pub(crate) fn buy_line(hint: &str) -> Option<(String, String, String)> {
+    let mut lines = hint.lines();
+    let first = lines.next()?.strip_prefix("BUY STATION")?.trim();
+    let (item, price) = first.rsplit_once('$').map_or((first, ""), |(i, p)| (i.trim(), p.trim()));
+    Some((item.to_owned(), if price.is_empty() { String::new() } else { format!("${price}") }, lines.collect::<Vec<_>>().join("  ")))
 }
 
 /// The ammo's picture for a gun.
@@ -589,6 +622,53 @@ pub(crate) fn spawn(
         }
     });
 
+    // --- Lower centre: what he can use here (the buy station's screen). ---
+    if alive && !b.hint.is_empty() {
+        let hint_pic = pic(hint_picture(&b.hint));
+        root.spawn(Node {
+            position_type: PositionType::Absolute,
+            top: Val::Percent(62.0),
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|c| {
+            c.spawn((
+                BackgroundColor(HUD.panel),
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: px(10.0),
+                    padding: UiRect::axes(px(12.0), px(6.0)),
+                    border: UiRect::top(px(2.0)),
+                    ..default()
+                },
+                BorderColor::all(HUD.accent),
+            ))
+            .with_children(|row| {
+                glyph(row, hint_pic, 40.0 * k, HUD.accent, false);
+                row.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(2.0), ..default() }).with_children(|t| {
+                    match buy_line(&b.hint) {
+                        Some((item, price, keys)) => {
+                            text(t, "BUY STATION", 14.0 * k, HUD.accent);
+                            t.spawn(Node { flex_direction: FlexDirection::Row, column_gap: px(12.0), ..default() }).with_children(|r| {
+                                text(r, &item, 20.0 * k, HUD.text);
+                                text(r, &price, 20.0 * k, HUD.cash);
+                            });
+                            text(t, &keys, 14.0 * k, HUD.dim);
+                        }
+                        None => {
+                            for (i, line) in b.hint.lines().enumerate() {
+                                text(t, line.trim(), if i == 0 { 19.0 * k } else { 14.0 * k }, if i == 0 { HUD.text } else { HUD.dim });
+                            }
+                        }
+                    }
+                });
+            });
+        });
+    }
+
     // --- Centre: the gas, the redeploy. ---
     if alive && b.in_gas {
         let mask_pic = pic("gas_mask");
@@ -853,5 +933,11 @@ mod tests {
         assert_eq!(ammo_picture("ksg_mp"), "ammo_shells");
         assert_eq!(ammo_picture("an94_mp"), "ammo_rifle");
         assert_eq!(contract_picture("Most Wanted"), "contract_mostwanted");
+        assert_eq!(
+            buy_line("BUY STATION   Self-Revive Kit  $4500\n[USE] NEXT   HOLD [USE] BUY"),
+            Some(("Self-Revive Kit".into(), "$4500".into(), "[USE] NEXT   HOLD [USE] BUY".into()))
+        );
+        assert_eq!(buy_line("[USE]  LOADOUT"), None);
+        assert_eq!(hint_picture("[USE]  LOADOUT"), "loadout_crate");
     }
 }
