@@ -231,7 +231,8 @@ impl MapSources {
     /// With the common zones beside the map read for the pictures and
     /// materials it names but does not hold (`crate::shared`).
     pub fn with_common(mut self) -> Self {
-        let zones = crate::shared::common_zones(&self.pak_dir);
+        let stem = self.zone.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let zones = crate::shared::common_zones_for(&self.pak_dir, &stem);
         self.shared = Some(std::sync::Arc::new(crate::shared::SharedZones::read(&zones)));
         self
     }
