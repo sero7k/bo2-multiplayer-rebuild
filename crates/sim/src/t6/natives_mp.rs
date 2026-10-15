@@ -1025,6 +1025,19 @@ pub(super) fn publish_screen(world: &mut World) {
         })
         .unwrap_or_default()
     };
+    // bo2mp: Resurgence's HUD values for each player (`self.bo2mp_br`, see
+    // br_resurgence.gsc `br_hud_publish`), "" outside Resurgence.
+    let br: std::collections::HashMap<u32, String> = super::with_vm(world, |vm, _| {
+        let f = vm.intern("bo2mp_br");
+        clients
+            .iter()
+            .filter_map(|(c, o)| match vm.raw_field(*o, f) {
+                gsc_t6::Value::Undefined => None,
+                v => Some((*c, vm.to_text(&v))),
+            })
+            .collect()
+    })
+    .unwrap_or_default();
     // The objectives each player's HUD marks (bots have no HUD).
     let views: Vec<(u32, String)> =
         teams.iter().filter(|(c, _, _)| !super::is_bot(world, *c)).map(|(c, t, _)| (*c, t.clone())).collect();
@@ -1052,6 +1065,7 @@ pub(super) fn publish_screen(world: &mut World) {
             ("bo2mp_board", board.clone()),
             ("bo2mp_prematch", prematch.clone()),
             ("bo2mp_outcome", outcome.clone()),
+            ("bo2mp_br", br.get(&c).cloned().unwrap_or_default()),
         ] {
             super::set_client_dvar(world, c, k, &v);
         }

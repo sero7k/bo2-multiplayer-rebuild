@@ -57,6 +57,16 @@ pub fn resurgence_opening_aliases() -> impl Iterator<Item = &'static str> {
         .flat_map(|r| r.jup.iter().copied())
 }
 
+/// Whether the client draws the Warzone HUD (`ui::hud_warzone`): the
+/// script's text lines for the circle, squad, cash and plates then hide.
+static WARZONE_HUD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// bo2mp: whether the client draws the Warzone HUD for Resurgence (on
+/// unless Black Ops II's own HUD is asked for).
+pub fn set_warzone_hud(on: bool) {
+    WARZONE_HUD.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// bo2mp: how to ask Modern Warfare III's sounds whether an alias is there.
 pub fn set_jup_sound_lookup(lookup: Option<fn(&str) -> bool>) {
     if let Ok(mut s) = JUP_SOUND.lock() {
@@ -126,6 +136,10 @@ pub(super) fn dvars(rules: &Rules) -> Vec<(String, String)> {
     let mut put = |k: &str, v: String| out.push((format!("scr_br{k}"), v));
     put("", "1".into());
     put("_squad", rules.squad_size.to_string());
+    put(
+        "_wzhud",
+        u8::from(WARZONE_HUD.load(std::sync::atomic::Ordering::Relaxed)).to_string(),
+    );
     put("_infil_ms", (u32::from(rules.infil_s) * 1000).to_string());
     put("_health", rules.health.to_string());
     put("_plate_hp", rules.plate_hp.to_string());

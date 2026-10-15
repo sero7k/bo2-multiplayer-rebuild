@@ -29,6 +29,7 @@ main()
     level.br_drops = [];
     level.br_contract = [];
     level.br_contract_taker = [];
+    level.br_contract_end = [];
     level.br_hurried = [];
     level.br_bounty_hit = [];
     level.br_scav_open = [];
@@ -816,6 +817,10 @@ br_onplayerkilled( attacker )
         attacker.br_cash = attacker.br_cash + level.br_kill_cash;
         attacker br_snd( "cash_pickup" );
         level.br_last_killer_squad = attacker.br_squad;
+        attacker.br_kills++;
+        attacker.br_ev_kill++;
+        attacker.br_ev_victim = self.name;
+        attacker br_hud_publish();
 
         if ( randomint( 4 ) == 0 )
             attacker br_vo( "vo_kill" );
@@ -946,6 +951,9 @@ br_redeploy( wait_ms )
         self.br_hud_big settext( "REDEPLOYING IN " + left );
         self.br_hud_big.alpha = 1;
 
+        if ( isdefined( self.br_wzhud ) )
+            self.br_hud_big.alpha = 0;
+
         // (No squadmate left alive: the squad is out, him with it.)
         if ( level.br_squad_size > 1 && br_squad_alive( self.br_squad ) == 0 )
         {
@@ -1035,6 +1043,8 @@ br_damage_hook( einflictor, eattacker, idamage, idflags, smeansofdeath, sweapon,
             if ( isdefined( eattacker ) && isplayer( eattacker ) )
             {
                 eattacker br_snd( "armor_break" );
+                eattacker.br_ev_break++;
+                eattacker br_hud_publish();
 
                 if ( self.br_plates == 0 )
                     br_cut_redeploys( eattacker.br_squad, level.br_armor_cut_ms );
@@ -1046,7 +1056,11 @@ br_damage_hook( einflictor, eattacker, idamage, idflags, smeansofdeath, sweapon,
         if ( idamage <= 0 )
         {
             if ( isdefined( eattacker ) && isplayer( eattacker ) )
+            {
                 eattacker br_snd( "armor_hit" );
+                eattacker.br_ev_hit++;
+                eattacker br_hud_publish();
+            }
 
             return 0;
         }
@@ -2276,6 +2290,7 @@ br_contract_run( player, c, id )
 
     objective_delete( id );
     level.br_contract[squad] = undefined;
+    level.br_contract_end[squad] = undefined;
 
     if ( isdefined( player ) )
         player br_snd( "biometric_close" );
@@ -2625,6 +2640,8 @@ br_most_wanted( squad, c, id )
 // Fifteen seconds left on a timed contract: said once.
 br_contract_hurry( squad, end )
 {
+    level.br_contract_end[squad] = end;
+
     if ( end - gettime() > 15000 )
         return;
 
@@ -2688,6 +2705,25 @@ br_hud_init()
     self.br_hud_note.alpha = 0;
     self.br_hud_use = self br_hud_elem( 0, 90, "center", "middle", 1.3 );
     self.br_hud_use.alpha = 0;
+
+    if ( !isdefined( self.br_kills ) )
+        self.br_kills = 0;
+
+    // (The client's Warzone HUD draws the circle, squad, cash, plates, gas
+    // and redeploy from `self.bo2mp_br`: these text lines stay hidden.)
+    if ( getdvarint( "scr_br_wzhud" ) )
+    {
+        self.br_hud_circle.alpha = 0;
+        self.br_hud_squad.alpha = 0;
+        self.br_hud_cash.alpha = 0;
+        self.br_hud_armor.alpha = 0;
+        self.br_hud_note.y = 150;
+        self.br_wzhud = 1;
+    }
+
+    self.br_ev_hit = 0;
+    self.br_ev_break = 0;
+    self.br_ev_kill = 0;
 }
 
 br_hud_hint( text )
@@ -2739,6 +2775,136 @@ br_clock( ms )
         return "" + m + ":0" + s;
 
     return "" + m + ":" + s;
+}
+
+// The Warzone HUD's values (the client draws them; published to his
+// client as `bo2mp_br`): `key=value` fields joined by "|", then a
+// `m=<state>,<health %>,<armor>,<name>` field for each squadmate (state:
+// a alive, r redeploying, d dead, o out).
+br_hud_publish()
+{
+    if ( !isdefined( self.br_squad ) || !isdefined( level.br_phases ) )
+        return;
+
+    now = br_elapsed();
+    st = "wait";
+    ms = 0;
+
+    if ( !isdefined( level.br_started ) )
+        st = "lobby";
+    else if ( level.br_phase < 0 )
+    {
+        st = "infil";
+        ms = level.br_infil_ms - now;
+    }
+    else if ( level.br_phase >= level.br_phases.size )
+        st = "final";
+    else
+    {
+        p = level.br_phases[level.br_phase];
+
+        if ( now < p.close_from )
+            ms = p.close_from - now;
+        else
+        {
+            st = "close";
+            ms = p.closed - now;
+        }
+    }
+
+    if ( ms < 0 )
+        ms = 0;
+
+    players = 0;
+
+    foreach ( pl in level.players )
+    {
+        if ( isdefined( pl.br_squad ) && !br_squad_out( pl.br_squad ) && ( isalive( pl ) || pl.br_pending ) )
+            players++;
+    }
+
+    redeploy = -1;
+
+    if ( !isalive( self ) && self.br_pending && isdefined( self.br_redeploy_at ) )
+        redeploy = self.br_redeploy_at - gettime();
+
+    gas = 0;
+    gas_d = 0;
+
+    if ( isalive( self ) && level.br_phase >= 0 && isdefined( level.br_center ) && !br_inside( self.origin, 0 ) )
+    {
+        gas = 1;
+        gas_d = int( distance2d( self.origin, level.br_center ) - level.br_radius );
+    }
+
+    contract = "";
+    contract_ms = -1;
+
+    if ( isdefined( level.br_contract[self.br_squad] ) )
+    {
+        foreach ( c in level.br_contract_kinds )
+        {
+            if ( c.key == level.br_contract[self.br_squad] )
+                contract = c.label;
+        }
+
+        if ( isdefined( level.br_contract_end[self.br_squad] ) )
+            contract_ms = level.br_contract_end[self.br_squad] - gettime();
+    }
+
+    circle = "";
+
+    if ( isdefined( level.br_center ) && isdefined( level.br_radius ) )
+    {
+        circle = int( level.br_center[0] ) + "," + int( level.br_center[1] ) + "," + int( level.br_radius );
+
+        if ( isdefined( level.br_next_center ) )
+            circle = circle + "," + int( level.br_next_center[0] ) + "," + int( level.br_next_center[1] ) + "," + int( level.br_next_radius );
+    }
+
+    health = 0;
+
+    if ( isalive( self ) && self.maxhealth > 0 )
+        health = int( self.health * 100 / self.maxhealth );
+
+    s = "v=1|st=" + st + "|ph=" + ( level.br_phase + 1 ) + "|np=" + level.br_phases.size + "|ms=" + ms;
+    s = s + "|sq=" + br_squads_standing() + "|pl=" + players + "|my=" + ( self.br_squad + 1 );
+    s = s + "|ca=" + self.br_cash + "|ki=" + self.br_kills + "|hp=" + health;
+    s = s + "|ar=" + self.br_armor + "|ah=" + level.br_plate_hp + "|ps=" + level.br_plate_slots + "|pc=" + self.br_plates_carried + "|pm=" + level.br_plates_max;
+    s = s + "|rd=" + br_redeploy_wait() + "|rt=" + redeploy + "|out=" + self.br_out + "|sr=" + self.br_selfrevive;
+    s = s + "|gas=" + gas + "|gd=" + gas_d + "|mask=" + self.br_mask_on + "|mm=" + self.br_mask_ms;
+    s = s + "|ct=" + contract + "|cm=" + contract_ms + "|circle=" + circle;
+    s = s + "|eh=" + self.br_ev_hit + "|eb=" + self.br_ev_break + "|ek=" + self.br_ev_kill;
+
+    if ( isdefined( self.br_ev_victim ) )
+        s = s + "|ev=" + self.br_ev_victim;
+
+    foreach ( mate in br_squad_members( self.br_squad ) )
+    {
+        if ( mate == self )
+            continue;
+
+        state = "a";
+
+        if ( !isalive( mate ) )
+        {
+            if ( mate.br_pending )
+                state = "r";
+            else if ( mate.br_out || br_squad_out( mate.br_squad ) )
+                state = "o";
+            else
+                state = "d";
+        }
+
+        mh = 0;
+
+        if ( isalive( mate ) && mate.maxhealth > 0 )
+            mh = int( mate.health * 100 / mate.maxhealth );
+
+        s = s + "|m=" + state + "," + mh + "," + mate.br_armor + "," + mate.name;
+    }
+
+    self.bo2mp_br = s;
 }
 
 br_hud_think()
@@ -2816,9 +2982,14 @@ br_hud_think()
         {
             self.br_hud_gas settext( "YOU ARE IN THE GAS  -  GET TO THE SAFE ZONE  " + int( distance2d( self.origin, level.br_center ) - level.br_radius ) + "" );
             self.br_hud_gas.alpha = 1;
+
+            if ( isdefined( self.br_wzhud ) )
+                self.br_hud_gas.alpha = 0;
         }
         else
             self.br_hud_gas.alpha = 0;
+
+        self br_hud_publish();
 
         if ( tick % 4 == 0 )
             self br_gas( br_gas_dps() );
