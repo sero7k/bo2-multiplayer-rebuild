@@ -418,8 +418,13 @@ pub fn probe_faces(map: &T7Map, index: usize, mip: u32) -> Result<ProbeFaces, St
     let s = (p.size >> mip).max(1);
     let bw = s.div_ceil(4) as usize;
     let mut texels = Vec::new();
+    let level_major = std::env::var("T7_CUBE_ORDER").is_ok_and(|v| v == "level");
     for f in 0..6 {
-        let at = (6 * index + f) * face + before;
+        let at = if level_major {
+            (0..mip).map(|k| lsize(k) * 6 * p.count as usize).sum::<usize>() + (6 * index + f) * lsize(mip)
+        } else {
+            (6 * index + f) * face + before
+        };
         let mut t = vec![[0f32; 3]; (s * s) as usize];
         for (i, b) in d.get(at..at + lsize(mip)).ok_or("past the data")?.chunks_exact(16).enumerate() {
             let px = bc6_block(b);
