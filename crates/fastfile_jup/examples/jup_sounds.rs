@@ -5,7 +5,7 @@
 //! ```text
 //! cargo run -p fastfile_jup --example jup_sounds -- "F:\Modern Warfare III 1.21" <zone>... [options]
 //!   --names <file>     alias names to try (one per line); hits are listed
-//!   --tsv <file>       write every alias: hash, name (if known), zone, variants, seconds, channels, package
+//!   --tsv <file>       write every alias: hash, name (if known), zone, variants, seconds, channels, package, next layer
 //!   --wav <dir>        decode the hits of --names (or --alias) into <dir>/<alias>[_n].wav
 //!   --alias <name|0xhash>  an alias to decode (repeatable)
 //!   --lang <xx>        language packs to prefer (default eng)
@@ -87,7 +87,7 @@ fn main() {
             let v = &bank.aliases[k];
             let s = &bank.sounds[v[0]];
             out.push_str(&format!(
-                "{k:016x}\t{}\t{}\t{}\t{:.2}\t{}\t{}\n",
+                "{k:016x}\t{}\t{}\t{}\t{:.2}\t{}\t{}\t{}\n",
                 names.get(k).map_or("", String::as_str),
                 bank.zones[s.zone],
                 v.len(),
@@ -95,7 +95,10 @@ fn main() {
                 s.asset.channels,
                 bank.package_of(s)
                     .and_then(|p| p.file_name())
-                    .map_or("inline".into(), |n| n.to_string_lossy())
+                    .map_or("inline".into(), |n| n.to_string_lossy()),
+                bank.next
+                    .get(k)
+                    .map_or(String::new(), |n| format!("{n:016x}"))
             ));
         }
         std::fs::write(&f, out).expect("write tsv");
