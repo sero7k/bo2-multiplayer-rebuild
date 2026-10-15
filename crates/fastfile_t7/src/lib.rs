@@ -18,6 +18,7 @@
 #![forbid(unsafe_code)]
 
 pub mod asset_type;
+pub mod bake;
 pub mod container;
 pub mod cursor;
 pub mod dxbc;

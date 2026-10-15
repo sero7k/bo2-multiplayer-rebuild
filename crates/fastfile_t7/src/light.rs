@@ -153,6 +153,27 @@ impl SkyPicture {
         })
     }
 
+    /// The mean sky within `cos_max` of direction `d` (a soft cone).
+    pub fn glow(&self, d: [f32; 3], cos_max: f32) -> f32 {
+        let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(1e-6);
+        let d = d.map(|v| v / n);
+        let (mut sum, mut cnt) = (0f64, 0u32);
+        let (w, h) = (64u32, 32u32);
+        for y in 0..h {
+            for x in 0..w {
+                let phi = (0.5 - (x as f32 + 0.5) / w as f32) * std::f32::consts::TAU;
+                let theta = (y as f32 + 0.5) / h as f32 * std::f32::consts::PI;
+                let dir = [theta.sin() * phi.sin(), theta.sin() * phi.cos(), theta.cos()];
+                if dir[0] * d[0] + dir[1] * d[1] + dir[2] * d[2] >= cos_max {
+                    let c = self.at(dir);
+                    sum += f64::from(0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]);
+                    cnt += 1;
+                }
+            }
+        }
+        if cnt == 0 { 0.0 } else { (sum / f64::from(cnt)) as f32 }
+    }
+
     /// The brightest texel's direction (the sun's, on a day sky) and value.
     pub fn brightest(&self) -> ([f32; 3], f32) {
         let (mut best, mut at) = (0f32, 0usize);
@@ -367,6 +388,20 @@ impl Bake {
                 probe_units = sky_up / probe_up;
             }
             report.push(format!("sky over probe (up face): {sky_up:.2} / {probe_up:.3} = {probe_units:.1}"));
+            // Which way the sun volume's angles point: the sky round both
+            // readings of them.
+            if let Some(s) = map.sun {
+                let (p, y) = (s.pitch.to_radians(), s.yaw.to_radians());
+                let fwd = [p.cos() * y.cos(), p.cos() * y.sin(), -p.sin()];
+                let back = fwd.map(|v| -v);
+                report.push(format!(
+                    "sun angles {:.1} {:.1}: forward {fwd:.3?} sky glow {:.1}, backward {back:.3?} sky glow {:.1}",
+                    s.pitch,
+                    s.yaw,
+                    sky.glow(fwd, 0.97),
+                    sky.glow(back, 0.97)
+                ));
+            }
         }
         if let Some(g) = probes.first() {
             report.push(format!(
