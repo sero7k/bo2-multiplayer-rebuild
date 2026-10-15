@@ -43,9 +43,9 @@ const IW7_VARIANTS: &[(&str, &str)] = &[
 
 /// bo2mp: IW4x's own map pack in Modern Warfare 2 (`zone/iw4x/.../dlc`):
 /// Call of Duty 4's and Black Ops' maps rebuilt for MW2, and its variants,
-/// titled as IW4x lists them. They are MW2's maps here (MW2's section), and
-/// a Call of Duty 4 map with a version in this list is not listed from
-/// Call of Duty 4 itself (`COD4_IN_MW2`).
+/// titled as IW4x lists them. They are MW2's maps here (MW2's section); a
+/// Call of Duty 4 map with a version in this list is listed from Call of
+/// Duty 4 itself as well, the MW2 one marked "(MW2)" (`COD4_IN_MW2`).
 const IW4X: &[(&str, &str)] = &[
     ("mp_nuked", "Nuketown"),
     ("mp_cross_fire", "Crossfire"),
@@ -77,7 +77,7 @@ const IW4X: &[(&str, &str)] = &[
 
 /// bo2mp: MW2's maps that are Call of Duty 4's (IW4x's rebuilds, its
 /// variants of them, and MW2's own Stimulus remakes): listed in Call of
-/// Duty 4's section, played as MW2's.
+/// Duty 4's section as "<title> (MW2)", beside CoD4's own.
 const COD4_MAPS_IN_MW2: &[&str] = &[
     "mp_convoy", "mp_backlot", "mp_bloc", "mp_bloc_sh", "mp_bog_sh", "mp_cargoship", "mp_cargoship_sh",
     "mp_carentan", "mp_citystreets", "mp_countdown", "mp_crash_snow", "mp_cross_fire", "mp_farm",
@@ -546,18 +546,17 @@ fn discover() -> Vec<Category> {
     );
     installed.sort();
     installed.dedup();
-    // bo2mp: a Call of Duty 4 map MW2's folder also has (IW4x's CoD4 pack:
-    // Backlot, Crossfire, Wet Work, ...) is played as MW2's version - it
-    // loads through MW2's lane like the rest of MW2, and runs better - so
-    // CoD4's own copy is not listed.
-    let ported: Vec<String> = installed
+    // bo2mp: Call of Duty 4's own maps are always listed, read from CoD4's
+    // own zones. Where MW2's folder also has a version of one (IW4x's CoD4
+    // pack: Backlot, Crossfire, Wet Work, ...) that version is listed too,
+    // marked "(MW2)", so both can be played.
+    let both: Vec<String> = installed
         .iter()
         .filter(|(g, s)| g == "iw3" && installed.iter().any(|(g2, s2)| g2 == "iw4" && s2 == mw2_version_of(s)))
         .map(|(_, s)| s.clone())
         .collect();
-    if !ported.is_empty() {
-        diag::info!(Ui, "bo2mp maps: {} Call of Duty 4 maps played as MW2's ports instead: {}", ported.len(), ported.join(", "));
-        installed.retain(|(g, s)| !(g == "iw3" && ported.contains(s)));
+    if !both.is_empty() {
+        diag::info!(Ui, "bo2mp maps: {} Call of Duty 4 maps listed as CoD4's own and as MW2's version: {}", both.len(), both.join(", "));
     }
     // bo2mp: likewise a Modern Warfare 3 map IW4x has rebuilt for MW2
     // (Lockdown, Dome, Seatown, ...): MW2's version is played (it looks
@@ -635,7 +634,7 @@ fn discover() -> Vec<Category> {
                 all.push(ForeignMap {
                     ui_name: if shared(&stem) { format!("{stem}_{}", game.prefix) } else { stem.clone() },
                     game: game.prefix,
-                    title,
+                    title: if cod4 { format!("{title} (MW2)") } else { title },
                     origin: if cod4 { "Call of Duty 4 (MW2 version)".to_owned() } else { format!("{}{suffix}", game.title) },
                     section: if suffix == " (Custom)" {
                         "CUSTOM MAPS".to_owned()
