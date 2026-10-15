@@ -46,12 +46,18 @@ pub const SUN_SHADOW_SOFTNESS: f32 = 0.25;
 /// The scale IW7's exposure (`tonemapExposure` plus
 /// `tonemapExposureAdjust`, in stops) turns its HDR light by:
 /// `EXPOSURE_K * 2^-stops`, the tone map's input (`Vision::exposure`).
-/// Fitted to the maps' preview pictures (see `iw7_render`).
-pub const EXPOSURE_K: f32 = 32768.0;
+/// Fitted to the maps' preview pictures (`iw7_render` with
+/// `IW7_RENDER_REF`): mp_proto and mp_prime (fixed exposure) sit a stop
+/// either side of it, and the maps whose automatic exposure meets
+/// `tonemapMaxExposure` (mp_frontier, mp_hawkwar, mp_quarry, mp_junk) came
+/// out a stop dark at half of it.
+pub const EXPOSURE_K: f32 = 65536.0;
 
 /// What IW7's automatic exposure (`tonemapAuto`) brings the scene's
 /// log-average HDR luminance to, exposed (the tone map's input). Fitted to
-/// the maps' preview pictures (see `iw7_render`).
+/// the maps' preview pictures (`iw7_render` with `IW7_RENDER_REF`): with
+/// it the spawn views of the 28 automatically exposed maps come out a
+/// median 1.0x the previews' mean brightness.
 pub const AUTO_KEY: f32 = 4.0;
 
 /// The albedo the metering proxy (`Iw7Map::metered_light`) takes surfaces
