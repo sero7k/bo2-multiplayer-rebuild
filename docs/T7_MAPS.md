@@ -104,8 +104,8 @@ III maps take it. Read from the GfxWorld's first sun volume:
   code not read): 1 start, 2 half distance, 3 base height, 4 half height,
   16..18 fog colour, 19 extinction, 20..22 haze colour, 23 haze start, 24
   haze spread, 25 Schlick k, 26 haze density, 28 in-scatter, 30 sun
-  strength, 31 sky distance. The fog's in-scatter is its colour at the sky
-  horizon's brightness, the haze's its colour at the sun's light x 2 pi x
+  strength, 31 sky distance. The fog's in-scatter is the sky's horizon
+  colour (words 16..18 as its colour were far too blue), the haze's its colour at the sun's light x 2 pi x
   its density. Added: the haze toward the sun is
   shadowed by the baked sun map along the first 2500 units of the ray (16
   steps), which draws the sun's shafts. `BO2MP_T7_FOG` (density scale, 0
