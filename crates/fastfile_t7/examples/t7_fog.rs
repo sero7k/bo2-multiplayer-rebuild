@@ -3,7 +3,8 @@
 //! header's inline settings (0x5f0..0x2040, words that are not zero, as
 //! floats where they look like one), each fog volume (624), lit fog volume
 //! (360), LUT volume (60) and exposure volume (108), and how many records
-//! each post-effect list holds.
+//! each post-effect list holds; with `<out.png>`, the LUT material's
+//! pictures (dimensions, format) and the first one's top level as a PNG.
 use fastfile_t7::walk::{Options, walk_with};
 
 fn word(b: &[u8], o: usize) -> String {
@@ -45,6 +46,47 @@ fn main() {
         println!("{name}s: {n}");
         for i in 0..n.min(6) {
             dump(b, at + size * i, size, &format!("{name} {i}"));
+        }
+    }
+    let paks = fastfile_t7::xpak::XpakSet::open_dir(path.parent().unwrap()).ok().map(|p| p.0);
+    for m in g.header_materials.iter().flatten() {
+        let Some(mat) = w.capture.material(m.trim_start_matches(',')) else {
+            println!("lut material {m}: not in the zone");
+            continue;
+        };
+        println!("lut material {m}: techset {:?}", mat.techset);
+        for (i, (hash, name)) in mat.textures.iter().enumerate() {
+            let im = w.capture.image(name.trim_start_matches(','));
+            println!("  texture {hash:#010x} {name}: {:?}", im.map(|im| (im.width, im.height, im.depth, im.levels, im.format, fastfile_t7::texture::dxgi_name(im.format))));
+            let (Some(im), Some(paks), Some(out)) = (im, paks.as_ref(), a.get(2)) else { continue };
+            if i > 0 {
+                continue;
+            }
+            match fastfile_t7::texture::image_levels(im, &z.image, paks) {
+                Ok(l) => {
+                    let depth = usize::from(im.depth.max(1));
+                    let (w0, h0) = (l.width as usize, l.height as usize);
+                    // A volume's slices one after another: the top level's
+                    // bytes are depth times a slice's.
+                    let slice = fastfile_t7::texture::level_size(l.format, l.width, l.height).unwrap_or(0);
+                    let mut rows: Vec<u8> = Vec::new();
+                    for d in 0..depth {
+                        let one = fastfile_t7::texture::ImageLevels { data: l.data[d * slice..((d + 1) * slice).min(l.data.len())].to_vec(), levels: 1, ..l.clone() };
+                        if let Some((_, _, px)) = fastfile_t7::texture::level_rgba(&one, 0) {
+                            rows.extend_from_slice(&px);
+                        }
+                    }
+                    let (pw, ph) = (w0, rows.len() / 4 / w0.max(1));
+                    let at = |x: usize, y: usize| rows.get((y * pw + x) * 4..(y * pw + x) * 4 + 4).map(|p| [p[0], p[1], p[2], p[3]]);
+                    println!("  decoded {pw}x{ph} ({depth} slices of {w0}x{h0}): corners {:?} {:?} {:?} {:?}", at(0, 0), at(pw - 1, 0), at(0, ph - 1), at(pw - 1, ph - 1));
+                    let f = std::fs::File::create(out).expect("png");
+                    let mut e = png::Encoder::new(std::io::BufWriter::new(f), pw as u32, ph as u32);
+                    e.set_color(png::ColorType::Rgba);
+                    e.set_depth(png::BitDepth::Eight);
+                    e.write_header().and_then(|mut w| w.write_image_data(&rows[..pw * ph * 4])).expect("png write");
+                }
+                Err(e) => println!("  pixels: {e}"),
+            }
         }
     }
     for (count_at, _size) in [(0x1620usize, 144usize), (0x1630, 144), (0x1b40, 384), (0x1b50, 464), (0x1b60, 464), (0x1b90, 144), (0x1ba0, 144), (0x1ff0, 336), (0x2000, 688), (0x2010, 688), (0x2020, 164), (0x2030, 164)] {
