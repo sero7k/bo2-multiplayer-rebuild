@@ -15,8 +15,10 @@ use std::path::Path;
 use asset_material::MaterialCatalog;
 use asset_transport::progress::{LoadProgress, StageId};
 use asset_world::WorldDrawPolicy;
+use fastfile_jup::map::materials::Packages;
 use fastfile_jup::map::{JupMap, MapSources, ents};
-use fastfile_t7::map::{T7Map, WorldSurface, WorldVertex};
+use fastfile_t7::map::{MapMaterial, T7Map, WorldSurface, WorldVertex};
+use fastfile_t7::texture::ImageLevels;
 
 use super::LoadedWorld;
 use crate::lane_capability::PreparedCapability;
@@ -176,7 +178,7 @@ fn as_t7(map: &JupMap, report: &mut Vec<String>) -> T7Map {
             vertex_count: s.positions.len() as u32,
             tri_count: s.tris.len() as u16,
             base_index,
-            material: None,
+            material: s.material,
             flags: 0,
             mins: lo,
             maxs: hi,
@@ -224,6 +226,117 @@ fn as_t7(map: &JupMap, report: &mut Vec<String>) -> T7Map {
     t7
 }
 
+/// The largest a picture is drawn at.
+const PICTURE_MAX: u32 = 1024;
+
+/// Does a BC1 picture cut holes (a tenth of its blocks in the
+/// punch-through mode)? Its material is then drawn alpha-tested.
+fn bc1_cuts(dxgi: u32, data: &[u8]) -> bool {
+    if dxgi != 71 || data.len() < 8 {
+        return false;
+    }
+    let blocks = data.chunks_exact(8);
+    let n = blocks.len();
+    let holes = blocks
+        .filter(|b| u16::from_le_bytes([b[0], b[1]]) <= u16::from_le_bytes([b[2], b[3]]))
+        .count();
+    holes * 10 >= n
+}
+
+/// The materials as the Black Ops III builder reads them, each with its
+/// colour picture's pixels (fetched from the install's packages, a few
+/// threads at once). Materials keep the map's order, so a surface's
+/// material index stays.
+fn materials_into(
+    map: &JupMap,
+    t7: &mut T7Map,
+    install: &Path,
+    oodle: &dyn fastfile_jup::oodle::Decompressor,
+    report: &mut Vec<String>,
+) {
+    if map.materials.is_empty() {
+        return;
+    }
+    let started = std::time::Instant::now();
+    let paks = Packages::open(install);
+    let wanted: Vec<usize> = map.materials.iter().filter_map(|m| m.colour).collect();
+    let mut wanted_sorted = wanted.clone();
+    wanted_sorted.sort_unstable();
+    wanted_sorted.dedup();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let results: std::sync::Mutex<
+        Vec<(usize, Result<fastfile_jup::map::materials::Level, String>)>,
+    > = std::sync::Mutex::new(Vec::new());
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get().clamp(2, 8));
+    std::thread::scope(|s| {
+        for _ in 0..threads {
+            s.spawn(|| {
+                loop {
+                    let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(&img) = wanted_sorted.get(k) else {
+                        break;
+                    };
+                    let level = paks.level(&map.images[img], PICTURE_MAX, oodle);
+                    if let Ok(mut r) = results.lock() {
+                        r.push((img, level));
+                    }
+                }
+            });
+        }
+    });
+    let mut decoded = std::collections::HashMap::new();
+    let mut failures = Vec::new();
+    for (img, level) in results.into_inner().unwrap_or_default() {
+        match level {
+            Ok(l) => {
+                decoded.insert(img, l);
+            }
+            Err(e) => failures.push(e),
+        }
+    }
+    let mut cut = 0usize;
+    for m in &map.materials {
+        let mut mat = MapMaterial {
+            name: format!("jup_{:016x}", m.hash),
+            technique_set: String::new(),
+            textures: Vec::new(),
+        };
+        if let Some(c) = m.colour
+            && let Some(l) = decoded.get(&c)
+        {
+            if bc1_cuts(l.dxgi, &l.data) {
+                mat.name.push_str("_alphatest");
+                cut += 1;
+            }
+            let name = format!("jup_img_{:016x}", map.images[c].hash);
+            t7.add_image(
+                name.clone(),
+                ImageLevels {
+                    format: l.dxgi,
+                    width: l.width,
+                    height: l.height,
+                    levels: 1,
+                    data: l.data.clone(),
+                    part: None,
+                },
+            );
+            mat.textures.push((0, name));
+        }
+        t7.materials.push(mat);
+    }
+    report.push(format!(
+        "jup pictures: {} of {} colour pictures from {} packages in {:.1}s ({cut} materials alpha-tested){}",
+        decoded.len(),
+        wanted_sorted.len(),
+        paks.len(),
+        started.elapsed().as_secs_f32(),
+        failures
+            .first()
+            .map(|e| format!("; first missing: {e}"))
+            .unwrap_or_default()
+    ));
+}
+
 /// Loads a Modern Warfare III map zone into the match's world. A zone that
 /// cannot be read becomes a gap with the reason, never a crash.
 pub(crate) fn load_jup_world(
@@ -240,12 +353,12 @@ pub(crate) fn load_jup_world(
     let started = std::time::Instant::now();
     let read = std::panic::catch_unwind(|| {
         let oodle = fastfile_jup::oodle::load(&src.install).map_err(|e| e.to_string())?;
-        JupMap::load(&src, oodle.as_ref())
+        JupMap::load(&src, oodle.as_ref()).map(|m| (m, oodle))
     });
-    let map = match read {
-        Ok(Ok(map)) => {
+    let (map, oodle) = match read {
+        Ok(Ok(read)) => {
             stage.done();
-            map
+            read
         }
         Ok(Err(error)) => {
             stage.fail();
@@ -282,7 +395,10 @@ pub(crate) fn load_jup_world(
         started.elapsed().as_secs_f32()
     ));
     report.extend(map.report.iter().map(|l| format!("jup {l}")));
-    let t7 = as_t7(&map, &mut report);
+    let mut t7 = as_t7(&map, &mut report);
+    let stage = progress.begin_scoped(StageId::MapAssets, "modern warfare iii pictures", None);
+    materials_into(&map, &mut t7, &src.install, oodle.as_ref(), &mut report);
+    stage.done();
     let loaded = super::t7_map::build_t7_world(path, &t7, report, progress, material_seed);
     diag::info!(
         World,

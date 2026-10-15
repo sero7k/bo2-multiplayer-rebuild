@@ -234,6 +234,9 @@ pub struct T7Map {
     /// lane for a big map's sea sheets and far backdrop.)
     pub no_collision: Vec<bool>,
     images: HashMap<String, ImageRec>,
+    /// (bo2mp: pictures another game's reader decoded for its materials,
+    /// by name: [`Self::add_image`].)
+    added_images: HashMap<String, ImageLevels>,
     zone_image: Vec<u8>,
     paks: Option<XpakSet>,
 }
@@ -574,6 +577,9 @@ impl T7Map {
     /// most `max_dim` (its single level; the smallest part's whole chain
     /// when that is the one), or the zone's own pixels.
     pub fn image(&self, name: &str, max_dim: u32) -> Result<ImageLevels, String> {
+        if let Some(l) = self.added_images.get(name) {
+            return Ok(l.clone());
+        }
         let im = self.images.get(bare(name)).ok_or_else(|| format!("{name}: not in the zone"))?;
         if im.xpak.is_empty() {
             return texture::zone_levels(im, &self.zone_image).map_err(|e| format!("{name}: {e}"));
@@ -590,6 +596,12 @@ impl T7Map {
             return Err(format!("{name}: part {k} decodes to {:#x} bytes, expected {want:#x}", data.len()));
         }
         Ok(ImageLevels { format: im.format, width: w, height: h, levels, data: data[..want].to_vec(), part: Some(k) })
+    }
+
+    /// (bo2mp: a picture another game's reader decoded, for a material of
+    /// its own to name; [`Self::image`] hands it out as it is.)
+    pub fn add_image(&mut self, name: String, levels: ImageLevels) {
+        self.added_images.insert(name, levels);
     }
 
     /// The image record of a name (format, size).
