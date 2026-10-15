@@ -168,8 +168,10 @@ pub(crate) fn picture(
         }
         data.push(blocks);
     }
-    // Biggest level first.
-    data.reverse();
+    // (The levels went in biggest first, as the mip chain runs: the
+    // quadtree's finest level, `top`, is mip 0. Turning them round put the
+    // coarsest level's 248 px first under the picture's 3968 px size, and
+    // Rebirth's ground drew magenta.)
     let side = (1u32 << top) * (INNER as u32) * 4;
     report.push(format!(
         "jup terrain: texture {side} px a side, {} levels, {} of {} tiles ({missing} missing) in {:.1}s",
