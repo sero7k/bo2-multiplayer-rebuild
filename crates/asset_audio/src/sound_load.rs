@@ -273,11 +273,29 @@ fn sound_sources(games: &GamesRoot, map: &Path) -> (Vec<SoundSource>, Vec<SoundS
         // its sound banks (read by `fastfile_t7`, kept under the BO3
         // namespace).
         after_map.extend(bo3_sound_source(games));
+        // bo2mp: Modern Warfare III's (2023) guns: their sounds, from its
+        // `ingame` (read by `fastfile_jup`, kept under the jup namespace).
+        after_map.extend(jup_gun_sound_source());
     }
     // bo2mp: Resurgence's sounds from Modern Warfare III (2023), when the
     // match is Resurgence and the install is set.
     after_map.extend(jup_sound_source());
     (before_map, after_map)
+}
+
+/// bo2mp: the name of the source of Modern Warfare III's (2023) gun sounds.
+const JUP_GUN_SOURCE: &str = "ingame (MW3 2023 guns)";
+
+/// bo2mp: Modern Warfare III's (2023) install, for its guns' sounds, when
+/// it is set.
+fn jup_gun_sound_source() -> Option<SoundSource> {
+    Some(SoundSource {
+        namespace: AssetNamespace::Jup,
+        name: JUP_GUN_SOURCE,
+        found: Ok(crate::jup_install()?),
+        merge: Merge::Missing,
+        absent: Absent::Skip,
+    })
 }
 
 /// bo2mp: Modern Warfare III's (2023) install, for Resurgence's sounds.
@@ -454,6 +472,9 @@ impl SoundSources {
             AssetNamespace::T4 => (crate::waw_weapon_sounds(path), ZoneSoundOrigin::AudioOnly),
             AssetNamespace::S1 => (crate::aw_weapon_sounds(path), ZoneSoundOrigin::AudioOnly),
             AssetNamespace::T7 => (crate::bo3_weapon_sounds(path), ZoneSoundOrigin::AudioOnly),
+            AssetNamespace::Jup if source.name == JUP_GUN_SOURCE => {
+                (crate::jup_gun_sounds(path), ZoneSoundOrigin::AudioOnly)
+            }
             AssetNamespace::Jup => (
                 crate::jup_resurgence_sounds(path, crate::jup_sounds_wanted().unwrap_or(false)),
                 ZoneSoundOrigin::AudioOnly,
