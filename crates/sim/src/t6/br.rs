@@ -2,9 +2,9 @@
 //!
 //! The rules are `gamemode_iw4::resurgence`'s table; the match script reads
 //! them as `scr_br_*` dvars written here, so the numbers have one home.
-//! A sound is played by its Modern Warfare III alias (`jup:<alias>`) once a
-//! reader for that game's sounds says it has it, else by Black Ops II's
-//! stand-in, else not at all.
+//! A sound is played by its Modern Warfare III aliases (`jup:<alias>` or
+//! `jup:#<hash>`, one picked at random) that the install has, else by Black
+//! Ops II's stand-in, else not at all.
 
 use std::sync::Mutex;
 
@@ -58,12 +58,19 @@ fn jup_has(alias: &str) -> bool {
             .is_some_and(|f| f(alias))
 }
 
-/// The alias the script plays for a sound route ("" for none).
+/// The aliases the script picks from for a sound route, space-separated
+/// ("" for none).
 pub(super) fn sound_alias(route: &resurgence::SoundRoute) -> String {
-    if jup_has(route.jup) {
-        format!("jup:{}", route.jup)
-    } else {
+    let have: Vec<String> = route
+        .jup
+        .iter()
+        .filter(|a| jup_has(a))
+        .map(|a| format!("jup:{a}"))
+        .collect();
+    if have.is_empty() {
         route.t6.to_owned()
+    } else {
+        have.join(" ")
     }
 }
 
@@ -140,6 +147,38 @@ pub(super) fn dvars(rules: &Rules) -> Vec<(String, String)> {
             format!("{}|{}|{}", b.key, b.label, b.price),
         );
     }
+    put(
+        "_armor_cut_ms",
+        (u32::from(rules.armor_break_cut_s) * 1000).to_string(),
+    );
+    put(
+        "_cache_cut_ms",
+        (u32::from(rules.cache_cut_s) * 1000).to_string(),
+    );
+    put(
+        "_bounty_cut_ms",
+        (u32::from(rules.bounty_cut_s) * 1000).to_string(),
+    );
+    put("_caches", rules.caches.to_string());
+    put("_mask_ms", (u32::from(rules.gas_mask_s) * 1000).to_string());
+    put("_heavy_pct", rules.heavy_armor_pct.to_string());
+    put("_discount", rules.supply_run_discount_pct.to_string());
+    put("_bounty_live_cash", rules.bounty_survive_cash.to_string());
+    put("_recon_ms", rules.recon_ms.to_string());
+    put("_contracts", rules.contracts.len().to_string());
+    for (i, c) in rules.contracts.iter().enumerate() {
+        put(
+            &format!("_contract_{i}"),
+            format!(
+                "{}|{}|{}|{}|{}",
+                c.key,
+                c.label,
+                c.reward,
+                u32::from(c.time_s) * 1000,
+                c.count
+            ),
+        );
+    }
     put("_tiers", rules.loot.len().to_string());
     for (i, t) in rules.loot.iter().enumerate() {
         put(
@@ -147,9 +186,26 @@ pub(super) fn dvars(rules: &Rules) -> Vec<(String, String)> {
             format!("{}|{}|{}|{}", t.key, t.label, t.weight, t.attachments),
         );
     }
+    let (mut mw3, mut stand_in, mut none) = (0usize, 0usize, 0usize);
     for r in resurgence::SOUNDS {
-        put(&format!("_snd_{}", r.key), sound_alias(r));
+        let a = sound_alias(r);
+        if a.starts_with("jup:") {
+            mw3 += 1;
+        } else if a.is_empty() {
+            none += 1;
+        } else {
+            stand_in += 1;
+        }
+        put(&format!("_snd_{}", r.key), a);
+        if let Some((next, ms)) = r.then {
+            put(&format!("_sndnext_{}", r.key), format!("{next} {ms}"));
+        }
     }
+    diag::info!(
+        Sim,
+        "bo2mp resurgence: {} sounds: {mw3} from Modern Warfare III, {stand_in} Black Ops II stand-ins, {none} silent",
+        resurgence::SOUNDS.len()
+    );
     out
 }
 
@@ -181,6 +237,21 @@ mod tests {
         assert_eq!(get("scr_br_phases"), Some(r.phases.len().to_string()));
         assert!(get(&format!("scr_br_phase_{}", r.phases.len() - 1)).is_some());
         assert_eq!(get("scr_br_snd_victory").as_deref(), Some("mus_victory"));
+        assert_eq!(
+            get("scr_br_sndnext_music_exfil").as_deref(),
+            Some("music_exfil_main 36120")
+        );
+        // Every sound the script plays has a route.
+        for k in [
+            "music_circle_low",
+            "music_circle_med",
+            "music_circle_high",
+            "music_circle_final",
+            "music_circle_last",
+            "amb_loops",
+        ] {
+            assert!(get(&format!("scr_br_snd_{k}")).is_some(), "{k}");
+        }
         let last = get("scr_br_phase_4").unwrap();
         assert!(last.ends_with(" -1000"), "{last}");
     }

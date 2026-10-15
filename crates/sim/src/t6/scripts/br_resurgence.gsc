@@ -7,8 +7,10 @@
 //
 // Off unless `scr_br 1`. Every number is a dvar written by the engine
 // from one table (`scr_br_*`, gamemode_iw4::resurgence); every sound is
-// `scr_br_snd_<event>` (Modern Warfare III's alias once it can be read,
-// Black Ops II's stand-in until then, "" for none).
+// `scr_br_snd_<event>`: Modern Warfare III's aliases for it (one picked at
+// random each time), Black Ops II's stand-in without that game, "" for
+// none; `scr_br_sndnext_<event>` "<event> <ms>" is what follows it (music:
+// an intro into its main part).
 
 main()
 {
@@ -25,6 +27,9 @@ main()
     level.br_loot = [];
     level.br_stations = [];
     level.br_drops = [];
+    level.br_contract = [];
+    level.br_bounty_hit = [];
+    level.br_scav_open = [];
     level.killstreaksenabled = 0;
 
     precachemodel( "t6_wpn_supply_drop_ally" );
@@ -57,6 +62,7 @@ main()
     level thread br_place_loot();
     level thread br_check_squads();
     level thread br_ambience();
+    level thread br_place_contracts();
 }
 
 br_blank( a, b, c, d )
@@ -87,6 +93,42 @@ br_read_rules()
     level.br_station_count = br_dvar_int( "scr_br_stations", 3 );
     level.br_uav_ms = br_dvar_int( "scr_br_uav_ms", 30000 );
     level.br_loot_count = br_dvar_int( "scr_br_loot_spots", 48 );
+    level.br_armor_cut_ms = br_dvar_int( "scr_br_armor_cut_ms", 2000 );
+    level.br_cache_cut_ms = br_dvar_int( "scr_br_cache_cut_ms", 2000 );
+    level.br_bounty_cut_ms = br_dvar_int( "scr_br_bounty_cut_ms", 10000 );
+    level.br_cache_count = br_dvar_int( "scr_br_caches", 16 );
+    level.br_mask_ms = br_dvar_int( "scr_br_mask_ms", 20000 );
+    level.br_discount = br_dvar_int( "scr_br_discount", 80 );
+    level.br_bounty_live_cash = br_dvar_int( "scr_br_bounty_live_cash", 1000 );
+    level.br_recon_ms = br_dvar_int( "scr_br_recon_ms", 30000 );
+
+    // Heavy Armor: now and then a match gives everyone one more plate slot.
+    level.br_heavy = 0;
+
+    if ( randomint( 100 ) < br_dvar_int( "scr_br_heavy_pct", 0 ) )
+    {
+        level.br_heavy = 1;
+        level.br_plate_slots++;
+    }
+
+    level.br_contract_kinds = [];
+    n = br_dvar_int( "scr_br_contracts", 0 );
+
+    for ( i = 0; i < n; i++ )
+    {
+        f = strtok( getdvar( "scr_br_contract_" + i ), "|" );
+
+        if ( f.size < 5 )
+            continue;
+
+        c = spawnstruct();
+        c.key = f[0];
+        c.label = f[1];
+        c.reward = int( f[2] );
+        c.time = int( f[3] );
+        c.count = int( f[4] );
+        level.br_contract_kinds[level.br_contract_kinds.size] = c;
+    }
 
     level.br_stacks = [];
     foreach ( s in strtok( getdvar( "scr_br_stacks" ), " " ) )
@@ -179,7 +221,12 @@ br_wait_start()
 
 br_snd_name( key )
 {
-    return getdvar( "scr_br_snd_" + key );
+    list = strtok( getdvar( "scr_br_snd_" + key ), " " );
+
+    if ( list.size == 0 )
+        return "";
+
+    return list[randomint( list.size )];
 }
 
 br_snd( key )
@@ -188,6 +235,72 @@ br_snd( key )
 
     if ( name != "" )
         self playlocalsound( name );
+
+    next = strtok( getdvar( "scr_br_sndnext_" + key ), " " );
+
+    if ( next.size == 2 )
+        self thread br_snd_then( next[0], int( next[1] ) );
+}
+
+br_snd_then( key, ms )
+{
+    self endon( "disconnect" );
+
+    // (Music gives way to the next piece; anything else stops with the match.)
+    if ( issubstr( key, "music_" ) )
+        self endon( "br_music" );
+    else
+        level endon( "game_ended" );
+
+    wait ms / 1000;
+    self br_snd( key );
+}
+
+// A piece of music: what was playing does not carry on into its next part.
+br_music( key )
+{
+    self notify( "br_music" );
+    self br_snd( key );
+}
+
+br_music_all( key )
+{
+    foreach ( player in level.players )
+        player br_music( key );
+}
+
+// An announcer line: one at a time for each player, the newest wins a
+// clash only when the one before has had a second.
+br_vo( key )
+{
+    if ( br_snd_name( key ) == "" )
+        return;
+
+    now = gettime();
+
+    if ( isdefined( self.br_vo_at ) && now - self.br_vo_at < 1200 )
+        return;
+
+    self.br_vo_at = now;
+    self br_snd( key );
+}
+
+br_vo_all( key )
+{
+    foreach ( player in level.players )
+        player br_vo( key );
+}
+
+br_vo_squad( squad, key )
+{
+    foreach ( player in br_squad_members( squad ) )
+        player br_vo( key );
+}
+
+// A spoken number (the circle's and the redeploy's last seconds): `vo_count_<n>`.
+br_vo_count( n )
+{
+    self br_snd( "vo_count_" + n );
 }
 
 br_snd_all( key )
@@ -202,12 +315,50 @@ br_snd_squad( squad, key )
         player br_snd( key );
 }
 
+// Before the drop: the island's pre-lobby music; at the drop the plane goes
+// over, the infil music starts and the island's own strikes land; its
+// emitters hum at spots around the map all match.
 br_ambience()
 {
     level endon( "game_ended" );
+    br_music_all( "music_prelobby" );
     br_wait_start();
+    br_music_all( "music_infil" );
+    br_snd_all( "infil_flyby" );
+    br_vo_all( "vo_infil" );
     br_snd_all( "ambience" );
-    br_snd_all( "infil_music" );
+    level thread br_emitters();
+
+    if ( level.br_heavy )
+    {
+        br_snd_all( "heavy_armor" );
+        br_vo_all( "vo_heavy_armor" );
+
+        foreach ( player in level.players )
+            player br_hud_flash( "HEAVY ARMOR  -  ONE MORE PLATE THIS MATCH" );
+    }
+
+    wait 4;
+    br_snd_all( "infil_strike" );
+    wait level.br_infil_ms / 1000 - 4;
+    br_vo_all( "vo_landed" );
+}
+
+// Rebirth Island's emitter loops (steam, vents, generators, fans, pipes),
+// each on a spot of the map.
+br_emitters()
+{
+    list = strtok( getdvar( "scr_br_snd_amb_loops" ), " " );
+
+    if ( list.size == 0 || level.br_spot_list.size == 0 )
+        return;
+
+    for ( i = 0; i < 6; i++ )
+    {
+        s = level.br_spot_list[randomint( level.br_spot_list.size )];
+        e = spawn( "script_origin", s.origin + ( 0, 0, 48 ) );
+        e playloopsound( list[randomint( list.size )] );
+    }
 }
 
 // ---- squads -----------------------------------------------------------------
@@ -236,6 +387,10 @@ br_player_init()
     self.br_out = 0;
     self.br_pending = 0;
     self.br_selfrevive = 0;
+    self.br_mask_ms = 0;
+    self.br_mask_on = 0;
+    self.br_wall_at = 0;
+    self.br_discount = 0;
     self.br_buy_index = 0;
     self.br_kit = undefined;
     self br_hud_init();
@@ -246,6 +401,9 @@ br_player_init()
 
     if ( self istestclient() )
         self thread br_bot_think();
+
+    if ( !isdefined( level.br_started ) )
+        self br_music( "music_prelobby" );
 }
 
 // Humans first, then bots, as they come in: squad after squad.
@@ -399,6 +557,7 @@ br_squad_wiped( squad )
     }
 
     br_snd_squad( squad, "squad_wiped" );
+    br_vo_squad( squad, "vo_squad_wiped" );
     left = br_squads_standing();
 
     foreach ( player in level.players )
@@ -408,15 +567,49 @@ br_squad_wiped( squad )
 
         player br_snd( "enemy_squad_wiped" );
         player br_hud_flash( "SQUAD ELIMINATED  -  " + left + " SQUADS LEFT" );
+
+        // (The squad that did it hears it said.)
+        if ( isdefined( level.br_last_killer_squad ) && player.br_squad == level.br_last_killer_squad )
+            player br_vo( "vo_enemy_squad_wiped" );
     }
 
     foreach ( p in br_squad_members( squad ) )
         p br_hud_flash( "YOUR SQUAD WAS ELIMINATED" );
 
+    // (Players left, said at the counts the announcer has.)
+    players = 0;
+
+    foreach ( p in level.players )
+    {
+        if ( isalive( p ) || p.br_pending )
+            players++;
+    }
+
+    if ( !isdefined( level.br_players_said ) )
+        level.br_players_said = 1000;
+
+    foreach ( n in array( 50, 25, 10 ) )
+    {
+        if ( players <= n && level.br_players_said > n )
+        {
+            level.br_players_said = n;
+            br_vo_all( "vo_players_left_" + n );
+        }
+    }
+
     if ( left == 3 || left == 2 )
         br_snd_all( "top_squads" );
     else
         br_snd_all( "squads_remaining" );
+
+    // (How many are left, said when it is a number the announcer has.)
+    foreach ( player in level.players )
+    {
+        if ( isdefined( player.br_squad ) && player.br_squad != squad && !player.br_out )
+        {
+            player br_vo( "vo_squads_left_" + left );
+        }
+    }
 }
 
 br_end( winner )
@@ -467,13 +660,38 @@ br_end( winner )
         if ( isdefined( player.br_squad ) && player.br_squad == winner )
         {
             player br_snd( "victory" );
-            player br_snd( "music_exfil" );
+            player br_vo( "vo_victory" );
+            player br_music( "music_exfil" );
         }
         else
+        {
             player br_snd( "defeat" );
+
+            // (A squad out in the last three hears where it finished.)
+            place = br_place_of( player.br_squad );
+
+            if ( place == 2 )
+                player br_vo( "vo_second" );
+            else if ( place == 3 )
+                player br_vo( "vo_third" );
+            else
+                player br_vo( "vo_defeat" );
+        }
     }
 
     thread maps\mp\gametypes\_globallogic::endgame( first, reason );
+}
+
+// 1 for the last squad standing, 2 for the one out last, ...
+br_place_of( squad )
+{
+    for ( i = 0; i < level.br_out_order.size; i++ )
+    {
+        if ( level.br_out_order[i] == squad )
+            return level.br_out_order.size - i + 1;
+    }
+
+    return 1;
 }
 
 // ---- lives and redeploys ----------------------------------------------------
@@ -541,7 +759,15 @@ br_spawned()
     {
         self.br_redeployed = 0;
         self br_snd( "redeployed" );
+        self br_snd( "redeploy_flare" );
+        self br_vo( "vo_redeployed" );
         self br_hud_flash( "REDEPLOYED" );
+
+        foreach ( mate in br_squad_members( self.br_squad ) )
+        {
+            if ( mate != self )
+                mate br_vo( "vo_mate_redeployed" );
+        }
     }
     else if ( !level.br_live )
         self br_snd( "match_start" );
@@ -573,19 +799,32 @@ br_onplayerkilled( attacker )
     {
         attacker.br_cash = attacker.br_cash + level.br_kill_cash;
         attacker br_snd( "cash_pickup" );
+        level.br_last_killer_squad = attacker.br_squad;
+
+        if ( randomint( 4 ) == 0 )
+            attacker br_vo( "vo_kill" );
 
         // (His squad's dead come back sooner.)
-        foreach ( mate in br_squad_members( attacker.br_squad ) )
-        {
-            if ( mate.br_pending )
-                mate.br_redeploy_at = mate.br_redeploy_at - level.br_kill_cut_ms;
-        }
+        br_cut_redeploys( attacker.br_squad, level.br_kill_cut_ms );
+        level thread br_contract_kill( attacker, self );
     }
+    else
+        level thread br_contract_kill( undefined, self );
+
+    alive = br_squad_alive( self.br_squad );
 
     foreach ( mate in br_squad_members( self.br_squad ) )
     {
-        if ( mate != self )
-            mate br_snd( "squadmate_down" );
+        if ( mate == self )
+            continue;
+
+        mate br_snd( "squadmate_down" );
+
+        // (The last one standing is told so.)
+        if ( alive == 1 && isalive( mate ) )
+            mate br_vo( "vo_last_alive" );
+        else
+            mate br_vo( "vo_mate_down" );
     }
 
     if ( level.br_over || br_squad_out( self.br_squad ) )
@@ -610,12 +849,27 @@ br_onplayerkilled( attacker )
     {
         self.br_out = 1;
         self br_snd( "redeploy_disabled" );
+        self br_vo( "vo_redeploy_off_dead" );
         self br_hud_flash( "REDEPLOY DISABLED  -  A SQUADMATE CAN BUY YOU BACK" );
         return;
     }
 
     self.br_pending = 1;
+    self br_vo( "vo_redeploy_pending" );
     self thread br_redeploy( wait_ms );
+}
+
+// The squad's dead come back `ms` sooner.
+br_cut_redeploys( squad, ms )
+{
+    foreach ( mate in br_squad_members( squad ) )
+    {
+        if ( mate.br_pending && isdefined( mate.br_redeploy_at ) )
+        {
+            mate.br_redeploy_at = mate.br_redeploy_at - ms;
+            mate br_vo( "vo_redeploy_cut" );
+        }
+    }
 }
 
 br_redeploy_wait()
@@ -646,8 +900,11 @@ br_redeploy( wait_ms )
     {
         left = int( ( self.br_redeploy_at - gettime() + 999 ) / 1000 );
 
-        if ( left != last && left <= 3 )
+        if ( left != last && left <= 5 )
+        {
             self br_snd( "redeploy_tick" );
+            self br_vo_count( left );
+        }
 
         last = left;
         self.br_hud_big settext( "REDEPLOYING IN " + left );
@@ -740,7 +997,12 @@ br_damage_hook( einflictor, eattacker, idamage, idflags, smeansofdeath, sweapon,
             self.br_plates = plates;
 
             if ( isdefined( eattacker ) && isplayer( eattacker ) )
+            {
                 eattacker br_snd( "armor_break" );
+
+                if ( self.br_plates == 0 )
+                    br_cut_redeploys( eattacker.br_squad, level.br_armor_cut_ms );
+            }
         }
 
         self.br_last_hurt = gettime();
@@ -762,6 +1024,7 @@ br_damage_hook( einflictor, eattacker, idamage, idflags, smeansofdeath, sweapon,
         self.br_selfrevive = 0;
         self.health = self.maxhealth;
         self br_snd( "self_revive" );
+        self br_vo( "vo_self_revive" );
         self br_hud_flash( "SELF-REVIVE USED" );
         return 0;
     }
@@ -1016,24 +1279,69 @@ br_circle()
         level.br_next_radius = plan.radius;
         objective_position( level.br_objid, plan.center );
         level.br_closing = 0;
+        last = i == level.br_phases.size - 1;
+        off = p.redeploy < 0 && ( i == 0 || level.br_phases[i - 1].redeploy >= 0 );
 
-        if ( i == level.br_phases.size - 1 || p.redeploy < 0 && ( i == 0 || level.br_phases[i - 1].redeploy >= 0 ) )
+        if ( last || off )
         {
             br_snd_all( "final_circle" );
 
-            if ( p.redeploy < 0 )
+            if ( off )
             {
+                br_vo_all( "vo_redeploy_off" );
+
                 foreach ( player in level.players )
                     player br_hud_flash( "REDEPLOYS ARE OFF" );
             }
+            else
+                br_vo_all( "vo_final_circle" );
+        }
+        else if ( i > 0 )
+            br_vo_all( "vo_circle_next" );
+
+        // (Redeploys go off with the next circle: said now.)
+        if ( p.redeploy >= 0 && i + 1 < level.br_phases.size && level.br_phases[i + 1].redeploy < 0 )
+        {
+            br_vo_all( "vo_redeploy_closing" );
+
+            foreach ( player in level.players )
+                player br_hud_flash( "REDEPLOYS END WITH THIS CIRCLE" );
         }
 
+        said_soon = 0;
+        said = -1;
+
         while ( br_elapsed() < p.close_from )
-            wait 0.25;
+        {
+            left = int( ( p.close_from - br_elapsed() + 999 ) / 1000 );
+
+            if ( !said_soon && left <= 30 && p.close_from - p.wait_from > 40000 )
+            {
+                said_soon = 1;
+                br_vo_all( "vo_circle_soon" );
+            }
+
+            if ( left <= 5 && left != said )
+            {
+                said = left;
+                br_snd_all( "circle_tick" );
+
+                foreach ( player in level.players )
+                    player br_vo_count( left );
+            }
+
+            wait 0.1;
+        }
 
         level.br_closing = 1;
         br_snd_all( "circle_collapsing" );
-        br_snd_all( br_circle_music( i ) );
+
+        if ( i == 0 )
+            br_vo_all( "vo_circle_closing_first" );
+        else if ( !last )
+            br_vo_all( "vo_circle_closing" );
+
+        br_music_all( br_circle_music( i ) );
 
         foreach ( player in level.players )
             player br_hud_flash( "THE CIRCLE IS CLOSING" );
@@ -1061,7 +1369,11 @@ br_circle()
         from_radius = plan.radius;
         level.br_closing = 0;
         br_snd_all( "circle_closed" );
+        br_vo_all( "vo_circle_closed" );
     }
+
+    // (The last circle is shut: the second loop to the end.)
+    br_music_all( "music_circle_last" );
 
     level.br_phase = level.br_phases.size;
 }
@@ -1108,7 +1420,22 @@ br_gas( dps )
     if ( !isalive( self ) || br_inside( self.origin, 0 ) || dps <= 0 )
     {
         if ( isdefined( self.br_in_gas ) && self.br_in_gas )
+        {
             self.br_in_gas = 0;
+
+            if ( self.br_mask_on )
+            {
+                self.br_mask_on = 0;
+                self br_snd( "gas_mask_off" );
+            }
+        }
+
+        // (By the wall: its hum.)
+        if ( isalive( self ) && level.br_phase >= 0 && !br_inside( self.origin, 400 ) && gettime() - self.br_wall_at > 8000 )
+        {
+            self.br_wall_at = gettime();
+            self br_snd( "gas_wall" );
+        }
 
         return;
     }
@@ -1117,6 +1444,27 @@ br_gas( dps )
     {
         self.br_in_gas = 1;
         self br_snd( "gas_enter" );
+        self br_vo( "vo_in_gas" );
+
+        if ( self.br_mask_ms > 0 )
+        {
+            self.br_mask_on = 1;
+            self br_snd( "gas_mask_on" );
+        }
+    }
+
+    // (A gas mask holds the gas off while it lasts.)
+    if ( self.br_mask_on )
+    {
+        self.br_mask_ms = self.br_mask_ms - 1000;
+
+        if ( self.br_mask_ms > 0 )
+            return;
+
+        self.br_mask_ms = 0;
+        self.br_mask_on = 0;
+        self br_snd( "gas_mask_break" );
+        self br_hud_flash( "GAS MASK BROKE" );
     }
 
     self br_snd( "gas_tick" );
@@ -1141,8 +1489,6 @@ br_place_loot()
 {
     level endon( "game_ended" );
     wait 1;
-    guns = array( "fiveseven_mp", "fnp45_mp", "beretta93r_mp", "kard_mp", "mp7_mp", "pdw57_mp", "vector_mp", "insas_mp", "qcw05_mp", "evoskorpion_mp", "peacekeeper_mp", "tar21_mp", "type95_mp", "sig556_mp", "sa58_mp", "hk416_mp", "scar_mp", "saritch_mp", "xm8_mp", "an94_mp", "mk48_mp", "qbb95_mp", "lsat_mp", "hamr_mp", "870mcs_mp", "saiga12_mp", "ksg_mp", "srm1216_mp", "svu_mp", "dsr50_mp", "ballista_mp" );
-    atts = array( "reflex", "extclip", "fastads", "silencer", "fmj", "holo", "acog", "grip", "rf", "dualclip" );
     spots = level.br_spot_list;
 
     for ( i = 0; i < level.br_loot_count && spots.size > 0; i++ )
@@ -1150,43 +1496,126 @@ br_place_loot()
         s = spots[randomint( spots.size )];
         origin = s.origin + ( randomfloatrange( -96, 96 ), randomfloatrange( -96, 96 ), 12 );
         roll = randomint( 100 );
-        item = spawnstruct();
-        item.origin = origin;
 
-        if ( roll < 20 )
+        br_spawn_loot( origin, roll );
+    }
+
+    level thread br_place_caches();
+}
+
+br_guns()
+{
+    return array( "fiveseven_mp", "fnp45_mp", "beretta93r_mp", "kard_mp", "mp7_mp", "pdw57_mp", "vector_mp", "insas_mp", "qcw05_mp", "evoskorpion_mp", "peacekeeper_mp", "tar21_mp", "type95_mp", "sig556_mp", "sa58_mp", "hk416_mp", "scar_mp", "saritch_mp", "xm8_mp", "an94_mp", "mk48_mp", "qbb95_mp", "lsat_mp", "hamr_mp", "870mcs_mp", "saiga12_mp", "ksg_mp", "srm1216_mp", "svu_mp", "dsr50_mp", "ballista_mp" );
+}
+
+// One item on the ground: `roll` (0..99) picks cash, plates, a gas mask or
+// a gun of a rolled rarity.
+br_spawn_loot( origin, roll )
+{
+    atts = array( "reflex", "extclip", "fastads", "silencer", "fmj", "holo", "acog", "grip", "rf", "dualclip" );
+    item = spawnstruct();
+    item.origin = origin;
+
+    if ( roll < 20 )
+    {
+        item.kind = "cash";
+        item.amount = level.br_stacks[randomint( level.br_stacks.size )];
+        model = getweaponmodel( "briefcase_bomb_mp" );
+    }
+    else if ( roll < 42 )
+    {
+        item.kind = "plates";
+        item.amount = 1 + randomint( 3 );
+        model = getweaponmodel( "riotshield_mp" );
+    }
+    else if ( roll < 47 )
+    {
+        item.kind = "mask";
+        model = getweaponmodel( "tactical_insertion_mp" );
+    }
+    else
+    {
+        item.kind = "gun";
+        tier = br_roll_tier();
+        guns = br_guns();
+        name = guns[randomint( guns.size )];
+        base = name;
+
+        for ( k = 0; k < tier.attachments; k++ )
+            name = name + "+" + atts[randomint( atts.size )];
+
+        item.weapon = name;
+        item.tier = tier;
+        model = getweaponmodel( base );
+    }
+
+    item.model = spawn( "script_model", origin );
+
+    if ( isdefined( model ) && model != "" )
+        item.model setmodel( model );
+
+    level.br_loot[level.br_loot.size] = item;
+    level thread br_loot_think( item );
+    return item;
+}
+
+// Supply boxes: [Use] opens one (cash and a few items spill out, the
+// squad's dead come back sooner).
+br_place_caches()
+{
+    for ( i = 0; i < level.br_cache_count && level.br_spot_list.size > 0; i++ )
+    {
+        s = level.br_spot_list[randomint( level.br_spot_list.size )];
+        level thread br_cache( s.origin + ( randomfloatrange( -64, 64 ), randomfloatrange( -64, 64 ), 0 ), 0, undefined );
+    }
+}
+
+// A supply box at `origin`; `contract`: a Scavenger box only that squad
+// may open (it ends when it is opened).
+br_cache( origin, contract, squad )
+{
+    level endon( "game_ended" );
+    box = spawn( "script_model", origin );
+    box setmodel( "t6_wpn_supply_drop_axis" );
+
+    for (;;)
+    {
+        wait 0.1;
+
+        foreach ( player in level.players )
         {
-            item.kind = "cash";
-            item.amount = level.br_stacks[randomint( level.br_stacks.size )];
-            model = getweaponmodel( "briefcase_bomb_mp" );
+            if ( !isalive( player ) || distancesquared( player.origin, origin ) > 72 * 72 )
+                continue;
+
+            if ( contract && player.br_squad != squad )
+                continue;
+
+            player br_hud_hint( "[USE]  OPEN SUPPLY BOX" );
+
+            if ( !player usebuttonpressed() && !player istestclient() )
+                continue;
+
+            player br_hud_hint( "" );
+
+            if ( contract )
+                player br_snd( "supply_chest_open" );
+            else
+                player br_snd( "cache_open" );
+
+            player.br_cash = player.br_cash + level.br_stacks[randomint( level.br_stacks.size )];
+            player br_snd( "cash_pickup" );
+            br_cut_redeploys( player.br_squad, level.br_cache_cut_ms );
+
+            for ( k = 0; k < 2; k++ )
+                br_spawn_loot( origin + ( randomfloatrange( -48, 48 ), randomfloatrange( -48, 48 ), 12 ), 20 + randomint( 80 ) );
+
+            box delete();
+
+            if ( contract )
+                level.br_scav_open[squad] = 1;
+
+            return;
         }
-        else if ( roll < 45 )
-        {
-            item.kind = "plates";
-            item.amount = 1 + randomint( 3 );
-            model = getweaponmodel( "riotshield_mp" );
-        }
-        else
-        {
-            item.kind = "gun";
-            tier = br_roll_tier();
-            name = guns[randomint( guns.size )];
-            base = name;
-
-            for ( k = 0; k < tier.attachments; k++ )
-                name = name + "+" + atts[randomint( atts.size )];
-
-            item.weapon = name;
-            item.tier = tier;
-            model = getweaponmodel( base );
-        }
-
-        item.model = spawn( "script_model", origin );
-
-        if ( isdefined( model ) && model != "" )
-            item.model setmodel( model );
-
-        level.br_loot[level.br_loot.size] = item;
-        level thread br_loot_think( item );
     }
 }
 
@@ -1233,6 +1662,18 @@ br_loot_think( item )
             {
                 player.br_cash = player.br_cash + item.amount;
                 player br_snd( "cash_pickup" );
+                item.model delete();
+                return;
+            }
+
+            if ( item.kind == "mask" )
+            {
+                if ( player.br_mask_ms > 0 )
+                    continue;
+
+                player.br_mask_ms = level.br_mask_ms;
+                player br_snd( "mask_pickup" );
+                player br_hud_flash( "GAS MASK" );
                 item.model delete();
                 return;
             }
@@ -1372,13 +1813,15 @@ br_buy_station( station )
             {
                 player.br_near = station;
                 player br_snd( "buy_open" );
+                player br_vo( "vo_buy_station" );
+                level notify( "br_at_station", player );
             }
 
             if ( player istestclient() )
                 continue;
 
             b = level.br_buys[player.br_buy_index % level.br_buys.size];
-            player br_hud_hint( "BUY STATION   " + b.label + "  $" + b.price + "\n[USE] NEXT   HOLD [USE] BUY" );
+            player br_hud_hint( "BUY STATION   " + b.label + "  $" + player br_price( b ) + "\n[USE] NEXT   HOLD [USE] BUY" );
 
             if ( !player usebuttonpressed() )
                 continue;
@@ -1402,9 +1845,20 @@ br_buy_station( station )
     }
 }
 
+// What `b` costs him (a Supply Run's discount off his next one).
+br_price( b )
+{
+    if ( self.br_discount > 0 )
+        return int( b.price * ( 100 - self.br_discount ) / 100 );
+
+    return b.price;
+}
+
 br_buy( b )
 {
-    if ( self.br_cash < b.price )
+    price = self br_price( b );
+
+    if ( self.br_cash < price )
     {
         self br_snd( "purchase_denied" );
         self br_hud_flash( "NOT ENOUGH CASH" );
@@ -1452,7 +1906,8 @@ br_buy( b )
         return 0;
     }
 
-    self.br_cash = self.br_cash - b.price;
+    self.br_cash = self.br_cash - price;
+    self.br_discount = 0;
     self br_snd( "purchase" );
     self br_hud_flash( b.label );
     return 1;
@@ -1468,6 +1923,7 @@ br_loadout_drop()
     trace = bullettrace( origin + ( 0, 0, 64 ), origin - ( 0, 0, 512 ), 0, self );
     ground = trace["position"];
     self br_snd( "loadout_incoming" );
+    self br_vo( "vo_loadout_incoming" );
     level thread br_loadout_crate( self, ground );
     return 1;
 }
@@ -1481,7 +1937,10 @@ br_loadout_crate( owner, ground )
     wait 3;
 
     foreach ( player in br_squad_members( owner.br_squad ) )
+    {
         player br_snd( "loadout_landed" );
+        player br_vo( "vo_loadout_landed" );
+    }
 
     claimed = [];
 
@@ -1529,6 +1988,14 @@ br_uav()
 {
     self endon( "disconnect" );
     self br_snd( "uav_online" );
+    self br_vo( "vo_uav_online" );
+
+    foreach ( player in level.players )
+    {
+        if ( isdefined( player.br_squad ) && player.br_squad != self.br_squad )
+            player br_vo( "vo_enemy_uav" );
+    }
+
     until = gettime() + level.br_uav_ms;
 
     while ( gettime() < until )
@@ -1550,10 +2017,462 @@ br_buyback()
         mate.br_out = 0;
         mate br_respawn();
         br_snd_squad( self.br_squad, "buyback" );
+        br_vo_squad( self.br_squad, "vo_buyback" );
         return 1;
     }
 
     return 0;
+}
+
+// ---- contracts --------------------------------------------------------------
+
+// Tablets on the map: [Use] takes its contract for his squad (one at a
+// time). A taken tablet's map marker becomes the contract's.
+br_place_contracts()
+{
+    level endon( "game_ended" );
+    br_wait_start();
+    wait 2;
+    k = 0;
+
+    foreach ( c in level.br_contract_kinds )
+    {
+        for ( i = 0; i < c.count && level.br_spot_list.size > 0 && k < 8; i++ )
+        {
+            s = level.br_spot_list[randomint( level.br_spot_list.size )];
+            t = spawn( "script_model", s.origin + ( randomfloatrange( -48, 48 ), randomfloatrange( -48, 48 ), 8 ) );
+            t setmodel( getweaponmodel( "satchel_charge_mp" ) );
+            t.br_kind = c;
+            t.br_id = level.br_objid + 4 + k;
+            objective_add( t.br_id, "active", t.origin, "compass_waypoint_defend" );
+            k++;
+            level thread br_tablet( t );
+        }
+    }
+}
+
+br_tablet( t )
+{
+    level endon( "game_ended" );
+
+    for (;;)
+    {
+        wait 0.1;
+
+        foreach ( player in level.players )
+        {
+            if ( !isalive( player ) || !isdefined( player.br_squad ) || distancesquared( player.origin, t.origin ) > 64 * 64 )
+                continue;
+
+            if ( isdefined( level.br_contract[player.br_squad] ) )
+            {
+                player br_hud_hint( "YOUR SQUAD HAS A CONTRACT" );
+                continue;
+            }
+
+            player br_hud_hint( "[USE]  " + t.br_kind.label + " CONTRACT" );
+
+            if ( !player usebuttonpressed() && !player istestclient() )
+                continue;
+
+            player br_hud_hint( "" );
+            id = t.br_id;
+            kind = t.br_kind;
+            t delete();
+            level thread br_contract_run( player, kind, id );
+            return;
+        }
+    }
+}
+
+// The squad's marker, seen by it alone.
+br_contract_marker( id, squad, origin )
+{
+    objective_position( id, origin );
+    objective_setinvisibletoall( id );
+
+    foreach ( p in br_squad_members( squad ) )
+        objective_setvisibletoplayer( id, p );
+}
+
+br_contract_run( player, c, id )
+{
+    squad = player.br_squad;
+    level.br_contract[squad] = c.key;
+    br_snd_squad( squad, "contract_take" );
+    br_vo_squad( squad, "vo_contract_take" );
+
+    foreach ( p in br_squad_members( squad ) )
+        p br_hud_flash( c.label + " CONTRACT" );
+
+    ok = 0;
+
+    switch ( c.key )
+    {
+        case "bounty":
+            ok = br_bounty( squad, c, id );
+            break;
+        case "scavenger":
+            ok = br_scavenger( squad, c, id );
+            break;
+        case "recon":
+            ok = br_recon( squad, c, id );
+            break;
+        case "supplyrun":
+            ok = br_supply_run( squad, c, id );
+            break;
+        case "mostwanted":
+            ok = br_most_wanted( squad, c, id );
+            break;
+    }
+
+    objective_delete( id );
+    level.br_contract[squad] = undefined;
+
+    if ( level.br_over || br_squad_out( squad ) )
+        return;
+
+    foreach ( p in br_squad_members( squad ) )
+    {
+        if ( ok )
+        {
+            p.br_cash = p.br_cash + c.reward;
+            p br_snd( "contract_reward" );
+            p br_vo( "vo_contract_done" );
+            p br_hud_flash( "CONTRACT COMPLETE  +$" + c.reward );
+        }
+        else
+        {
+            p br_snd( "contract_failed" );
+            p br_vo( "vo_contract_failed" );
+            p br_hud_flash( "CONTRACT FAILED" );
+        }
+    }
+}
+
+// Who leads the squad: a living human first, else a living bot.
+br_squad_lead( squad )
+{
+    lead = undefined;
+
+    foreach ( p in br_squad_members( squad ) )
+    {
+        if ( !isalive( p ) )
+            continue;
+
+        if ( !isdefined( lead ) || !p istestclient() )
+            lead = p;
+    }
+
+    return lead;
+}
+
+// Bounty: the nearest living enemy is marked; kill him in time. A target
+// who lives through it is paid.
+br_bounty( squad, c, id )
+{
+    lead = br_squad_lead( squad );
+
+    if ( !isdefined( lead ) )
+        return 0;
+
+    target = undefined;
+    bestd = 1000000000;
+
+    foreach ( p in level.players )
+    {
+        if ( !isalive( p ) || !isdefined( p.br_squad ) || p.br_squad == squad || br_squad_out( p.br_squad ) )
+            continue;
+
+        d = distancesquared( p.origin, lead.origin );
+
+        if ( d < bestd )
+        {
+            bestd = d;
+            target = p;
+        }
+    }
+
+    if ( !isdefined( target ) )
+        return 0;
+
+    target.br_bounty_by = squad;
+    level.br_bounty_hit[squad] = 0;
+    br_vo_squad( squad, "vo_bounty_start" );
+    br_vo_squad( target.br_squad, "vo_bounty_on_you" );
+    target br_hud_flash( "THERE IS A BOUNTY ON YOU" );
+    end = gettime() + c.time;
+
+    while ( gettime() < end )
+    {
+        if ( br_squad_out( squad ) || level.br_over || !isdefined( target ) )
+            return 0;
+
+        if ( !isalive( target ) )
+        {
+            target.br_bounty_by = undefined;
+
+            if ( level.br_bounty_hit[squad] )
+            {
+                br_vo_squad( squad, "vo_bounty_done" );
+                br_cut_redeploys( squad, level.br_bounty_cut_ms );
+                return 1;
+            }
+
+            return 0;
+        }
+
+        br_contract_marker( id, squad, target.origin );
+        wait 0.5;
+    }
+
+    target.br_bounty_by = undefined;
+
+    foreach ( p in br_squad_members( target.br_squad ) )
+    {
+        p.br_cash = p.br_cash + level.br_bounty_live_cash;
+        p br_vo( "vo_bounty_survived" );
+        p br_snd( "contract_reward" );
+    }
+
+    br_vo_squad( squad, "vo_bounty_failed" );
+    return 0;
+}
+
+// Scavenger: three supply boxes, each marked once the one before is open;
+// the last one fills everyone's plates (the armor satchel).
+br_scavenger( squad, c, id )
+{
+    br_vo_squad( squad, "vo_scav_start" );
+
+    for ( n = 0; n < 3; n++ )
+    {
+        lead = br_squad_lead( squad );
+
+        if ( !isdefined( lead ) )
+            return 0;
+
+        spot = br_spot_near( lead.origin, 2500 );
+
+        if ( !isdefined( spot ) )
+            return 0;
+
+        if ( n > 0 )
+            br_vo_squad( squad, "vo_scav_next" );
+
+        br_contract_marker( id, squad, spot.origin );
+        level.br_scav_open[squad] = 0;
+        level thread br_cache( spot.origin, 1, squad );
+
+        while ( !level.br_scav_open[squad] )
+        {
+            if ( br_squad_out( squad ) || level.br_over )
+                return 0;
+
+            wait 0.25;
+        }
+    }
+
+    foreach ( p in br_squad_members( squad ) )
+        p.br_plates_carried = level.br_plates_max;
+
+    br_vo_squad( squad, "vo_scav_done" );
+    return 1;
+}
+
+// Recon: hold a spot (more of the squad on it uploads faster); the next
+// circle's middle is then shown to the squad for a while.
+br_recon( squad, c, id )
+{
+    lead = br_squad_lead( squad );
+
+    if ( !isdefined( lead ) )
+        return 0;
+
+    spot = br_spot_near( lead.origin, 2500 );
+
+    if ( !isdefined( spot ) )
+        return 0;
+
+    br_contract_marker( id, squad, spot.origin );
+    br_vo_squad( squad, "vo_recon_start" );
+    done = 0;
+    uploading = 0;
+
+    while ( done < level.br_recon_ms )
+    {
+        if ( br_squad_out( squad ) || level.br_over )
+            return 0;
+
+        n = 0;
+
+        foreach ( p in br_squad_members( squad ) )
+        {
+            if ( isalive( p ) && distance2d( p.origin, spot.origin ) < 160 )
+            {
+                n++;
+                p br_hud_hint( "UPLOADING DATA  " + int( done * 100 / level.br_recon_ms ) + "%" );
+            }
+        }
+
+        if ( n > 0 && !uploading )
+        {
+            uploading = 1;
+            br_snd_squad( squad, "recon_upload" );
+        }
+        else if ( n == 0 && uploading )
+        {
+            uploading = 0;
+            br_snd_squad( squad, "recon_exit" );
+        }
+
+        done = done + 250 * n;
+        wait 0.25;
+    }
+
+    br_snd_squad( squad, "recon_exit" );
+
+    foreach ( p in br_squad_members( squad ) )
+        p br_hud_hint( "" );
+
+    br_vo_squad( squad, "vo_recon_done" );
+    next = level.br_phase + 1;
+
+    if ( next < 0 )
+        next = 0;
+
+    if ( isdefined( level.br_plan ) && isdefined( level.br_plan[next] ) )
+    {
+        br_contract_marker( id, squad, level.br_plan[next].center );
+
+        foreach ( p in br_squad_members( squad ) )
+            p br_hud_flash( "NEXT CIRCLE MARKED" );
+
+        wait 20;
+    }
+
+    return 1;
+}
+
+// Supply Run: reach the marked buy station in time; the squad's next
+// purchase is cheaper.
+br_supply_run( squad, c, id )
+{
+    lead = br_squad_lead( squad );
+
+    if ( !isdefined( lead ) || level.br_stations.size == 0 )
+        return 0;
+
+    st = level.br_stations[0];
+    bestd = 1000000000;
+
+    foreach ( s in level.br_stations )
+    {
+        d = distancesquared( s.origin, lead.origin );
+
+        if ( d < bestd && br_inside( s.origin, 0 ) )
+        {
+            bestd = d;
+            st = s;
+        }
+    }
+
+    br_contract_marker( id, squad, st.origin );
+    br_vo_squad( squad, "vo_supply_start" );
+    end = gettime() + c.time;
+
+    while ( gettime() < end )
+    {
+        if ( br_squad_out( squad ) || level.br_over )
+            return 0;
+
+        foreach ( p in br_squad_members( squad ) )
+        {
+            if ( isalive( p ) && distancesquared( p.origin, st.origin ) < 96 * 96 )
+            {
+                foreach ( m in br_squad_members( squad ) )
+                    m.br_discount = level.br_discount;
+
+                br_vo_squad( squad, "vo_supply_done" );
+                return 1;
+            }
+        }
+
+        wait 0.25;
+    }
+
+    br_vo_squad( squad, "vo_supply_failed" );
+    return 0;
+}
+
+// Most Wanted: the squad is on everyone's map; when it lives through it,
+// its dead come back.
+br_most_wanted( squad, c, id )
+{
+    br_vo_squad( squad, "vo_wanted_start" );
+
+    foreach ( p in level.players )
+    {
+        if ( isdefined( p.br_squad ) && p.br_squad != squad )
+            p br_vo( "vo_wanted_enemy" );
+    }
+
+    level.br_wanted = squad;
+    objective_setvisibletoall( id );
+    end = gettime() + c.time;
+
+    while ( gettime() < end )
+    {
+        if ( br_squad_out( squad ) || level.br_over )
+        {
+            level.br_wanted = undefined;
+            br_vo_squad( squad, "vo_wanted_failed" );
+            return 0;
+        }
+
+        lead = br_squad_lead( squad );
+
+        if ( isdefined( lead ) )
+            objective_position( id, lead.origin );
+
+        wait 0.5;
+    }
+
+    level.br_wanted = undefined;
+
+    foreach ( p in br_squad_members( squad ) )
+    {
+        if ( isalive( p ) )
+            continue;
+
+        if ( p.br_pending )
+            p.br_redeploy_at = gettime();
+        else
+        {
+            p.br_out = 0;
+            p br_respawn();
+        }
+    }
+
+    br_vo_squad( squad, "vo_wanted_done" );
+    return 1;
+}
+
+// A kill and the contracts: a bounty's target, a most-wanted squad's man.
+br_contract_kill( attacker, victim )
+{
+    if ( !isdefined( victim ) )
+        return;
+
+    if ( isdefined( victim.br_bounty_by ) && isdefined( attacker ) && isdefined( attacker.br_squad ) && attacker.br_squad == victim.br_bounty_by )
+        level.br_bounty_hit[victim.br_bounty_by] = 1;
+
+    if ( isdefined( level.br_wanted ) && victim.br_squad == level.br_wanted && isdefined( attacker ) && isdefined( attacker.br_squad ) && attacker.br_squad != level.br_wanted )
+    {
+        attacker.br_cash = attacker.br_cash + level.br_kill_cash;
+        attacker br_snd( "contract_reward" );
+        attacker br_vo( "vo_wanted_killed" );
+    }
 }
 
 // ---- the HUD ----------------------------------------------------------------
