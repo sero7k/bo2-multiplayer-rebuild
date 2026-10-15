@@ -411,6 +411,28 @@ pub fn iw3_owned_light_grid(grid: &iw3::zone::LightGrid) -> Option<asset_model::
     })
 }
 
+/// bo2mp: what a CoD4 / World at War lit model takes from the light grid at
+/// `pos`: the lookup's mean colour (8-bit gamma over 255) and the sun's
+/// visibility there (the share of the corners' weight whose entries name
+/// the sun: CoD4's model lighting keeps it in the lookup's alpha, which its
+/// `lp_sun_*` shaders multiply the sun by). `None` outside the grid.
+pub fn iw3_grid_light(grid: &asset_model::OwnedLightGrid, pos: [f32; 3]) -> Option<([f32; 3], f32)> {
+    let s = asset_model::sample_light_grid(&grid.view(), pos).ok()?;
+    let mean = asset_model::mean_tile_rgba01(&s.tile);
+    let sun = grid.sun_primary_light_index;
+    let band = lighting_iw4::light_grid_primary_light_sun_band(sun);
+    let (mut lit, mut all) = (0.0f32, 0.0f32);
+    for i in 0..8 {
+        if let Some(p) = s.corner_primaries[i] {
+            all += s.weights[i];
+            if u32::from(p) == sun || u32::from(p) >= band {
+                lit += s.weights[i];
+            }
+        }
+    }
+    Some((mean, if all > 1e-6 { (lit / all).clamp(0.0, 1.0) } else { 0.0 }))
+}
+
 /// bo2mp: a CoD4 / World at War reflection probe's cube (64x64 A8R8G8B8,
 /// each face with its mips before the next face) as the fallback pass's
 /// probe layers: RGBA with CoD4's alpha scale folded in (its lit shaders
