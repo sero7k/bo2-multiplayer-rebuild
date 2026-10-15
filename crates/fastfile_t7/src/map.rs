@@ -168,7 +168,7 @@ pub struct Common {
 /// bo2mp: a material's named constants and bound texture slots, from its
 /// technique set's programs (`MapMaterial::constants`): the zone's own
 /// technique set, else the common zones' (`common`).
-fn material_constants(
+pub(crate) fn material_constants(
     cap: &Capture,
     image: &[u8],
     common: &Common,
@@ -405,6 +405,8 @@ pub struct T7Map {
     /// (bo2mp: a sky cube another game's reader made (six faces, +x -x
     /// +y -y +z -z, z up), drawn behind the world.)
     pub sky_cube: Option<ImageLevels>,
+    /// bo2mp: where the first sun volume keeps its light (`crate::light`).
+    pub(crate) light_refs: Option<crate::light::LightRefs>,
     images: HashMap<String, ImageRec>,
     /// (bo2mp: pictures another game's reader decoded for its materials,
     /// by name: [`Self::add_image`].)
@@ -514,6 +516,9 @@ impl T7Map {
                 out.images.entry(im.name.clone()).or_insert_with(|| im.clone());
             }
         }
+        // bo2mp: the sun volume's light (sky, probes) and the sky material's
+        // constants (`skyScale`).
+        out.light_refs = crate::light::LightRefs::read(&cap, &zone.image, &common);
         out.zone_image = zone.image;
         match packages(&src.pak_dir) {
             Ok(p) => out.paks = Some(p),
@@ -800,6 +805,11 @@ impl T7Map {
     /// its own to name; [`Self::image`] hands it out as it is.)
     pub fn add_image(&mut self, name: String, levels: ImageLevels) {
         self.added_images.insert(name, levels);
+    }
+
+    /// bo2mp: the `.xpak` packages beside the zone, when they opened.
+    pub fn paks(&self) -> Option<&XpakSet> {
+        self.paks.as_ref()
     }
 
     /// The image record of a name (format, size).
