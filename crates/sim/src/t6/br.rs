@@ -40,14 +40,22 @@ pub fn set_jup_sound_lookup(lookup: Option<fn(&str) -> bool>) {
 
 pub(super) fn rules() -> Option<Rules> {
     if let Ok(v) = std::env::var("BO2MP_BR") {
-        let n = v.trim().parse::<u8>().unwrap_or(resurgence::REBIRTH.squad_size);
+        let n = v
+            .trim()
+            .parse::<u8>()
+            .unwrap_or(resurgence::REBIRTH.squad_size);
         return (n > 0).then(|| resurgence::REBIRTH.with_squad_size(n));
     }
     SETUP.lock().ok().and_then(|s| *s)
 }
 
 fn jup_has(alias: &str) -> bool {
-    !alias.is_empty() && JUP_SOUND.lock().ok().and_then(|f| *f).is_some_and(|f| f(alias))
+    !alias.is_empty()
+        && JUP_SOUND
+            .lock()
+            .ok()
+            .and_then(|f| *f)
+            .is_some_and(|f| f(alias))
 }
 
 /// The alias the script plays for a sound route ("" for none).
@@ -73,7 +81,10 @@ pub(super) const SETTINGS: &[(&str, &str)] = &[
 
 pub(super) fn setting(name: &str) -> Option<&'static str> {
     rules()?;
-    SETTINGS.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| *v)
+    SETTINGS
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, v)| *v)
 }
 
 /// The `scr_br_*` dvars for `rules`.
@@ -91,8 +102,19 @@ pub(super) fn dvars(rules: &Rules) -> Vec<(String, String)> {
     put("_spawn_plates", rules.spawn_plates.to_string());
     put("_start_cash", rules.start_cash.to_string());
     put("_kill_cash", rules.kill_cash.to_string());
-    put("_kill_cut_ms", (u32::from(rules.kill_redeploy_cut_s) * 1000).to_string());
-    put("_stacks", rules.cash_stacks.iter().map(u32::to_string).collect::<Vec<_>>().join(" "));
+    put(
+        "_kill_cut_ms",
+        (u32::from(rules.kill_redeploy_cut_s) * 1000).to_string(),
+    );
+    put(
+        "_stacks",
+        rules
+            .cash_stacks
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
     put("_stations", rules.buy_station_count.to_string());
     put("_uav_ms", (u32::from(rules.uav_s) * 1000).to_string());
     put("_loot_spots", rules.loot_spots.to_string());
@@ -113,11 +135,17 @@ pub(super) fn dvars(rules: &Rules) -> Vec<(String, String)> {
     }
     put("_buys", rules.buy.len().to_string());
     for (i, b) in rules.buy.iter().enumerate() {
-        put(&format!("_buy_{i}"), format!("{}|{}|{}", b.key, b.label, b.price));
+        put(
+            &format!("_buy_{i}"),
+            format!("{}|{}|{}", b.key, b.label, b.price),
+        );
     }
     put("_tiers", rules.loot.len().to_string());
     for (i, t) in rules.loot.iter().enumerate() {
-        put(&format!("_tier_{i}"), format!("{}|{}|{}|{}", t.key, t.label, t.weight, t.attachments));
+        put(
+            &format!("_tier_{i}"),
+            format!("{}|{}|{}|{}", t.key, t.label, t.weight, t.attachments),
+        );
     }
     for r in resurgence::SOUNDS {
         put(&format!("_snd_{}", r.key), sound_alias(r));
@@ -129,8 +157,18 @@ pub(super) fn dvars(rules: &Rules) -> Vec<(String, String)> {
 mod tests {
     #[test]
     fn the_resurgence_script_compiles_with_its_parts() {
-        let s = gsc_t6::compile("bo2mp/resurgence", super::SCRIPT).expect("br_resurgence.gsc compiles");
-        for f in ["main", "br_onplayerdamage", "br_onplayerkilled", "br_circle", "br_redeploy", "br_buy_station", "br_bot_think", "br_check_squads"] {
+        let s =
+            gsc_t6::compile("bo2mp/resurgence", super::SCRIPT).expect("br_resurgence.gsc compiles");
+        for f in [
+            "main",
+            "br_onplayerdamage",
+            "br_onplayerkilled",
+            "br_circle",
+            "br_redeploy",
+            "br_buy_station",
+            "br_bot_think",
+            "br_check_squads",
+        ] {
             assert!(s.functions.iter().any(|x| x.name == f), "{f}");
         }
     }

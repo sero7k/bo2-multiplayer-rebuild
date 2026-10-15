@@ -83,29 +83,121 @@ pub struct Rules {
 }
 
 pub const PHASES: &[CirclePhase] = &[
-    CirclePhase { wait_s: 120, close_s: 90, end_radius: 0.62, gas_dps: 5, redeploy_s: Some(10) },
-    CirclePhase { wait_s: 75, close_s: 75, end_radius: 0.40, gas_dps: 8, redeploy_s: Some(15) },
-    CirclePhase { wait_s: 60, close_s: 60, end_radius: 0.24, gas_dps: 10, redeploy_s: Some(20) },
-    CirclePhase { wait_s: 50, close_s: 50, end_radius: 0.13, gas_dps: 15, redeploy_s: Some(25) },
-    CirclePhase { wait_s: 40, close_s: 40, end_radius: 0.06, gas_dps: 20, redeploy_s: None },
-    CirclePhase { wait_s: 30, close_s: 35, end_radius: 0.02, gas_dps: 25, redeploy_s: None },
-    CirclePhase { wait_s: 20, close_s: 30, end_radius: 0.0, gas_dps: 30, redeploy_s: None },
+    CirclePhase {
+        wait_s: 120,
+        close_s: 90,
+        end_radius: 0.62,
+        gas_dps: 5,
+        redeploy_s: Some(10),
+    },
+    CirclePhase {
+        wait_s: 75,
+        close_s: 75,
+        end_radius: 0.40,
+        gas_dps: 8,
+        redeploy_s: Some(15),
+    },
+    CirclePhase {
+        wait_s: 60,
+        close_s: 60,
+        end_radius: 0.24,
+        gas_dps: 10,
+        redeploy_s: Some(20),
+    },
+    CirclePhase {
+        wait_s: 50,
+        close_s: 50,
+        end_radius: 0.13,
+        gas_dps: 15,
+        redeploy_s: Some(25),
+    },
+    CirclePhase {
+        wait_s: 40,
+        close_s: 40,
+        end_radius: 0.06,
+        gas_dps: 20,
+        redeploy_s: None,
+    },
+    CirclePhase {
+        wait_s: 30,
+        close_s: 35,
+        end_radius: 0.02,
+        gas_dps: 25,
+        redeploy_s: None,
+    },
+    CirclePhase {
+        wait_s: 20,
+        close_s: 30,
+        end_radius: 0.0,
+        gas_dps: 30,
+        redeploy_s: None,
+    },
 ];
 
 pub const BUY: &[BuyItem] = &[
-    BuyItem { kind: BuyKind::LoadoutDrop, key: "loadout", label: "LOADOUT DROP", price: 6000 },
-    BuyItem { kind: BuyKind::SquadBuyback, key: "buyback", label: "SQUAD BUYBACK", price: 4000 },
-    BuyItem { kind: BuyKind::SelfRevive, key: "selfrevive", label: "SELF-REVIVE KIT", price: 4500 },
-    BuyItem { kind: BuyKind::Uav, key: "uav", label: "PERSONAL UAV", price: 4000 },
-    BuyItem { kind: BuyKind::ArmorPlates, key: "plates", label: "ARMOR PLATES (3)", price: 1000 },
+    BuyItem {
+        kind: BuyKind::LoadoutDrop,
+        key: "loadout",
+        label: "LOADOUT DROP",
+        price: 6000,
+    },
+    BuyItem {
+        kind: BuyKind::SquadBuyback,
+        key: "buyback",
+        label: "SQUAD BUYBACK",
+        price: 4000,
+    },
+    BuyItem {
+        kind: BuyKind::SelfRevive,
+        key: "selfrevive",
+        label: "SELF-REVIVE KIT",
+        price: 4500,
+    },
+    BuyItem {
+        kind: BuyKind::Uav,
+        key: "uav",
+        label: "PERSONAL UAV",
+        price: 4000,
+    },
+    BuyItem {
+        kind: BuyKind::ArmorPlates,
+        key: "plates",
+        label: "ARMOR PLATES (3)",
+        price: 1000,
+    },
 ];
 
 pub const LOOT: &[LootTier] = &[
-    LootTier { key: "common", label: "COMMON", weight: 45, attachments: 0 },
-    LootTier { key: "uncommon", label: "UNCOMMON", weight: 28, attachments: 1 },
-    LootTier { key: "rare", label: "RARE", weight: 16, attachments: 2 },
-    LootTier { key: "epic", label: "EPIC", weight: 8, attachments: 3 },
-    LootTier { key: "legendary", label: "LEGENDARY", weight: 3, attachments: 4 },
+    LootTier {
+        key: "common",
+        label: "COMMON",
+        weight: 45,
+        attachments: 0,
+    },
+    LootTier {
+        key: "uncommon",
+        label: "UNCOMMON",
+        weight: 28,
+        attachments: 1,
+    },
+    LootTier {
+        key: "rare",
+        label: "RARE",
+        weight: 16,
+        attachments: 2,
+    },
+    LootTier {
+        key: "epic",
+        label: "EPIC",
+        weight: 8,
+        attachments: 3,
+    },
+    LootTier {
+        key: "legendary",
+        label: "LEGENDARY",
+        weight: 3,
+        attachments: 4,
+    },
 ];
 
 pub const REBIRTH: Rules = Rules {
@@ -149,7 +241,13 @@ pub enum Moment {
 
 impl Rules {
     pub const fn with_squad_size(mut self, n: u8) -> Self {
-        self.squad_size = if n == 0 { 1 } else if n > MAX_SQUAD_SIZE { MAX_SQUAD_SIZE } else { n };
+        self.squad_size = if n == 0 {
+            1
+        } else if n > MAX_SQUAD_SIZE {
+            MAX_SQUAD_SIZE
+        } else {
+            n
+        };
         self
     }
 
@@ -160,7 +258,12 @@ impl Rules {
             let close_from_ms = wait_from_ms + u32::from(p.wait_s) * 1000;
             let closed_ms = close_from_ms + u32::from(p.close_s) * 1000;
             at = closed_ms;
-            PhaseWindow { index, wait_from_ms, close_from_ms, closed_ms }
+            PhaseWindow {
+                index,
+                wait_from_ms,
+                close_from_ms,
+                closed_ms,
+            }
         })
     }
 
@@ -170,10 +273,14 @@ impl Rules {
         }
         for w in self.windows() {
             if ms < w.close_from_ms {
-                return Moment::Waiting { phase: w.index, left_ms: w.close_from_ms - ms };
+                return Moment::Waiting {
+                    phase: w.index,
+                    left_ms: w.close_from_ms - ms,
+                };
             }
             if ms < w.closed_ms {
-                let t = (ms - w.close_from_ms) as f32 / (w.closed_ms - w.close_from_ms).max(1) as f32;
+                let t =
+                    (ms - w.close_from_ms) as f32 / (w.closed_ms - w.close_from_ms).max(1) as f32;
                 return Moment::Closing { phase: w.index, t };
             }
         }
@@ -182,7 +289,13 @@ impl Rules {
 
     /// The circle's radius as a share of the first one's.
     pub fn radius_share(&self, ms: u32) -> f32 {
-        let start = |i: usize| if i == 0 { 1.0 } else { self.phases[i - 1].end_radius };
+        let start = |i: usize| {
+            if i == 0 {
+                1.0
+            } else {
+                self.phases[i - 1].end_radius
+            }
+        };
         match self.moment(ms) {
             Moment::Infil => 1.0,
             Moment::Waiting { phase, .. } => start(phase),
@@ -198,7 +311,9 @@ impl Rules {
     pub fn redeploy_s(&self, ms: u32) -> Option<u16> {
         match self.moment(ms) {
             Moment::Infil => self.phases.first().and_then(|p| p.redeploy_s),
-            Moment::Waiting { phase, .. } | Moment::Closing { phase, .. } => self.phases[phase].redeploy_s,
+            Moment::Waiting { phase, .. } | Moment::Closing { phase, .. } => {
+                self.phases[phase].redeploy_s
+            }
             Moment::Closed => None,
         }
     }
@@ -206,7 +321,9 @@ impl Rules {
     pub fn gas_dps(&self, ms: u32) -> u16 {
         match self.moment(ms) {
             Moment::Infil => 0,
-            Moment::Waiting { phase, .. } | Moment::Closing { phase, .. } => self.phases[phase].gas_dps,
+            Moment::Waiting { phase, .. } | Moment::Closing { phase, .. } => {
+                self.phases[phase].gas_dps
+            }
             Moment::Closed => self.phases.last().map_or(0, |p| p.gas_dps),
         }
     }
@@ -289,41 +406,116 @@ pub struct SoundRoute {
     pub t6: &'static str,
 }
 
-const fn route(event: BrSound, key: &'static str, jup: &'static str, t6: &'static str) -> SoundRoute {
-    SoundRoute { event, key, jup, t6 }
+const fn route(
+    event: BrSound,
+    key: &'static str,
+    jup: &'static str,
+    t6: &'static str,
+) -> SoundRoute {
+    SoundRoute {
+        event,
+        key,
+        jup,
+        t6,
+    }
 }
 
 pub const SOUNDS: &[SoundRoute] = &[
     route(BrSound::MatchStart, "match_start", "", "mpl_hit_alert"),
     route(BrSound::InfilMusic, "infil_music", "", ""),
-    route(BrSound::CircleCollapsing, "circle_collapsing", "", "mpl_sd_bomb_planted"),
+    route(
+        BrSound::CircleCollapsing,
+        "circle_collapsing",
+        "",
+        "mpl_sd_bomb_planted",
+    ),
     route(BrSound::CircleClosed, "circle_closed", "", ""),
-    route(BrSound::FinalCircle, "final_circle", "", "mus_time_running_out"),
+    route(
+        BrSound::FinalCircle,
+        "final_circle",
+        "",
+        "mus_time_running_out",
+    ),
     route(BrSound::GasTick, "gas_tick", "", "mpl_hit_alert_low"),
     route(BrSound::GasEnter, "gas_enter", "", ""),
     route(BrSound::GasLoop, "gas_loop", "", ""),
-    route(BrSound::RedeployCountdown, "redeploy_tick", "", "mpl_ui_timer_countdown"),
-    route(BrSound::Redeployed, "redeployed", "", "mpl_killstreak_radar"),
+    route(
+        BrSound::RedeployCountdown,
+        "redeploy_tick",
+        "",
+        "mpl_ui_timer_countdown",
+    ),
+    route(
+        BrSound::Redeployed,
+        "redeployed",
+        "",
+        "mpl_killstreak_radar",
+    ),
     route(BrSound::RedeployDisabled, "redeploy_disabled", "", ""),
     route(BrSound::SquadmateDown, "squadmate_down", "", ""),
-    route(BrSound::SquadWiped, "squad_wiped", "", "mpl_flagcapture_sting_enemy"),
-    route(BrSound::EnemySquadWiped, "enemy_squad_wiped", "", "mpl_flagcapture_sting_friend"),
-    route(BrSound::SquadsRemaining, "squads_remaining", "", "uin_alert_slideout"),
+    route(
+        BrSound::SquadWiped,
+        "squad_wiped",
+        "",
+        "mpl_flagcapture_sting_enemy",
+    ),
+    route(
+        BrSound::EnemySquadWiped,
+        "enemy_squad_wiped",
+        "",
+        "mpl_flagcapture_sting_friend",
+    ),
+    route(
+        BrSound::SquadsRemaining,
+        "squads_remaining",
+        "",
+        "uin_alert_slideout",
+    ),
     route(BrSound::TopSquads, "top_squads", "", ""),
     route(BrSound::Victory, "victory", "", "mus_victory"),
     route(BrSound::Defeat, "defeat", "", "mus_loss"),
     route(BrSound::CashPickup, "cash_pickup", "", "mpl_turret_alert"),
-    route(BrSound::PlatePickup, "plate_pickup", "", "uin_alert_slideout"),
-    route(BrSound::PlateInsert, "plate_insert", "", "fly_riotshield_impact_npc"),
+    route(
+        BrSound::PlatePickup,
+        "plate_pickup",
+        "",
+        "uin_alert_slideout",
+    ),
+    route(
+        BrSound::PlateInsert,
+        "plate_insert",
+        "",
+        "fly_riotshield_impact_npc",
+    ),
     route(BrSound::PlatesFull, "plates_full", "", ""),
     route(BrSound::ArmorBreak, "armor_break", "", "mpl_hit_alert_clip"),
     route(BrSound::BuyStationOpen, "buy_open", "", "uin_main_pause"),
     route(BrSound::Purchase, "purchase", "", "mpl_turret_alert"),
-    route(BrSound::PurchaseDenied, "purchase_denied", "", "uin_unlock_denied"),
-    route(BrSound::LoadoutDropIncoming, "loadout_incoming", "", "mpl_killstreak_supply"),
-    route(BrSound::LoadoutDropLanded, "loadout_landed", "", "mpl_supply_crate_land"),
+    route(
+        BrSound::PurchaseDenied,
+        "purchase_denied",
+        "",
+        "uin_unlock_denied",
+    ),
+    route(
+        BrSound::LoadoutDropIncoming,
+        "loadout_incoming",
+        "",
+        "mpl_killstreak_supply",
+    ),
+    route(
+        BrSound::LoadoutDropLanded,
+        "loadout_landed",
+        "",
+        "mpl_supply_crate_land",
+    ),
     route(BrSound::UavOnline, "uav_online", "", "mpl_killstreak_radar"),
-    route(BrSound::BuybackComplete, "buyback", "", "mpl_killstreak_radar"),
+    route(
+        BrSound::BuybackComplete,
+        "buyback",
+        "",
+        "mpl_killstreak_radar",
+    ),
     route(BrSound::SelfRevive, "self_revive", "", "mpl_hit_alert"),
     route(BrSound::LootCommon, "loot_common", "", ""),
     route(BrSound::LootRare, "loot_rare", "", ""),
