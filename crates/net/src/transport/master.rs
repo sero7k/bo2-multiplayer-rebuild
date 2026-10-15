@@ -68,6 +68,9 @@ pub fn content_required_by_map(map: &str) -> Result<ContentFlags> {
         "t6" => CONTENT_T6,
         "iw3" => CONTENT_IW3,
         "t4" => CONTENT_T4,
+        // bo2mp: other games' maps play by Black Ops II's rules, from its
+        // files (`jup:` Modern Warfare III's (2023), as `map jup:<zone>`).
+        "iw6" | "iw7" | "t7" | "jup" => CONTENT_T6,
         other => return Err(format!("unknown content namespace `{other}` in map `{map}`").into()),
     }))
 }
@@ -3403,6 +3406,7 @@ mod content_tests {
             ("t6:mp_raid", CONTENT_T6, "t6"),
             ("iw3:mp_crash", CONTENT_IW3, "iw3"),
             ("t4:mp_castle", CONTENT_T4, "t4"),
+            ("jup:mp_jup_escape5", CONTENT_T6, "t6"),
         ] {
             let flags = content_required_by_map(map).unwrap();
             assert_eq!(flags.0, flag);
