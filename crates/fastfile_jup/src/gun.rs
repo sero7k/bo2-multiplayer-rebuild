@@ -168,13 +168,13 @@ fn f32_at(z: &[u8], o: usize) -> f32 {
 }
 
 /// The model's header after its mesh: a hash, `-2`, the surface count.
-fn model_header(z: &[u8], from: usize, surfaces: usize) -> Option<usize> {
-    (from..from.saturating_add(0x200).min(z.len().saturating_sub(0x18))).find(|&o| {
+fn model_header(z: &[u8], from: usize, surfaces: &[usize]) -> Option<usize> {
+    (from..from.saturating_add(0x8000).min(z.len().saturating_sub(0x18))).find(|&o| {
         let h = u64_at(z, o);
         h != 0
             && !crate::hash::is_ref(h)
             && u64_at(z, o + 8) == FOLLOW
-            && usize::from(u16::from_le_bytes([z[o + 0x10], z[o + 0x11]])) == surfaces
+            && surfaces.contains(&usize::from(u16::from_le_bytes([z[o + 0x10], z[o + 0x11]])))
     })
 }
 
@@ -290,9 +290,24 @@ pub fn read_part(z: &[u8]) -> Result<PartModel, String> {
     if h.assets.first().map(|a| a.kind) != Some(zone::asset_type::XMODEL_SURFS) {
         return Err("no mesh first".into());
     }
-    let rec = surfs::parse(z, h.data_start).map_err(|e| e.to_string())?;
-    let n = rec.surfaces.len();
-    let header = model_header(z, rec.end, n).ok_or("no model after the mesh")?;
+    // (A world model's zone holds more than one mesh: its LODs, read one
+    // after another; the model is drawn with its densest of the surface
+    // count it names.)
+    let mut meshes = Vec::new();
+    let mut at = h.data_start;
+    for _ in h.assets.iter().take_while(|a| a.kind == zone::asset_type::XMODEL_SURFS) {
+        let rec = surfs::parse(z, at).map_err(|e| e.to_string())?;
+        at = rec.end;
+        meshes.push(rec);
+    }
+    let counts: Vec<usize> = meshes.iter().map(|m| m.surfaces.len()).collect();
+    let header = model_header(z, at, &counts).ok_or("no model after the mesh")?;
+    let n = usize::from(u16::from_le_bytes([z[header + 0x10], z[header + 0x11]]));
+    let rec = meshes
+        .into_iter()
+        .filter(|m| m.surfaces.len() == n)
+        .max_by_key(|m| m.surfaces.iter().map(|s| s.vert_count).sum::<u32>())
+        .ok_or("no mesh of the model's surface count")?;
     let (name, after_name) = model_name(z, header + 0x18).ok_or("model has no name")?;
     let bones = bones(z, after_name);
     let mats = materials(z, after_name, z.len(), n).unwrap_or_else(|| vec![None; n]);
