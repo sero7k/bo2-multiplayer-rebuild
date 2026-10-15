@@ -5,7 +5,7 @@
 //! 0x00 u64 name hash          0x08 u64 0
 //! 0x10 u32 0, u32 flags       0x18 u32 data size (every level)
 //! 0x1c u32 ?                  0x20 u16 width, height, depth, array size
-//! 0x28 u8 ?, u8 ?, u8 format, u8 usage, u8 ?, u8 ?, u8 group count, u8 ?
+//! 0x28 u8 ?, u8 ?, u8 format, u8 usage, u8 level count, u8 ?, u8 group count, u8 ?
 //! 0x30 ptr groups (-2: group count records follow)
 //! 0x38 ptr pixels (-2: data size bytes follow, a small image in the zone)
 //! group record, 24 bytes: u64 package key, u64 0, u16 ?, u16 ?,
@@ -53,6 +53,8 @@ pub struct ImageRec {
     pub array: u16,
     pub format: u8,
     pub usage: u8,
+    /// Mip levels (0 where not set: every level down to 4x4 is assumed).
+    pub levels: u8,
     pub groups: Vec<MipGroup>,
     /// The pixels in the zone, for a small image: (offset, length).
     pub inline: Option<(usize, usize)>,
@@ -110,6 +112,7 @@ pub fn parse(zone: &[u8], at: usize) -> Result<Option<ImageRec>, OutOfBounds> {
         array: u16_at(0x26),
         format: h[0x2a],
         usage: h[0x2b],
+        levels: h[0x2c],
         groups,
         inline,
         end,
@@ -213,7 +216,7 @@ impl ImageRun {
 #[must_use]
 pub fn dxgi(format: u8) -> Option<u32> {
     match format {
-        0x2a => Some(71), // BC1_UNORM
+        0x25 | 0x2a => Some(71), // BC1_UNORM (0x25: calling cards; a 1024x1024 one is 512 KiB)
         0x2f => Some(83), // BC5_UNORM
         0x30 => Some(98), // BC7_UNORM
         _ => None,
@@ -249,15 +252,17 @@ pub fn group_levels(img: &ImageRec, group: usize, dxgi: u32) -> Option<Vec<(u32,
     let (w0, h0) = (u32::from(img.width), u32::from(img.height));
     // (Levels below 4x4 are not streamed: a 1024x1024 image's first
     // group is its 8x8 and 4x4 levels, 80 bytes of BC7.)
+    // (Nor are levels past the header's level count: a picture with one
+    // level, 1024x1024 or 256x256, is one group of that level.)
     let mut levels = Vec::new();
     let mut l = 0u32;
     loop {
         let (w, h) = ((w0 >> l).max(1), (h0 >> l).max(1));
         levels.push((l, w, h, level_bytes(dxgi, w, h)?));
-        if w <= 4 || h <= 4 {
+        l += 1;
+        if w <= 4 || h <= 4 || (img.levels != 0 && l >= u32::from(img.levels)) {
             break;
         }
-        l += 1;
     }
     // Sum from the smallest level up.
     let mut acc = 0u32;
@@ -323,6 +328,12 @@ mod tests {
         let d = dxgi(img.format).unwrap();
         assert_eq!(group_levels(&img, 2, d).unwrap(), vec![(0, 64, 64, 0)]);
         assert_eq!(group_levels(&img, 1, d).unwrap(), vec![(1, 32, 32, 0), (2, 16, 16, 1024)]);
+        // One level, in one group (an emblem's picture).
+        let mut z = header(0x55, 256, 256, 0x30, &[(7, 65536)]);
+        z[0x2c] = 1;
+        let img = parse(&z, 0).unwrap().unwrap();
+        assert_eq!(img.levels, 1);
+        assert_eq!(group_levels(&img, 0, d).unwrap(), vec![(0, 256, 256, 0)]);
     }
 
     #[test]
