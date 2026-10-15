@@ -605,9 +605,17 @@ pub fn axes_of(q: [f32; 4]) -> [[f32; 3]; 3] {
     ]
 }
 
-/// Model names that are no model to draw: shadow casters.
+/// Model names that are no model to draw: shadow casters, the world
+/// tiles' coarse stand-ins (`tm7/<map>_<tile>`: the tiles themselves are
+/// drawn), and the destroyed or in-between states of what can be
+/// destroyed (as the swap zones' are left out).
 fn drawn(name: &str) -> bool {
-    !name.contains("shadow::")
+    !(name.contains("shadow::")
+        || name.starts_with("tm7/")
+        || name.contains("_swap_dest")
+        || name.contains("_swap_t_")
+        || name.ends_with("_dest_ext")
+        || name.ends_with("_dest_int"))
 }
 
 /// A LOD's surfaces decoded (its mesh's bytes from the zone or fetched).
