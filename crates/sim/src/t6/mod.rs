@@ -24,6 +24,7 @@ mod actors;
 mod asd;
 mod audio_triggers;
 mod autoplay;
+mod input_replay;
 mod bots;
 mod autoplay_prison;
 mod brushes;
@@ -1760,6 +1761,8 @@ fn advance_inner(world: &mut World) {
     timed("bots", world, |world| {
         // The test player's buttons go in before the triggers read them.
         autoplay::drive(world, now);
+        // bo2mp: a timed input script played as his commands (test aid).
+        input_replay::drive(world, now);
         // bo2zm: the solo cheat menu's picks.
         cheats::apply(world);
         cheats::hold(world);

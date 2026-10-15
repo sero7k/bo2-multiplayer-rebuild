@@ -514,8 +514,32 @@ pub(crate) fn advance_weapon_command(
             },
         };
         let clip_before = hands[0].clip;
+        let before = hands[0];
         let events = weapon_hands(&mut hands, &facts, &mut wcmd, last_hand);
         let hand0 = hands[0];
+        if weapon_trace() && id.0 == 0 && world.publishes_snapshot() {
+            diag::info!(
+                Sim,
+                "wtrace t {} msec {msec} btn {:#x} want {} | {} st {:#x}->{:#x} time {}->{} delay {}->{} clip {}->{} shots {} rech {}->{} anim {:#x} ev {:?}",
+                cmd.server_time,
+                cmd.buttons,
+                cmd.weapon,
+                hand0.weapon,
+                before.weaponstate,
+                hand0.weaponstate,
+                before.weapon_time,
+                hand0.weapon_time,
+                before.weapon_delay,
+                hand0.weapon_delay,
+                before.clip,
+                hand0.clip,
+                hand0.shot_count,
+                u8::from(before.rechamber_pending),
+                u8::from(hand0.rechamber_pending),
+                hand0.weap_anim,
+                events
+            );
+        }
         if let Some(charge) = wcmd.melee_started {
             if let Some(ps_mut) = world.player_mut(*id) {
                 movement_iw4::add_predictable_event(
@@ -1010,6 +1034,13 @@ pub(crate) fn ammo_log() -> bool {
 pub(crate) fn damage_log() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("IW4L_DAMAGE_LOG").is_some())
+}
+
+/// bo2mp: `BO2MP_WEAPON_TRACE` set = the host logs player 1's weapon state
+/// for every command he sends (test aid for trick timings).
+pub(crate) fn weapon_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("BO2MP_WEAPON_TRACE").is_some())
 }
 
 /// bo2mp: `IW4L_SWAP_LOG` set = log how long each alternate (Hybrid Optic)
