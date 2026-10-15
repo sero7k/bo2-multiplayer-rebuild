@@ -67,9 +67,32 @@ fn tangent_of(n: [f32; 3]) -> [f32; 3] {
     t.map(|x| x / l)
 }
 
+/// Where the map is played: a circle (middle, radius) on the ground plan.
+#[derive(Clone, Copy, Debug)]
+struct PlayArea {
+    mid: [f32; 2],
+    radius: f32,
+}
+
+impl PlayArea {
+    /// Does a box (on the ground plan) come within the area?
+    fn reaches(&self, lo: [f32; 3], hi: [f32; 3]) -> bool {
+        let dx = (self.mid[0] - self.mid[0].clamp(lo[0], hi[0])).abs();
+        let dy = (self.mid[1] - self.mid[1].clamp(lo[1], hi[1])).abs();
+        dx * dx + dy * dy <= self.radius * self.radius
+    }
+}
+
+/// A drawn surface too big to stand on as one (a sea sheet, a far vista's
+/// ground) spans more than this on the ground plan.
+const SHEET: f32 = 16384.0;
+
 /// Floor points when the map has no path nodes: the middles of the
-/// world's upward triangles of some size, in the box most of them are in.
-fn floor_points(map: &JupMap) -> Vec<[f32; 3]> {
+/// world's upward triangles of a walkable size (not the sea's or a far
+/// vista's huge sheets), around where most of them are (a big map's
+/// streamed backdrop tiles out), above the lowest few (the sea bed); and
+/// the play area they make.
+fn floor_points(map: &JupMap) -> (Vec<[f32; 3]>, Option<PlayArea>) {
     let mut pts = Vec::new();
     for s in &map.surfaces {
         for t in &s.tris {
@@ -82,21 +105,37 @@ fn floor_points(map: &JupMap) -> Vec<[f32; 3]> {
                 u[0] * v[1] - u[1] * v[0],
             ];
             let area2 = (f[0] * f[0] + f[1] * f[1] + f[2] * f[2]).sqrt();
-            if area2 > 2.0 * 32.0 * 32.0 && f[2] / area2 > 0.85 {
+            if area2 > 2.0 * 32.0 * 32.0 && area2 < 2.0 * 512.0 * 512.0 && f[2] / area2 > 0.85 {
                 pts.push(std::array::from_fn(|k| (a[k] + b[k] + c[k]) / 3.0));
             }
         }
     }
-    // The middle 80% on each axis (sky boxes and far vistas out).
-    for k in 0..2 {
-        let mut v: Vec<f32> = pts.iter().map(|p: &[f32; 3]| p[k]).collect();
-        v.sort_by(f32::total_cmp);
-        if v.len() > 10 {
-            let (lo, hi) = (v[v.len() / 10], v[v.len() * 9 / 10]);
-            pts.retain(|p| p[k] >= lo && p[k] <= hi);
-        }
+    if pts.len() < 10 {
+        return (pts, None);
     }
-    pts
+    let median = |k: usize, pts: &[[f32; 3]]| {
+        let mut v: Vec<f32> = pts.iter().map(|p| p[k]).collect();
+        v.sort_by(f32::total_cmp);
+        v[v.len() / 2]
+    };
+    // Around the middle: within 1.5 times the distance six in ten are in.
+    let mid = [median(0, &pts), median(1, &pts)];
+    let d2 = |p: &[f32; 3]| (p[0] - mid[0]).powi(2) + (p[1] - mid[1]).powi(2);
+    let mut d: Vec<f32> = pts.iter().map(d2).collect();
+    d.sort_by(f32::total_cmp);
+    let reach = d[d.len() * 6 / 10] * 1.5 * 1.5;
+    pts.retain(|p| d2(p) <= reach);
+    // Above the lowest twentieth.
+    let mut z: Vec<f32> = pts.iter().map(|p| p[2]).collect();
+    z.sort_by(f32::total_cmp);
+    let floor = z[z.len() / 20];
+    pts.retain(|p| p[2] > floor);
+    let area = PlayArea {
+        mid,
+        // (A little past the floor's edge: what borders it is solid too.)
+        radius: reach.sqrt() * 1.25,
+    };
+    (pts, Some(area))
 }
 
 /// The map as a Black Ops III map read.
@@ -143,9 +182,31 @@ fn as_t7(map: &JupMap, report: &mut Vec<String>) -> T7Map {
             maxs: hi,
         });
     }
+    let (ground, area) = floor_points(map);
+    // Collision only where the map is played: not the sea sheets, not the
+    // backdrop beyond the play area (a big map's far tiles).
+    if let Some(area) = area {
+        t7.no_collision = t7
+            .surfaces
+            .iter()
+            .map(|s| {
+                s.maxs[0] - s.mins[0] > SHEET
+                    || s.maxs[1] - s.mins[1] > SHEET
+                    || !area.reaches(s.mins, s.maxs)
+            })
+            .collect();
+        let left = t7.no_collision.iter().filter(|&&n| n).count();
+        report.push(format!(
+            "jup collision: play area {:.0} around ({:.0}, {:.0}); {left} of {} surfaces drawn only",
+            area.radius,
+            area.mid[0],
+            area.mid[1],
+            t7.surfaces.len()
+        ));
+    }
     let mut floor = ents::path_nodes(&map.entities);
     let source = if floor.is_empty() {
-        floor = floor_points(map);
+        floor = ground;
         "the world's floor"
     } else {
         "the path nodes"

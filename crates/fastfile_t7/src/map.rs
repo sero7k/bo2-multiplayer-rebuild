@@ -229,6 +229,10 @@ pub struct T7Map {
     pub maxs: [f32; 3],
     /// What was read and what was missing, line by line.
     pub report: Vec<String>,
+    /// (bo2mp: surfaces drawn but left out of the collision built from the
+    /// drawn world, by index; empty: none. Set by the Modern Warfare III
+    /// lane for a big map's sea sheets and far backdrop.)
+    pub no_collision: Vec<bool>,
     images: HashMap<String, ImageRec>,
     zone_image: Vec<u8>,
     paks: Option<XpakSet>,

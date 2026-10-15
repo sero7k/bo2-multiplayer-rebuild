@@ -485,7 +485,7 @@ fn collision_of(map: &T7Map, hidden: &[bool], report: &mut Vec<String>) -> asset
     let Some(clip) = &map.clip else {
         // No clip map read: the drawn world and every placed model.
         for (i, s) in map.surfaces.iter().enumerate() {
-            if hidden.get(i).copied().unwrap_or(false) {
+            if hidden.get(i).copied().unwrap_or(false) || map.no_collision.get(i).copied().unwrap_or(false) {
                 continue;
             }
             for t in 0..s.tri_count as usize {
