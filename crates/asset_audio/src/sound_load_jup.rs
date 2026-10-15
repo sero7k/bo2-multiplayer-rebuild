@@ -32,10 +32,16 @@ use crate::{AssetNamespace, ZoneGame, ZoneOwner};
 pub const JUP_INSTALL_ENV: &str = "BO2_JUP_INSTALL";
 
 /// The zones Resurgence's sounds come from: the battle royale's own
-/// (gameplay, interface, music), its English voice lines, and Rebirth
-/// Island's English ones. (The map zone, `mp_jup_escape5`, holds the
+/// (gameplay, interface, music), its English voice lines, Rebirth Island's
+/// English ones, and the shared multiplayer one (the battle royale's
+/// pickups, cash, armor hit markers, purchase and victory/defeat stings). (The map zone, `mp_jup_escape5`, holds the
 /// island's emitters and ambience; 270 MB to inflate, read once with them.)
-pub const RESURGENCE_ZONES: &[&str] = &["ingame_br", "eng_ingame_br", "eng_mp_jup_escape5"];
+pub const RESURGENCE_ZONES: &[&str] = &[
+    "ingame_br",
+    "eng_ingame_br",
+    "eng_mp_jup_escape5",
+    "ingame_shared_mp",
+];
 
 /// Rebirth Island's map zone (its ambience emitters), read with Resurgence's sounds.
 pub const REBIRTH_MAP_ZONE: &str = "mp_jup_escape5";
