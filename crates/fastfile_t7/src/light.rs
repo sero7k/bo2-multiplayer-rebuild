@@ -36,6 +36,8 @@ pub struct LightRefs {
     pub sky_scale: f32,
     pub sky_material: String,
     pub probes: Option<ProbeRef>,
+    /// bo2mp: the probe volume (state 0): its buffer's entry and size.
+    pub volume: Option<VolumeRef>,
     /// The `GfxWorld` header's LUT material's picture, when it has one.
     pub lut_image: Option<String>,
     /// bo2mp: the fog volumes (`GfxWorld` 0x148: 624 bytes each).
@@ -118,6 +120,16 @@ pub struct SkyRef {
     pub format: u32,
 }
 
+/// bo2mp: the probe volume's three BC6H 3D textures (`gProbeX/Y/ZArray`)
+/// in one streamed buffer, one after another.
+#[derive(Clone, Debug)]
+pub struct VolumeRef {
+    pub key: u64,
+    pub width: usize,
+    pub height: usize,
+    pub depth: usize,
+}
+
 #[derive(Clone, Debug)]
 pub struct ProbeRef {
     pub key: u64,
@@ -181,6 +193,13 @@ impl LightRefs {
                 format: im.format,
                 configs,
             });
+        }
+        if let Some(Some(name)) = l.probe_volumes.first().map(|v| v[0].as_ref())
+            && let Some(im) = cap.image(bare(name)).or_else(|| cap.image(name))
+            && matches!(im.format, 95 | 96)
+            && let Some(key) = l.volume_buffers.first().copied().flatten().and_then(|b| u64_at(image, b + 8))
+        {
+            out.volume = Some(VolumeRef { key, width: usize::from(im.width), height: usize::from(im.height), depth: usize::from(im.depth) });
         }
         out.lut_image = g
             .header_materials
@@ -287,6 +306,11 @@ pub struct Probe {
     /// stand-in).
     pub box_centre: [f32; 3],
     pub box_half: [f32; 3],
+    /// bo2mp: where its light volume sits in the probe volume (uvw: size,
+    /// words 4..6, and place, 7..9; the depth's first half holds the
+    /// positive directions, the second the negative: `t7_pvol`).
+    pub vol_size: [f32; 3],
+    pub vol_at: [f32; 3],
     /// +X, -X, +Y, -Y, +Z, -Z (world axes) of the smallest level.
     pub faces: [[f32; 3]; 6],
 }
@@ -348,7 +372,101 @@ pub struct Bake {
     /// directions (the map-wide probe's upper four faces against the sky
     /// there): the probes are baked in exposure-relative units.
     pub probe_units: f32,
+    /// bo2mp: the probe volume, when read.
+    pub volume: Option<ProbeVolume>,
     pub report: Vec<String>,
+}
+
+/// bo2mp: the probe volume (`gProbeX/Y/ZArray`): per texel, per axis, the
+/// light the probe's smallest level gives a surface facing that way is
+/// scaled by (BO3's lit shader: the ambient is the three axes' texels
+/// weighted by the normal's squares times the probe cube's level 6 at the
+/// normal). An atlas: each probe's light volume is a region of it (its
+/// config words 4..9), its box mapped onto that region; the depth's first
+/// half holds the positive directions, the second the negative.
+pub struct ProbeVolume {
+    data: Vec<u8>,
+    w: usize,
+    h: usize,
+    d: usize,
+}
+
+impl ProbeVolume {
+    fn texel(&self, t: usize, x: usize, y: usize, z: usize) -> [f32; 3] {
+        let slice = (self.w / 4) * (self.h / 4) * 16;
+        let at = t * slice * self.d + z * slice + ((y / 4) * (self.w / 4) + x / 4) * 16;
+        let Some(blk) = self.data.get(at..at + 16) else { return [0.0; 3] };
+        let mut px = [0f32; 48];
+        bcdec_rs::bc6h_float(blk, &mut px, 12, false);
+        let o = (y % 4) * 12 + (x % 4) * 3;
+        [px[o], px[o + 1], px[o + 2]].map(|v| if v.is_finite() { v.max(0.0) } else { 0.0 })
+    }
+
+    /// Texture `t` at `uvw` (0..1), trilinear, clamped to `lo..hi` (uvw:
+    /// the probe's region, so a neighbour's texels never bleed in).
+    fn sample(&self, t: usize, uvw: [f32; 3], lo: [f32; 3], hi: [f32; 3]) -> [f32; 3] {
+        let dims = [self.w, self.h, self.d];
+        let mut i0 = [0usize; 3];
+        let mut f = [0f32; 3];
+        let mut i1 = [0usize; 3];
+        for k in 0..3 {
+            let n = dims[k] as f32;
+            let a = (lo[k] * n).floor().max(0.0);
+            let b = ((hi[k] * n).ceil() - 1.0).clamp(a, n - 1.0);
+            let x = (uvw[k] * n - 0.5).clamp(a, b);
+            i0[k] = x.floor() as usize;
+            i1[k] = (i0[k] + 1).min(b as usize);
+            f[k] = x - x.floor();
+        }
+        let mut c = [0f32; 3];
+        for corner in 0..8 {
+            let pick = |k: usize| if corner >> k & 1 == 1 { (i1[k], f[k]) } else { (i0[k], 1.0 - f[k]) };
+            let (x, wx) = pick(0);
+            let (y, wy) = pick(1);
+            let (z, wz) = pick(2);
+            let wgt = wx * wy * wz;
+            if wgt <= 0.0 {
+                continue;
+            }
+            let v = self.texel(t, x, y, z);
+            for j in 0..3 {
+                c[j] += wgt * v[j];
+            }
+        }
+        c
+    }
+
+    /// The light scale at `p` facing `n` from probe `pr`'s light volume
+    /// (None when the probe has no region).
+    pub fn term(&self, pr: &Probe, p: [f32; 3], n: [f32; 3]) -> Option<[f32; 3]> {
+        if pr.vol_size.iter().any(|s| *s <= 0.0) || pr.half.iter().any(|h| *h <= 0.0) {
+            return None;
+        }
+        let d = [p[0] - pr.origin[0], p[1] - pr.origin[1], p[2] - pr.origin[2]];
+        let mut uvw = [0f32; 3];
+        for k in 0..3 {
+            let l = pr.axes[k][0] * d[0] + pr.axes[k][1] * d[1] + pr.axes[k][2] * d[2];
+            let u = (l / (2.0 * pr.half[k]) + 0.5).clamp(0.0, 1.0);
+            uvw[k] = u * pr.vol_size[k] + pr.vol_at[k];
+        }
+        let hi = [0, 1, 2].map(|k| pr.vol_at[k] + pr.vol_size[k]);
+        let mut c = [0f32; 3];
+        for a in 0..3 {
+            let wgt = n[a] * n[a];
+            if wgt <= 1e-4 {
+                continue;
+            }
+            let dz = if n[a] > 0.0 { 0.0 } else { 0.5 };
+            let at = [uvw[0], uvw[1], uvw[2] + dz];
+            let lo = [pr.vol_at[0], pr.vol_at[1], pr.vol_at[2] + dz];
+            let top = [hi[0], hi[1], hi[2] + dz];
+            let v = self.sample(a, at, lo, top);
+            for j in 0..3 {
+                c[j] += wgt * v[j];
+            }
+        }
+        Some(c)
+    }
 }
 
 /// World direction to the probe cube's D3D axes (and back: its own inverse).
@@ -438,6 +556,8 @@ impl Bake {
                             scale: w(0),
                             box_centre: [w(29), w(30), w(31)],
                             box_half: [w(26), w(27), w(28)].map(|v| if v.is_finite() { v.abs() } else { 0.0 }),
+                            vol_size: [w(4), w(5), w(6)].map(|v| if v.is_finite() { v } else { 0.0 }),
+                            vol_at: [w(7), w(8), w(9)].map(|v| if v.is_finite() { v } else { 0.0 }),
                             faces: world,
                         });
                     }
@@ -513,7 +633,28 @@ impl Bake {
                 g.faces.iter().map(|f| 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2]).collect::<Vec<_>>()
             ));
         }
-        Ok(Bake { sky, probes, bounds: [lo, hi], probe_units, report })
+        // bo2mp: the probe volume.
+        let volume = match refs.volume.as_ref() {
+            Some(v) => {
+                let want = 3 * (v.width / 4) * (v.height / 4) * 16 * v.depth;
+                match paks.read(v.key) {
+                    Ok(d) if d.len() >= want => {
+                        report.push(format!("probe volume {}x{}x{} (3 axes)", v.width, v.height, v.depth));
+                        Some(ProbeVolume { data: d, w: v.width, h: v.height, d: v.depth })
+                    }
+                    Ok(d) => {
+                        report.push(format!("probe volume: {} bytes, {want} wanted", d.len()));
+                        None
+                    }
+                    Err(e) => {
+                        report.push(format!("probe volume: {e}"));
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
+        Ok(Bake { sky, probes, bounds: [lo, hi], probe_units, volume, report })
     }
 
     /// The ambient light at `p` for a surface facing `n` (unit): the probe
@@ -564,6 +705,18 @@ impl Bake {
             }
             None => global,
         }
+    }
+
+    /// bo2mp: the probe volume's scale at `p` facing `n`: the light volume
+    /// of the probe whose box holds `p` (the smallest), else the map-wide
+    /// probe's. None without the volume.
+    pub fn volume_term(&self, p: [f32; 3], n: [f32; 3]) -> Option<[f32; 3]> {
+        let v = self.volume.as_ref()?;
+        let i = match self.box_at(p) {
+            Some((o, i)) if o <= 0.0 => i,
+            _ => 0,
+        };
+        v.term(self.probes.get(i)?, p, n).or_else(|| v.term(self.probes.first()?, p, n))
     }
 
     /// `ambient_lit` averaged over the six axis directions.

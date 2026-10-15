@@ -205,21 +205,47 @@ impl Lit {
         fastfile_t7::bake::parallel_map(map.vertices.len(), |i| {
             let v = &map.vertices[i];
             let n = v.normal;
-            let a = self.bake.ambient_lit(v.xyz, n);
-            let o = self.occlusion(v.xyz, n, i as u32, 128.0);
+            let a = self.ambient_at(v.xyz, n, i as u32, 128.0);
             let alpha = colours.get(i).map_or(1.0, |c| c[3]);
-            [a[0] * o, a[1] * o, a[2] * o, if soft[i] > 0.0 { reveal_alpha(alpha, soft[i]) } else { alpha }]
+            [a[0], a[1], a[2], if soft[i] > 0.0 { reveal_alpha(alpha, soft[i]) } else { alpha }]
         })
+    }
+
+    /// The ambient light at `p` facing `n`: the probes' ambient cube times,
+    /// where the probe volume is read (`Bake::volume_term`), its scale and
+    /// a light contact occlusion (short rays: the volume holds the room's
+    /// shadowing at its texels, about 4 to 8 units), else the occlusion
+    /// alone. `BO2MP_T7_VOLUME=0` leaves the volume out.
+    fn ambient_at(&self, p: [f32; 3], n: [f32; 3], seed: u32, reach: f32) -> [f32; 3] {
+        static VOLUME: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let a = self.bake.ambient_lit(p, n);
+        let term = if *VOLUME.get_or_init(|| env_scale("BO2MP_T7_VOLUME", 1.0) > 0.0) { self.bake.volume_term(p, n) } else { None };
+        match term {
+            Some(t) => {
+                static SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+                let o = (0.7 + 0.3 * self.tracer.openness(p, n, reach * 0.5, 8, seed, 1.0)) * *SCALE.get_or_init(|| env_scale("BO2MP_T7_AMBIENT", 1.0));
+                [a[0] * t[0] * o, a[1] * t[1] * o, a[2] * t[2] * o]
+            }
+            None => {
+                let o = self.occlusion(p, n, seed, reach);
+                [a[0] * o, a[1] * o, a[2] * o]
+            }
+        }
     }
 
     /// A placed model's light (`packed_lighting`: sqrt(light / 32)): the
     /// mean ambient light at its origin, its occlusion seen from just
     /// above it.
     pub fn prop_light(&self, origin: [f32; 3], seed: u32) -> [u8; 4] {
-        let a = self.bake.ambient_mean(origin);
         let up = [origin[0], origin[1], origin[2] + 8.0];
-        let o = self.occlusion(up, [0.0, 0.0, 1.0], seed, 256.0);
-        let p = |v: f32| (((v * o).max(0.0) / 32.0).sqrt() * 255.0).round().clamp(1.0, 255.0) as u8;
+        let mut a = [0f32; 3];
+        for d in [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, -1.0f32]] {
+            let c = self.ambient_at(up, d, seed, 256.0);
+            for k in 0..3 {
+                a[k] += c[k] / 6.0;
+            }
+        }
+        let p = |v: f32| ((v.max(0.0) / 32.0).sqrt() * 255.0).round().clamp(1.0, 255.0) as u8;
         [p(a[0]), p(a[1]), p(a[2]), 0]
     }
 
