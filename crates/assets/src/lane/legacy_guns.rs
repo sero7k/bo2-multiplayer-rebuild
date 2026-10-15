@@ -981,40 +981,31 @@ pub(crate) fn legacy_static_models(
         decoded: 0,
         missing: Vec::new(),
     };
-    // The light grid: each stored point's mean colour (gamma), by point.
-    let grid = &world.light_grid;
-    let mut light: HashMap<[u32; 3], [f32; 3]> = HashMap::new();
-    for (p, entry) in grid.points() {
-        let Some(colours) = grid.colors.get(usize::from(entry.colors_index)) else { continue };
+    // bo2mp: the light grid as the moving things read it
+    // (`world_iw3::iw3_owned_light_grid`): the lookup's mean colour and the
+    // sun's visibility at the model's middle.
+    let grid = asset_world::world_iw3::iw3_owned_light_grid(&world.light_grid);
+    let sun_primary = grid.as_ref().map_or(0, |g| g.sun_primary_light_index.min(255) as u8);
+    // (A middle the lookup cannot answer, inside a wall or under the
+    // floor: a little higher, then the map's mean light without the sun.
+    // A placement without light is not drawn.)
+    let mean: Option<[f32; 3]> = (!world.light_grid.colors.is_empty()).then(|| {
         let mut sum = [0.0f32; 3];
-        for c in &colours.0 {
-            for k in 0..3 {
-                sum[k] += f32::from(c[k]) / 255.0;
-            }
-        }
-        light.insert(p, sum.map(|v| v / colours.0.len() as f32));
-    }
-    let light_at = |at: [f32; 3]| -> Option<[f32; 3]> {
-        let g: [i64; 3] = std::array::from_fn(|i| ((at[i] + 131_072.0) / iw3::zone::LightGrid::SPACING[i]).round() as i64);
-        // The nearest stored point within two steps.
-        let mut best: Option<(i64, [f32; 3])> = None;
-        for dz in -2i64..=2 {
-            for dy in -2i64..=2 {
-                for dx in -2i64..=2 {
-                    let p = [g[0] + dx, g[1] + dy, g[2] + dz];
-                    if p.iter().any(|&v| v < 0) {
-                        continue;
-                    }
-                    if let Some(c) = light.get(&[p[0] as u32, p[1] as u32, p[2] as u32]) {
-                        let d = dx * dx + dy * dy + dz * dz;
-                        if best.is_none_or(|(bd, _)| d < bd) {
-                            best = Some((d, *c));
-                        }
-                    }
+        for c in &world.light_grid.colors {
+            for d in &c.0 {
+                for k in 0..3 {
+                    sum[k] += f32::from(d[k]) / 255.0;
                 }
             }
         }
-        best.map(|(_, c)| c)
+        sum.map(|v| v / (world.light_grid.colors.len() * 56) as f32)
+    });
+    let light_at = |at: [f32; 3]| {
+        let g = grid.as_ref()?;
+        [0.0, 16.0, 48.0]
+            .iter()
+            .find_map(|dz| asset_world::world_iw3::iw3_grid_light(g, [at[0], at[1], at[2] + dz]))
+            .or_else(|| mean.map(|m| (m, 0.0)))
     };
     let mut meshes = Vec::new();
     let mut shared: HashMap<usize, Option<(usize, [f32; 3])>> = HashMap::new();
@@ -1045,16 +1036,20 @@ pub(crate) fn legacy_static_models(
         let at: [f32; 3] = std::array::from_fn(|k| {
             sm.origin[k] + (mid[0] * sm.axis[0][k] + mid[1] * sm.axis[1][k] + mid[2] * sm.axis[2][k]) * sm.scale
         });
-        // As the map's lightmaps light in gamma space: the grid's colour is
-        // the light the model takes (light = colour^2, packed sqrt(light/32)).
-        let packed_lighting = match light_at(at) {
-            Some(c) => {
+        // As CoD4's / World at War's lit model shaders (`lp_*`, read from
+        // common_mp): twice the grid's colour, in gamma space (light =
+        // (2 * colour)^2, packed sqrt(light / 32)), and the sun by its
+        // visibility there (`t6_primary`; the fallback pass adds it in
+        // gamma space on these maps).
+        let (packed_lighting, t6_primary) = match light_at(at) {
+            Some((c, sun)) => {
                 lit += 1;
-                Some([c[0], c[1], c[2]].map(|v| (v / 32f32.sqrt() * 255.0).round().clamp(0.0, 255.0) as u8).into_iter().chain([0]).collect::<Vec<u8>>().try_into().unwrap_or([0; 4]))
+                let pack = |v: f32| (2.0 * v / 32f32.sqrt() * 255.0).round().clamp(0.0, 254.0) as u8;
+                (Some([pack(c[0]), pack(c[1]), pack(c[2]), 0]), [sun_primary, (sun * 255.0).round() as u8])
             }
             None => {
                 dark += 1;
-                None
+                (None, [0, 0])
             }
         };
         let basis = Mat3::from_cols(Vec3::from_array(sm.axis[0]), Vec3::from_array(sm.axis[1]), Vec3::from_array(sm.axis[2]));
@@ -1073,11 +1068,11 @@ pub(crate) fn legacy_static_models(
             primary_light_index: 0,
             flags: sm.flags,
             packed_lighting,
-            t6_primary: [0, 0],
+            t6_primary,
         });
     }
     let report = format!(
-        "{tag} props: {} placed of {}, {} models; {lit} lit by the light grid, {dark} with no grid point near; {} pictures decoded, {} not found{}; unreadable {:?}",
+        "{tag} props: {} placed of {}, {} models; {lit} lit by the light grid, {dark} outside it; {} pictures decoded, {} not found{}; unreadable {:?}",
         placements.iter().filter(|p| p.is_some()).count(),
         world.static_models.len(),
         meshes.len(),

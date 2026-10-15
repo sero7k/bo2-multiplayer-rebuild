@@ -1763,13 +1763,29 @@ pub(super) fn foreign_t6_lighting(loaded: &mut LoadedWorld, map: &str) {
         .filter(|&i| i != 0)
         .or(sun.map(|i| i as u8))
         .unwrap_or(0);
+    // bo2mp: a CoD4 / World at War map (drawn by the fallback pass's IW3
+    // branch) lights its models as those games do (`lp_sun_*`: twice the
+    // grid's colour plus the sun by N.L times its visibility, in gamma
+    // space; the pass's `add_light`): the grid's sun row in the light table
+    // is the sun, and the models' sun term is on.
+    let legacy = loaded.world.draw.as_ref().is_some_and(|d| d.iw3_lightmaps);
+    if legacy
+        && sun_primary != 0
+        && usize::from(sun_primary) < SUN_FOG_SLOT
+        && let Some(draw) = loaded.world.draw.as_mut()
+    {
+        if draw.t6_lights.len() < 32 {
+            draw.t6_lights.resize(32, [0.0; 16]);
+        }
+        draw.t6_lights[usize::from(sun_primary)][3] = 1.0;
+    }
     let scale = match grid.as_ref().map(|g| g.color_encoding) {
         Some(asset_model::LightGridColorEncoding::T5Y12U6W6) => 255.0 / 8.0,
         _ => 4.0,
     };
     // bo2mp: the primary light's term on models is off on another game's
     // map (`BO2MP_FOREIGN_SUN=1` brings it back): see `sample_foreign`.
-    let foreign_sun = std::env::var("BO2MP_FOREIGN_SUN").is_ok_and(|v| v.trim() == "1");
+    let foreign_sun = legacy || std::env::var("BO2MP_FOREIGN_SUN").is_ok_and(|v| v.trim() == "1");
     asset_world::set_foreign_sun(foreign_sun);
     let foreign = asset_world::ForeignGridLight {
         scale,

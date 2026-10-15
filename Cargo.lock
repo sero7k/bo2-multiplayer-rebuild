@@ -437,6 +437,7 @@ dependencies = [
  "bcdec_rs",
  "bevy",
  "clipmap_iw4",
+ "d3d9_sm3",
  "dpvs_iw4",
  "fastfile_iw4",
  "fastfile_iw5",

@@ -3382,8 +3382,11 @@ fn draw_geometry_diagnostic(
                             .copied()
                             .unwrap_or(0),
                     );
+                    // (bo2mp: a CoD4 / World at War map's own probes have
+                    // no lighting table rows: every one of its cubes.)
+                    let probe_cap = if geometry.t6_probes.is_empty() { 1023 } else { T6_MAX_PROBES as u32 - 1 };
                     let instance = if tess == DiagnosticTess::WorldTextured(style) && style & STYLE_SHINE != 0 {
-                        (light & 63) | (shine[2].min(T6_MAX_PROBES as u32 - 1) << 6)
+                        (light & 63) | (shine[2].min(probe_cap) << 6)
                     } else {
                         light
                     };
