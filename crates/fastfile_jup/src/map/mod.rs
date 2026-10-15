@@ -15,6 +15,7 @@ pub mod ents;
 pub mod index;
 pub mod materials;
 pub mod models;
+pub mod terrain;
 pub mod tiles;
 pub mod world;
 
@@ -70,6 +71,12 @@ pub struct JupMap {
     /// The install's packages (opened for the models' meshes; the pictures
     /// come from them too).
     pub packages: Option<materials::Packages>,
+    /// The sky's pictures ([`materials::sky_images`]).
+    pub sky_images: Vec<materials::MapImage>,
+    /// The terrain's coarse heights and its virtual texture
+    /// ([`terrain`]), where the map has a terrain.
+    pub terrain: Option<terrain::Terrain>,
+    pub virtual_texture: Option<terrain::VirtualTexture>,
     /// What was read and what was missing, line by line.
     pub report: Vec<String>,
 }
@@ -156,6 +163,32 @@ impl JupMap {
         ));
         drop(placed);
         out.packages = Some(paks);
+        let images = zone.types.iter().filter(|&&t| t == 21).count();
+        let run = crate::image::ImageRun::find(z, images).unwrap_or_default();
+        out.sky_images = materials::sky_images(&zone, &run);
+        out.report
+            .push(format!("sky: {} pictures", out.sky_images.len()));
+        // The terrain: its coarse heights and its texture's colour tiles.
+        out.terrain = terrain::height_grid(z, name_hash(&src.name));
+        if let Some(t) = &out.terrain {
+            out.virtual_texture = terrain::virtual_texture(&zone, &run, t.half);
+        }
+        drop(run);
+        out.report.push(match (&out.terrain, &out.virtual_texture) {
+            (Some(t), vt) => format!(
+                "terrain: {0}x{0} heights, {1} units apart, from {2:.0}; {3}",
+                t.size,
+                t.cell,
+                t.origin[0],
+                vt.as_ref().map_or("no texture".to_owned(), |v| format!(
+                    "texture of {} levels, {} of {} tiles with colour",
+                    v.levels,
+                    v.tiles.iter().flatten().count(),
+                    v.tiles.len()
+                ))
+            ),
+            (None, _) => "terrain: none".to_owned(),
+        });
         // The zone's own entities (else the install's text copy, below).
         match ents::from_zone(z, name_hash(&src.name)) {
             Ok(list) => {

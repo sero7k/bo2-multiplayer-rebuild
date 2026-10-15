@@ -401,7 +401,7 @@ pub fn read(zone: &ZoneImage, zones: &[u32], extra: &[usize], report: &mut Vec<S
     out
 }
 
-fn map_image(z: &[u8], at: usize) -> MapImage {
+pub(crate) fn map_image(z: &[u8], at: usize) -> MapImage {
     match image::parse(z, at) {
         Ok(Some(ImageRec {
             hash,
@@ -421,6 +421,20 @@ fn map_image(z: &[u8], at: usize) -> MapImage {
         },
         _ => MapImage::default(),
     }
+}
+
+/// The sky's pictures: the zone's half-float (format 0x2d, BC6H) pictures
+/// of the sky's use (0x3a) twice as wide as high, each two hemispheres
+/// side by side (see `assets::lane::jup_sky`). Rebirth Island has three
+/// (a clear sky with the sun, a sky beside the ground, an overcast one).
+pub fn sky_images(zone: &ZoneImage, run: &image::ImageRun) -> Vec<MapImage> {
+    let z = &zone.bytes;
+    run.at
+        .iter()
+        .filter_map(|&at| image::parse(z, at).ok().flatten().map(|r| (at, r)))
+        .filter(|(_, r)| r.format == 0x2d && r.usage == 0x3a && r.width == 2 * r.height && r.height >= 256)
+        .map(|(at, _)| map_image(z, at))
+        .collect()
 }
 
 /// The install's streamed packages, to fetch pictures' pixels from.
