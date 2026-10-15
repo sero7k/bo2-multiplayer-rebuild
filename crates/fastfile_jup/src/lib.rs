@@ -15,6 +15,7 @@
 #![deny(unsafe_code)]
 
 pub mod container;
+pub mod map;
 pub mod oodle;
 #[cfg(windows)]
 pub mod oodle_dll;
