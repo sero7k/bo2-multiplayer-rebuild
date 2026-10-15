@@ -150,6 +150,17 @@ pub struct SpawnPoint {
     pub angles: [f32; 3],
 }
 
+/// A scriptable instance: its definition's and model's names, where it
+/// stands and its script name.
+#[derive(Clone, Debug, Default)]
+pub struct ScriptableInstance {
+    pub def: String,
+    pub model: String,
+    pub origin: [f32; 3],
+    pub angles: [f32; 3],
+    pub targetname: String,
+}
+
 /// A brush sub-model (`*<n>`: a door, a debris pile): its world surfaces
 /// (`GfxBrushModel`) and its bounds.
 #[derive(Clone, Copy, Debug, Default)]
@@ -274,6 +285,10 @@ pub struct Iw7Map {
     /// and the probes' origins.
     pub probe_image: Option<String>,
     pub probe_origins: Vec<[f32; 3]>,
+    /// The map's scriptable instances (`MapEnts::scriptableMapEnts`):
+    /// destructible and scripted props (Zombies maps' buyable blockers
+    /// among them), not among the placed models.
+    pub scriptables: Vec<ScriptableInstance>,
     /// The server triggers' hulls by `?<n>` (a volume's or trigger's
     /// `model`): each hull's midpoint and half size, about the entity's
     /// origin.
@@ -802,6 +817,22 @@ impl Iw7Map {
                 }
             }
             out.entities = entity_text(&m.entity_string, &out.spawns);
+        }
+        // Scriptable instances.
+        if let Some(m) = map.cap.map_ents.first()
+            && let Some(span) = m.scriptables
+        {
+            use L::ScriptableInstance as I;
+            for (i, r) in span.get(image).chunks_exact(I::SIZE).enumerate() {
+                let name = |id: Option<&Option<AssetId>>| id.copied().flatten().map(|id| bare(map.cap.name_of(id)).to_owned()).unwrap_or_default();
+                out.scriptables.push(ScriptableInstance {
+                    def: name(m.scriptable_defs.get(i)),
+                    model: name(m.scriptable_models.get(i)),
+                    origin: v3(r, I::contextHeader__context__initialOrigin),
+                    angles: v3(r, I::contextHeader__context__initialAngles),
+                    targetname: sstr(u32_at(r, I::targetname)),
+                });
+            }
         }
         // Trigger volumes, brush models and path nodes (the Zombies layout
         // needs them).

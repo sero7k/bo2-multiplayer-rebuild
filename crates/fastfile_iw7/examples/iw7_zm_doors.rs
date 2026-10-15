@@ -41,6 +41,10 @@ fn main() {
             }
         }
     }
+    println!("{} scriptables:", map.scriptables.len());
+    for sc in &map.scriptables {
+        println!("  scriptable {} model {} at {:?} angles {:?} targetname {}", sc.def, sc.model, sc.origin, sc.angles, sc.targetname);
+    }
     let mut classes = std::collections::BTreeMap::new();
     for e in &ents {
         *classes.entry(e.get("classname").cloned().unwrap_or_default()).or_insert(0usize) += 1;

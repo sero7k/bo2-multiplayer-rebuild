@@ -83,7 +83,7 @@ fn iw3_unit_vec(v: [f32; 3]) -> u32 {
 }
 
 /// Black Ops II's packed unit vector: signed 10:10:10 over 511.
-fn t6_unit_vec(v: [f32; 3]) -> u32 {
+pub(super) fn t6_unit_vec(v: [f32; 3]) -> u32 {
     let mut out = 0u32;
     for (k, c) in v.iter().enumerate() {
         let s = (c.clamp(-1.0, 1.0) * 511.0).round() as i32;
@@ -98,7 +98,7 @@ fn t6_unit_vec(v: [f32; 3]) -> u32 {
 /// Ghosts, a placed model's vertex colour is no tint (foliage keeps its wind
 /// weights there, other props near black: mp_proto's speakers and crates
 /// drew black), so white.
-fn iw7_vertex_to_t6(v: &[u8; 32]) -> [u8; 32] {
+pub(super) fn iw7_vertex_to_t6(v: &[u8; 32]) -> [u8; 32] {
     let mut out = *v;
     out[12..16].copy_from_slice(&1.0f32.to_le_bytes());
     out[16..20].fill(0xff);
@@ -1000,9 +1000,9 @@ pub(crate) fn load_iw7_world(path: &Path, progress: &LoadProgress, material_seed
 /// of its bounds for the entity that names it, and each trigger model
 /// (`?1`...: a Zombies area, a buy trigger) its hulls. Also the triangles,
 /// for the Zombies maps' walk graph.
-fn collision_of(map: &Iw7Map, hidden: &[bool]) -> (asset_world::ClipCollision, Vec<asset_world::world_iw7::SoupTri>, usize) {
+fn collision_of(map: &Iw7Map, hidden: &[bool], entity_props: &std::collections::HashSet<usize>) -> (asset_world::ClipCollision, Vec<asset_world::world_iw7::SoupTri>, usize) {
     use asset_world::world_iw7::build_soup_clip_collision;
-    let (tris, cleared) = collision_tris(map, hidden);
+    let (tris, cleared) = collision_tris(map, hidden, entity_props);
     let cmodels: Vec<asset_world::world_iw7::SoupCmodel> = map
         .brush_models
         .iter()
@@ -1061,7 +1061,10 @@ fn tri_overlaps_box(t: &[[f32; 3]; 3], mid: [f32; 3], half: [f32; 3]) -> bool {
     }))
 }
 
-fn collision_tris(map: &Iw7Map, hidden: &[bool]) -> (Vec<asset_world::world_iw7::SoupTri>, usize) {
+/// (`entity_props`: placed models drawn as entities instead, a Zombies
+/// blocker's doors and piles: they block as its clip brush does, and go
+/// with it.)
+fn collision_tris(map: &Iw7Map, hidden: &[bool], entity_props: &std::collections::HashSet<usize>) -> (Vec<asset_world::world_iw7::SoupTri>, usize) {
     use asset_world::world_iw7::{IW7_SOLID, SoupTri};
     // A spawn point's player box (lifted off its floor): a placed model's
     // triangle in it is left out of the collision, or the player spawned
@@ -1104,9 +1107,9 @@ fn collision_tris(map: &Iw7Map, hidden: &[bool]) -> (Vec<asset_world::world_iw7:
             tris.push(SoupTri { p: [v(0), v(1), v(2)], surface_flags: 0, contents: IW7_SOLID });
         }
     }
-    for sm in &map.static_models {
+    for (i, sm) in map.static_models.iter().enumerate() {
         let m = &map.models[sm.model];
-        if m.radius * sm.scale < COLLIDE_MIN_RADIUS {
+        if m.radius * sm.scale < COLLIDE_MIN_RADIUS || entity_props.contains(&i) {
             continue;
         }
         let surfaces = if m.coarse.is_empty() { &m.surfaces } else { &m.coarse };
@@ -1168,7 +1171,13 @@ fn build_iw7_world(
 
     // Collision.
     let stage = progress.begin_scoped(StageId::MapAssets, "infinite warfare collision", None);
-    let (collision, soup, cleared) = collision_of(map, &hidden);
+    // bo2mp: a Zombies map's layout (`super::iw7_zombies`); its blockers'
+    // placed models are drawn as entities the Zombies scripts take away
+    // with the blocker's clip (not as placed models, nor collided with).
+    let zm_layout = super::iw7_zombies::is_iw7_zombies_map(&map_name).then(|| fastfile_iw7::zombies::ZmLayout::read(map));
+    let entity_props: std::collections::HashSet<usize> =
+        zm_layout.iter().flat_map(|l| l.blockers.iter().flat_map(|b| b.props.iter().map(|p| p.index))).collect();
+    let (collision, soup, cleared) = collision_of(map, &hidden, &entity_props);
     let census = asset_world::world_iw3::spawn_ground_census(&collision, &map.spawns.iter().map(|s| s.origin).collect::<Vec<_>>());
     report.push(format!(
         "iw7 clip: {} triangles ({} vertices, {} partitions) from the drawn world and placed models ({cleared} props' triangles in spawn points' player boxes left out); {census}",
@@ -1184,7 +1193,7 @@ fn build_iw7_world(
     // Zombies (`super::iw7_zombies`, attached under its rules).
     if super::iw7_zombies::is_iw7_zombies_map(&map_name) {
         let stage = progress.begin_scoped(StageId::MapAssets, "infinite warfare zombies layout", None);
-        report.extend(super::iw7_zombies::prepare(&map_name, map, &soup));
+        report.extend(super::iw7_zombies::prepare_layout(&map_name, zm_layout.clone().unwrap_or_else(|| fastfile_iw7::zombies::ZmLayout::read(map)), &soup));
         stage.done();
     }
     drop(soup);
@@ -1358,6 +1367,11 @@ fn build_iw7_world(
         let mut placements = Vec::with_capacity(map.static_models.len());
         let mut lit = 0usize;
         for (i, sm) in map.static_models.iter().enumerate() {
+            // bo2mp: a Zombies blocker's model: drawn as its entity.
+            if entity_props.contains(&i) {
+                placements.push(None);
+                continue;
+            }
             let entry = *built.entry(sm.model).or_insert_with(|| {
                 let m = &map.models[sm.model];
                 let key = |i: usize| asset_t6::AssetKey { ty: fastfile_t6::AssetType::Material, index: i };
@@ -1471,6 +1485,21 @@ fn build_iw7_world(
     ));
     report.push(format!("iw7 shine: {} materials with normal or specular maps{}", b.with_shine, if b.shine_on { "" } else { " (off: BO2MP_IW7_SHINE=0)" }));
     report.push(format!("iw7 glow: {} model materials glow by their emissive maps (x{:.2} to the draw's light)", b.with_glow, b.glow_scale));
+    // bo2mp: a Zombies map's blockers' models as entity models
+    // (`super::iw7_zombies::blocker_model_refs`).
+    let mut blocker_models = asset_model::FpvMeshBuild::default();
+    blocker_models.set_capture_ns(AssetNamespace::T6);
+    if let Some(layout) = &zm_layout {
+        let mut unreadable = 0usize;
+        for (xref, keys) in super::iw7_zombies::blocker_model_refs(map, layout) {
+            let linked: HashMap<usize, usize> = keys.into_iter().filter_map(|k| Some((k, b.material(k, true)?))).collect();
+            match asset_model::capture_model_skel_t6(&xref, |k| linked.get(&k.index).copied()) {
+                Some(skel) => blocker_models.insert_in(AssetNamespace::T6, skel, Some(&b.catalog)),
+                None => unreadable += 1,
+            }
+        }
+        report.push(format!("iw7 zombies: {} blocker models drawn as entities ({unreadable} unreadable)", blocker_models.len()));
+    }
     let mut materials = std::mem::take(&mut b.catalog);
     let owner = b.owner;
     drop(b);
@@ -1547,6 +1576,7 @@ fn build_iw7_world(
                 spawns,
                 facts,
                 report,
+                fpv_meshes: blocker_models,
                 ..Default::default()
             }
         }

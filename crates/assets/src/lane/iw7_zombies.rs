@@ -91,8 +91,110 @@ pub(crate) fn is_iw7_zombies_map(map: &str) -> bool {
 
 /// The lane read a Zombies map: its layout and walk graph, kept for
 /// [`attach_t6_zm_rules`]. Report lines.
-pub(super) fn prepare(map_name: &str, map: &Iw7Map, tris: &[SoupTri]) -> Vec<String> {
-    prepare_layout(map_name, ZmLayout::read(map), tris)
+/// The entity model name of a blocker's placed model (its index among the
+/// map's placed models).
+pub(super) fn blocker_prop_model(index: usize) -> String {
+    format!("iw7_blocker_{index}")
+}
+
+/// IW7's packed unit vector (unsigned 10:10:10 over 1023).
+fn iw7_unit_vec(v: [f32; 3]) -> u32 {
+    let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-9);
+    let mut out = 0u32;
+    for (k, c) in v.iter().enumerate() {
+        let q = (((c / l).clamp(-1.0, 1.0) + 1.0) * 0.5 * 1023.0).round() as u32;
+        out |= (q & 0x3ff) << (10 * k);
+    }
+    out
+}
+
+/// Each blocker's placed models (`fastfile_iw7::zombies::Blocker::props`)
+/// as one-bone Black Ops II models named `blocker_prop_model`, their
+/// vertices turned and scaled as they stand (the entity stands at the
+/// model's origin, unturned), with the map materials they name: drawn by
+/// their `script_model` entities (`translate`), which Black Ops II's
+/// `zombie_debris` script deletes when the blocker is bought.
+pub(super) fn blocker_model_refs(map: &Iw7Map, layout: &ZmLayout) -> Vec<(asset_t6::XModelRef, Vec<usize>)> {
+    let mut out = Vec::new();
+    for p in layout.blockers.iter().flat_map(|b| b.props.iter()) {
+        let Some(sm) = map.static_models.get(p.index) else { continue };
+        let Some(model) = map.models.get(sm.model) else { continue };
+        let turn = |v: [f32; 3]| -> [f32; 3] { std::array::from_fn(|k| v[0] * p.axis[0][k] + v[1] * p.axis[1][k] + v[2] * p.axis[2][k]) };
+        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+        let mut keys = Vec::new();
+        let lod0: Vec<asset_t6::XSurfaceRef> = model
+            .surfaces
+            .iter()
+            .filter(|s| !s.verts.is_empty() && s.verts.len() <= usize::from(u16::MAX))
+            .map(|s| {
+                let verts: Vec<u8> = s
+                    .verts
+                    .iter()
+                    .flat_map(|v| {
+                        let mut v = *v;
+                        let f = |o: usize| f32::from_le_bytes([v[o], v[o + 1], v[o + 2], v[o + 3]]);
+                        let xyz = turn([f(0), f(4), f(8)]);
+                        for k in 0..3 {
+                            lo[k] = lo[k].min(xyz[k]);
+                            hi[k] = hi[k].max(xyz[k]);
+                            v[4 * k..4 * k + 4].copy_from_slice(&xyz[k].to_le_bytes());
+                        }
+                        for at in [24usize, 28] {
+                            let packed = u32::from_le_bytes([v[at], v[at + 1], v[at + 2], v[at + 3]]);
+                            v[at..at + 4].copy_from_slice(&iw7_unit_vec(turn(fastfile_iw7::map::unpack_unit(packed))).to_le_bytes());
+                        }
+                        super::iw7::iw7_vertex_to_t6(&v)
+                    })
+                    .collect();
+                keys.extend(s.material);
+                asset_t6::XSurfaceRef {
+                    verts,
+                    vert_count: s.verts.len() as u16,
+                    indices: s.tris.iter().flatten().copied().collect(),
+                    vert_lists: vec![(0, s.verts.len() as u16, 0, s.tris.len() as u16)],
+                    flags: 0,
+                    material: s.material.map(|index| asset_t6::AssetKey { ty: fastfile_t6::AssetType::Material, index }),
+                    blend_counts: [0; 4],
+                    blend: Vec::new(),
+                    part_bits: [0; 6],
+                }
+            })
+            .collect();
+        if lod0.is_empty() || lo[0] > hi[0] {
+            continue;
+        }
+        let radius = (0..3).map(|k| lo[k].abs().max(hi[k].abs()).powi(2)).sum::<f32>().sqrt();
+        out.push((
+            asset_t6::XModelRef {
+                lighting_origin_offset: [0.0; 3],
+                lighting_origin_range: 0.0,
+                name: blocker_prop_model(p.index),
+                numsurfs: lod0.len().min(255) as u8,
+                materials: lod0.iter().map(|s| s.material).collect(),
+                num_bones: 1,
+                num_lods: 1,
+                mins: lo,
+                maxs: hi,
+                radius,
+                lod0,
+                bone_names: vec!["tag_origin".to_owned()],
+                num_root_bones: 1,
+                parent_list: Vec::new(),
+                quats: Vec::new(),
+                trans: Vec::new(),
+                base_mat: vec![([0.0, 0.0, 0.0, 1.0], [0.0; 3])],
+                part_classification: vec![0],
+                bone_info: vec![None],
+                lods: vec![(0.0, 0, 0)],
+                contents: 0,
+                coll_lod: -1,
+                coll_surfs: Vec::new(),
+                phys_preset: None,
+            },
+            keys,
+        ));
+    }
+    out
 }
 
 /// [`prepare`] for a layout another lane read (its own map's entities in
@@ -694,6 +796,14 @@ pub(crate) fn translate(p: &Pending, kit: &DonorKit) -> Translation {
                 ents.push(t);
             }
         }
+        // What is seen of it: its placed models as script models of the
+        // group, which the script deletes with the clip
+        // (`blocker_model_refs`).
+        for prop in &b.props {
+            let mut m = Block::new("script_model");
+            m.set("targetname", flag).set("model", blocker_prop_model(prop.index)).set("origin", vec3(prop.origin)).set("angles", "0 0 0");
+            ents.push(m);
+        }
         for (model, origin) in &b.brushes {
             let mut c = Block::new("script_brushmodel");
             c.set("targetname", flag).set("script_noteworthy", "clip").set("spawnflags", "1").set("model", format!("*{model}"));
@@ -702,9 +812,10 @@ pub(crate) fn translate(p: &Pending, kit: &DonorKit) -> Translation {
         }
     }
     report.push(format!(
-        "iw7 zombies: {} debris piles and doors ({} team doors sold at 1000)",
+        "iw7 zombies: {} debris piles and doors ({} team doors sold at 1000; {} placed models of theirs as script models)",
         l.blockers.len(),
-        l.blockers.iter().filter(|b| b.kind == BlockerKind::TeamDoor).count()
+        l.blockers.iter().filter(|b| b.kind == BlockerKind::TeamDoor).count(),
+        l.blockers.iter().map(|b| b.props.len()).sum::<usize>()
     ));
 
     // Perk machines and Pack-a-Punch.
