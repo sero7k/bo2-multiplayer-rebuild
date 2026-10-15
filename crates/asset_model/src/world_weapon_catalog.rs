@@ -312,6 +312,7 @@ impl WorldWeaponCatalog {
                 AssetNamespace::Iw3 => 64,
                 AssetNamespace::S1 => 128,
                 AssetNamespace::T7 => 256,
+                AssetNamespace::Jup => 512,
             };
         }
         seen.values().filter(|bits| bits.count_ones() >= 2).count()

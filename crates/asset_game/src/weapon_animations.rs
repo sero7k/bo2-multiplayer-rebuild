@@ -36,7 +36,8 @@ impl AdsOverlayConvention {
             | crate::AssetNamespace::Iw6
             | crate::AssetNamespace::T4
             | crate::AssetNamespace::Iw3
-            | crate::AssetNamespace::S1 => Self::WeightIsFrac,
+            | crate::AssetNamespace::S1
+            | crate::AssetNamespace::Jup => Self::WeightIsFrac,
         }
     }
 }

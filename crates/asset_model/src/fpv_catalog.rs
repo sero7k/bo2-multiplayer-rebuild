@@ -42,7 +42,7 @@ const fn game_default_hands_name(ns: AssetNamespace) -> &'static str {
     match ns {
         AssetNamespace::Iw4 | AssetNamespace::Iw5 => VIEWHANDS_NAME,
         AssetNamespace::T5 => VIEWHANDS_NAME_T5,
-        AssetNamespace::T6 | AssetNamespace::Iw6 | AssetNamespace::T4 | AssetNamespace::Iw3 | AssetNamespace::S1 | AssetNamespace::T7 => VIEWHANDS_NAME_T6,
+        AssetNamespace::T6 | AssetNamespace::Iw6 | AssetNamespace::T4 | AssetNamespace::Iw3 | AssetNamespace::S1 | AssetNamespace::T7 | AssetNamespace::Jup => VIEWHANDS_NAME_T6,
     }
 }
 
@@ -539,6 +539,7 @@ impl FpvMeshCatalog {
                 AssetNamespace::Iw3 => 64,
                 AssetNamespace::S1 => 128,
                 AssetNamespace::T7 => 256,
+                AssetNamespace::Jup => 512,
             };
         }
         seen.values().filter(|bits| bits.count_ones() >= 2).count()
