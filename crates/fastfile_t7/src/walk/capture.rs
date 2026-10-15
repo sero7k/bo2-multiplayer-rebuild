@@ -175,6 +175,9 @@ pub struct MaterialRec {
     /// drawn with (measured on core_common's gun materials: a bullet's
     /// brass, a tritium dot's red; 1, 1, 1 where a map carries the colour).
     pub colour_consts: Option<[f32; 8]>,
+    /// bo2mp: the material's constant table (`MaterialConstantDef`, 32
+    /// bytes each), as stored.
+    pub constants: Vec<[u8; 32]>,
 }
 
 /// A `GfxImage` loaded in the zone.

@@ -163,7 +163,16 @@ pub fn material(s: &mut Stream, h: usize) -> Result<Option<String>> {
     // The sampler table is 16-aligned.
     s.records(h + 0x288, samplers, SAMPLER_DEF, 15)?;
     let constants = s.u8_at(h + 0x272)? as usize;
-    s.records(h + 0x290, constants, CONSTANT_DEF, 15)?;
+    if let Some(c) = s.records(h + 0x290, constants, CONSTANT_DEF, 15)? {
+        for i in 0..constants {
+            let d = c + CONSTANT_DEF * i;
+            let mut raw = [0u8; CONSTANT_DEF];
+            for (k, b) in raw.iter_mut().enumerate() {
+                *b = s.u8_at(d + k)?;
+            }
+            rec.constants.push(raw);
+        }
+    }
     s.asset(AssetType::Material, h + 0x298)?;
     s.capture.add_material(rec);
     Ok(name)
