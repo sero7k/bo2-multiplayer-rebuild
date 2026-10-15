@@ -413,7 +413,11 @@ fn load_jup(install: &Path, zones: &[&str], keep: Option<Keep>) -> Result<SoundC
         });
     }
     catalog.finalize();
-    if let Ok(mut s) = available().lock() {
+    // (What Resurgence's script may play: the guns' sounds are not asked
+    // for, and `jup_has` reads Resurgence's zones while this is empty.)
+    if keep.is_none()
+        && let Ok(mut s) = available().lock()
+    {
         s.extend(have);
     }
     diag::info!(
