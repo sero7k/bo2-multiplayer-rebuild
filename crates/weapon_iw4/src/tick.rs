@@ -804,6 +804,10 @@ pub struct WeaponCmd {
     pub alternate_switch: bool,
 
     pub switch_quick_raise_time_ms: i32,
+    /// bo2mp: the gun being switched to has an empty clip and its own
+    /// `iEmptyRaiseTime` (`switch_raise_time_ms` is then that time): Black
+    /// Ops II raises it with the empty raise, ahead of a quick raise.
+    pub switch_raise_empty: bool,
 
     pub offhand: crate::offhand::OffhandCmd,
 
@@ -843,6 +847,7 @@ impl Default for WeaponCmd {
             switch_alternate_raise_time_ms: 0,
             alternate_switch: false,
             switch_quick_raise_time_ms: 0,
+            switch_raise_empty: false,
             offhand: crate::offhand::OffhandCmd::default(),
             perks0: 0,
             perk_weap_reload_multiplier: PERK_WEAP_RELOAD_MULTIPLIER_DEFAULT,
@@ -1066,6 +1071,9 @@ pub fn weapon_ordinary(
     };
     let attack = cmd.buttons & fire_mask != 0;
     let was_attack = cmd.old_buttons & fire_mask != 0;
+    // bo2mp: Black Ops II's weapon rules (its own PM_Weapon order and
+    // timer-expiry rule; see `bo2_timer_expired`).
+    let bo2 = crate::offhand::bo2_switch_rules();
     let time_before = hand.weapon_time;
     let delay_before = hand.weapon_delay;
     let decay_ms = weapon_time_adjust(hand, facts, cmd);
@@ -1074,7 +1082,11 @@ pub fn weapon_ordinary(
     }
 
     if time_before != 0 && hand.weapon_time < 1 {
-        weapon_decay_hold_interrupt(hand, fire_ty, cmd, attack, facts.unlimited_ammo);
+        if bo2 {
+            bo2_timer_expired(hand, fire_ty, cmd, attack, facts.unlimited_ammo);
+        } else {
+            weapon_decay_hold_interrupt(hand, fire_ty, cmd, attack, facts.unlimited_ammo);
+        }
     }
     if hand.weapon_delay > 0 {
         hand.weapon_delay = (hand.weapon_delay - decay_ms).max(0);
@@ -1085,7 +1097,15 @@ pub fn weapon_ordinary(
         hand.weapon_restrict_kick_time = (hand.weapon_restrict_kick_time - cmd.msec).max(0);
     }
 
-    crate::sprint::weapon_check_for_sprint(hand, facts, cmd.pm_flags, cmd.perks0);
+    // bo2mp: while a burst is still going out Black Ops II skips its whole
+    // check block (sprint, offhand, weapon change, reload ...): the burst
+    // finishes first. This is why a burst-mode gun's swap is never clean.
+    let burst_busy = bo2
+        && burst_pending(hand, fire_ty)
+        && (hand.clip > 0 || hand.stock > 0 || facts.unlimited_ammo);
+    if !burst_busy {
+        crate::sprint::weapon_check_for_sprint(hand, facts, cmd.pm_flags, cmd.perks0);
+    }
     crate::sprint::weapon_advance_sprint(hand, &mut cmd.weap_flags, &mut cmd.pm_flags, cmd.pm_type);
     crate::sprint::weapon_dive_anim(hand, cmd.pm_flags);
     crate::crawl::weapon_crawl_anim(hand, cmd.pm_flags, cmd.pm_type, cmd.buttons, cmd.move_input);
@@ -1100,10 +1120,16 @@ pub fn weapon_ordinary(
         return Some(melee);
     }
 
-    if let Some(prepare) = crate::offhand::weapon_check_for_offhand(hand, cmd) {
+    if !burst_busy
+        && let Some(prepare) = crate::offhand::weapon_check_for_offhand(hand, cmd)
+    {
         return Some(prepare);
     }
-    let mut event = crate::weapon_change::weapon_check_for_change(hand, facts, cmd);
+    let mut event = if burst_busy {
+        None
+    } else {
+        crate::weapon_change::weapon_check_for_change(hand, facts, cmd)
+    };
 
     let delayed = crate::reload::weapon_reload_delayed_action(hand, facts, delayed_action);
     let ammo_credited = delayed.shells;
@@ -1117,6 +1143,7 @@ pub fn weapon_ordinary(
     let reload = cmd.buttons & BUTTON_RELOAD != 0;
     let reload_edge = reload && cmd.old_buttons & BUTTON_RELOAD == 0;
     if !cmd.mantle_weapon_up
+        && !burst_busy
         && crate::reload::weapon_process_input_wants_reload(hand, facts, reload_edge, cmd.pm_flags)
         && begin_weapon_reload(hand, facts)
     {
@@ -1124,7 +1151,11 @@ pub fn weapon_ordinary(
     }
 
     if event.is_none() {
-        event = weapon_check_for_rechamber(hand, facts, cmd, delayed_action);
+        event = if bo2 {
+            bo2_check_for_rechamber(hand, facts, cmd, delayed_action)
+        } else {
+            weapon_check_for_rechamber(hand, facts, cmd, delayed_action)
+        };
     }
 
     match WeaponState::from_i32(hand.weaponstate) {
@@ -1166,7 +1197,11 @@ pub fn weapon_ordinary(
                         );
                         hand.weaponstate = WeaponState::Ready as i32;
                         hand.weapon_time = facts.burst_cooldown().max(1);
-                        hand.shot_count = 0;
+                        // bo2mp: Black Ops II keeps the count; it clears
+                        // when a timer runs out with the trigger up.
+                        if !bo2 {
+                            hand.shot_count = 0;
+                        }
                     }
                 } else {
                     if !attack && !hand.burst_latch {
@@ -1273,6 +1308,11 @@ pub fn weapon_ordinary(
     if ready_idle || mid_burst_continue || delayed_fire {
         let trigger = match fire_ty {
             FireType::FullAuto => attack || delayed_fire,
+            // bo2mp: Black Ops II fires a semi-automatic whenever the trigger
+            // is down and the gun is free; "let go first" comes from the
+            // timer-expiry rule holding the gun at 1 ms. So a swap-back
+            // that frees the gun with the trigger held fires at once.
+            FireType::SingleShot if bo2 => attack || delayed_fire,
             FireType::SingleShot => (attack && !was_attack) || delayed_fire,
             FireType::BurstFire2 | FireType::BurstFire3 | FireType::BurstFire4 => {
                 attack || pending || delayed_fire
@@ -1345,7 +1385,7 @@ pub fn weapon_ordinary(
                     if fire_ty.is_burst() && hand.shot_count == 0 {
                         hand.burst_latch = false;
                     }
-                    hand.shot_count = hand.shot_count.saturating_add(1).min(4);
+                    hand.shot_count = hand.shot_count.saturating_add(1).min(if bo2 { 7 } else { 4 });
                 } else if intro {
                     hand.shot_count = hand.shot_count.saturating_add(1);
                 }
@@ -1445,6 +1485,137 @@ fn weapon_check_for_rechamber(
     };
     crate::weap_anim::set_rechamber_anim(&mut hand.weap_anim, cmd.f_weapon_pos_frac > 0.0);
 
+    Some(WeaponTickEvent::RechamberWeapon)
+}
+
+/// bo2mp: Black Ops II's rule for the frame a weapon timer runs out. If
+/// the shot limit is reached (one for a semi-automatic, the burst for a
+/// burst gun, never for an automatic), the trigger is still down and the
+/// weapon asked for is the one in hand, the timer is held at 1 ms (0 in the
+/// alternate-switch states) and the state is let go; otherwise the timer is
+/// 0 and, with the trigger up and no burst going, the shot count clears.
+///
+/// It runs in every timed weapon state, not only firing: so a semi-automatic
+/// or burst gun raised with the trigger still down from its last shot stays
+/// raising until the trigger comes up, a burst gun needs a fresh pull after
+/// its cooldown, and only a timer that never ran out (the swap-back reset)
+/// frees the gun with the trigger held.
+fn bo2_timer_expired(
+    hand: &mut WeaponHandState,
+    fire_ty: FireType,
+    cmd: &WeaponCmd,
+    attack: bool,
+    unlimited_ammo: bool,
+) {
+    use WeaponState as S;
+    let Ok(state) = WeaponState::from_i32(hand.weaponstate) else {
+        return;
+    };
+    if !matches!(
+        state,
+        S::Ready
+            | S::Raising
+            | S::RaisingAltswitch
+            | S::Dropping
+            | S::DroppingQuick
+            | S::DroppingAltswitch
+            | S::Firing
+            | S::Rechambering
+            | S::Reloading
+            | S::ReloadingInterrupt
+            | S::ReloadStart
+            | S::ReloadStartInterrupt
+            | S::ReloadEnd
+            | S::SprintIn
+            | S::SprintOut
+    ) {
+        return;
+    }
+    let burst_going = burst_pending(hand, fire_ty);
+    // A burst that has finished takes its cooldown (the firing state's own
+    // step) before this rule looks at it.
+    if state == S::Firing && fire_ty.is_burst() && !burst_going {
+        return;
+    }
+    let hold = !hand.burst_latch
+        && fire_ty.shot_limit_reached(hand.shot_count)
+        && attack
+        && u32::from(cmd.cmd_weapon) == hand.weapon
+        && (hand.clip > 0 || unlimited_ammo);
+    if !hold {
+        hand.weapon_time = 0;
+        if (!attack || hand.burst_latch) && !burst_going {
+            hand.shot_count = 0;
+        }
+        return;
+    }
+    hand.weapon_time = if matches!(state, S::RaisingAltswitch | S::DroppingAltswitch) {
+        0
+    } else {
+        1
+    };
+    match state {
+        S::Reloading | S::ReloadingInterrupt | S::ReloadStart | S::ReloadStartInterrupt | S::ReloadEnd => {
+            hand.weapon_time = 0;
+            hand.shot_count = 0;
+        }
+        // Past the bolt: the rechamber is done.
+        S::Rechambering if hand.weapon_delay == 0 => {
+            hand.rechamber_pending = false;
+            weapon_finish_rechamber(hand, cmd.pm_type);
+        }
+        S::Firing | S::Rechambering => {
+            crate::weap_anim::continue_weapon_anim(
+                &mut hand.weap_anim,
+                crate::weap_anim::weap_anim_event::IDLE,
+                cmd.pm_type,
+            );
+            hand.weaponstate = WeaponState::Ready as i32;
+        }
+        _ => {}
+    }
+}
+
+/// bo2mp: Black Ops II's rechamber. The "needs rechamber" mark stays on the
+/// gun until the rechamber's whole timer has run (not at the bolt), and a
+/// weapon switch does not clear it: a pump skipped by a quick swap plays
+/// when the gun is next ready, and swapping away mid-pump and back restarts
+/// it from the start (the Moni NAC). It starts from ready whenever the gun's
+/// delay is clear, the frame of a swap-back included.
+fn bo2_check_for_rechamber(
+    hand: &mut WeaponHandState,
+    facts: &WeaponCombatFacts,
+    cmd: &WeaponCmd,
+    delayed_action: bool,
+) -> Option<WeaponTickEvent> {
+    if !facts.bolt_action {
+        return None;
+    }
+    if hand.weaponstate == WeaponState::Rechambering as i32 {
+        let brass = (delayed_action && hand.rechamber_pending).then_some(WeaponTickEvent::EjectBrass);
+        if hand.weapon_time == 0 && hand.weapon_delay == 0 {
+            hand.rechamber_pending = false;
+            weapon_finish_rechamber(hand, cmd.pm_type);
+        }
+        return brass;
+    }
+    if !hand.rechamber_pending
+        || hand.weaponstate != WeaponState::Ready as i32
+        || hand.weapon_delay != 0
+    {
+        return None;
+    }
+    let rechamber = if cmd.last_weapon_hand == 1 {
+        facts.rechamber_bolt_time_ms
+    } else {
+        facts.rechamber_time_ms
+    };
+    let rechamber = if rechamber > 0 { rechamber } else { 1 };
+    hand.weaponstate = WeaponState::Rechambering as i32;
+    hand.weapon_time = rechamber;
+    let bolt = facts.rechamber_bolt_delay_ms;
+    hand.weapon_delay = if bolt != 0 && bolt < rechamber { bolt } else { 1 };
+    crate::weap_anim::set_rechamber_anim(&mut hand.weap_anim, cmd.f_weapon_pos_frac > 0.0);
     Some(WeaponTickEvent::RechamberWeapon)
 }
 

@@ -1460,6 +1460,11 @@ fn encode_client_meta(out: &mut WireWriter, meta: &ClientSnapshotMeta) {
     for weapon in &meta.taped_mag_spent {
         out.put_u32(*weapon);
     }
+    debug_assert!(meta.rechamber_weapons.len() <= u8::MAX as usize);
+    out.put_u8(meta.rechamber_weapons.len() as u8);
+    for weapon in &meta.rechamber_weapons {
+        out.put_u32(*weapon);
+    }
     out.put_u8(meta.weapon_shot_count);
     out.put_u8(u8::from(meta.burst_latch) | (u8::from(meta.burst_latch_secondary) << 1));
     out.put_u8(
@@ -1632,6 +1637,11 @@ fn decode_client_meta(input: &mut WireReader<'_>) -> Result<ClientSnapshotMeta, 
     for _ in 0..spent_rows {
         taped_mag_spent.push(input.get_u32()?);
     }
+    let rechamber_rows = input.get_u8()? as usize;
+    let mut rechamber_weapons = Vec::with_capacity(rechamber_rows);
+    for _ in 0..rechamber_rows {
+        rechamber_weapons.push(input.get_u32()?);
+    }
     let weapon_shot_count = input.get_u8()?;
     let burst_latch_hands = input.get_u8()?;
     let burst_latch = burst_latch_hands & 1 != 0;
@@ -1737,6 +1747,7 @@ fn decode_client_meta(input: &mut WireReader<'_>) -> Result<ClientSnapshotMeta, 
         remote_missile,
         ammo_by_weapon,
         taped_mag_spent,
+        rechamber_weapons,
         weapon_shot_count,
         burst_latch,
         burst_latch_secondary,

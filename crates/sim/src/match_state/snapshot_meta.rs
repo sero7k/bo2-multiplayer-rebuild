@@ -36,6 +36,9 @@ pub struct ClientSnapshotMeta {
 
     pub taped_mag_spent: Vec<u32>,
 
+    /// bo2mp: the guns still needing their pump or bolt pulled.
+    pub rechamber_weapons: Vec<u32>,
+
     pub weapon_shot_count: u8,
     pub burst_latch: bool,
     pub burst_latch_secondary: bool,

@@ -1076,6 +1076,31 @@ pub fn sample_client_input(
                 );
                 continue;
             }
+            // bo2mp: Black Ops II's client refuses the alternate (Select
+            // Fire) toggle while the predicted weapon is going down, mid
+            // toggle, knifing or in an offhand: a swap pressed right after
+            // the toggle wins, and a toggle cannot interrupt a swap.
+            if ps.action_slot_type.get(slot).copied() == Some(2)
+                && weapon_iw4::bo2_switch_rules()
+                && matches!(
+                    weapon_iw4::WeaponState::from_i32(ps.weaponstate_primary),
+                    Ok(weapon_iw4::WeaponState::RaisingAltswitch
+                        | weapon_iw4::WeaponState::Dropping
+                        | weapon_iw4::WeaponState::DroppingQuick
+                        | weapon_iw4::WeaponState::DroppingAltswitch
+                        | weapon_iw4::WeaponState::MeleeInit
+                        | weapon_iw4::WeaponState::MeleeFire
+                        | weapon_iw4::WeaponState::MeleeEnd
+                        | weapon_iw4::WeaponState::OffhandInit
+                        | weapon_iw4::WeaponState::OffhandPrepare
+                        | weapon_iw4::WeaponState::OffhandHold
+                        | weapon_iw4::WeaponState::OffhandStart
+                        | weapon_iw4::WeaponState::Offhand
+                        | weapon_iw4::WeaponState::OffhandEnd)
+                )
+            {
+                continue;
+            }
             let target = match ps.action_slot_type.get(slot).copied() {
                 Some(1) => ps.action_slot_param[slot].max(0) as u32,
                 Some(2) => match prediction.0.world().weapon_combat_row(select.index) {

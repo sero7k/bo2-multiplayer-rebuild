@@ -19,6 +19,11 @@ pub mod weap_anim_event {
     pub const RELOAD_END: u32 = 0x10;
     pub const QUICK_DROP: u32 = 0x13;
     pub const QUICK_RAISE: u32 = 0x14;
+    /// bo2mp: Black Ops II's empty-clip drop and raise (`iEmptyDropTime`,
+    /// `iEmptyRaiseTime`); a viewmodel without the clips plays the plain
+    /// drop or raise on these timers.
+    pub const EMPTY_DROP: u32 = 0x15;
+    pub const EMPTY_RAISE: u32 = 0x16;
     pub const SPRINT_IN: u32 = 0x17;
     pub const SPRINT_LOOP: u32 = 0x18;
     pub const SPRINT_OUT: u32 = 0x19;

@@ -199,7 +199,27 @@ pub fn set_bo2_switch_rules(on: bool) {
 }
 
 pub fn bo2_switch_rules() -> bool {
+    #[cfg(test)]
+    if let Some(on) = TEST_RULES.with(core::cell::Cell::get) {
+        return on;
+    }
     BO2_SWITCH_RULES.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+#[cfg(test)]
+std::thread_local! {
+    /// A test's own rules, so tests running side by side do not share the
+    /// process-wide switch.
+    static TEST_RULES: core::cell::Cell<Option<bool>> = const { core::cell::Cell::new(None) };
+}
+
+/// Runs `f` with this thread's weapon rules set (tests only).
+#[cfg(test)]
+pub(crate) fn with_test_rules<R>(bo2: bool, f: impl FnOnce() -> R) -> R {
+    TEST_RULES.with(|c| c.set(Some(bo2)));
+    let out = f();
+    TEST_RULES.with(|c| c.set(None));
+    out
 }
 
 pub fn weapon_enter_offhand(hand: &mut WeaponHandState, cmd: &mut WeaponCmd) {

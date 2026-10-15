@@ -287,7 +287,12 @@ pub(crate) fn advance_weapon_command(
                 stock,
                 shot_count: meta.weapon_shot_count,
                 burst_latch: meta.burst_latch,
-                rechamber_pending: meta.rechamber_pending,
+                // bo2mp: Black Ops II keeps the rechamber mark per gun.
+                rechamber_pending: if weapon_iw4::bo2_switch_rules() {
+                    meta.needs_rechamber(started_weapon)
+                } else {
+                    meta.rechamber_pending
+                },
                 delayed_rechamber: false,
                 weapon_restrict_kick_time: ps.weapon_restrict_kick_time,
                 quick_reload,
@@ -430,6 +435,17 @@ pub(crate) fn advance_weapon_command(
                         }
                     })
                     .unwrap_or(0)
+            },
+            switch_raise_empty: {
+                let w = if cmd.weapon != 0 {
+                    u32::from(cmd.weapon)
+                } else {
+                    ps.weapon
+                };
+                world.combat_facts_for(w).is_some_and(|f| {
+                    let clip = get_clip_for_hand(&ps.ammoclip, weapon_iw4::clip_table_key(f.clip_index, w), 0);
+                    f.empty_raise_time_ms > 0 && f.clip_size > 0 && !f.unlimited_ammo && clip <= 0
+                })
             },
             switch_quick_raise_time_ms: {
                 let w = if cmd.weapon != 0 {
@@ -582,6 +598,17 @@ pub(crate) fn advance_weapon_command(
         meta.weapon_shot_count = hand0.shot_count;
         meta.burst_latch = hand0.burst_latch;
         meta.rechamber_pending = hand0.rechamber_pending;
+        if weapon_iw4::bo2_switch_rules() {
+            // bo2mp: the mark belongs to the gun this command began with
+            // (a finished putaway leaves the old gun's mark in the hand);
+            // the next command loads the new gun's.
+            meta.set_needs_rechamber(started_weapon, hand0.rechamber_pending);
+            meta.rechamber_pending = if hand0.weapon == started_weapon {
+                hand0.rechamber_pending
+            } else {
+                meta.needs_rechamber(hand0.weapon)
+            };
+        }
         meta.burst_latch_secondary = last_hand >= 1 && hands[1].burst_latch;
         meta.rechamber_pending_secondary = last_hand >= 1 && hands[1].rechamber_pending;
         if facts.dual_mag.is_some() && started_weapon != 0 {

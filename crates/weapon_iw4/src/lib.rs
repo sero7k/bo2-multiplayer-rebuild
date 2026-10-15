@@ -1,6 +1,9 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
+extern crate std;
+
 mod ads_allow;
 mod ads_overlay;
 mod ammo;
@@ -18,6 +21,8 @@ mod reload;
 mod spread;
 mod sprint;
 mod sway;
+#[cfg(test)]
+mod bo2_rules_tests;
 mod tick;
 mod unlocated;
 mod view_bob;
