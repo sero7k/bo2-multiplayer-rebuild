@@ -18,54 +18,62 @@ const SNIPER: u32 = 2;
 const SMG: u32 = 3;
 const SMG_BURST: u32 = 4;
 
-/// Remington 870 MCS: pump (a rechamber after every shot).
+/// Remington 870 MCS (common_mp.ff): pump, a rechamber after every shot.
 fn shotgun() -> WeaponCombatFacts {
     WeaponCombatFacts {
         fire_type: FireType::SingleShot as i32,
-        fire_time_ms: 100,
+        fire_time_ms: 192,
+        last_fire_time_ms: 528,
         bolt_action: true,
-        rechamber_time_ms: 700,
-        rechamber_bolt_time_ms: 700,
-        rechamber_bolt_delay_ms: 300,
-        drop_time_ms: 250,
-        raise_time_ms: 450,
-        quick_drop_time_ms: 200,
+        rechamber_time_ms: 550,
+        rechamber_bolt_time_ms: 550,
+        rechamber_bolt_delay_ms: 0,
+        drop_time_ms: 400,
+        raise_time_ms: 550,
+        quick_drop_time_ms: 250,
         quick_raise_time_ms: 300,
+        empty_drop_time_ms: 330,
+        empty_raise_time_ms: 650,
         clip_size: 8,
         start_ammo: 32,
         ..WeaponCombatFacts::default()
     }
 }
 
-/// DSR 50: bolt-action sniper.
+/// DSR 50 (common_mp.ff): bolt-action sniper.
 fn sniper() -> WeaponCombatFacts {
     WeaponCombatFacts {
         fire_type: FireType::SingleShot as i32,
-        fire_time_ms: 150,
+        fire_time_ms: 200,
         bolt_action: true,
-        rechamber_time_ms: 1100,
-        rechamber_bolt_time_ms: 1100,
-        rechamber_bolt_delay_ms: 500,
-        drop_time_ms: 300,
-        raise_time_ms: 450,
+        rechamber_time_ms: 1000,
+        rechamber_bolt_time_ms: 1000,
+        rechamber_bolt_delay_ms: 600,
+        drop_time_ms: 750,
+        raise_time_ms: 750,
         quick_drop_time_ms: 250,
-        quick_raise_time_ms: 300,
+        quick_raise_time_ms: 500,
+        empty_drop_time_ms: 700,
+        empty_raise_time_ms: 1000,
         clip_size: 5,
         start_ammo: 30,
         ..WeaponCombatFacts::default()
     }
 }
 
-/// MP7 with Select Fire: automatic, and its burst alternate.
+/// MP7 (common_mp.ff) with Select Fire: automatic, and its burst
+/// alternate.
 fn smg(fire_type: FireType) -> WeaponCombatFacts {
     WeaponCombatFacts {
         fire_type: fire_type as i32,
-        fire_time_ms: 75,
+        fire_time_ms: 64,
         burst_cooldown_ms: 200,
-        drop_time_ms: 250,
-        raise_time_ms: 300,
-        quick_drop_time_ms: 200,
-        quick_raise_time_ms: 250,
+        drop_time_ms: 350,
+        raise_time_ms: 500,
+        quick_drop_time_ms: 250,
+        quick_raise_time_ms: 300,
+        empty_drop_time_ms: 450,
+        empty_raise_time_ms: 800,
         clip_size: 40,
         start_ammo: 160,
         ..WeaponCombatFacts::default()
