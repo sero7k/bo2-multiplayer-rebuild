@@ -168,7 +168,7 @@ pub struct Common {
 /// bo2mp: a material's named constants and bound texture slots, from its
 /// technique set's programs (`MapMaterial::constants`): the zone's own
 /// technique set, else the common zones' (`common`).
-fn material_constants(
+pub(crate) fn material_constants(
     cap: &Capture,
     image: &[u8],
     common: &Common,
@@ -385,6 +385,8 @@ pub struct T7Map {
     pub maxs: [f32; 3],
     /// What was read and what was missing, line by line.
     pub report: Vec<String>,
+    /// bo2mp: where the first sun volume keeps its light (`crate::light`).
+    pub(crate) light_refs: Option<crate::light::LightRefs>,
     images: HashMap<String, ImageRec>,
     zone_image: Vec<u8>,
     /// bo2mp: the common zones' pictures (`Common`).
@@ -491,6 +493,9 @@ impl T7Map {
                 out.images.entry(im.name.clone()).or_insert_with(|| im.clone());
             }
         }
+        // bo2mp: the sun volume's light (sky, probes) and the sky material's
+        // constants (`skyScale`).
+        out.light_refs = crate::light::LightRefs::read(&cap, &zone.image, &common);
         out.zone_image = zone.image;
         match packages(&src.pak_dir) {
             Ok(p) => out.paks = Some(p),
@@ -767,6 +772,11 @@ impl T7Map {
             return Err(format!("{name}: part {k} decodes to {:#x} bytes, expected {want:#x}", data.len()));
         }
         Ok(ImageLevels { format: im.format, width: w, height: h, levels, data: data[..want].to_vec(), part: Some(k) })
+    }
+
+    /// bo2mp: the `.xpak` packages beside the zone, when they opened.
+    pub fn paks(&self) -> Option<&XpakSet> {
+        self.paks.as_ref()
     }
 
     /// The image record of a name (format, size).
