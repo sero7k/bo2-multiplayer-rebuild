@@ -217,7 +217,7 @@ pub struct Probe {
 
 impl Probe {
     /// Distance outside the box (0 inside), in units.
-    fn outside(&self, p: [f32; 3]) -> f32 {
+    pub fn outside(&self, p: [f32; 3]) -> f32 {
         let d = [p[0] - self.origin[0], p[1] - self.origin[1], p[2] - self.origin[2]];
         let mut s = 0.0;
         for k in 0..3 {
@@ -228,7 +228,7 @@ impl Probe {
         s.sqrt()
     }
 
-    fn volume(&self) -> f32 {
+    pub fn volume(&self) -> f32 {
         self.half[0] * self.half[1] * self.half[2]
     }
 
@@ -457,6 +457,69 @@ impl Bake {
         }
     }
 
+    /// The probes' unit: the map-wide probe's scale (config word 0). A
+    /// probe's texels times its own scale are the game's light; over this
+    /// unit, daylit ground is about one.
+    pub fn units(&self) -> f32 {
+        self.probes.first().map(|p| p.scale).filter(|s| s.is_finite() && *s > 1e-3).unwrap_or(1.0)
+    }
+
+    /// A probe's light over the map-wide probe's (its scale over `units`).
+    pub fn gain(&self, i: usize) -> f32 {
+        self.probes.get(i).map_or(1.0, |p| if p.scale.is_finite() && p.scale > 0.0 { p.scale / self.units() } else { 1.0 })
+    }
+
+    /// The ambient light at `p` facing `n` in the probes' unit: as
+    /// `ambient`, each probe's faces times its `gain` (a probe in a dim
+    /// room is baked dim).
+    pub fn ambient_lit(&self, p: [f32; 3], n: [f32; 3]) -> [f32; 3] {
+        if self.probes.is_empty() {
+            return [1.0; 3];
+        }
+        let global = self.probes[0].ambient(n);
+        match self.box_at(p) {
+            Some((o, i)) => {
+                let g = self.gain(i);
+                let local = self.probes[i].ambient(n).map(|v| v * g);
+                let t = (o / BOX_BLEND).clamp(0.0, 1.0);
+                std::array::from_fn(|k| local[k] + (global[k] - local[k]) * t)
+            }
+            None => global,
+        }
+    }
+
+    /// `ambient_lit` averaged over the six axis directions.
+    pub fn ambient_mean(&self, p: [f32; 3]) -> [f32; 3] {
+        let mut s = [0f32; 3];
+        for d in [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, -1.0f32]] {
+            let a = self.ambient_lit(p, d);
+            for k in 0..3 {
+                s[k] += a[k] / 6.0;
+            }
+        }
+        s
+    }
+
+    /// What the sky picture (times `skyScale`) is multiplied by to be in the
+    /// probes' unit: one over `units`, unless the sky's upper face and the
+    /// map-wide probe's (times `units`) disagree by more than four times
+    /// (mp_waterpark's picture is 20 times dimmer than its probes saw),
+    /// then matched to the probe.
+    pub fn sky_gain(&self) -> f32 {
+        let u = self.units();
+        let (Some(sky), Some(g)) = (self.sky.as_ref(), self.probes.first()) else {
+            return 1.0 / u;
+        };
+        let s = 8u32;
+        let cube = sky_cube(sky, s);
+        let lum = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        let n = (s * s) as usize;
+        let sky_up: f32 = cube[4 * n..5 * n].iter().map(|c| lum([c[0], c[1], c[2]])).sum::<f32>() / n as f32;
+        let probe_up = lum(g.faces[4]) * u;
+        let r = probe_up / sky_up.max(1e-6);
+        if (0.25..=4.0).contains(&r) { 1.0 / u } else { r / u }
+    }
+
     /// The local probe whose box holds `p` (the smallest such), else the
     /// nearest within `BOX_BLEND` units: (distance outside it, index).
     pub fn box_at(&self, p: [f32; 3]) -> Option<(f32, usize)> {
@@ -623,4 +686,114 @@ pub fn probe_array(map: &T7Map, keep: &[usize]) -> Result<ProbeArray, String> {
         }
     }
     Ok(ProbeArray { size: p.size, levels: p.levels, format: p.format, data })
+}
+
+/// The direction toward the sun from the sun volume's angles: they aim the
+/// light (pitch down from level, yaw about z), so the sun lies the other
+/// way. (Read against mp_redwood's, mp_nuketown_x's and mp_apartments' own
+/// probes, whose brightest texel sits within a few degrees of it.)
+pub fn sun_toward(s: &crate::map::Sun) -> [f32; 3] {
+    let (p, y) = (s.pitch.to_radians(), s.yaw.to_radians());
+    let d = [-p.cos() * y.cos(), -p.cos() * y.sin(), p.sin()];
+    let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(1e-6);
+    d.map(|v| v / l)
+}
+
+/// How a material's triangles block the sun and the sky.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Blocks {
+    No,
+    /// Cut-out (foliage, fences): half the light through.
+    Partly,
+    Fully,
+}
+
+/// The map's triangles that block light, world surfaces then placed
+/// models' first LODs (in the world), by `blocks(material)`; placed models
+/// smaller than `min_radius` units (scaled) and outside `area` (low and
+/// high corners, xy) are left out.
+pub fn casters(map: &T7Map, blocks: &dyn Fn(usize) -> Blocks, min_radius: f32, area: [[f32; 2]; 2]) -> Vec<crate::bake::Caster> {
+    use crate::bake::Caster;
+    let mut out = Vec::new();
+    for s in &map.surfaces {
+        let b = s.material.map_or(Blocks::No, blocks);
+        if b == Blocks::No {
+            continue;
+        }
+        let base = s.base_index as usize;
+        let first = s.first_vertex as usize;
+        for t in 0..s.tri_count as usize {
+            let Some(ix) = map.indices.get(base + 3 * t..base + 3 * t + 3) else { break };
+            let v = |k: usize| map.vertices.get(first + usize::from(ix[k])).map(|v| v.xyz);
+            if let (Some(a), Some(b2), Some(c)) = (v(0), v(1), v(2)) {
+                out.push(Caster { p: [a, b2, c], partial: b == Blocks::Partly });
+            }
+        }
+    }
+    for sm in &map.static_models {
+        let Some(m) = map.models.get(sm.model) else { continue };
+        let r = m.surfaces.iter().flat_map(|s| s.positions.iter()).map(|q| q[0].abs().max(q[1].abs()).max(q[2].abs())).fold(0.0f32, f32::max) * sm.scale;
+        if r < min_radius
+            || sm.origin[0] + r < area[0][0]
+            || sm.origin[0] - r > area[1][0]
+            || sm.origin[1] + r < area[0][1]
+            || sm.origin[1] - r > area[1][1]
+        {
+            continue;
+        }
+        let place = |q: [f32; 3]| -> [f32; 3] {
+            std::array::from_fn(|k| sm.origin[k] + sm.scale * (q[0] * sm.axis[0][k] + q[1] * sm.axis[1][k] + q[2] * sm.axis[2][k]))
+        };
+        for surf in &m.surfaces {
+            let b = surf.material.map_or(Blocks::No, blocks);
+            if b == Blocks::No {
+                continue;
+            }
+            for t in &surf.tris {
+                let v = |k: usize| surf.positions.get(usize::from(t[k])).copied().map(place);
+                if let (Some(a), Some(b2), Some(c)) = (v(0), v(1), v(2)) {
+                    out.push(Caster { p: [a, b2, c], partial: b == Blocks::Partly });
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The baked sun shadow map for the GPU: `SunDepth` over the square round
+/// `centre` (`span` units, at most `max_size` texels a side) and its
+/// height packing (`SunDepth::packed`): base and range.
+pub struct SunMap {
+    pub depth: crate::bake::SunDepth,
+    pub base: f32,
+    pub range: f32,
+}
+
+impl SunMap {
+    pub fn render(casters: &[crate::bake::Caster], toward: [f32; 3], centre: [f32; 3], span: f32, max_size: u32) -> SunMap {
+        // (Never 1024 wide: the renderer tells a Black Ops II colour table,
+        // 1024 wide, from this map by its width.)
+        let size = ((span / 1.5).ceil() as u32).clamp(2048, max_size.max(2048));
+        let depth = crate::bake::SunDepth::render(casters, toward, centre, span, size);
+        let (lo, hi) = depth.height_range();
+        let (base, range) = if lo <= hi { (lo - 16.0, (hi - lo + 32.0).max(1.0)) } else { (0.0, 1.0) };
+        SunMap { depth, base, range }
+    }
+
+    /// The map's RGBA8 texels (`SunDepth::packed`).
+    pub fn texels(&self) -> Vec<u8> {
+        self.depth.packed(self.base, self.range)
+    }
+
+    /// The shader's three rows: (u, origin u), (v, origin v), (toward the
+    /// sun, 1 / texel), (base, range, size, 0).
+    pub fn rows(&self) -> [[f32; 4]; 4] {
+        let d = &self.depth;
+        [
+            [d.u[0], d.u[1], d.u[2], d.origin[0]],
+            [d.v[0], d.v[1], d.v[2], d.origin[1]],
+            [d.dir[0], d.dir[1], d.dir[2], 1.0 / d.texel],
+            [self.base, self.range, d.size as f32, 0.0],
+        ]
+    }
 }
