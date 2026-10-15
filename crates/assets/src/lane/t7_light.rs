@@ -241,13 +241,23 @@ impl Lit {
     }
 
     /// The probe table rows: each drawn probe's gain (its light over the
-    /// map-wide probe's).
+    /// map-wide probe's) and where it was taken; its parallax box's centre
+    /// and its turn about z (cosine), its half size and the turn's sine
+    /// (half size 0: no parallax, the map-wide probe). `BO2MP_T7_PARALLAX=0`
+    /// leaves the parallax out.
     pub fn probe_rows(&self) -> Vec<[[f32; 4]; 3]> {
+        let parallax = std::env::var("BO2MP_T7_PARALLAX").map_or(true, |v| v.trim() != "0");
         self.keep
             .iter()
-            .map(|&i| {
+            .enumerate()
+            .map(|(k, &i)| {
                 let g = self.bake.gain(i);
-                [[g, g, g, 0.0], [0.0, 0.0, 0.0, 1.0], [0.0; 4]]
+                let p = &self.bake.probes[i];
+                let (c, s) = (p.axes[0][0], p.axes[0][1]);
+                let flat = (p.axes[2][2] - 1.0).abs() < 0.01 && (c * c + s * s - 1.0).abs() < 0.02;
+                let on = parallax && k > 0 && flat && p.box_half.iter().all(|h| *h > 1.0 && *h < 20000.0) && p.box_centre.iter().all(|v| v.is_finite());
+                let h = if on { p.box_half } else { [0.0; 3] };
+                [[g, p.origin[0], p.origin[1], p.origin[2]], [p.box_centre[0], p.box_centre[1], p.box_centre[2], c], [h[0], h[1], h[2], s]]
             })
             .collect()
     }
