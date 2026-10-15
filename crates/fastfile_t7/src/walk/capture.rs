@@ -38,6 +38,9 @@ pub struct WeaponRec {
     pub fields: Vec<(String, FieldValue)>,
     /// The animation table (197 slots): (slot, slot name, animation name).
     pub anims: Vec<(usize, String, String)>,
+    /// bo2mp: the animation table's file offset when this variant loaded it
+    /// (another variant of the gun may point at it instead of loading one).
+    pub anims_at: Option<usize>,
     /// `hideTags`: script string indices (32 slots, zero ones dropped).
     pub hide_tags: Vec<u32>,
     /// bo2mp: the `WeaponDef`'s location damage multipliers (21 f32), when

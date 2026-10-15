@@ -254,12 +254,20 @@ pub fn weapon(s: &mut Stream, h: usize) -> Result<Option<String>> {
     if std::env::var_os("T7_WTRACE").is_some() {
         eprintln!("WLIST anims {:?} at {:#x}", s.ptr_at(h + 0x48)?, s.pos());
     }
+    let anims_ptr = s.ptr_at(h + 0x48)?;
     if let Some(t) = s.records(h + 0x48, ANIMS, 8, 7)? {
+        rec.anims_at = Some(t);
         for i in 0..ANIMS {
             if let Some(a) = s.string_named(t + 8 * i)?.filter(|a| !a.is_empty()) {
                 let slot = ANIM_NAMES.iter().find(|n| n.0 == i).map_or_else(|| format!("anim{i}"), |n| n.1.to_string());
                 rec.anims.push((i, slot, a));
             }
+        }
+    } else if let Some(at) = anims_ptr.virtual_offset().and_then(|v| s.vmap.file_pos(v)) {
+        // bo2mp: a table another variant loaded (`smg_standard_mp` points
+        // at its campaign variant's): that variant's animations.
+        if let Some(owner) = s.capture.weapons.iter().find(|w| w.anims_at == Some(at)) {
+            rec.anims = owner.anims.clone();
         }
     }
     if let Some(t) = s.records(h + 0x50, HIDE_TAGS, 4, 3)? {
