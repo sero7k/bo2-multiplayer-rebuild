@@ -8,8 +8,8 @@
 //!   swap zones) a big map keeps most of its world in.
 //! - [`materials`]: each surface's material, the materials' pictures and
 //!   their pixels from the install's packages.
-//! - [`ents`]: the entities (the install's entity text, else none) and the
-//!   spawn points a multiplayer match needs.
+//! - [`ents`]: the entities (the zone's `map_ents`, else the install's
+//!   entity text) and the spawn points a multiplayer match needs.
 
 pub mod ents;
 pub mod index;
@@ -156,6 +156,18 @@ impl JupMap {
         ));
         drop(placed);
         out.packages = Some(paks);
+        // The zone's own entities (else the install's text copy, below).
+        match ents::from_zone(z, name_hash(&src.name)) {
+            Ok(list) => {
+                out.entities = ents::to_text(&list);
+                out.report.push(format!(
+                    "entities: {} in the zone's map_ents, {} bytes kept",
+                    list.len(),
+                    out.entities.len()
+                ));
+            }
+            Err(e) => out.report.push(format!("entities: {e}")),
+        }
         // The map's own world zone.
         if zones.contains(&0) {
             let buffers = world::find_buffers(z, name_hash(&src.name))
@@ -229,13 +241,15 @@ impl JupMap {
             }
         }
         (out.mins, out.maxs) = (lo, hi);
-        match ents::read(src) {
-            Ok(text) => {
-                out.entities = text;
-                out.report
-                    .push(format!("entities: {} bytes", out.entities.len()));
+        if out.entities.is_empty() {
+            match ents::read(src) {
+                Ok(text) => {
+                    out.entities = text;
+                    out.report
+                        .push(format!("entities: {} bytes of text", out.entities.len()));
+                }
+                Err(e) => out.report.push(format!("entities: {e}")),
             }
-            Err(e) => out.report.push(format!("entities: {e}")),
         }
         Ok(out)
     }
