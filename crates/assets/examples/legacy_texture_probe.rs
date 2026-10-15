@@ -37,7 +37,10 @@ fn main() {
             let colour = mat.textures.iter().find(|t| t.semantic == asset_material::TS_COLOR_MAP);
             match colour.and_then(|t| t.image).and_then(|i| pop.images.get(i).map(|img| (i, img))) {
                 None => Some(format!("{name} (no colour map{})", if mat.t6_draw.is_none() { ", no t6 draw" } else { "" })),
-                Some((_, img)) if img.width <= 1 && img.height <= 1 => Some(format!("{name} [{} 1x1]", img.name.as_str())),
+                Some((_, img)) if img.width <= 1 && img.height <= 1 && !img.name.as_str().ends_with("#water") => {
+                    Some(format!("{name} [{} 1x1]", img.name.as_str()))
+                }
+                Some((_, img)) if img.name.as_str().contains("case64") => Some(format!("{name} [{} placeholder]", img.name.as_str())),
                 Some((_, img)) if img.decoded.is_none() && img.payload.is_empty() && img.pending_decode.is_none() => {
                     Some(format!("{name} [{}: no pixels]", img.name.as_str()))
                 }

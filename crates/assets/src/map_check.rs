@@ -116,7 +116,13 @@ fn legacy_texture_census(loaded: &LoadedWorld) -> String {
         let image = colour.and_then(|t| t.image).and_then(|i| cat.images.get(i));
         match image {
             None => Some(format!("{name} (no colour map)")),
-            Some(img) if img.width <= 1 && img.height <= 1 => Some(format!("{name} [{}]", img.name.as_str())),
+            // (A 1x1 picture is the grey stand-in, unless it is a water
+            // colour the lane made.)
+            Some(img) if img.width <= 1 && img.height <= 1 && !img.name.as_str().ends_with("#water") => {
+                Some(format!("{name} [{}]", img.name.as_str()))
+            }
+            // The editor's placeholder (`case64blue`) drawn as a picture.
+            Some(img) if img.name.as_str().contains("case64") => Some(format!("{name} [{} placeholder]", img.name.as_str())),
             Some(img) if img.decoded.is_none() && img.payload.is_empty() && img.pending_decode.is_none() => {
                 Some(format!("{name} [{}: no pixels]", img.name.as_str()))
             }

@@ -211,7 +211,6 @@ pub(crate) struct Look {
     pub sky_parm: [f32; 2],
 }
 
-/// The model map's sky cube: (material name, decoded cube).
 /// bo2mp: the model map's sky material's `skyColorParm` (y its
 /// brightness, x above 0 for a cube stored `rgb / a`); `[1, 1]` without one.
 fn model_sky_parm(capture: &asset_t6::ZoneCapture) -> [f32; 2] {
@@ -227,6 +226,7 @@ fn model_sky_parm(capture: &asset_t6::ZoneCapture) -> [f32; 2] {
         .map_or([1.0, 1.0], |c| [c.2[1], c.2[0]])
 }
 
+/// The model map's sky cube: (material name, decoded cube).
 fn model_sky(capture: &asset_t6::ZoneCapture, packs: &asset_t6::PackSet) -> Result<(String, Arc<Image>), String> {
     let material = capture
         .materials
