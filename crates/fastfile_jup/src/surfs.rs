@@ -17,8 +17,8 @@
 //!   0x78 ptr shared blob ({ptr -2, u32 bytes, u32 ?} then the bytes;
 //!        the later surfaces point back at the first's)
 //!   0x80 ptr rigid ranges (-2: `range count` 12-byte records)
-//!   0xb0 f32 centre[3], extents[3]: positions are 21-bit fractions of
-//!        the largest extent about the centre
+//!   0xb0 f32 centre[3], extents[3]: positions are 21-bit fractions
+//!        spanning the largest extent either side of the centre
 //!   0xc8 ptr 12 bytes (not read)
 //! then: blob struct and bytes; per surface its rigid ranges and its
 //! 12 bytes.
@@ -217,14 +217,16 @@ pub fn f16(h: u16) -> f32 {
     }
 }
 
-/// One packed position.
+/// One packed position: the centre plus or minus the largest extent.
+/// (A gun's part models fit their receiver's attach tags only so: the
+/// tags are stored as plain floats.)
 #[must_use]
 pub fn position(raw: u64, centre: [f32; 3], extents: [f32; 3]) -> [f32; 3] {
     let scale = extents[0].max(extents[1]).max(extents[2]);
     let mut p = [0.0; 3];
     for (k, c) in p.iter_mut().enumerate() {
         let v = ((raw >> (21 * k)) & 0x1f_ffff) as f32 / 2_097_151.0;
-        *c = centre[k] + (v - 0.5) * scale;
+        *c = centre[k] + (2.0 * v - 1.0) * scale;
     }
     p
 }
@@ -308,9 +310,9 @@ mod tests {
         // x at the top of its range, y in the middle, z at the bottom.
         let raw = 0x1f_ffffu64 | (0x10_0000 << 21);
         let p = position(raw, c, e);
-        assert!((p[0] - 3.0).abs() < 1e-5);
+        assert!((p[0] - 4.0).abs() < 1e-5);
         assert!(p[1].abs() < 1e-5);
-        assert!((p[2] - -3.0).abs() < 1e-5);
+        assert!((p[2] - -4.0).abs() < 1e-5);
     }
 
     /// A one-surface mesh: 3 vertices, one packet of one triangle with
@@ -356,6 +358,6 @@ mod tests {
         let g = geometry(&z, &rec, 0).unwrap();
         assert_eq!(g.indices, vec![1, 2, 0]);
         assert_eq!(g.positions.len(), 3);
-        assert!((g.positions[1][0] - 0.5).abs() < 1e-5);
+        assert!((g.positions[1][0] - 1.0).abs() < 1e-5);
     }
 }

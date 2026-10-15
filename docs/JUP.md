@@ -168,7 +168,7 @@ names, no other map zone more than one). Start one with `map jup:<zone>`.
   shape as the run of exactly the zone's material count (Rebirth: 5841);
   pictures are asset-list entries of the image run. Format 0x25 (BC1) is
   the colour maps' form; 0x2a (BC1) holds masks and terrain blend maps, 0x2f
-  BC5, 0x30 BC7. Pixels: the largest streamed group within 1024 px from the
+  BC7 (normal maps, x y z in red green blue), 0x30 BC7. Pixels: the largest streamed group within 1024 px from the
   zone `.xpak` indexes (levels placed from the top: BC1 streams to 2x2).
   Terrain (virtual textures) and materials whose pictures are shared tables
   draw without a picture.
