@@ -98,6 +98,31 @@ pub struct GfxWorldRec {
     pub sky_models: Vec<String>,
     /// The sun's settings (first sun volume's first state): file offset.
     pub sun_at: usize,
+    /// bo2mp: the sun volumes' file offsets (4536 each).
+    pub sun_volumes: Vec<usize>,
+    /// bo2mp: per sun volume, its lighting as the walk met it.
+    pub sun_lighting: Vec<SunVolumeLighting>,
+    /// bo2mp: the fog volumes (624 each), LUT volumes (60), exposure
+    /// volumes (108), lit fog volumes (360): (file offset, count).
+    pub fog_volumes: Span,
+    pub lut_volumes: Span,
+    pub exposure_volumes: Span,
+    pub lit_fog_volumes: Span,
+    /// bo2mp: the LUT material's name (0x520..0x538: the four materials).
+    pub header_materials: Vec<Option<String>>,
+}
+
+/// bo2mp: what a sun volume holds for lighting: its four reflection probe
+/// arrays (image, configs, blends), its four probe volumes (three images
+/// each) and its four sky boxes' images, by name and file offset.
+#[derive(Clone, Debug, Default)]
+pub struct SunVolumeLighting {
+    /// (image, configs (file offset, count + 1), blends (file offset, count)).
+    pub reflection_probes: Vec<(Option<String>, Span, Span)>,
+    pub probe_volumes: Vec<[Option<String>; 3]>,
+    pub sky_images: Vec<Option<String>>,
+    /// The exposure grids' probes (file offset, count).
+    pub exposure_grids: Vec<Span>,
 }
 
 fn count(s: &Stream, at: usize) -> Result<usize> {
@@ -159,21 +184,25 @@ fn sun_volume(s: &mut Stream, v: usize, rec: &mut GfxWorldRec, first: bool) -> R
     }
     let n = count(s, v + 1696)?;
     s.records(v + 1704, n, 2, 1)?;
+    let mut light = SunVolumeLighting::default();
     for k in 0..4 {
         let r = v + 1712 + 40 * k;
-        image(s, r + 8)?;
+        let im = s.asset_named(AssetType::Image, r + 8)?;
         let n = count(s, r + 32)?;
-        s.records(r + 16, n + 1, PROBE_CONFIG, 15)?;
+        let configs = span(s, r + 16, n + 1, PROBE_CONFIG, 15)?;
         let n = count(s, r + 36)?;
-        s.records(r + 24, n, PROBE_BLEND, 15)?;
+        let blends = span(s, r + 24, n, PROBE_BLEND, 15)?;
         stream_wrapped(s, r)?;
+        light.reflection_probes.push((im, configs, blends));
     }
     for k in 0..4 {
         let p = v + 1872 + 32 * k;
-        for j in 0..3 {
-            image(s, p + 8 * j)?;
+        let mut names: [Option<String>; 3] = Default::default();
+        for (j, n) in names.iter_mut().enumerate() {
+            *n = s.asset_named(AssetType::Image, p + 8 * j)?;
         }
         stream_wrapped(s, p + 24)?;
+        light.probe_volumes.push(names);
     }
     for k in 0..4 {
         let b = v + 2000 + 24 * k;
@@ -182,15 +211,19 @@ fn sun_volume(s: &mut Stream, v: usize, rec: &mut GfxWorldRec, first: bool) -> R
         {
             rec.sky_models.push(m);
         }
+        let mut sky = None;
         if let Some(i) = s.array(b + 16, 72, 7)? {
-            image(s, i)?;
+            sky = s.asset_named(AssetType::Image, i)?;
             stream_wrapped_body(s, i + 8)?;
         }
+        light.sky_images.push(sky);
     }
     for k in 0..4 {
         let g = v + 2096 + 16 * k;
         let n = count(s, g)?;
-        let Some(t) = s.records(g + 8, n, EXPOSURE_PROBE, 7)? else { continue };
+        let t = s.records(g + 8, n, EXPOSURE_PROBE, 7)?;
+        light.exposure_grids.push(t.map(|t| (t, n)));
+        let Some(t) = t else { continue };
         for i in 0..n {
             let e = t + EXPOSURE_PROBE * i;
             let voxels = s.u16_at(e + 40)? as usize * s.u16_at(e + 42)? as usize * s.u16_at(e + 44)? as usize;
@@ -204,6 +237,8 @@ fn sun_volume(s: &mut Stream, v: usize, rec: &mut GfxWorldRec, first: bool) -> R
             }
         }
     }
+    rec.sun_volumes.push(v);
+    rec.sun_lighting.push(light);
     Ok(())
 }
 
@@ -246,16 +281,16 @@ pub fn gfx_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
     planes(s, h, 0x118)?;
     // Exposure volumes (`GfxExposureVolume`, 108; `mp_sector` has eight).
     let n = count(s, h + 0x128)?;
-    s.records(h + 0x130, n, EXPOSURE_VOLUME, 3)?;
+    rec.exposure_volumes = span(s, h + 0x130, n, EXPOSURE_VOLUME, 3)?;
     planes(s, h, 0x138)?;
     let n = count(s, h + 0x148)?;
-    s.records(h + 0x150, n, FOG_VOLUME, 15)?;
+    rec.fog_volumes = span(s, h + 0x150, n, FOG_VOLUME, 15)?;
     planes(s, h, 0x158)?;
     let n = count(s, h + 0x168)?;
     s.records(h + 0x170, n, 44, 15)?;
     planes(s, h, 0x178)?;
     let n = count(s, h + 0x188)?;
-    s.records(h + 0x190, n, LUT_VOLUME, 3)?;
+    rec.lut_volumes = span(s, h + 0x190, n, LUT_VOLUME, 3)?;
     planes(s, h, 0x198)?;
     let n = count(s, h + 0x1a8)?;
     if let Some(t) = s.records(h + 0x1b0, n, GRIME_VOLUME, 7)? {
@@ -354,7 +389,8 @@ pub fn gfx_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
     let at = s.capture.world.gfx_worlds.len() - 1;
     // Materials, umbra, lenses, lit fog, decals.
     for f in [0x520, 0x528, 0x530, 0x538] {
-        s.asset(AssetType::Material, h + f)?;
+        let m = s.asset_named(AssetType::Material, h + f)?;
+        s.capture.world.gfx_worlds[at].header_materials.push(m);
     }
     let n = count(s, h + 0x540)?;
     s.records(h + 0x548, n, 68, 3)?;
@@ -381,7 +417,8 @@ pub fn gfx_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
     // Lit fog volumes (360: planeStart and planeCount first, then x64-zt's
     // `GfxLitFogVolume`) and their planes (the 0x5c0 array: vec4s).
     let n = count(s, h + 0x5a8)?;
-    s.records(h + 0x5b0, n, 360, 15)?;
+    let lit_fog = span(s, h + 0x5b0, n, 360, 15)?;
+    s.capture.world.gfx_worlds[at].lit_fog_volumes = lit_fog;
     planes(s, h, 0x5b8)?;
     // Volume decals (`GfxVolumeDecal`, 184, the material at 152:
     // `mp_nuketown_x`'s twelve).
@@ -426,7 +463,6 @@ pub fn gfx_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
         }
     }
     s.no_loads(h + 0x1bb0, 0x1ff0 - 0x1bb0, &[])?;
-    let _ = at;
     Ok(name)
 }
 
