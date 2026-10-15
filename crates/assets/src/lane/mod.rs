@@ -26,6 +26,7 @@ pub(crate) use t7_map::load_t7_world;
 mod jup_light;
 mod jup_map;
 mod jup_sky;
+mod jup_terrain;
 pub(crate) use jup_map::load_jup_world;
 // bo2mp: Infinite Warfare's Zombies maps as Black Ops II Zombies.
 mod iw7_zombies;

@@ -190,17 +190,49 @@ names, no other map zone more than one). Start one with `map jup:<zone>`.
 - Sheets (flat, wider than 16384 units): the sea (Rebirth: 14 at z=64) is
   drawn cut to the play area and 16384 units around, not collided; the sea
   bed and vista sheets are not drawn (they stretched the bounds to ±144k).
-- Sky: not found in the zone (the only cube is 128x141 format 0x12); a
-  procedural daylight cube stands in.
-- Collision: the drawn world and placed models inside the play area; the
-  zone's `col_map` is not read. Spawns: made over the map's path
-  nodes when the install has its entity text
-  (`jupiter/Assets/MapEnts/SpawnVars/<map>.d3dbsp`: Tokyo), else over the
-  walkable floor of the play area (Rebirth).
+- Terrain (`map/terrain.rs`, `lane/jup_terrain.rs`): the ground between
+  the buildings is in no world surface (Rebirth's island showed the sea
+  through it). An asset of the map's name holds the height field's header
+  (+0x14 half side 16384, +0x20 1025 samples a side, +0x28 128 cells,
+  +0x2c lowest height, +0x3c side 32768, +0x44 85 quadtree nodes) and at
+  +0x100 a coarse 132 x 132 u16 grid (128 cells of 256 units and 2 more
+  each side, sample centres from -16768, height `lowest + v / 8`); the
+  1025-sample field is not in the zone. The grid is drawn and collided as
+  16 x 16-cell chunks (chunks under the sea are drawn only), 20 units up
+  (the path nodes on no world surface stand that far above it, 73% within
+  32). The virtual texture: a table of 1365 tiles (a 6-level quadtree, each
+  level row by row from -x -y) of 5 image back-pointers each, the BC1
+  (0x25) one the colour; tiles are 256 px with a 4 px border (one BC1
+  block), so a level is the tiles' inner 248 px side by side, and levels 0
+  to 4 make one BC1 picture's mip chain (3968 px, about 9 units a pixel).
+  Where it lies was fitted against the grid's coast: from (-16225,
+  -16225), 34900 a side (the land masks agree on 95%).
+- Entities: the zone's `map_ents` (`map/ents.rs`; pairs of key index,
+  kind and value over hashed keys, GUIDs, vectors and pooled strings). MP
+  spawn points are not among them: they are made over the AI nodes.
+  Worldspawn has the sun (`sundirection`, `suncolor`, `sunlight`).
+- Light (`lane/jup_light.rs`): the lightmaps are not read. The sun and
+  the sky are baked into the world's vertex colours (a sun ray and 6 sky
+  rays a vertex against the world and the larger placed models' coarse
+  LODs, through a BVH) as the share of the light that reaches the vertex,
+  drawn through the IW3 lightmapped path over a uniform lightmap of the
+  sky's colour; each placed model takes one light sample above itself.
+  World triangles wind clockwise seen from the front (every sea triangle
+  does seen from above); normals follow that.
+- Sky (`lane/jup_sky.rs`): the zone's BC6H (0x2d) pictures of use 0x3a,
+  twice as wide as high, are two mirrored squares each the upper
+  hemisphere seen from above; mapped concentrically with height
+  `1 - r^k`, `k` fitted to put the picture's sun at worldspawn's height,
+  turned to worldspawn's sun direction, exposed and written as the cube.
+- Collision: the drawn world, the terrain and placed models inside the
+  play area; surfaces wholly 48 units under the sea and models 192 under
+  it do not collide (the fall kill plane then sits just under the island).
+  The zone's `col_map` is not read.
 - World surfaces' extra stream (record +0x34, 4 bytes a vertex) holds blend
   weights, not colours.
-- Not read yet: lightmaps / light grid, terrain virtual textures, `col_map`,
-  the zone's `map_ents`, the real sky.
+- Not read yet: lightmaps / light grid / probes (surfaces carry lightmap
+  indexes 0..29 and atlas UVs, the pictures were not found), the full
+  height field, `col_map`.
 - A hidden test run spawns with `BO2MP_AUTOCLASS=class_smg` (the console's
   `spawn 0` waits for a class menu nobody answers):
   `iw4l map jup:mp_jup_escape5 --cmds "wait world; wait 50s; force_match_start &; …"`.

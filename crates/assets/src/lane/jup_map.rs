@@ -364,6 +364,20 @@ fn as_t7(map: &JupMap, report: &mut Vec<String>) -> T7Map {
             maxs: hi,
         });
     }
+    // The terrain (the ground between the buildings), drawn with the
+    // material after the map's own (its virtual texture's picture, added
+    // with the pictures).
+    if let Some(terrain) = &map.terrain {
+        let material = (!map.materials.is_empty()).then_some(map.materials.len());
+        let added = super::jup_terrain::add_mesh(&mut t7, terrain, map.virtual_texture.as_ref(), material);
+        report.push(format!(
+            "jup terrain: {} surfaces over {}x{} heights {} units apart",
+            added.len(),
+            terrain.size,
+            terrain.size,
+            terrain.cell
+        ));
+    }
     // The sky: a daylight cube, the glow where the Black Ops III builder's
     // default sun stands (60 degrees up, toward +x +y).
     t7.sky_cube = Some(daylight_sky(256, [0.3536, 0.3536, 0.866]));
@@ -595,6 +609,9 @@ fn with_worldspawn_sun(text: &str, angles: [f32; 3], colour: [f32; 3]) -> String
 
 /// The largest a picture is drawn at.
 const PICTURE_MAX: u32 = 1024;
+/// The terrain texture's finest quadtree level drawn (Rebirth: 16 tiles a
+/// side, 3968 px, about 9 units a pixel).
+const TERRAIN_LEVEL: u32 = 4;
 
 /// Does a BC1 picture cut holes (a tenth of its blocks in the
 /// punch-through mode)? Its material is then drawn alpha-tested.
@@ -774,6 +791,23 @@ pub(crate) fn load_jup_world(
     let mut t7 = as_t7(&map, &mut report);
     let stage = progress.begin_scoped(StageId::MapAssets, "modern warfare iii pictures", None);
     materials_into(&map, &mut t7, &src.install, oodle.as_ref(), &mut report);
+    // The terrain's material (index: after the map's own, see `as_t7`).
+    if map.terrain.is_some() && !map.materials.is_empty() {
+        let mut mat = MapMaterial {
+            name: "jup_terrain".to_owned(),
+            technique_set: String::new(),
+            textures: Vec::new(),
+            constants: Default::default(),
+            bound: Vec::new(),
+        };
+        if let (Some(vt), Some(paks)) = (map.virtual_texture.as_ref(), map.packages.as_ref())
+            && let Some(picture) = super::jup_terrain::picture(vt, paks, oodle.as_ref(), TERRAIN_LEVEL, &mut report)
+        {
+            t7.add_image("jup_terrain_colour".to_owned(), picture);
+            mat.textures.push((0, "jup_terrain_colour".to_owned()));
+        }
+        t7.materials.push(mat);
+    }
     // The map's own sky, where its pictures are in the install.
     if !map.sky_images.is_empty()
         && let Some(paks) = map.packages.as_ref()
