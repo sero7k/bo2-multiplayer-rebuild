@@ -95,6 +95,21 @@ fn main() {
                     println!("    ... 2096..");
                     dump(&z.image, v + 2160, 4536 - 2160);
                 }
+                if hex.contains("grid")
+                    && let Some(Some((at, n))) = l.exposure_grids.first()
+                {
+                    for j in 0..*n {
+                        let e = at + 80 * j;
+                        let mut line = format!("    grid {j:3}:");
+                        for k in (0..40).step_by(4) {
+                            line.push_str(&format!(" {:.3}", f32_at(&z.image, e + k)));
+                        }
+                        for k in (40..80).step_by(2) {
+                            line.push_str(&format!(" {}", u16::from_le_bytes([z.image[e + k], z.image[e + k + 1]])));
+                        }
+                        println!("{line}");
+                    }
+                }
                 if hex.contains("table") {
                     // Every config of state 0, one line each: 82 words.
                     if let Some((_, Some((at, n)), _)) = l.reflection_probes.first() {
