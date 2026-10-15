@@ -97,7 +97,11 @@ pub fn common_zones_cp(dir: &Path) -> Vec<PathBuf> {
         "patch_global_core_mp",
         "global_core_mp",
         "techsets_global_core_mp",
-        // (`flat_nml`, the flat normal map cp_zmb's painted metal names.)
+        // (`flat_nml`, the flat normal map the Zombies maps' painted metal
+        // and glass name, and `black`: global_mp's.)
+        "patch_global_mp",
+        "global_mp",
+        "techsets_global_mp",
         "patch_common_mp",
         "common_mp",
         "techsets_common_mp",
