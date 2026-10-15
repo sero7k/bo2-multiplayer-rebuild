@@ -76,3 +76,37 @@ that have parts (2,497,482 rows, all equal to the part's own row); the 8
 `*_cdn.xpak` (kind 4) name no installed parts. `xpak_cache/cache_N_2.xpak`
 (flavor 1, kind 1) index `cache_N_2.xpakdata` (entries start `1D F0`); not
 read yet.
+
+## Resurgence's sounds (`gamemode_iw4::resurgence::SOUNDS`)
+
+Read at runtime from `ingame_br`, `eng_ingame_br`, `eng_mp_jup_escape5`,
+`ingame_shared_mp` and `mp_jup_escape5` (`asset_audio::jup_resurgence_sounds`):
+1.21 has 1,527 aliases in `ingame_br`, 893 in `mp_jup_escape5`, 1,615 English
+voice lines in `eng_ingame_br` and 30 in `eng_mp_jup_escape5`; the battle
+royale's pickups, cash, armor hit markers, purchase and end stings are in
+`ingame_shared_mp` (16,628 aliases with `ingame_mp` and the base zones). Alias names are FNV-1a
+hashes; a route names an alias where the name is known and `#<hash>` where
+it is not.
+
+- Names: the music (`mus_mx_mp_br_ri_*`, plain in `ingame_br`), and ~480
+  sound names recovered by hashing: identifiers of the zones
+  (`jup_alias_names`), and words of the zones joined under prefixes met from
+  each hash's end (`jup_alias_brute --tails`: `br_splash_mission_accept`,
+  `br_circle_closing`, `uin_iw9_br_victory_slam`, `br_pickup_cash_med_01`,
+  `hit_marker_armor_break_plr`, `ui_select_purchase_confirm`, `emt_escape5_*` ...).
+- The announcer: the voice lines of the two English zones were decoded from
+  the install and run through a local speech-to-text model on the owner's PC
+  (transcripts stay there, `C:\RE-Tools\jup\br\vo_all.tsv`; nothing of them
+  is committed), then sorted into events by what they say. 304 of the 1,645
+  hashed lines are Resurgence's (redeploys, the circle and safe zone,
+  squads and players left, the countdown numbers, contracts, UAVs, loadout
+  drops, buy station, victory and placings, infil and landing); 879 belong
+  to the other modes these zones also carry (DMZ, Plunder, Lockdown, the
+  Gulag, events) and 462 are flavour lines with no event here.
+- Rebirth Island's ambience: the 37 stereo `wz23` streams of
+  `mp_jup_escape5` of 90–97 s (beds), chained one after another.
+
+Not named yet, so these events keep Black Ops II's stand-ins (or the
+nearest MW3 sound, said in the route): the plate insert itself (the armor
+box's refill plays), plates full, squads remaining, gas tick/enter, the
+circle closed, the loadout crate landing, the first spawn.
