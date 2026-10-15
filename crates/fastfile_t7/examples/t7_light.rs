@@ -95,6 +95,25 @@ fn main() {
                     println!("    ... 2096..");
                     dump(&z.image, v + 2160, 4536 - 2160);
                 }
+                if hex.contains("table") {
+                    // Every config of state 0, one line each: 82 words.
+                    if let Some((_, Some((at, n)), _)) = l.reflection_probes.first() {
+                        for j in 0..*n {
+                            let c = at + 328 * j;
+                            let mut line = format!("    cfg {j:3}:");
+                            for k in (0..328).step_by(4) {
+                                let u = u32_at(&z.image, c + k);
+                                let f = f32_at(&z.image, c + k);
+                                if u != 0 && f.is_finite() && f.abs() > 1e-6 && f.abs() < 1e7 {
+                                    line.push_str(&format!(" {f:.4}"));
+                                } else {
+                                    line.push_str(&format!(" #{u:x}"));
+                                }
+                            }
+                            println!("{line}");
+                        }
+                    }
+                }
                 if hex.contains("probes") {
                     for (k, (_, c, b)) in l.reflection_probes.iter().enumerate() {
                         if let Some((at, n)) = c {
