@@ -749,6 +749,49 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
         let y = page1.a * 4.064516 - 2.064516;
         var f = saturate(inverseSqrt(1.0 + x * x + y * y));
         var n_iw3 = normalize(in.normal);
+#ifdef WATER
+        // bo2mp: CoD4 / World at War water (`wc_water`; the lane's
+        // `legacy_water_table`). The games simulate their waves each frame;
+        // here four scrolled samples of a ripple map make the normal (water
+        // lies flat: no tangent frame), and, in CoD4's gamma space, the
+        // water's colour under its baked light and the sun mixes toward the
+        // reflection probe by the material's fresnel (envMapParms x to y by
+        // (1 - N.V)^z), plus the sun's glint on the ripples.
+        let wl0 = textureLoad(colour_map, vec2<i32>(0, 0), 0);
+        let wl1 = textureLoad(colour_map, vec2<i32>(1, 0), 0);
+        let wl2 = textureLoad(colour_map, vec2<i32>(2, 0), 0);
+        let wl3 = textureLoad(colour_map, vec2<i32>(3, 0), 0);
+        let wns = textureLoad(colour_map, vec2<i32>(4, 0), 0);
+        let wlw = textureLoad(colour_map, vec2<i32>(5, 0), 0);
+        let wc0 = textureLoad(colour_map, vec2<i32>(6, 0), 0);
+        let wc1 = textureLoad(colour_map, vec2<i32>(7, 0), 0);
+        let wca = textureLoad(colour_map, vec2<i32>(8, 0), 0);
+        let wcb = textureLoad(colour_map, vec2<i32>(9, 0), 0);
+        let wt = t6_dyn.count.y;
+        let wp = in.world_position.xy;
+        let na = textureSample(normal_map, colour_sampler, wp * wl0.xy + wt * wl0.zw).xy * wns.x + wns.y;
+        let nb = textureSample(normal_map, colour_sampler, wp * wl1.xy + wt * wl1.zw).xy * wns.x + wns.y;
+        let nc = textureSample(specular_map, colour_sampler, wp * wl2.xy + wt * wl2.zw).xy * wns.z + wns.w;
+        let nd = textureSample(specular_map, colour_sampler, wp * wl3.xy + wt * wl3.zw).xy * wns.z + wns.w;
+        let wn = normalize(vec3(na * wlw.x + nb * wlw.y + nc * wlw.z + nd * wlw.w, 1.0));
+        let wv = normalize(in.world_position - view.world_position);
+        let wndotv = saturate(dot(wn, -wv));
+        let wfres = saturate(wc0.z + wc0.w * pow(1.0 - wndotv, max(wc0.y, 0.5)));
+        let wvis = page2.a * sun_shadow_at(in.world_position);
+        let wsun = t6.sun_color.rgb * wvis;
+        let wlg = page0.rgb + page1.rgb * f + wsun * saturate(dot(wn, t6.sun_dir_exposure.xyz));
+        let wr = wv - 2.0 * dot(wv, wn) * wn;
+        let we = textureSampleLevel(probe_cubes, probe_sampler, wr, i32(in.probe), 0.0);
+        // (The map's own probes are gamma values, their alpha folded in; a
+        // Black Ops II model map's are linear rgb / a.)
+        let wenv = select(sqrt(max(we.rgb / (we.a + 0.000001), vec3(0.0))), we.rgb, t6.sun_color.a > 3.5);
+        let wbody = mix(wca, wcb, wndotv);
+        var wg = mix(wbody.rgb * wlg, wenv, wfres);
+        let wglint = exp2(log2(max(saturate(dot(wr, t6.sun_dir_exposure.xyz)), 0.000001)) * max(wc0.x, 1.0));
+        wg += wsun * (wglint * wc1.x);
+        let wa = saturate(mix(wbody.a, 1.0, wfres));
+        return vec4(bo2_out(bo2_fog(wg * wg, in.world_position)), wa);
+#endif
 #ifdef SHINE
         // bo2mp: the normal map (Black Ops II's layout: a CoD4 map's xGxR
         // one is moved there when linked, `world_iw3::iw3_normal_to_bo2`)

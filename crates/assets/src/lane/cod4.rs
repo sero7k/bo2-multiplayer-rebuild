@@ -179,6 +179,12 @@ fn link_world_materials(
     let mut shine_maps = 0usize;
     let mut water_count = 0usize;
     let mut out = Vec::with_capacity(world.surfaces.len());
+    // bo2mp: water draws as moving water only where the map has reflections
+    // to show on it (its own probes, or a Black Ops II model map's); the
+    // fallback pass skips water without them, so elsewhere it keeps its flat
+    // colour.
+    let water_probes = legacy_probes_ready(zone, world, look);
+    let mut moving_water = 0usize;
     let mut sky_line = None;
     for surf in &world.surfaces {
         let Some(mid) = surf.material else {
@@ -236,7 +242,73 @@ fn link_world_materials(
         // normal map instead. Drawn here as its `waterColor` (alpha below 1
         // blended over the bed), not the placeholder.
         let water = legacy_water_colour(technique_set, material);
-        if let Some(rgba) = water
+        let water_rows = water_probes.then(|| legacy_water_table(technique_set, material)).flatten();
+        if let Some(rows) = water_rows
+            && let Some(texture) = colour
+        {
+            // bo2mp: moving water (the fallback pass's IW3 water): its
+            // table in the colour map's place, the ripple map in both normal
+            // slots.
+            draw.water = true;
+            if rows[8][3] < 1.0 && draw.blend == asset_core::T6Blend::Opaque {
+                draw.blend = asset_core::T6Blend::Blend;
+            }
+            let table = *images.entry(format!("{}#watertable", material.name)).or_insert_with(|| {
+                Some(catalog.link_image(AuthoredImage {
+                    namespace: AssetNamespace::T6,
+                    name: AssetRef::Real(format!("{tag}:{}#watertable", material.name)),
+                    map_type: 0,
+                    semantic: TS_COLOR_MAP,
+                    category: 0,
+                    use_srgb_reads: false,
+                    width: rows.len() as u16,
+                    height: 1,
+                    depth: 1,
+                    level_count: 1,
+                    format: 0,
+                    payload: Arc::new(Vec::new()),
+                    decoded: Some(Arc::new(super::t6_materials::water_image(&rows))),
+                    common_owned: false,
+                    decoded_variant: None,
+                    decoded_by: None,
+                    pending_decode: None,
+                }))
+            });
+            let ripple = *images.entry("#legacy_water_ripple".to_owned()).or_insert_with(|| {
+                let (w, h, rgba) = ripple_normal_map();
+                Some(catalog.link_image(AuthoredImage {
+                    namespace: AssetNamespace::T6,
+                    name: AssetRef::Real(format!("{tag}:#water_ripple")),
+                    map_type: 0,
+                    semantic: TS_NORMAL_MAP,
+                    category: 0,
+                    use_srgb_reads: false,
+                    width: w as u16,
+                    height: h as u16,
+                    depth: 1,
+                    level_count: 1,
+                    format: 0,
+                    payload: Arc::new(Vec::new()),
+                    decoded: Some(Arc::new(linear_image(w, h, rgba))),
+                    common_owned: false,
+                    decoded_variant: None,
+                    decoded_by: None,
+                    pending_decode: None,
+                }))
+            });
+            water_count += 1;
+            moving_water += 1;
+            for (semantic, image) in [(TS_COLOR_MAP, table), (TS_NORMAL_MAP, ripple), (TS_SPECULAR_MAP, ripple)] {
+                textures.push(MaterialTextureBinding {
+                    name_hash: texture.name_hash,
+                    name_start: 0,
+                    name_end: 0,
+                    sampler_state: texture.sampler_state,
+                    semantic,
+                    image,
+                });
+            }
+        } else if let Some(rgba) = water
             && let Some(texture) = colour
         {
             if rgba[3] < 255 && draw.blend == asset_core::T6Blend::Opaque {
@@ -594,7 +666,7 @@ fn link_world_materials(
         } else {
             String::new()
         } + &if water_count > 0 {
-            format!("; {water_count} water drawn by its colour")
+            format!("; {water_count} water ({moving_water} moving, the rest by its colour)")
         } else {
             String::new()
         }
@@ -759,6 +831,106 @@ fn legacy_film_vision(
     }
 }
 
+/// bo2mp: whether the fallback pass will have reflection probes for this
+/// map (a Black Ops II model map's, or the map's own 64x64 cubes, as
+/// `link_own_probes` takes them).
+fn legacy_probes_ready(zone: &iw3::zone::Zone, world: &iw3::zone::GfxWorld, look: Option<&super::bo2_look::Look>) -> bool {
+    if look.and_then(|l| l.capture.world.as_ref()).is_some_and(|m| !m.reflection_probes.is_empty()) {
+        return true;
+    }
+    let many = world.reflection_probes.len() > 1;
+    world.reflection_probes.iter().enumerate().any(|(i, p)| {
+        !(i == 0 && many)
+            && p.image
+                .and_then(|i| zone.image(i))
+                .and_then(|img| img.load_def.as_ref())
+                .is_some_and(|d| d.format == 21 && d.dimensions[0] == 64)
+    })
+}
+
+/// bo2mp: a CoD4 / World at War water material's table for the fallback
+/// pass's IW3 water (`fragment_lightmapped`), one RGBA16F texel each, laid
+/// out as Black Ops II's water table (`t6_materials::water_table`): 0..3
+/// the four ripple layers (world xy scale, scroll per second), 4 the
+/// ripple map's scale and bias, 5 the layers' weights, 6 the sun glint's
+/// power, the fresnel's exponent, least share and range (`envMapParms`
+/// x, y, z: the reflection's share runs from x to y by (1 - N.V)^z), 7 the
+/// glint's strength (`envMapParms` w), 8 and 9 the water's colour (its
+/// `waterColor`, gamma values) and opacity. The games' own water is a wave
+/// simulation drawn each frame (`watersetup0`); this stands in for it with
+/// scrolling ripples, its colour and its reflection.
+fn legacy_water_table(technique_set: &str, material: &iw3::zone::Material) -> Option<Vec<[f32; 4]>> {
+    legacy_water_colour(technique_set, material)?;
+    let constant = |name: &str| material.constants.iter().find(|c| c.name == name).map(|c| c.literal);
+    let colour = constant("waterColor").unwrap_or([0.26, 0.28, 0.22, 0.6]);
+    let env = constant("envMapParms").unwrap_or([0.2, 0.6, 4.0, 1.0]);
+    let opacity = if colour[3] > 0.0 { colour[3].max(0.35) } else { 1.0 };
+    let (least, most) = (env[0].clamp(0.0, 1.0), env[1].clamp(0.0, 1.0).max(env[0].clamp(0.0, 1.0)));
+    let body = [colour[0], colour[1], colour[2], opacity];
+    Some(vec![
+        [1.0 / 310.0, 1.0 / 310.0, 0.011, 0.006],
+        [1.0 / 173.0, 1.0 / 173.0, -0.008, 0.010],
+        [1.0 / 97.0, 1.0 / 97.0, 0.019, -0.012],
+        [1.0 / 59.0, 1.0 / 59.0, -0.015, -0.020],
+        [2.0, -1.0, 2.0, -1.0],
+        [0.32, 0.28, 0.22, 0.18],
+        [192.0, env[2].clamp(1.0, 8.0), least, most - least],
+        [env[3].clamp(0.0, 4.0) * 0.4, 0.0, 0.0, 0.0],
+        body,
+        body,
+    ])
+}
+
+/// bo2mp: a tiling 256x256 ripple normal map (a sum of waves whole in the
+/// tile), Black Ops II's layout (x red, y green, 0.5 flat), for the IW3
+/// water. Made once.
+fn ripple_normal_map() -> (u32, u32, Vec<u8>) {
+    use std::sync::OnceLock;
+    static MAP: OnceLock<(u32, u32, Vec<u8>)> = OnceLock::new();
+    MAP.get_or_init(|| {
+        const N: usize = 256;
+        // (cycles across the tile in x and y, amplitude, phase)
+        const WAVES: [(f32, f32, f32, f32); 8] = [
+            (3.0, 1.0, 1.0, 0.3),
+            (-2.0, 4.0, 0.8, 1.1),
+            (5.0, -3.0, 0.5, 2.0),
+            (1.0, 7.0, 0.4, 0.7),
+            (-8.0, 2.0, 0.3, 2.9),
+            (9.0, 6.0, 0.2, 1.7),
+            (-4.0, -11.0, 0.15, 0.4),
+            (13.0, -5.0, 0.12, 2.2),
+        ];
+        let tau = std::f32::consts::TAU;
+        let mut grads = vec![(0.0f32, 0.0f32); N * N];
+        let mut largest = 1e-6f32;
+        for y in 0..N {
+            for x in 0..N {
+                let (mut gx, mut gy) = (0.0, 0.0);
+                for (kx, ky, a, ph) in WAVES {
+                    let c = (tau * (kx * x as f32 + ky * y as f32) / N as f32 + ph).cos();
+                    gx += a * kx * c;
+                    gy += a * ky * c;
+                }
+                largest = largest.max((gx * gx + gy * gy).sqrt());
+                grads[y * N + x] = (gx, gy);
+            }
+        }
+        // The steepest slope 0.6.
+        let scale = 0.6 / largest;
+        let mut rgba = Vec::with_capacity(N * N * 4);
+        for (gx, gy) in grads {
+            let n = [-gx * scale, -gy * scale, 1.0];
+            let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            for v in n {
+                rgba.push(((v / len * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8);
+            }
+            rgba.push(255);
+        }
+        (N as u32, N as u32, rgba)
+    })
+    .clone()
+}
+
 /// bo2mp: a CoD4 / World at War water material's (`wc_water`, not the
 /// dynamic ocean, whose colour map is its real foam) colour as one sRGB
 /// texel: its `waterColor` constant (gamma values; alpha its opacity, 0
@@ -777,6 +949,28 @@ fn legacy_water_colour(technique_set: &str, material: &iw3::zone::Material) -> O
     let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     let alpha = if colour[3] > 0.0 { colour[3].max(0.35) } else { 1.0 };
     Some([byte(colour[0] * kept), byte(colour[1] * kept), byte(colour[2] * kept), byte(alpha)])
+}
+
+#[cfg(test)]
+mod moving_water_tests {
+    #[test]
+    fn the_ripple_map_tiles_and_is_unit_length() {
+        let (w, h, px) = super::ripple_normal_map();
+        assert_eq!((w, h, px.len()), (256, 256, 256 * 256 * 4));
+        let at = |x: usize, y: usize| -> [f32; 3] {
+            let p = &px[(y * 256 + x) * 4..][..3];
+            [0, 1, 2].map(|c| f32::from(p[c]) / 255.0 * 2.0 - 1.0)
+        };
+        for (x, y) in [(0, 0), (17, 200), (255, 255), (128, 3)] {
+            let n = at(x, y);
+            let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            assert!((len - 1.0).abs() < 0.02, "{len}");
+            assert!(n[2] > 0.8);
+        }
+        // Whole waves: the last column leads into the first.
+        let (a, b) = (at(255, 40), at(0, 40));
+        assert!((a[0] - b[0]).abs() < 0.08 && (a[1] - b[1]).abs() < 0.08);
+    }
 }
 
 #[cfg(test)]

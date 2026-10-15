@@ -823,7 +823,7 @@ fn tile_images(
 }
 
 /// bo2mp: the water table as an RGBA16F picture (read by texel).
-fn water_image(rows: &[[f32; 4]]) -> Image {
+pub(super) fn water_image(rows: &[[f32; 4]]) -> Image {
     let data: Vec<u8> = rows
         .iter()
         .flatten()
