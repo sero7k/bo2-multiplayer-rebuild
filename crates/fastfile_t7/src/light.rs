@@ -399,6 +399,44 @@ impl Bake {
     }
 }
 
+/// One probe's six faces at level `mip`, decoded.
+pub struct ProbeFaces {
+    pub size: u32,
+    pub texels: Vec<Vec<[f32; 3]>>,
+}
+
+/// Probe `index`'s six faces at level `mip` (as stored: face-major, each
+/// face its whole chain).
+pub fn probe_faces(map: &T7Map, index: usize, mip: u32) -> Result<ProbeFaces, String> {
+    let p = map.light_refs.as_ref().and_then(|r| r.probes.as_ref()).ok_or("no probes")?;
+    let paks = map.paks().ok_or("no packages")?;
+    let d = paks.read(p.key).map_err(|e| e.to_string())?;
+    let lsize = |k: u32| crate::texture::level_size(p.format, p.size >> k, p.size >> k).unwrap_or(0);
+    let face: usize = (0..p.levels).map(lsize).sum();
+    let mip = mip.min(p.levels - 1);
+    let before: usize = (0..mip).map(lsize).sum();
+    let s = (p.size >> mip).max(1);
+    let bw = s.div_ceil(4) as usize;
+    let mut texels = Vec::new();
+    for f in 0..6 {
+        let at = (6 * index + f) * face + before;
+        let mut t = vec![[0f32; 3]; (s * s) as usize];
+        for (i, b) in d.get(at..at + lsize(mip)).ok_or("past the data")?.chunks_exact(16).enumerate() {
+            let px = bc6_block(b);
+            for y in 0..4 {
+                for x in 0..4 {
+                    let (tx, ty) = (i % bw * 4 + x, i / bw * 4 + y);
+                    if tx < s as usize && ty < s as usize {
+                        t[ty * s as usize + tx] = px[y * 4 + x];
+                    }
+                }
+            }
+        }
+        texels.push(t);
+    }
+    Ok(ProbeFaces { size: s, texels })
+}
+
 /// A BC6H lat-long picture averaged down to at most `max_w` wide (each
 /// output pixel the mean of whole 4x4 blocks).
 fn latlong(d: &[u8], s: &SkyRef, max_w: u32, scale: f32) -> Result<SkyPicture, String> {
