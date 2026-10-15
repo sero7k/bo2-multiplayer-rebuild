@@ -350,14 +350,19 @@ fn solid_levels(rgb: [f32; 3]) -> ImageLevels {
 }
 
 /// Black Ops III's animation slots -> Black Ops II's (`szXAnims`, the slots
-/// `WeaponCatalog::capture_t6` reads).
+/// `WeaponCatalog::capture_t6` reads). Black Ops III's two ADS clips are
+/// still poses, not moves: `adsUpAnim` (`vm_<gun>_ads_base_up`) holds the gun
+/// at the hip, `adsDownAnim` (`..._ads_base_down`) down its sights (its
+/// `tag_torso` puts the sight on the eye), the reverse of what Black Ops II's
+/// `adsUp`/`adsDown` end on; so they go in each other's slot (held at the
+/// hip, the gun sat dead centre, aimed).
 const T7_TO_T6_ANIMS: &[(usize, usize)] = &[
     (1, 0x01), (2, 0x02), (3, 0x03), (4, 0x04), (7, 0x05), (10, 0x06), (11, 0x08), (12, 0x09), (14, 0x0D),
     (20, 0x0E), (40, 0x10), (41, 0x12), (42, 0x13), (43, 0x14), (44, 0x15), (45, 0x16), (50, 0x17), (51, 0x18),
     (52, 0x19), (53, 0x1A), (54, 0x1B), (57, 0x1C), (58, 0x1D), (59, 0x1E), (60, 0x1F), (72, 0x20), (73, 0x21),
     (74, 0x22), (75, 0x23), (76, 0x24), (77, 0x25), (84, 0x2C), (85, 0x2D), (86, 0x2E), (87, 0x2F), (88, 0x30),
     (89, 0x31), (90, 0x32), (91, 0x33), (92, 0x34), (93, 0x35), (94, 0x36), (95, 0x37), (103, 0x3A), (104, 0x3D),
-    (106, 0x3E), (107, 0x3F), (108, 0x40), (173, 0x55), (174, 0x56),
+    (106, 0x3E), (107, 0x3F), (108, 0x40), (173, 0x56), (174, 0x55),
 ];
 
 /// Black Ops II's `szXAnims` slot count.

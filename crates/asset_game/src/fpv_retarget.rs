@@ -242,6 +242,55 @@ impl FpvArmsRetarget {
         let (q, t) = local(n);
         let (pq, pt) = world[self.weapon_right];
         world.push((pq * q, pq * t + pt));
+        // bo2mp diag (`BO2MP_T7_ARMS_LOG=1`): per clip mix, once, where the
+        // clips put Black Ops III's arms and the gun.
+        let mut log_mix = false;
+        if std::env::var_os("BO2MP_T7_ARMS_LOG").is_some() {
+            static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+            let key: String = anims.iter().map(|a| format!("{}@{:.1}", a.clip.name, a.weight)).collect::<Vec<_>>().join("+");
+            let fresh = SEEN.lock().is_ok_and(|mut seen| {
+                let fresh = seen.len() < 40 && !seen.contains(&key);
+                if fresh {
+                    seen.push(key.clone());
+                }
+                fresh
+            });
+            log_mix = fresh;
+            if fresh {
+                let at = |name: &str| {
+                    let b = if name == "gun" { Some(n) } else { self.src_index.get(name).copied() };
+                    b.map(|b| {
+                        let (q, t) = world[b];
+                        let (f, u) = (q * Vec3::X, q * Vec3::Z);
+                        format!("{name} at ({:.1} {:.1} {:.1}) fwd ({:.2} {:.2} {:.2}) up ({:.2} {:.2} {:.2})", t.x, t.y, t.z, f.x, f.y, f.z, u.x, u.y, u.z)
+                    })
+                    .unwrap_or_else(|| format!("{name} -"))
+                };
+                let names = ["tag_ads", "tag_cambone", "tag_camera", "tag_torso", "tag_weapon_right", "gun", "j_wrist_ri", "j_wrist_le"];
+                diag::info!(Fpv, "bo2mp t7 arms: [{key}] {}", names.iter().map(|n| at(n)).collect::<Vec<_>>().join(" | "));
+                for anim in anims {
+                    let raw: Vec<String> = ["tag_torso", "tag_weapon_right", "tag_weapon", "j_shoulder_ri"]
+                        .iter()
+                        .filter_map(|want| {
+                            let track = anim.clip.tracks.iter().position(|t| t.name.eq_ignore_ascii_case(want))?;
+                            let s = anim.clip.sample_track(track, anim.time)?;
+                            Some(format!("{want} q {:?} t {:?}", s.rotation.map(|q| q.map(|v| (v * 1000.0).round() / 1000.0)), s.translation.map(|v| v.map(|x| (x * 10.0).round() / 10.0))))
+                        })
+                        .collect();
+                    let ends: Vec<String> = ["tag_torso", "tag_weapon_right"]
+                        .iter()
+                        .filter_map(|want| {
+                            let track = anim.clip.tracks.iter().position(|t| t.name.eq_ignore_ascii_case(want))?;
+                            let d = anim.clip.duration();
+                            let a = anim.clip.sample_track(track, 0.0)?.translation?;
+                            let b = anim.clip.sample_track(track, d)?.translation?;
+                            Some(format!("{want} t0 {:?} tend {:?}", a.map(|x| (x * 10.0).round() / 10.0), b.map(|x| (x * 10.0).round() / 10.0)))
+                        })
+                        .collect();
+                    diag::info!(Fpv, "bo2mp t7 clip {} t={:.2}/{:.2} w={:.2}: {} || {}", anim.clip.name, anim.time, anim.clip.duration(), anim.weight, raw.join(" | "), ends.join(" | "));
+                }
+            }
+        }
         // Black Ops II's arms on them.
         let Some(arms) = dobj.models.first() else { return };
         let mut posed: Vec<(Quat, Vec3)> = Vec::with_capacity(self.dst.len());
@@ -264,6 +313,13 @@ impl FpvArmsRetarget {
                 }
                 None => here,
             };
+            if log_mix {
+                let name = dobj.bones[b].name.as_str();
+                if ["j_wrist_ri", "j_wrist_le", "j_elbow_ri", "j_elbow_le", "j_shoulder_ri", "tag_weapon", "j_index_ri_0", "j_index_le_0"].contains(&name) {
+                    let f = here.0 * Vec3::X;
+                    diag::info!(Fpv, "bo2mp t7 bo2 arm {name}: at ({:.1} {:.1} {:.1}) fwd ({:.2} {:.2} {:.2}) source {:?}", here.1.x, here.1.y, here.1.z, f.x, f.y, f.z, source);
+                }
+            }
             if let Some(slot) = locals.get_mut(b) {
                 let bind_t = dobj.bones[b].bind_translation;
                 slot.rotation = lq.normalize().to_array();
