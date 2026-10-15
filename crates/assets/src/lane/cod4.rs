@@ -177,6 +177,7 @@ fn link_world_materials(
     let (mut decoded, mut grey, mut missing) = (0usize, 0usize, Vec::new());
     let mut layer_maps = 0usize;
     let mut shine_maps = 0usize;
+    let mut water_count = 0usize;
     let mut out = Vec::with_capacity(world.surfaces.len());
     let mut sky_line = None;
     for surf in &world.surfaces {
@@ -210,6 +211,12 @@ fn link_world_materials(
             .map_or("", |t| t.name.as_str());
         let state = TECHNIQUES.iter().find_map(|&t| material.state_bits_for(t));
         let mut draw = T6Draw::from_technique_set(technique_set, material.sort_key, state);
+        // bo2mp: tool surfaces (`wc_tools`: caulk_shadow, aa_default) cast
+        // shadows only; the game never draws their pictures (Cargoship's
+        // caulk drew over 1300 triangles of its decks).
+        if technique_set.trim_start_matches(',').split('_').any(|t| t == "tools") {
+            draw.blend = asset_core::T6Blend::ShadowOnly;
+        }
 
         let mut textures = Vec::new();
         // bo2mp: the base colour map is `colorMap` (a layered material's
@@ -223,7 +230,49 @@ fn link_world_materials(
             .and_then(|t| t.image)
             .and_then(|i| mzone.image(i))
             .and_then(|image| look.and_then(|l| l.swaps.get_key_value(image.name.as_str())));
-        if let Some((key, swap)) = swap
+        // bo2mp: CoD4 / World at War water (`wc_water`) keeps the shader's
+        // placeholder in its colour slot (`case64blue`, a blue grid of
+        // numbers): the game's water shader draws from its constants and
+        // normal map instead. Drawn here as its `waterColor` (alpha below 1
+        // blended over the bed), not the placeholder.
+        let water = legacy_water_colour(technique_set, material);
+        if let Some(rgba) = water
+            && let Some(texture) = colour
+        {
+            if rgba[3] < 255 && draw.blend == asset_core::T6Blend::Opaque {
+                draw.blend = asset_core::T6Blend::Blend;
+            }
+            let slot = *images.entry(format!("{}#water", material.name)).or_insert_with(|| {
+                Some(catalog.link_image(AuthoredImage {
+                    namespace: AssetNamespace::T6,
+                    name: AssetRef::Real(format!("{tag}:{}#water", material.name)),
+                    map_type: 0,
+                    semantic: TS_COLOR_MAP,
+                    category: 0,
+                    use_srgb_reads: true,
+                    width: 1,
+                    height: 1,
+                    depth: 1,
+                    level_count: 1,
+                    format: 0,
+                    payload: Arc::new(Vec::new()),
+                    decoded: Some(Arc::new(rgba_image(1, 1, rgba.to_vec()))),
+                    common_owned: false,
+                    decoded_variant: None,
+                    decoded_by: None,
+                    pending_decode: None,
+                }))
+            });
+            water_count += 1;
+            textures.push(MaterialTextureBinding {
+                name_hash: texture.name_hash,
+                name_start: 0,
+                name_end: 0,
+                sampler_state: texture.sampler_state,
+                semantic: TS_COLOR_MAP,
+                image: slot,
+            });
+        } else if let Some((key, swap)) = swap
             && let Some(texture) = colour
         {
             let slots = *swapped.entry(key.clone()).or_insert_with(|| {
@@ -544,6 +593,10 @@ fn link_world_materials(
             format!("; {swap_count} drawn with Black Ops II materials")
         } else {
             String::new()
+        } + &if water_count > 0 {
+            format!("; {water_count} water drawn by its colour")
+        } else {
+            String::new()
         }
     ));
     report.push(sky_line.unwrap_or_else(|| format!("{tag} sky: none ({} sky surfaces)", world.sky_start_surfs.len())));
@@ -703,6 +756,62 @@ fn legacy_film_vision(
             report.push(format!("film vision: {name} in neither the map's zone, common_mp nor the IWDs"));
             None
         }
+    }
+}
+
+/// bo2mp: a CoD4 / World at War water material's (`wc_water`, not the
+/// dynamic ocean, whose colour map is its real foam) colour as one sRGB
+/// texel: its `waterColor` constant (gamma values; alpha its opacity, 0
+/// read as opaque), else a muddy grey-green. The game's shader reflects the
+/// sky over it by at least `envMapParms.x` (its fresnel's least share), which
+/// this draw has no reflection for: the colour keeps the rest (Cargoship's
+/// night sea, 0.5 reflected, drew as a bright lavender sheet).
+fn legacy_water_colour(technique_set: &str, material: &iw3::zone::Material) -> Option<[u8; 4]> {
+    let tokens: Vec<&str> = technique_set.trim_start_matches(',').split('_').collect();
+    if !tokens.contains(&"water") || tokens.contains(&"dynamic") {
+        return None;
+    }
+    let constant = |name: &str| material.constants.iter().find(|c| c.name == name).map(|c| c.literal);
+    let colour = constant("waterColor").unwrap_or([0.26, 0.28, 0.22, 0.6]);
+    let kept = 1.0 - constant("envMapParms").map_or(0.0, |p| p[0]).clamp(0.0, 0.8);
+    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let alpha = if colour[3] > 0.0 { colour[3].max(0.35) } else { 1.0 };
+    Some([byte(colour[0] * kept), byte(colour[1] * kept), byte(colour[2] * kept), byte(alpha)])
+}
+
+#[cfg(test)]
+mod water_tests {
+    fn water(technique_set: &str, constants: &[(&str, [f32; 4])]) -> Option<[u8; 4]> {
+        let material = iw3::zone::Material {
+            name: "wc/water".into(),
+            game_flags: 0,
+            sort_key: 4,
+            surface_type_bits: 0,
+            state_bits_entry: [0xff; 34],
+            state_flags: 0,
+            camera_region: 0,
+            technique_set: None,
+            textures: Vec::new(),
+            constants: constants
+                .iter()
+                .map(|(n, v)| iw3::zone::MaterialConstant { name_hash: 0, name: (*n).into(), literal: *v })
+                .collect(),
+            state_bits: Vec::new(),
+        };
+        super::legacy_water_colour(technique_set, &material)
+    }
+
+    #[test]
+    fn water_takes_its_colour_less_its_reflection() {
+        // Cargoship's night sea: half of it is the sky's reflection.
+        let sea = water("wc_water", &[("waterColor", [0.4, 0.4, 0.5, 1.0]), ("envMapParms", [0.5, 0.9, 1.0, 2.5])]);
+        assert_eq!(sea, Some([51, 51, 64, 255]));
+        // A muddy puddle (no reflection at its least), half see-through.
+        let mud = water("wc_water", &[("waterColor", [0.4, 0.35, 0.3, 0.5]), ("envMapParms", [0.0, 0.45, 4.0, 2.5])]);
+        assert_eq!(mud, Some([102, 89, 77, 128]));
+        // The dynamic ocean keeps its own foam picture; lit surfaces are not water.
+        assert_eq!(water("wc_water_dynamic", &[]), None);
+        assert_eq!(water("wc_l_sm_r0c0n0s0", &[]), None);
     }
 }
 
@@ -1044,13 +1153,35 @@ pub(crate) fn build_legacy_world(
         };
         r.map_err(|e| report.push(format!("{tag} localized_common_mp: {e}"))).ok()
     });
+    // bo2mp: and the code zones (`code_post_gfx_mp`,
+    // `localized_code_post_gfx_mp`): what common_mp only names lives there
+    // (CoD4's `mc/lambert1`, World at War's destructibles' `mtl_fx_dest_atlas`:
+    // Roundhouse's and Downfall's wrecks were left undrawn without it).
+    let code_zones: Vec<iw3::zone::Zone> = ["code_post_gfx_mp.ff", "localized_code_post_gfx_mp.ff"]
+        .iter()
+        .filter_map(|name| path.parent().map(|d| d.join(name)).filter(|p| p.is_file()))
+        .filter_map(|p| {
+            let r = if tag == "t4" {
+                std::panic::catch_unwind(|| t4::load_map(&p))
+                    .map_err(|_| "reader panicked".to_owned())
+                    .and_then(|r| r.map(|m| m.zone).map_err(|e| e.to_string()))
+            } else {
+                iw3::fastfile::load(&p)
+                    .map_err(|e| e.to_string())
+                    .and_then(|d| iw3::zone::Zone::parse(&d, iw3::zone::ParseOptions::default()).map_err(|e| e.to_string()))
+            };
+            r.map_err(|e| report.push(format!("{tag} {}: {e}", p.display()))).ok()
+        })
+        .collect();
     let mut commons: Vec<&iw3::zone::Zone> = Vec::new();
     commons.extend(localized.as_ref());
     commons.extend(common.as_deref().map(|c| &**c));
+    commons.extend(code_zones.iter());
     report.push(format!(
-        "{tag} shared zones: localized_common_mp {}, common_mp {}",
+        "{tag} shared zones: localized_common_mp {}, common_mp {}, {} code zones",
         if localized.is_some() { "read" } else { "not found" },
-        if common.is_some() { "read" } else { "not found" }
+        if common.is_some() { "read" } else { "not found" },
+        code_zones.len()
     ));
     let surface_materials = link_world_materials(
         tag,
@@ -1122,11 +1253,28 @@ pub(crate) fn build_legacy_world(
     if look.is_some() {
         report.push("bo2 look: the sun is the map's own".to_owned());
     }
+    // bo2mp: a Black Ops II model's sky cube is HDR for the model map's
+    // exposure and its sky material's brightness (`skyColorParm`); this map
+    // draws at exposure 1, so its row takes both (at 1 Makin's, Airfield's
+    // and Castle's borrowed skies burned white).
+    let sky_brightness = look
+        .as_ref()
+        .filter(|l| l.sky.is_some())
+        .and_then(|l| {
+            let model = l.capture.world.as_ref()?;
+            let exposure = model.exposure_volumes.first().map_or(model.init_sun_exposure, |v| v[0]);
+            Some(l.sky_parm[0] * (-exposure).exp2())
+        })
+        .filter(|b| b.is_finite() && *b > 0.0)
+        .unwrap_or(1.0);
+    if look.as_ref().is_some_and(|l| l.sky.is_some()) {
+        report.push(format!("bo2 look: sky brightness {sky_brightness:.4} (the model's skyColorParm and exposure)"));
+    }
     let lighting = asset_world::T6WorldLighting {
         sun: asset_world::WorldSunLight { direction: dir, diffuse: colour, specular: colour },
         exposure_scale: 1.0,
         // The sky cube as the game looks it up (world x, y, z: no turn).
-        sky: [0.0, 1.0, 0.0, 1.0],
+        sky: [0.0, 1.0, 0.0, sky_brightness],
         // (Both sky cubes, the map's own and a BO2 model's, are `rgb / a`;
         // the grade is the BO2 look's, installed on its own.)
         sky_parms: [1.0, 0.0],

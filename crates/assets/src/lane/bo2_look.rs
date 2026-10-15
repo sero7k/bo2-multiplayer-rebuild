@@ -205,6 +205,25 @@ pub(crate) struct Look {
     /// War's skies are small cubes and looked poor under Black Ops II's
     /// grade. `None`: the model has no readable sky; the map keeps its own.
     pub sky: Option<(String, Arc<Image>)>,
+    /// bo2mp: the model sky's own brightness and decode (its material's
+    /// `skyColorParm` y and x), for the sky row: its cube is HDR for the
+    /// model map's exposure, not this map's.
+    pub sky_parm: [f32; 2],
+}
+
+/// bo2mp: the model map's sky material's `skyColorParm` (y its
+/// brightness, x above 0 for a cube stored `rgb / a`); `[1, 1]` without one.
+fn model_sky_parm(capture: &asset_t6::ZoneCapture) -> [f32; 2] {
+    capture
+        .materials
+        .iter()
+        .find(|m| {
+            m.technique_set
+                .and_then(|k| capture.technique_sets.get(k.index))
+                .is_some_and(|t| t.name.contains("skycubemap"))
+        })
+        .and_then(|m| m.constants.iter().find(|c| "skyColorParm".starts_with(c.1.as_str()) && !c.1.is_empty()))
+        .map_or([1.0, 1.0], |c| [c.2[1], c.2[0]])
 }
 
 /// The model map's sky cube: (material name, decoded cube).
@@ -391,7 +410,8 @@ pub(crate) fn load(recipe: &'static Recipe, images: &[String], report: &mut Vec<
             None
         }
     };
-    Some(Look { model: recipe.model, capture, packs, swaps, sky })
+    let sky_parm = model_sky_parm(&capture);
+    Some(Look { model: recipe.model, capture, packs, swaps, sky, sky_parm })
 }
 
 type Pictures = (Arc<Image>, Option<Arc<Image>>, Option<Arc<Image>>);

@@ -91,8 +91,79 @@ pub fn check_map(game: &str, path: &Path) -> String {
                 .cloned()
                 .collect::<Vec<_>>()
                 .join("; ");
-            format!("OK: {line}; {materials}")
+            format!("OK: {line}; {materials}; {}", legacy_texture_census(&loaded))
         }
         (_, Err(why)) => format!("FAIL {why}"),
     }
+}
+
+/// bo2mp: what a CoD4 / World at War map draws untextured: every material
+/// a drawn world batch or a placed prop uses, by its colour binding as the
+/// renderer will see it (no colour slot, no image, or the lane's 1x1 grey
+/// stand-in for a picture it did not find). `textures missing: world N/M
+/// materials (T tris), props P/Q [names]`.
+fn legacy_texture_census(loaded: &LoadedWorld) -> String {
+    use std::collections::BTreeMap;
+    let cat = &loaded.materials;
+    let untextured = |m: usize| -> Option<String> {
+        let mat = cat.materials.get(m)?;
+        let name = mat.name.as_str().to_owned();
+        // (The shadow-only and sky surfaces draw no colour.)
+        if mat.t6_draw.is_some_and(|d| matches!(d.blend, asset_core::T6Blend::ShadowOnly | asset_core::T6Blend::Sky)) {
+            return None;
+        }
+        let colour = mat.textures.iter().find(|t| t.semantic == asset_material::TS_COLOR_MAP);
+        let image = colour.and_then(|t| t.image).and_then(|i| cat.images.get(i));
+        match image {
+            None => Some(format!("{name} (no colour map)")),
+            // (A 1x1 picture is the grey stand-in, unless it is a water
+            // colour the lane made.)
+            Some(img) if img.width <= 1 && img.height <= 1 && !img.name.as_str().ends_with("#water") => {
+                Some(format!("{name} [{}]", img.name.as_str()))
+            }
+            // The editor's placeholder (`case64blue`) drawn as a picture.
+            Some(img) if img.name.as_str().contains("case64") => Some(format!("{name} [{} placeholder]", img.name.as_str())),
+            Some(img) if img.decoded.is_none() && img.payload.is_empty() && img.pending_decode.is_none() => {
+                Some(format!("{name} [{}: no pixels]", img.name.as_str()))
+            }
+            Some(_) => None,
+        }
+    };
+    let mut world: BTreeMap<usize, u64> = BTreeMap::new();
+    if let Some(draw) = &loaded.world.draw {
+        for b in &draw.batches {
+            if let Some(m) = b.material {
+                *world.entry(m).or_default() += (b.packed_indices.len() / 3) as u64;
+            }
+        }
+    }
+    let mut props: BTreeMap<usize, ()> = BTreeMap::new();
+    for mesh in &loaded.world.static_model_meshes {
+        for s in mesh.lod_surfaces.iter().flatten() {
+            if let Some(m) = s.material {
+                props.insert(m, ());
+            }
+        }
+    }
+    let mut names = Vec::new();
+    let (mut wm, mut wt) = (0usize, 0u64);
+    for (&m, &tris) in &world {
+        if let Some(n) = untextured(m) {
+            wm += 1;
+            wt += tris;
+            names.push(format!("world {n} {tris} tris"));
+        }
+    }
+    let mut pm = 0usize;
+    for &m in props.keys() {
+        if let Some(n) = untextured(m) {
+            pm += 1;
+            names.push(format!("prop {n}"));
+        }
+    }
+    format!(
+        "textures missing: world {wm}/{} materials ({wt} tris), props {pm}/{} {names:?}",
+        world.len(),
+        props.len()
+    )
 }
