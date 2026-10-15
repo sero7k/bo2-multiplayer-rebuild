@@ -123,10 +123,21 @@ III maps take it. Read from the GfxWorld's first sun volume:
 - Test aids: `BO2MP_T7_SUN`, `BO2MP_T7_AMBIENT` scale the sun and the
   ambient light.
 
-Not read: the probe volume (gProbeX/Y/Z: an atlas of per-probe volumes, the
-lit shader maps each probe's box into it from its 224-byte GPU pack; the
-config's words 4..9 and 34..37 look like its atlas place and size), the sun
-shadow tree, the exposure grids and auto-exposure, the lit fog volumes
+- Probe volume (`gProbeX/Y/ZArray`, three BC6H 3D textures, 248 x 280 x
+  608 on Redwood): an atlas of each probe's light volume. A probe's region
+  is its config words 4..6 (uvw size) at 7..9 (uvw place), its box (half
+  size 23..25, in its axes) mapped onto it; the depth's first half holds
+  the positive directions, the second the negative (`t7_pvol` checks the
+  regions are lit inside, dark round). As BO3's lit shader: the ambient is
+  the probe's level 6 at the normal times the three axes' texels weighted
+  by the normal's squares (here per vertex, trilinear, with a light contact
+  occlusion; `BO2MP_T7_VOLUME=0` off). Words 34, 36, 37: the region's size
+  in texels.
+- Water: drawn as a clear turquoise sheet (sRGB 95, 170, 185, alpha 120)
+  with its normal and specular maps; its colour map (a ramp for BO3's water
+  shader) drew rainbow pools.
+
+Not read: the sun shadow tree, the exposure grids and auto-exposure, the lit fog volumes
 (360 bytes: local volumetric fog boxes; BO3's `volumetric_light_sun`
 marches them with the sun's shadow map), BO3's bloom settings and lens
 flares.
@@ -147,5 +158,5 @@ curve.
 
 ## Not done
 
-The probe volume; glass and doors static; map pictures; Zombies menu
+Glass and doors static; map pictures; Zombies menu
 entries (use `iw4l map t7:zm_factory`).
