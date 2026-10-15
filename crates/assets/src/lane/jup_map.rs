@@ -27,13 +27,15 @@ use fastfile_t7::texture::ImageLevels;
 use super::LoadedWorld;
 use crate::lane_capability::PreparedCapability;
 
-/// Smooth normals for a triangle list (area-weighted).
+/// Smooth normals for a triangle list (area-weighted). The front faces
+/// wind clockwise seen from the front (the sea's sheets all do seen from
+/// above).
 fn normals_of(positions: &[[f32; 3]], tris: &[[u16; 3]]) -> Vec<[f32; 3]> {
     let mut n = vec![[0.0f32; 3]; positions.len()];
     for t in tris {
         let [a, b, c] = t.map(|i| positions[usize::from(i)]);
-        let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-        let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        let u = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        let v = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
         let f = [
             u[1] * v[2] - u[2] * v[1],
             u[2] * v[0] - u[0] * v[2],
@@ -95,8 +97,8 @@ const SHEET: f32 = 16384.0;
 
 /// A clear daylight sky as a cube (RGBA8 sRGB, faces +x -x +y -y +z -z,
 /// z up): the zenith's blue down to a pale haze at the horizon, the sea's
-/// haze below it, a soft glow toward the sun. (Modern Warfare III's own
-/// sky is not read: this stands in for it.)
+/// haze below it, a soft glow toward the sun. (It stands in for the map's
+/// own sky, [`super::jup_sky`], where that cannot be read.)
 fn daylight_sky(size: u32, sun: [f32; 3]) -> ImageLevels {
     let zenith = [0.33f32, 0.55, 0.86];
     let horizon = [0.80f32, 0.86, 0.91];
@@ -149,6 +151,10 @@ fn daylight_sky(size: u32, sun: [f32; 3]) -> ImageLevels {
 
 /// How far past the map's bounds the sea is drawn.
 const SEA_MARGIN: f32 = 16384.0;
+
+/// What lies wholly this far under the sea collides with nothing (a placed
+/// model whose origin lies four times as deep).
+const UNDERWATER: f32 = 48.0;
 
 /// A flat sheet's triangles cut to a box on the ground plan (each
 /// triangle clipped against the box's four sides, UVs carried along).
@@ -263,6 +269,8 @@ fn as_t7(map: &JupMap, report: &mut Vec<String>) -> T7Map {
     let mut sheets = 0usize;
     let mut sea = 0usize;
     let mut sea_surfaces = Vec::new();
+    // The sea's level (its sheets' height), where it has one.
+    let mut sea_z = f32::MIN;
     // The bounds of the surfaces that are not sheets (where the sea is cut).
     let play = {
         let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
@@ -320,6 +328,7 @@ fn as_t7(map: &JupMap, report: &mut Vec<String>) -> T7Map {
             }
             sea += 1;
             sea_surfaces.push(t7.surfaces.len());
+            sea_z = sea_z.max(s.positions[0][2]);
             (&clipped.0, &clipped.1, &clipped.2)
         } else {
             (&s.positions, &s.uvs, &s.tris)
@@ -448,6 +457,27 @@ fn as_t7(map: &JupMap, report: &mut Vec<String>) -> T7Map {
     if t7.no_collision.is_empty() && !sea_surfaces.is_empty() {
         t7.no_collision = (0..t7.surfaces.len()).map(|i| sea_surfaces.contains(&i)).collect();
     }
+    // Under the sea nothing is stood on: what lies wholly below it (the sea
+    // floor, sunken rocks) is drawn only, so one who falls in sinks to the
+    // fall kill plane just under the island instead of walking off along
+    // the bottom.
+    let underwater = sea_z > f32::MIN;
+    if underwater {
+        let below = sea_z - UNDERWATER;
+        let mut sunk = 0usize;
+        for (i, s) in t7.surfaces.iter().enumerate() {
+            if s.maxs[2] < below
+                && let Some(n) = t7.no_collision.get_mut(i)
+                && !*n
+            {
+                *n = true;
+                sunk += 1;
+            }
+        }
+        report.push(format!(
+            "jup collision: sea at {sea_z:.0}; {sunk} surfaces wholly under it drawn only"
+        ));
+    }
     // Placed models collide where the map is played, but not foliage,
     // decals and effects' models; each as its coarse LOD.
     t7.static_no_collision = t7
@@ -456,6 +486,7 @@ fn as_t7(map: &JupMap, report: &mut Vec<String>) -> T7Map {
         .map(|sm| {
             let name = &t7.models[sm.model].name;
             area.is_some_and(|a| !a.reaches(sm.origin, sm.origin))
+                || (underwater && sm.origin[2] < sea_z - 4.0 * UNDERWATER)
                 || ["foliage", "grass", "decal", "vfx", "fx_", "leaves", "weeds"]
                     .iter()
                     .any(|w| name.contains(w))
@@ -489,12 +520,77 @@ fn as_t7(map: &JupMap, report: &mut Vec<String>) -> T7Map {
         "jup spawns: made over {source} ({} points)",
         floor.len()
     ));
-    t7.entities = if map.entities.trim().is_empty() {
-        format!("{{\n\"classname\" \"worldspawn\"\n}}\n{spawns}")
+    let entities = if map.entities.trim().is_empty() {
+        "{\n\"classname\" \"worldspawn\"\n}\n".to_owned()
     } else {
-        format!("{}{spawns}", map.entities)
+        map.entities.clone()
     };
+    // The light: the map's sun (worldspawn's, else a late-morning one),
+    // dimmed to leave room for the sky's, baked into the vertex colours.
+    let angles = worldspawn_vec(&entities, "sundirection").unwrap_or(DEFAULT_SUN_ANGLES);
+    let colour = worldspawn_vec(&entities, "suncolor").unwrap_or([1.0, 0.96, 0.9]);
+    let sun = colour.map(|c| (c * SUN_SCALE).clamp(0.0, 2.0));
+    let (pitch, yaw) = (angles[0].to_radians(), angles[1].to_radians());
+    let toward_sun = [pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), -pitch.sin()];
+    let skip: Vec<bool> = (0..t7.surfaces.len()).map(|i| sea_surfaces.contains(&i)).collect();
+    super::jup_light::bake(
+        &mut t7,
+        &super::jup_light::BakeLight {
+            toward_sun,
+            sun,
+            ambient: AMBIENT,
+        },
+        &skip,
+        report,
+    );
+    t7.baked_ambient = Some(AMBIENT);
+    let entities = with_worldspawn_sun(&entities, angles, sun);
+    t7.entities = format!("{entities}{spawns}");
     t7
+}
+
+/// The sky's light where the map's lightmaps are not read (gamma space).
+const AMBIENT: [f32; 3] = [0.40, 0.43, 0.50];
+/// The sun's share of its colour (the sky lights the rest).
+const SUN_SCALE: f32 = 0.78;
+/// A sun for a map whose worldspawn has none: 50 degrees up, from the
+/// south-west (pitch, yaw, roll).
+const DEFAULT_SUN_ANGLES: [f32; 3] = [-50.0, 35.0, 0.0];
+
+/// A vector key of the entity text's worldspawn (its first block).
+fn worldspawn_vec(text: &str, key: &str) -> Option<[f32; 3]> {
+    let block = text.split('}').next()?;
+    let line = block.lines().find(|l| l.trim().starts_with(&format!("\"{key}\"")))?;
+    let v: Vec<f32> = line
+        .trim()
+        .split('"')
+        .nth(3)?
+        .split_whitespace()
+        .filter_map(|x| x.parse().ok())
+        .collect();
+    (v.len() == 3 && v.iter().all(|x| x.is_finite())).then(|| [v[0], v[1], v[2]])
+}
+
+/// The entity text with worldspawn's sun set to the one drawn.
+fn with_worldspawn_sun(text: &str, angles: [f32; 3], colour: [f32; 3]) -> String {
+    let Some(end) = text.find('}') else {
+        return text.to_owned();
+    };
+    let (head, rest) = text.split_at(end);
+    let mut out: String = head
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.starts_with("\"sundirection\"") && !t.starts_with("\"suncolor\"")
+        })
+        .map(|l| format!("{l}\n"))
+        .collect();
+    out.push_str(&format!(
+        "\"sundirection\" \"{} {} {}\"\n\"suncolor\" \"{} {} {}\"\n",
+        angles[0], angles[1], angles[2], colour[0], colour[1], colour[2]
+    ));
+    out.push_str(rest);
+    out
 }
 
 /// The largest a picture is drawn at.
@@ -678,6 +774,17 @@ pub(crate) fn load_jup_world(
     let mut t7 = as_t7(&map, &mut report);
     let stage = progress.begin_scoped(StageId::MapAssets, "modern warfare iii pictures", None);
     materials_into(&map, &mut t7, &src.install, oodle.as_ref(), &mut report);
+    // The map's own sky, where its pictures are in the install.
+    if !map.sky_images.is_empty()
+        && let Some(paks) = map.packages.as_ref()
+    {
+        let angles = worldspawn_vec(&t7.entities, "sundirection").unwrap_or(DEFAULT_SUN_ANGLES);
+        let (pitch, yaw) = (angles[0].to_radians(), angles[1].to_radians());
+        let toward_sun = [pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), -pitch.sin()];
+        if let Some(cube) = super::jup_sky::sky_cube(&map.sky_images, paks, oodle.as_ref(), toward_sun, 512, &mut report) {
+            t7.sky_cube = Some(cube);
+        }
+    }
     stage.done();
     let loaded = super::t7_map::build_t7_world(path, &t7, report, progress, material_seed);
     diag::info!(

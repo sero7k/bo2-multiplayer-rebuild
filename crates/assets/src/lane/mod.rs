@@ -23,7 +23,9 @@ mod t7_map;
 pub(crate) use t7_map::load_t7_world;
 // bo2mp: Modern Warfare III's (2023) maps, through the Black Ops III
 // builder.
+mod jup_light;
 mod jup_map;
+mod jup_sky;
 pub(crate) use jup_map::load_jup_world;
 // bo2mp: Infinite Warfare's Zombies maps as Black Ops II Zombies.
 mod iw7_zombies;
