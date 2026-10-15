@@ -649,6 +649,13 @@ pub const SOUNDS: &[SoundRoute] = &[
         then: None,
         t6: "",
     },
+    // out of the plane
+    SoundRoute {
+        key: "infil_jump",
+        jup: &["evt_br_infil_jump_stinger"],
+        then: None,
+        t6: "",
+    },
     // Rebirth's infil strikes (lighthouse, water tower)
     SoundRoute {
         key: "infil_strike",
@@ -749,7 +756,7 @@ pub const SOUNDS: &[SoundRoute] = &[
     // the last seconds before a circle closes
     SoundRoute {
         key: "circle_tick",
-        jup: &["uin_iw9_gulag_countdown_timer"],
+        jup: &["ui_mp_timer_countdown", "uin_iw9_gulag_countdown_timer"],
         then: None,
         t6: "mpl_ui_timer_countdown",
     },
@@ -812,16 +819,23 @@ pub const SOUNDS: &[SoundRoute] = &[
     // a gas mask picked up
     SoundRoute {
         key: "mask_pickup",
-        jup: &["br_gas_mask_on_plr"],
+        jup: &["br_pickup_generic", "br_pickup_generic_lyr"],
         then: None,
         t6: "uin_alert_slideout",
     },
     // the redeploy's last seconds
     SoundRoute {
         key: "redeploy_tick",
-        jup: &["uin_iw9_gulag_countdown_timer"],
+        jup: &["ui_mp_timer_countdown"],
         then: None,
         t6: "mpl_ui_timer_countdown",
+    },
+    // the redeploy's last second
+    SoundRoute {
+        key: "redeploy_go",
+        jup: &["ui_mp_timer_countdown_1"],
+        then: None,
+        t6: "",
     },
     // back in
     SoundRoute {
@@ -850,24 +864,24 @@ pub const SOUNDS: &[SoundRoute] = &[
         then: None,
         t6: "",
     },
-    // a squadmate died
+    // a squadmate died (the revive ping)
     SoundRoute {
         key: "squadmate_down",
-        jup: &[],
+        jup: &["br_ping_revive"],
         then: None,
         t6: "",
     },
     // his squad is out
     SoundRoute {
         key: "squad_wiped",
-        jup: &[],
+        jup: &["mp_plunder_team_wiped"],
         then: None,
         t6: "mpl_flagcapture_sting_enemy",
     },
     // another squad is out
     SoundRoute {
         key: "enemy_squad_wiped",
-        jup: &[],
+        jup: &["ui_team_wipe_splash"],
         then: None,
         t6: "mpl_flagcapture_sting_friend",
     },
@@ -888,35 +902,71 @@ pub const SOUNDS: &[SoundRoute] = &[
     // his squad won
     SoundRoute {
         key: "victory",
-        jup: &["uin_iw9_br_victory_slam", "uin_iw9_br_elite_victory_slam"],
+        jup: &[
+            "uin_iw9_br_victory_slam",
+            "uin_iw9_br_elite_victory_slam",
+            "uin_jup_mp_victory_match",
+            "uin_mp_victory_screen",
+        ],
         then: None,
         t6: "mus_victory",
+    },
+    // the winners' ending
+    SoundRoute {
+        key: "victory_amb",
+        jup: &["br_exfil_end_part_lr", "amb_br_ending_int_lr"],
+        then: None,
+        t6: "",
     },
     // his squad lost (the after-action screen)
     SoundRoute {
         key: "defeat",
+        jup: &["uin_jup_mp_defeat_match", "uin_mp_defeat_screen"],
+        then: Some(("defeat_aar", 5000)),
+        t6: "mus_loss",
+    },
+    // the after-action screen
+    SoundRoute {
+        key: "defeat_aar",
         jup: &["uin_iw9_br_aar_begin"],
         then: None,
-        t6: "mus_loss",
+        t6: "",
     },
     // cash
     SoundRoute {
         key: "cash_pickup",
-        jup: &["br_reward_mission_cash"],
+        jup: &[
+            "br_pickup_cash_01",
+            "br_pickup_cash_02",
+            "br_pickup_cash_03",
+            "br_pickup_cash_med_01",
+            "br_pickup_cash_med_02",
+            "br_pickup_cash_med_03",
+            "br_pickup_cash_lrg_01",
+            "br_pickup_cash_lrg_02",
+            "br_pickup_cash_lrg_03",
+        ],
         then: None,
         t6: "mpl_turret_alert",
+    },
+    // a dead player's cash on the ground
+    SoundRoute {
+        key: "cash_drop",
+        jup: &["br_drop_plunder_cash", "br_inventory_drop_plunder_sm"],
+        then: None,
+        t6: "",
     },
     // plates picked up
     SoundRoute {
         key: "plate_pickup",
-        jup: &["perk_scavenger_pickup_plr"],
+        jup: &["iw9_br_pickup_armor", "generic_armor_pickup"],
         then: None,
         t6: "uin_alert_slideout",
     },
-    // a plate in
+    // a plate in (the armor box's refill: MW3's plate insert is not named yet)
     SoundRoute {
         key: "plate_insert",
-        jup: &[],
+        jup: &["iw9_armor_crate_use"],
         then: None,
         t6: "fly_riotshield_impact_npc",
     },
@@ -927,12 +977,19 @@ pub const SOUNDS: &[SoundRoute] = &[
         then: None,
         t6: "",
     },
-    // an enemy's plate broke
+    // an enemy's plates broke
     SoundRoute {
         key: "armor_break",
-        jup: &[],
+        jup: &["hit_marker_armor_break_plr"],
         then: None,
         t6: "mpl_hit_alert_clip",
+    },
+    // a hit the enemy's plates took
+    SoundRoute {
+        key: "armor_hit",
+        jup: &["hit_marker_heavy"],
+        then: None,
+        t6: "mpl_hit_alert",
     },
     // the Heavy Armor event
     SoundRoute {
@@ -951,21 +1008,21 @@ pub const SOUNDS: &[SoundRoute] = &[
     // a common or uncommon gun
     SoundRoute {
         key: "loot_common",
-        jup: &[],
+        jup: &["weap_pickup_br_plr", "br_pickup_weap"],
         then: None,
         t6: "",
     },
     // a rare gun
     SoundRoute {
         key: "loot_rare",
-        jup: &[],
+        jup: &["br_pickup_weap", "br_pickup_weap_lyr"],
         then: None,
         t6: "",
     },
     // an epic or legendary gun
     SoundRoute {
         key: "loot_legendary",
-        jup: &["br_legendary_loot_drop"],
+        jup: &["br_legendary_loot_pickup", "br_legendary_loot_drop"],
         then: None,
         t6: "",
     },
@@ -986,21 +1043,28 @@ pub const SOUNDS: &[SoundRoute] = &[
     // at a buy station
     SoundRoute {
         key: "buy_open",
-        jup: &[],
+        jup: &["ui_screen_trans_in"],
         then: None,
         t6: "uin_main_pause",
+    },
+    // away from the buy station
+    SoundRoute {
+        key: "buy_close",
+        jup: &["ui_screen_trans_out"],
+        then: None,
+        t6: "",
     },
     // bought
     SoundRoute {
         key: "purchase",
-        jup: &[],
+        jup: &["ui_select_purchase_confirm"],
         then: None,
         t6: "mpl_turret_alert",
     },
     // not enough cash
     SoundRoute {
         key: "purchase_denied",
-        jup: &[],
+        jup: &["ui_select_purchase_deny", "br_pickup_deny"],
         then: None,
         t6: "uin_unlock_denied",
     },
@@ -1018,6 +1082,13 @@ pub const SOUNDS: &[SoundRoute] = &[
         then: None,
         t6: "mpl_supply_crate_land",
     },
+    // his loadout taken from the crate
+    SoundRoute {
+        key: "loadout_claim",
+        jup: &["ammo_crate_use"],
+        then: None,
+        t6: "",
+    },
     // his UAV
     SoundRoute {
         key: "uav_online",
@@ -1025,10 +1096,17 @@ pub const SOUNDS: &[SoundRoute] = &[
         then: None,
         t6: "mpl_killstreak_radar",
     },
+    // an enemy's UAV
+    SoundRoute {
+        key: "enemy_uav",
+        jup: &["uin_mp_killstreak_incoming"],
+        then: None,
+        t6: "",
+    },
     // a squadmate bought back
     SoundRoute {
         key: "buyback",
-        jup: &[],
+        jup: &["br_splash_redeploy"],
         then: None,
         t6: "mpl_killstreak_radar",
     },
@@ -1092,6 +1170,13 @@ pub const SOUNDS: &[SoundRoute] = &[
     SoundRoute {
         key: "target_down",
         jup: &["br_splash_vip_eliminated"],
+        then: None,
+        t6: "",
+    },
+    // his squad is a bounty
+    SoundRoute {
+        key: "bounty_marked",
+        jup: &["uin_splash_bounty_marked"],
         then: None,
         t6: "",
     },

@@ -330,6 +330,7 @@ br_ambience()
     br_vo_all( "vo_prelobby_over" );
     wait 2;
     br_vo_all( "vo_infil" );
+    br_snd_all( "infil_jump" );
     br_snd_all( "ambience" );
     level thread br_emitters();
 
@@ -674,6 +675,7 @@ br_end( winner )
         if ( isdefined( player.br_squad ) && player.br_squad == winner )
         {
             player br_snd( "victory" );
+            player br_snd( "victory_amb" );
             player br_vo( "vo_victory" );
             player br_music( "music_exfil" );
         }
@@ -932,7 +934,11 @@ br_redeploy( wait_ms )
 
         if ( left != last && left <= 5 )
         {
-            self br_snd( "redeploy_tick" );
+            if ( left == 1 )
+                self br_snd( "redeploy_go" );
+            else
+                self br_snd( "redeploy_tick" );
+
             self br_vo_count( left );
         }
 
@@ -1040,7 +1046,7 @@ br_damage_hook( einflictor, eattacker, idamage, idflags, smeansofdeath, sweapon,
         if ( idamage <= 0 )
         {
             if ( isdefined( eattacker ) && isplayer( eattacker ) )
-                eattacker playlocalsound( "mpl_hit_alert" );
+                eattacker br_snd( "armor_hit" );
 
             return 0;
         }
@@ -1541,6 +1547,12 @@ br_cash_drop( origin, amount )
     item.model setmodel( getweaponmodel( "briefcase_bomb_mp" ) );
     level.br_loot[level.br_loot.size] = item;
     level thread br_loot_think( item );
+
+    foreach ( player in level.players )
+    {
+        if ( isalive( player ) && distancesquared( player.origin, origin ) < 1024 * 1024 )
+            player br_snd( "cash_drop" );
+    }
 }
 
 br_place_loot()
@@ -1862,6 +1874,7 @@ br_buy_station( station )
                 {
                     player.br_near = undefined;
                     player br_hud_hint( "" );
+                    player br_snd( "buy_close" );
                 }
 
                 continue;
@@ -2019,6 +2032,7 @@ br_loadout_crate( owner, ground )
             if ( player usebuttonpressed() || player istestclient() )
             {
                 claimed[player getentitynumber()] = 1;
+                player br_snd( "loadout_claim" );
                 player br_give_kit();
                 player br_hud_hint( "" );
             }
@@ -2051,7 +2065,10 @@ br_uav()
     foreach ( player in level.players )
     {
         if ( isdefined( player.br_squad ) && player.br_squad != self.br_squad )
+        {
+            player br_snd( "enemy_uav" );
             player br_vo( "vo_enemy_uav" );
+        }
     }
 
     until = gettime() + level.br_uav_ms;
@@ -2270,6 +2287,7 @@ br_bounty( squad, c, id )
     target.br_bounty_by = squad;
     level.br_bounty_hit[squad] = 0;
     br_vo_squad( squad, "vo_bounty_start" );
+    br_snd_squad( target.br_squad, "bounty_marked" );
     br_vo_squad( target.br_squad, "vo_bounty_on_you" );
     target br_hud_flash( "THERE IS A BOUNTY ON YOU" );
     end = gettime() + c.time;
