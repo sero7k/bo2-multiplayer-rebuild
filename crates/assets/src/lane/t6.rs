@@ -1672,6 +1672,7 @@ pub(crate) fn t6_surface_list(loaded: &mut LoadedWorld, map: &str, iw_list: bool
     let Some(clip) = loaded.collision.as_mut() else {
         return;
     };
+    let started = std::time::Instant::now();
     let moved = if iw_list {
         asset_world::remap_clip_surface_flags(clip, asset_world::iw_surface_flags_to_t6)
     } else {
@@ -1687,12 +1688,13 @@ pub(crate) fn t6_surface_list(loaded: &mut LoadedWorld, map: &str, iw_list: bool
         .collect();
     rows.sort_by(|a, b| b.0.cmp(&a.0));
     let line = format!(
-        "bo2 rules: {map} surfaces in BO2's list ({moved} moved{}): {}",
+        "bo2 rules: {map} surfaces in BO2's list ({moved} moved{}): {} [{:.2}s]",
         if iw_list { " from Infinity Ward's" } else { "" },
         rows.iter()
             .map(|(n, name)| format!("{name}={n}"))
             .collect::<Vec<_>>()
-            .join(" ")
+            .join(" "),
+        started.elapsed().as_secs_f32()
     );
     diag::info!(World, "{line}");
     loaded.report.push(line);
@@ -1835,7 +1837,11 @@ pub(crate) fn attach_t6_rules(
     map: &str,
     source: asset_world::ForeignEntityGame,
 ) {
+    let started = std::time::Instant::now();
+    let mut marks: Vec<(&str, f32)> = Vec::new();
+    let mark = |what: &'static str, marks: &mut Vec<(&str, f32)>| marks.push((what, started.elapsed().as_secs_f32()));
     foreign_t6_lighting(loaded, map);
+    mark("lighting", &mut marks);
     // No Black Ops II vision for this map: its own game's film vision when
     // it has one (CoD4's, World at War's: drawn as the colour table of
     // Black Ops II's final pass), else its colours as they are. The
@@ -1904,7 +1910,9 @@ pub(crate) fn attach_t6_rules(
         }
         _ => asset_t6::ZoneCapture::default(),
     };
+    mark("zones found, packs open", &mut marks);
     let mut combat = super::t6_m2::load_t6_combat(&path, &empty, &mut loaded.materials, packs.as_ref());
+    mark("combat zones", &mut marks);
     if let (Some((shots, _)), Ok(sound)) = (pending_fx, combat.sound.as_mut()) {
         let n = shots.len();
         sound.scripted_map_fx.get_or_insert_with(Default::default).oneshots = shots;
@@ -1923,6 +1931,7 @@ pub(crate) fn attach_t6_rules(
     );
     report.extend(foreign.report);
     combat.scripts.entities.push(foreign.text);
+    mark("entities", &mut marks);
     // Its row in BO2's map table: the borrowed map's, under its own name
     // (BO2's scripts read the factions and the map's name from it).
     if let Some((_, columns, rows, cells)) = combat
@@ -2008,7 +2017,15 @@ pub(crate) fn attach_t6_rules(
         }
         (Err(error), other) => other.unwrap_or(Err(error)),
     });
+    mark("absorbed", &mut marks);
     report.push(format!("bo2 rules: {map} plays by Black Ops II's rules"));
+    let line = format!(
+        "bo2 rules: {map} attached in {:.1}s ({})",
+        started.elapsed().as_secs_f32(),
+        marks.iter().map(|(what, at)| format!("{what} at {at:.1}s")).collect::<Vec<_>>().join(", ")
+    );
+    diag::info!(World, "{line}");
+    report.push(line);
     loaded.report.extend(report);
 }
 
