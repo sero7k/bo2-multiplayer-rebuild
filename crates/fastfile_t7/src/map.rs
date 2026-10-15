@@ -112,9 +112,11 @@ fn techset_layout(ts: &crate::walk::capture::TechsetRec, image: &[u8]) -> Techse
 }
 
 /// bo2mp: the technique sets of the zones a map's materials borrow theirs
-/// from (`core_common`, `mp_common` or `zm_common`, `zm_levelcommon`: a
-/// map's `,mc/lit...` technique sets are references to theirs), by name,
-/// read once per folder.
+/// from (a map's `,mc/lit...` technique sets are references to the ones
+/// the zones loaded before it hold: `mc/lit` itself is in `core_pre_gfx`,
+/// most others in `core_common`, `mp_common`, `zm_levelcommon`), by name,
+/// read once per folder. (A zone whose walk stops still gives the
+/// technique sets it read before the stop.)
 fn common_layouts(dir: &Path) -> std::sync::Arc<HashMap<String, TechsetLayout>> {
     use std::sync::{Arc, Mutex, OnceLock};
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<HashMap<String, TechsetLayout>>>>> = OnceLock::new();
@@ -123,7 +125,7 @@ fn common_layouts(dir: &Path) -> std::sync::Arc<HashMap<String, TechsetLayout>> 
         return c;
     }
     let mut out: HashMap<String, TechsetLayout> = HashMap::new();
-    for zone in ["mp_common", "zm_common", "zm_levelcommon", "core_common"] {
+    for zone in ["core_pre_gfx", "core_common", "mp_common", "zm_common", "zm_levelcommon", "core_post_gfx", "core_ui"] {
         let Ok(z) = crate::Zone::open(&dir.join(format!("{zone}.ff"))) else { continue };
         let w = crate::walk::walk(&z);
         for ts in &w.capture.techsets {
