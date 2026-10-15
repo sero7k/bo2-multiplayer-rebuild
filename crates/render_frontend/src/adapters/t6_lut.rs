@@ -82,10 +82,11 @@ fn apply_t6_lut(
         return;
     };
     // IW4L_T6_NO_LUT=1: no colour table (test aid).
+    // (bo2mp: a Black Ops III world's `t6_lut` is its sun map.)
     let Some(lut) = scene
         .t6_lut
         .clone()
-        .filter(|_| std::env::var_os("IW4L_T6_NO_LUT").is_none())
+        .filter(|_| !scene.t7_light && std::env::var_os("IW4L_T6_NO_LUT").is_none())
     else {
         if scene.t6_lut_pick[3] != 0.0 {
             scene.t6_lut_pick = [0.0, 0.0, 1.0, 0.0];

@@ -325,6 +325,7 @@ pub fn build_iw5_world_draw(
             t6_flicker: Vec::new(),
             t6_probes: Vec::new(),
             t6_layer_uvs: Vec::new(),
+            t7_light: false,
         },
         materials,
     ))

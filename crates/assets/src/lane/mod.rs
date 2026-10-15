@@ -18,6 +18,7 @@ pub(crate) use iw7::load_iw7_world;
 // bo2mp: Infinite Warfare's emissive materials' glow.
 mod iw7_glow;
 // bo2mp: Black Ops III's maps (no ZoneGame of their own).
+mod t7_light;
 mod t7_look;
 mod t7_map;
 pub(crate) use t7_map::load_t7_world;

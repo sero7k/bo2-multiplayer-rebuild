@@ -464,6 +464,7 @@ pub fn build_t6_world_draw(
         t6_flicker: Vec::new(),
         t6_probes: Vec::new(),
         t6_layer_uvs: layer_uvs,
+        t7_light: false,
     })
 }
 
