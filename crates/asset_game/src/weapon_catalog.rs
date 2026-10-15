@@ -7547,7 +7547,7 @@ impl WeaponRegistry {
         slot: WeaponSoundSlot,
         catalog: &'a crate::SoundCatalog,
     ) -> Option<(crate::AssetNamespace, &'a str)> {
-        let ns = self.namespace_of(index).unwrap_or_default();
+        let ns = self.borrowed_namespace_of(index).unwrap_or_default();
         sound_alias_in_bank(self.authored_weapon_sound(index, slot), ns, catalog)
     }
 
@@ -7557,7 +7557,7 @@ impl WeaponRegistry {
         surf: usize,
         catalog: &'a crate::SoundCatalog,
     ) -> Option<&'a str> {
-        let ns = self.namespace_of(index).unwrap_or_default();
+        let ns = self.borrowed_namespace_of(index).unwrap_or_default();
         sound_alias_in_bank(self.bounce_sound_of(index, surf), ns, catalog).map(|(_, alias)| alias)
     }
 
@@ -7674,6 +7674,16 @@ impl WeaponRegistry {
             return None;
         }
         self.rows.get(index as usize).map(|row| row.namespace)
+    }
+
+    /// bo2mp: the namespace a weapon's sounds and HUD pictures are named
+    /// in: its own, or for a guest gun made from a Black Ops II gun the
+    /// donor's.
+    pub fn borrowed_namespace_of(&self, index: u32) -> Option<crate::AssetNamespace> {
+        if index == 0 {
+            return None;
+        }
+        self.rows.get(index as usize).map(|row| row.donor_namespace.unwrap_or(row.namespace))
     }
 
     /// Whether this weapon's `player_anim_type` is in Modern Warfare's

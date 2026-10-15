@@ -109,7 +109,7 @@ fn pick_kill_icon(
         None => (0, false),
     };
     let (stem, namespace) = if let Some(reg) = weapons {
-        let ns = reg.0.namespace_of(weapon).unwrap_or(chrome);
+        let ns = reg.0.borrowed_namespace_of(weapon).unwrap_or(chrome);
         if let Some(image) = reg.0.kill_icon_image_of(weapon) {
             (image.to_owned(), ns)
         } else if let Some(name) = reg.0.kill_icon_of(weapon) {

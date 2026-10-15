@@ -119,7 +119,7 @@ fn melee_impact_alias<'a>(
     knife: bool,
     slot: WeaponSoundSlot,
 ) -> Option<(asset_core::AssetNamespace, &'a str)> {
-    let ns = weapons.namespace_of(weapon).unwrap_or_default();
+    let ns = weapons.borrowed_namespace_of(weapon).unwrap_or_default();
     // bo2zm: Black Ops II names its melee sounds as Black Ops does
     // (`wpn_melee_knife_hit_body`, `wpn_melee_hit_other`).
     let t5 = matches!(
@@ -545,7 +545,7 @@ impl NotetrackSoundTable {
         let mut rumbles = HashMap::new();
         for weapon in 1..=weapons.len() as u32 {
             let namespace = weapons
-                .namespace_of(weapon)
+                .borrowed_namespace_of(weapon)
                 .unwrap_or(asset_core::AssetNamespace::Iw4);
             for (note, action) in weapons.notetrack_actions_of(weapon) {
                 let sound = action.sound_alias.as_deref().map(|alias| {
@@ -744,7 +744,7 @@ fn grenade_contact(
             .bounce_sound_alias(payload.weapon, surf, &bank.0)?;
         let namespace = weapons
             .0
-            .namespace_of(payload.weapon)
+            .borrowed_namespace_of(payload.weapon)
             .unwrap_or(asset_core::AssetNamespace::Iw4);
         Some((namespace, alias))
     }) else {
