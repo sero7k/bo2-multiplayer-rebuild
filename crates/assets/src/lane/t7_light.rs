@@ -152,7 +152,7 @@ impl Lit {
             casters.iter().filter(|c| c.partial).count(),
             started.elapsed().as_secs_f32()
         ));
-        let fog = Fog::read(map, &bake, sun, spawns);
+        let fog = Fog::read(map, &bake, sun, sun_light, spawns);
         match fog.as_ref() {
             Some(f) => report.push(f.report.clone()),
             None => report.push("t7 fog: none (no fog volume with atmospheric settings, or BO2MP_T7_FOG=0)".to_owned()),
@@ -333,13 +333,13 @@ impl Lit {
 /// units), 3 base height, 4 half height (the density halves every this many
 /// units up), 16..18 the fog's (Rayleigh) colour, 19 extinction strength,
 /// 20..22 the haze's (Mie) colour, 23 haze start, 24 haze spread, 25 the
-/// haze's Schlick k (forward scattering), 26 its density, 27 its light in
-/// stops (2^x, the sun's unit), 28 in-scatter strength, 30 sun strength
-/// (the Rayleigh phase's share), 31 the sky's distance.
+/// haze's Schlick k (forward scattering), 26 its density, 28 in-scatter
+/// strength, 30 sun strength (the Rayleigh phase's share), 31 the sky's
+/// distance (27, 13.5 on most maps, 19.75 on the snow one: not used).
 ///
 /// The fog's in-scatter colour is the bank's colour at the brightness of
 /// the sky's horizon (a far wall fogs into the sky behind it); the haze's
-/// is its colour at its light times its density. `BO2MP_T7_FOG` scales the
+/// is its colour at the sun's light times its density. `BO2MP_T7_FOG` scales the
 /// density (0: no fog), `BO2MP_T7_HAZE` the haze, `BO2MP_T7_SHAFTS` the sun
 /// shafts (0: none).
 pub(super) struct Fog {
@@ -352,7 +352,7 @@ fn env_scale(name: &str, default: f32) -> f32 {
 }
 
 impl Fog {
-    pub fn read(map: &T7Map, bake: &Bake, toward_sun: [f32; 3], spawns: &[[f32; 3]]) -> Option<Fog> {
+    pub fn read(map: &T7Map, bake: &Bake, toward_sun: [f32; 3], sun_light: f32, spawns: &[[f32; 3]]) -> Option<Fog> {
         let density = env_scale("BO2MP_T7_FOG", 1.0);
         if density <= 0.0 {
             return None;
@@ -392,10 +392,10 @@ impl Fog {
             }
             None => 1.0,
         };
-        let units = bake.units();
         let fog_c = norm([b[16], b[17], b[18]]).map(|x| x * horizon);
-        let haze_light = 2f32.powf(b[27].clamp(0.0, 24.0)) / units;
-        let haze_c = norm([b[20], b[21], b[22]]).map(|x| x * haze_light * b[26].max(0.0) * env_scale("BO2MP_T7_HAZE", 1.0));
+        // The haze scatters the sun: its colour at the sun's light times its
+        // density (times 2 pi: the phase's normalisation, half of it).
+        let haze_c = norm([b[20], b[21], b[22]]).map(|x| x * sun_light * std::f32::consts::TAU * b[26].max(0.0) * env_scale("BO2MP_T7_HAZE", 1.0));
         let half = (b[2] / density).max(1.0);
         let ext = if b[19] > 0.0 { b[19].min(2.0) } else { 1.0 };
         let k = b[25].clamp(0.0, 0.95);
