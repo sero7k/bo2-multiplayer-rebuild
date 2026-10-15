@@ -27,7 +27,7 @@
 //! the pistol whole.
 #![forbid(unsafe_code)]
 
-use crate::ptr::{FOLLOW, INSERT, Ptr};
+use crate::ptr::{FOLLOW, INSERT, MINUS3, Ptr};
 
 use crate::{frame, surfs, zone};
 
@@ -222,7 +222,7 @@ fn materials(z: &[u8], from: usize, to: usize, surfaces: usize) -> Option<Vec<Op
         for k in 0..inline {
             let h = u64_at(z, stubs + STUB * k);
             if !crate::hash::is_ref(h)
-                || matches!(h, FOLLOW | INSERT)
+                || h >= MINUS3
                 || crate::hash::strip(h).count_ones() < 12
                 || u64_at(z, stubs + STUB * k + 8) != 0
             {

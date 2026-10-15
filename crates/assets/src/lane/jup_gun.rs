@@ -179,14 +179,18 @@ fn read_gun(
         .ok_or("no receiver")?;
     let rec = read_part(install, oodle, zone(receiver))?;
     let mut parts = Vec::new();
+    // (A part whose model is not read is left off; the gun still draws.)
+    let mut unread = Vec::new();
     for p in g.parts.iter().filter(|p| p.tag.is_some()) {
-        parts.push((
-            read_part(install, oodle, zone(p))?,
-            p.tag.unwrap_or_default(),
-        ));
+        match read_part(install, oodle, zone(p)) {
+            Ok(m) => parts.push((m, p.tag.unwrap_or_default())),
+            Err(e) => unread.push(e),
+        }
     }
     let refs: Vec<(&PartModel, &str)> = parts.iter().map(|(m, t)| (m, *t)).collect();
-    Ok(gun::assemble(&rec, &refs))
+    let mut gun = gun::assemble(&rec, &refs);
+    gun.missing.extend(unread);
+    Ok(gun)
 }
 
 fn u64_at(z: &[u8], o: usize) -> u64 {

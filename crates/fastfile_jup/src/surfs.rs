@@ -19,9 +19,9 @@
 //!   0x80 ptr rigid ranges (-2: `range count` 12-byte records)
 //!   0xb0 f32 centre[3], extents[3]: positions are 21-bit fractions
 //!        spanning the largest extent either side of the centre
-//!   0xc8 ptr 12 bytes (not read)
-//! then: blob struct and bytes; per surface its rigid ranges and its
-//! 12 bytes.
+//!   0xc8 ptr 12 bytes per rigid range (not read)
+//! then: blob struct and bytes; per surface its rigid ranges and 12
+//! bytes for each of them.
 //! packet (40 bytes): 0x00 16 bytes (bounds), 0x10 12 bytes,
 //!   0x1c u32 first entry in the packet vertex list,
 //!   0x20 u16 first triangle, u8 vertex count, u8 triangle count,
@@ -186,7 +186,7 @@ pub fn parse(zone: &[u8], at: usize) -> Result<SurfsRec, SurfsError> {
             }
         }
         if tail_follows {
-            cur += 12;
+            cur += 12 * surfaces[i].ranges.len().max(1);
         }
     }
     let blob = blob.ok_or(SurfsError::Layout("no blob"))?;
