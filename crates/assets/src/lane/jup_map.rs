@@ -332,6 +332,8 @@ fn materials_into(
             name: format!("jup_{:016x}", m.hash),
             technique_set: String::new(),
             textures: Vec::new(),
+            constants: Default::default(),
+            bound: Vec::new(),
         };
         if let Some(c) = m.colour
             && let Some(l) = decoded.get(&c)
