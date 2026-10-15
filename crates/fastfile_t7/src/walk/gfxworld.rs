@@ -123,6 +123,12 @@ pub struct SunVolumeLighting {
     pub sky_images: Vec<Option<String>>,
     /// The exposure grids' probes (file offset, count).
     pub exposure_grids: Vec<Span>,
+    /// The `StreamWrappedBuffer`s (64 bytes: file offsets) of the four
+    /// reflection probe arrays, the four probe volumes and the four sky
+    /// box images: where their pixels are.
+    pub probe_buffers: Vec<Option<usize>>,
+    pub volume_buffers: Vec<Option<usize>>,
+    pub sky_buffers: Vec<Option<usize>>,
 }
 
 fn count(s: &Stream, at: usize) -> Result<usize> {
@@ -144,11 +150,12 @@ pub(crate) fn stream_wrapped_body(s: &mut Stream, b: usize) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn stream_wrapped(s: &mut Stream, field: usize) -> Result<()> {
-    if let Some(b) = s.array(field, STREAM_WRAPPED, 7)? {
+pub(crate) fn stream_wrapped(s: &mut Stream, field: usize) -> Result<Option<usize>> {
+    let b = s.array(field, STREAM_WRAPPED, 7)?;
+    if let Some(b) = b {
         stream_wrapped_body(s, b)?;
     }
-    Ok(())
+    Ok(b)
 }
 
 /// `GfxStreamedShadowTreeBuffer*` at `field`.
@@ -192,7 +199,7 @@ fn sun_volume(s: &mut Stream, v: usize, rec: &mut GfxWorldRec, first: bool) -> R
         let configs = span(s, r + 16, n + 1, PROBE_CONFIG, 15)?;
         let n = count(s, r + 36)?;
         let blends = span(s, r + 24, n, PROBE_BLEND, 15)?;
-        stream_wrapped(s, r)?;
+        light.probe_buffers.push(stream_wrapped(s, r)?);
         light.reflection_probes.push((im, configs, blends));
     }
     for k in 0..4 {
@@ -201,7 +208,7 @@ fn sun_volume(s: &mut Stream, v: usize, rec: &mut GfxWorldRec, first: bool) -> R
         for (j, n) in names.iter_mut().enumerate() {
             *n = s.asset_named(AssetType::Image, p + 8 * j)?;
         }
-        stream_wrapped(s, p + 24)?;
+        light.volume_buffers.push(stream_wrapped(s, p + 24)?);
         light.probe_volumes.push(names);
     }
     for k in 0..4 {
@@ -212,10 +219,13 @@ fn sun_volume(s: &mut Stream, v: usize, rec: &mut GfxWorldRec, first: bool) -> R
             rec.sky_models.push(m);
         }
         let mut sky = None;
+        let mut buffer = None;
         if let Some(i) = s.array(b + 16, 72, 7)? {
             sky = s.asset_named(AssetType::Image, i)?;
             stream_wrapped_body(s, i + 8)?;
+            buffer = Some(i + 8);
         }
+        light.sky_buffers.push(buffer);
         light.sky_images.push(sky);
     }
     for k in 0..4 {

@@ -82,6 +82,14 @@ fn main() {
                     println!("    sky {k}: {}", image(im));
                 }
                 println!("    exposure grids {:x?}", l.exposure_grids);
+                for (what, list) in [("probe", &l.probe_buffers), ("volume", &l.volume_buffers), ("sky", &l.sky_buffers)] {
+                    for (k, b) in list.iter().enumerate() {
+                        if let Some(b) = b {
+                            let raw = &z.image[*b..*b + 64];
+                            println!("    {what} buffer {k} at {b:#x}: {:02x?}", raw);
+                        }
+                    }
+                }
                 if hex.contains("sun") {
                     dump(&z.image, *v, 1056);
                     println!("    ... 2096..");
