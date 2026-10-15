@@ -789,9 +789,11 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
         let wr = wv - 2.0 * dot(wv, wn) * wn;
         let we = textureSampleLevel(probe_cubes, probe_sampler, wr, i32(in.probe), 0.0);
         // (The map's own probes are gamma values, their alpha folded in; a
-        // Black Ops II model map's are linear rgb / a. A black one, the
-        // compiler's stand-in, reflects the light here instead.)
-        let wprobe = select(sqrt(max(we.rgb / (we.a + 0.000001), vec3(0.0))), we.rgb, t6.sun_color.a > 3.5);
+        // Black Ops II model map's are linear rgb / a for that map's light,
+        // relit by the light here as the shine branch does. A black one,
+        // the compiler's stand-in, reflects the light here instead.)
+        let wlum = clamp(dot(wlg * wlg, vec3(0.299, 0.587, 0.114)), 0.0, 2.0);
+        let wprobe = select(sqrt(max(we.rgb / (we.a + 0.000001) * wlum, vec3(0.0))), we.rgb, t6.sun_color.a > 3.5);
         let wenv = select(wprobe, wlg * 0.6, dot(wprobe, vec3(0.333)) < 0.02);
         let wbody = mix(wca, wcb, wndotv);
         var wg = mix(wbody.rgb * wlg, wenv, wfres);
