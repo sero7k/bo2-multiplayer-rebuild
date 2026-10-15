@@ -363,9 +363,9 @@ impl Lit {
 /// strength, 30 sun strength (the Rayleigh phase's share), 31 the sky's
 /// distance (27, 13.5 on most maps, 19.75 on the snow one: not used).
 ///
-/// The fog's in-scatter colour is the bank's colour at the brightness of
-/// the sky's horizon (a far wall fogs into the sky behind it); the haze's
-/// is its colour at the sun's light times its density. `BO2MP_T7_FOG` scales the
+/// The fog's in-scatter colour is the sky's horizon colour (a far wall
+/// fogs into the sky behind it); the haze's is its colour at the sun's
+/// light times its density. `BO2MP_T7_FOG` scales the
 /// density (0: no fog), `BO2MP_T7_HAZE` the haze, `BO2MP_T7_SHAFTS` the sun
 /// shafts (0: none).
 pub(super) struct Fog {
@@ -403,22 +403,33 @@ impl Fog {
             c.map(|x| x.max(0.0) / l)
         };
         // The sky's horizon, in the probes' unit.
+        // The sky's horizon (its colour round the map a few degrees up, the
+        // brightest quarter, the sun's side, left out), in the probes' unit.
         let horizon = match bake.sky.as_ref() {
             Some(sky) => {
                 let g = bake.sky_gain();
+                let mut ring: Vec<[f32; 3]> = (0..64)
+                    .map(|k| {
+                        let a = k as f32 / 64.0 * std::f32::consts::TAU;
+                        sky.at([a.cos(), a.sin(), 0.08]).map(|c| c * g)
+                    })
+                    .collect();
+                ring.sort_by(|x, y| lum(*x).total_cmp(&lum(*y)));
+                let keep = &ring[..48];
                 let mut sum = [0f32; 3];
-                for k in 0..64 {
-                    let a = k as f32 / 64.0 * std::f32::consts::TAU;
-                    let c = sky.at([a.cos(), a.sin(), 0.08]);
+                for c in keep {
                     for j in 0..3 {
-                        sum[j] += c[j] * g / 64.0;
+                        sum[j] += c[j] / keep.len() as f32;
                     }
                 }
-                lum(sum)
+                sum
             }
-            None => 1.0,
+            None => [1.0; 3],
         };
-        let fog_c = norm([b[16], b[17], b[18]]).map(|x| x * horizon);
+        // The fog takes on the horizon's colour (a far wall fogs into the
+        // sky behind it; the bank's own colour, words 16..18, read as a
+        // Rayleigh tint, was far bluer than the game's fog on mp_waterpark).
+        let fog_c = horizon;
         // The haze scatters the sun: its colour at the sun's light times its
         // density (times 2 pi: the phase's normalisation, half of it).
         let haze_c = norm([b[20], b[21], b[22]]).map(|x| x * sun_light * std::f32::consts::TAU * b[26].max(0.0) * env_scale("BO2MP_T7_HAZE", 1.0));
@@ -438,7 +449,7 @@ impl Fog {
             [1.0 / 2000.0, 2500.0, if shafts > 0.0 { 16.0 } else { 0.0 }, shafts],
         ];
         let report = format!(
-            "t7 fog: volume {vi} of {} ({inside} of {} spawns in it): start {:.0}, half {:.0}, base {:.0}, half height {:.0}, fog {:.3?} (horizon {horizon:.3}), haze {:.3?} from {:.0} over {:.0}, k {k:.2}, extinction {ext:.2}, in-scatter {:.2}, sun strength {:.2}, sky at {:.0}",
+            "t7 fog: volume {vi} of {} ({inside} of {} spawns in it): start {:.0}, half {:.0}, base {:.0}, half height {:.0}, fog {:.3?} (the horizon's), haze {:.3?} from {:.0} over {:.0}, k {k:.2}, extinction {ext:.2}, in-scatter {:.2}, sun strength {:.2}, sky at {:.0}",
             vols.len(),
             spawns.len(),
             b[1],
