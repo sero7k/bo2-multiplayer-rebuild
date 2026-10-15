@@ -7,6 +7,9 @@
 //! (index, sheet, cell, hash, width, height, format byte, bytes per pixel
 //! of the whole chain, decoded size or why not). `JUP_FMT=0x1a=28,...` reads
 //! more format bytes as DXGI formats (28: RGBA8, 61: R8, 98: BC7...).
+//! `JUP_ONLY=0x30,0x24` keeps those format bytes only, `JUP_LARGEST=512`
+//! pictures no wider or higher than that (the HUD's are small); the others
+//! are listed with sheet -1.
 
 use std::io::Write;
 use std::path::Path;
@@ -105,6 +108,12 @@ fn main() {
     let paks = Packages::open(install);
     println!("{} packages", paks.len());
     let extra = extra_formats();
+    let only: Vec<u8> = std::env::var("JUP_ONLY")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|f| u8::from_str_radix(f.trim().trim_start_matches("0x"), 16).ok())
+        .collect();
+    let largest: u16 = std::env::var("JUP_LARGEST").ok().and_then(|v| v.parse().ok()).unwrap_or(u16::MAX);
     for zname in zones {
         let t = std::time::Instant::now();
         let (_, zone) = match fastfile_jup::read_zone(&install.join("zone").join(format!("{zname}.ff")), oodle.as_ref()) {
@@ -144,8 +153,26 @@ fn main() {
         fresh(&mut sheet);
         let mut formats: std::collections::BTreeMap<u8, (usize, f32)> = Default::default();
         let mut decoded = 0usize;
-        for (i, &at) in run.at.iter().enumerate() {
+        let mut i = 0usize;
+        let kept: Vec<usize> = run
+            .at
+            .iter()
+            .copied()
+            .filter(|&at| match image::parse(&zone, at) {
+                Ok(Some(img)) => {
+                    let keep = (only.is_empty() || only.contains(&img.format)) && img.width.max(img.height) <= largest;
+                    if !keep {
+                        let _ = writeln!(tsv, "-\t-1\t-\t{:016x}\t{}\t{}\t{:#04x}\t-\tfiltered", img.hash, img.width, img.height, img.format);
+                    }
+                    keep
+                }
+                _ => false,
+            })
+            .collect();
+        for &at in &kept {
             let Ok(Some(img)) = image::parse(&zone, at) else { continue };
+            i += 1;
+            let i = i - 1;
             let px = f32::from(img.width) * f32::from(img.height) * f32::from(img.depth.max(1)) * f32::from(img.array.max(1));
             let bpp = img.data_size as f32 / px.max(1.0);
             let e = formats.entry(img.format).or_default();
@@ -179,7 +206,7 @@ fn main() {
                     }
                 }
             }
-            if cell == per - 1 || i + 1 == run.at.len() {
+            if cell == per - 1 || i + 1 == kept.len() {
                 write_png(&dir.join(format!("sheet_{sheet_no:03}.png")), side, side, &sheet);
                 fresh(&mut sheet);
             }
