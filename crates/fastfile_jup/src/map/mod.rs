@@ -70,7 +70,7 @@ pub struct JupMap {
     pub props: Vec<models::Prop>,
     /// The install's packages (opened for the models' meshes; the pictures
     /// come from them too).
-    pub packages: Option<materials::Packages>,
+    pub packages: Option<std::sync::Arc<materials::Packages>>,
     /// The sky's pictures ([`materials::sky_images`]).
     pub sky_images: Vec<materials::MapImage>,
     /// The terrain's coarse heights and its virtual texture
@@ -149,7 +149,7 @@ impl JupMap {
             &mut out.report,
         );
         let started_models = std::time::Instant::now();
-        let paks = materials::Packages::open(&src.install);
+        let paks = materials::Packages::shared(&src.install);
         (out.prop_models, out.props) = models::meshes(
             &zone,
             &placed,

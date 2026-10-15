@@ -483,7 +483,7 @@ pub(crate) fn load_t7_world(path: &Path, progress: &LoadProgress, material_seed:
     };
     report.push(format!("t7 zone: read in {:.1}s", started.elapsed().as_secs_f32()));
     report.extend(map.report.iter().map(|l| format!("t7 {l}")));
-    let loaded = build_t7_world(path, &map, report, progress, material_seed);
+    let loaded = build_t7_world(path, &map, report, progress, material_seed, None);
     diag::info!(
         World,
         "bo2mp t7: {} loaded: {}",
@@ -630,8 +630,16 @@ fn walk_soup(map: &T7Map, hidden: &[bool]) -> Vec<asset_world::world_iw7::SoupTr
 }
 
 /// (bo2mp: also Modern Warfare III's maps, read into a `T7Map` by
-/// `super::jup_map`.)
-pub(super) fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, progress: &LoadProgress, material_seed: MaterialCatalog) -> LoadedWorld {
+/// `super::jup_map`, which may hand over the collision it built from the
+/// same map before: `collision`.)
+pub(super) fn build_t7_world(
+    path: &Path,
+    map: &T7Map,
+    mut report: Vec<String>,
+    progress: &LoadProgress,
+    material_seed: MaterialCatalog,
+    collision: Option<asset_world::ClipCollision>,
+) -> LoadedWorld {
     super::bo2_look::set_pending_grade(None);
     let map_name = path.file_stem().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
 
@@ -652,7 +660,13 @@ pub(super) fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, 
 
     // Collision.
     let stage = progress.begin_scoped(StageId::MapAssets, "black ops iii collision", None);
-    let mut collision = collision_of(map, &hidden, &mut report);
+    let mut collision = match collision {
+        Some(c) => {
+            report.push(format!("t7 clip: from the cache ({} triangles)", c.mesh.tri_count()));
+            c
+        }
+        None => collision_of(map, &hidden, &mut report),
+    };
     collision.trigger_models = map
         .trigger_models
         .iter()

@@ -149,6 +149,13 @@ fn daylight_sky(size: u32, sun: [f32; 3]) -> ImageLevels {
     }
 }
 
+/// The sky drawn where the map's own cannot be read: a daylight cube, the
+/// glow where the Black Ops III builder's default sun stands (60 degrees
+/// up, toward +x +y).
+fn default_sky() -> ImageLevels {
+    daylight_sky(256, [0.3536, 0.3536, 0.866])
+}
+
 /// How far past the map's bounds the sea is drawn.
 const SEA_MARGIN: f32 = 16384.0;
 
@@ -380,7 +387,7 @@ fn as_t7(map: &JupMap, report: &mut Vec<String>) -> T7Map {
     }
     // The sky: a daylight cube, the glow where the Black Ops III builder's
     // default sun stands (60 degrees up, toward +x +y).
-    t7.sky_cube = Some(daylight_sky(256, [0.3536, 0.3536, 0.866]));
+    t7.sky_cube = Some(default_sky());
     // The placed models (first LODs), drawn out to their last LOD's
     // distance.
     for m in &map.prop_models {
@@ -627,14 +634,21 @@ fn bc1_cuts(dxgi: u32, data: &[u8]) -> bool {
     holes * 10 >= n
 }
 
+/// What a map's materials are and the pictures they name (from the zone,
+/// or from the converted map's cache).
+struct Pictures<'a> {
+    materials: &'a [fastfile_jup::map::materials::MapMaterial],
+    images: &'a [fastfile_jup::map::materials::MapImage],
+}
+
 /// The materials as the Black Ops III builder reads them, each with its
 /// colour picture's pixels (fetched from the install's packages, a few
 /// threads at once). Materials keep the map's order, so a surface's
 /// material index stays.
 fn materials_into(
-    map: &JupMap,
+    map: &Pictures<'_>,
     t7: &mut T7Map,
-    install: &Path,
+    paks: &Packages,
     oodle: &dyn fastfile_jup::oodle::Decompressor,
     report: &mut Vec<String>,
 ) {
@@ -642,14 +656,6 @@ fn materials_into(
         return;
     }
     let started = std::time::Instant::now();
-    let opened;
-    let paks = match &map.packages {
-        Some(p) => p,
-        None => {
-            opened = Packages::open(install);
-            &opened
-        }
-    };
     let wanted: Vec<usize> = map.materials.iter().filter_map(|m| m.colour).collect();
     let mut wanted_sorted = wanted.clone();
     wanted_sorted.sort_unstable();
@@ -686,7 +692,7 @@ fn materials_into(
         }
     }
     let mut cut = 0usize;
-    for m in &map.materials {
+    for m in map.materials {
         let mut mat = MapMaterial {
             name: format!("jup_{:016x}", m.hash),
             technique_set: String::new(),
@@ -730,38 +736,30 @@ fn materials_into(
     ));
 }
 
-/// Loads a Modern Warfare III map zone into the match's world. A zone that
-/// cannot be read becomes a gap with the reason, never a crash.
-pub(crate) fn load_jup_world(
+/// A zone that cannot be read: the match's gap, with the reason.
+fn zone_gap(path: &Path, why: String, at: &'static str) -> LoadedWorld {
+    diag::warn!(World, "bo2mp jup: {}: {why}", path.display());
+    LoadedWorld::with_gap(WorldDrawPolicy::t5(), PreparedCapability::PreparedWorld, why, Some(at))
+}
+
+/// Reads the map's zones and converts them (`as_t7`, the light baked).
+fn convert(
     path: &Path,
+    src: &MapSources,
+    oodle: &dyn fastfile_jup::oodle::Decompressor,
     progress: &LoadProgress,
-    material_seed: MaterialCatalog,
-) -> LoadedWorld {
-    let src = MapSources::beside(path);
-    let mut report = vec![format!(
-        "game: JUP / Modern Warfare III ({})",
-        path.display()
-    )];
+) -> Result<(super::jup_cache::Converted, Option<std::sync::Arc<Packages>>), LoadedWorld> {
     let stage = progress.begin_scoped(StageId::MapAssets, "modern warfare iii zone", None);
     let started = std::time::Instant::now();
-    let read = std::panic::catch_unwind(|| {
-        let oodle = fastfile_jup::oodle::load(&src.install).map_err(|e| e.to_string())?;
-        JupMap::load(&src, oodle.as_ref()).map(|m| (m, oodle))
-    });
-    let (map, oodle) = match read {
-        Ok(Ok(read)) => {
+    let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| JupMap::load(src, oodle)));
+    let mut map = match read {
+        Ok(Ok(map)) => {
             stage.done();
-            read
+            map
         }
         Ok(Err(error)) => {
             stage.fail();
-            diag::warn!(World, "bo2mp jup: {}: {error}", path.display());
-            return LoadedWorld::with_gap(
-                WorldDrawPolicy::t5(),
-                PreparedCapability::PreparedWorld,
-                format!("Modern Warfare III zone: {error}"),
-                Some("assets::lane::jup_map::load_world/zone"),
-            );
+            return Err(zone_gap(path, format!("Modern Warfare III zone: {error}"), "assets::lane::jup_map::load_world/zone"));
         }
         Err(panic) => {
             stage.fail();
@@ -770,29 +768,110 @@ pub(crate) fn load_jup_world(
                 .map(|s| (*s).to_owned())
                 .or_else(|| panic.downcast_ref::<String>().cloned())
                 .unwrap_or_else(|| "unknown error".to_owned());
-            diag::warn!(
-                World,
-                "bo2mp jup: {}: reader panicked: {what}",
-                path.display()
-            );
-            return LoadedWorld::with_gap(
-                WorldDrawPolicy::t5(),
-                PreparedCapability::PreparedWorld,
+            return Err(zone_gap(
+                path,
                 format!("Modern Warfare III zone could not be read: {what}"),
-                Some("assets::lane::jup_map::load_world/panic"),
-            );
+                "assets::lane::jup_map::load_world/panic",
+            ));
         }
     };
-    report.push(format!(
-        "jup zone: read in {:.1}s",
-        started.elapsed().as_secs_f32()
-    ));
+    let mut report = vec![format!("jup zone: read in {:.1}s", started.elapsed().as_secs_f32())];
     report.extend(map.report.iter().map(|l| format!("jup {l}")));
-    let mut t7 = as_t7(&map, &mut report);
+    let stage = progress.begin_scoped(StageId::MapAssets, "modern warfare iii light", None);
+    let t7 = as_t7(&map, &mut report);
+    stage.done();
+    let packages = map.packages.take();
+    Ok((
+        super::jup_cache::Converted {
+            t7,
+            materials: std::mem::take(&mut map.materials),
+            images: std::mem::take(&mut map.images),
+            sky_images: std::mem::take(&mut map.sky_images),
+            virtual_texture: map.virtual_texture.take(),
+            has_terrain: map.terrain.is_some(),
+            report,
+        },
+        packages,
+    ))
+}
+
+/// Loads a Modern Warfare III map zone into the match's world. A zone that
+/// cannot be read becomes a gap with the reason, never a crash.
+///
+/// The converted map comes from the game's cache when it was converted
+/// before from the same files (`super::jup_cache`); else it is read and
+/// converted, and written there for the next load. Its collision likewise.
+pub(crate) fn load_jup_world(
+    path: &Path,
+    progress: &LoadProgress,
+    material_seed: MaterialCatalog,
+) -> LoadedWorld {
+    use super::jup_cache::{CLIP_KIND, MAP_KIND};
+    let src = MapSources::beside(path);
+    let mut report = vec![format!(
+        "game: JUP / Modern Warfare III ({})",
+        path.display()
+    )];
+    let oodle = match std::panic::catch_unwind(|| fastfile_jup::oodle::load(&src.install).map_err(|e| e.to_string())) {
+        Ok(Ok(oodle)) => oodle,
+        Ok(Err(error)) => {
+            return zone_gap(path, format!("Modern Warfare III zone: {error}"), "assets::lane::jup_map::load_world/zone");
+        }
+        Err(_) => {
+            return zone_gap(path, "Modern Warfare III's Oodle could not be loaded".to_owned(), "assets::lane::jup_map::load_world/panic");
+        }
+    };
+    let keys = super::jup_cache::keys(path);
+    let stage = progress.begin_scoped(StageId::MapAssets, "modern warfare iii cache", None);
+    let started = std::time::Instant::now();
+    let cached = keys
+        .as_ref()
+        .and_then(|(key, _)| super::jup_cache::read(MAP_KIND, key))
+        .and_then(|raw| super::jup_cache::decode(&raw));
+    let cached_clip = keys
+        .as_ref()
+        .and_then(|(_, key)| super::jup_cache::read(CLIP_KIND, key))
+        .and_then(|raw| super::jup_cache::decode_clip(&raw));
+    stage.done();
+    let (mut conv, packages) = match cached {
+        Some(mut conv) => {
+            report.push(format!(
+                "jup cache: the converted map read in {:.1}s ({} vertices, {} placed models){}",
+                started.elapsed().as_secs_f32(),
+                conv.t7.vertices.len(),
+                conv.t7.static_models.len(),
+                if cached_clip.is_some() { ", with its collision" } else { "" }
+            ));
+            conv.t7.sky_cube = Some(default_sky());
+            (conv, None)
+        }
+        None => {
+            let (conv, packages) = match convert(path, &src, oodle.as_ref(), progress) {
+                Ok(read) => read,
+                Err(gap) => return gap,
+            };
+            if let Some((key, _)) = &keys {
+                // (Encoded here, before the pictures change the map;
+                // packed and written on a thread of its own.)
+                let raw = super::jup_cache::encode(&conv);
+                super::jup_cache::write_later(MAP_KIND, key.clone(), move || raw);
+            }
+            (conv, packages)
+        }
+    };
+    report.append(&mut conv.report);
     let stage = progress.begin_scoped(StageId::MapAssets, "modern warfare iii pictures", None);
-    materials_into(&map, &mut t7, &src.install, oodle.as_ref(), &mut report);
+    let packages = packages.unwrap_or_else(|| {
+        let opened = std::time::Instant::now();
+        let p = Packages::shared(&src.install);
+        report.push(format!("jup packages: {} opened in {:.1}s", p.len(), opened.elapsed().as_secs_f32()));
+        p
+    });
+    let pictures = Pictures { materials: &conv.materials, images: &conv.images };
+    let t7 = &mut conv.t7;
+    materials_into(&pictures, t7, &packages, oodle.as_ref(), &mut report);
     // The terrain's material (index: after the map's own, see `as_t7`).
-    if map.terrain.is_some() && !map.materials.is_empty() {
+    if conv.has_terrain && !conv.materials.is_empty() {
         let mut mat = MapMaterial {
             name: "jup_terrain".to_owned(),
             technique_set: String::new(),
@@ -800,8 +879,8 @@ pub(crate) fn load_jup_world(
             constants: Default::default(),
             bound: Vec::new(),
         };
-        if let (Some(vt), Some(paks)) = (map.virtual_texture.as_ref(), map.packages.as_ref())
-            && let Some(picture) = super::jup_terrain::picture(vt, paks, oodle.as_ref(), TERRAIN_LEVEL, &mut report)
+        if let Some(vt) = conv.virtual_texture.as_ref()
+            && let Some(picture) = super::jup_terrain::picture(vt, &packages, oodle.as_ref(), TERRAIN_LEVEL, &mut report)
         {
             t7.add_image("jup_terrain_colour".to_owned(), picture);
             mat.textures.push((0, "jup_terrain_colour".to_owned()));
@@ -809,18 +888,23 @@ pub(crate) fn load_jup_world(
         t7.materials.push(mat);
     }
     // The map's own sky, where its pictures are in the install.
-    if !map.sky_images.is_empty()
-        && let Some(paks) = map.packages.as_ref()
-    {
+    if !conv.sky_images.is_empty() {
         let angles = worldspawn_vec(&t7.entities, "sundirection").unwrap_or(DEFAULT_SUN_ANGLES);
         let (pitch, yaw) = (angles[0].to_radians(), angles[1].to_radians());
         let toward_sun = [pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), -pitch.sin()];
-        if let Some(cube) = super::jup_sky::sky_cube(&map.sky_images, paks, oodle.as_ref(), toward_sun, 512, &mut report) {
+        if let Some(cube) = super::jup_sky::sky_cube(&conv.sky_images, &packages, oodle.as_ref(), toward_sun, 512, &mut report) {
             t7.sky_cube = Some(cube);
         }
     }
     stage.done();
-    let loaded = super::t7_map::build_t7_world(path, &t7, report, progress, material_seed);
+    let clip_was_cached = cached_clip.is_some();
+    let loaded = super::t7_map::build_t7_world(path, &conv.t7, report, progress, material_seed, cached_clip);
+    if !clip_was_cached
+        && let (Some((_, key)), Some(clip)) = (&keys, loaded.collision.as_ref())
+    {
+        let clip = clip.clone();
+        super::jup_cache::write_later(CLIP_KIND, key.clone(), move || super::jup_cache::encode_clip(&clip));
+    }
     diag::info!(
         World,
         "bo2mp jup: {} loaded: {}",

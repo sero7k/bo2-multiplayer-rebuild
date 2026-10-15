@@ -13,7 +13,10 @@ fn cache_budget_bytes() -> u64 {
         std::env::var("IW4L_CACHE_BUDGET_MIB")
             .ok()
             .and_then(|value| value.trim().parse::<u64>().ok())
-            .unwrap_or(4096)
+            // (8 GiB: the pictures' mip chains and the shaders fill 4, and a
+            // converted Modern Warfare III map with its collision is
+            // several hundred MiB more.)
+            .unwrap_or(8192)
             << 20
     })
 }
@@ -25,6 +28,27 @@ pub fn cache_get(kind: &str, key: &str) -> Option<Vec<u8>> {
 
 pub fn cache_open(kind: &str, key: &str) -> Option<fs::File> {
     fs::File::open(cache_path(kind, key).ok()?).ok()
+}
+
+/// Removes the entries of `kind` whose key starts with `prefix`, but
+/// `keep` (an older build of the same thing, which a newer key replaces).
+pub fn cache_prune(kind: &str, prefix: &str, keep: &str) {
+    let Ok(path) = cache_path(kind, keep) else {
+        return;
+    };
+    let Some(dir) = path.parent() else {
+        return;
+    };
+    let Ok(listing) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in listing.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(prefix) && name != keep && !name.ends_with(".tmp") {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 pub fn cache_put(kind: &str, key: &str, bytes: &[u8]) -> Result<(), String> {

@@ -42,6 +42,7 @@ bevy.workspace = true
 frame.workspace = true
 serde_json.workspace = true
 async-lock.workspace = true
+lz4_flex.workspace = true # bo2mp: the converted Modern Warfare III map's cache
 png.workspace = true
 
 # `load_pool` puts its workers back on the process's CPUs (`session_load`).

@@ -451,6 +451,24 @@ pub struct Level {
 }
 
 impl Packages {
+    /// [`Self::open`], once a run per install: the map, the guest guns and
+    /// the Warzone HUD's pictures all read the same packages' indexes.
+    pub fn shared(install: &Path) -> std::sync::Arc<Self> {
+        use std::collections::HashMap;
+        use std::path::PathBuf;
+        use std::sync::{Arc, Mutex, OnceLock};
+        type Opened = Mutex<HashMap<PathBuf, Arc<OnceLock<Arc<Packages>>>>>;
+        static OPENED: OnceLock<Opened> = OnceLock::new();
+        // (One slot per install, filled once: two asking at once wait for
+        // the one opening them.)
+        let slot = OPENED
+            .get_or_init(Default::default)
+            .lock()
+            .map(|mut m| m.entry(install.to_path_buf()).or_default().clone())
+            .unwrap_or_default();
+        slot.get_or_init(|| Arc::new(Self::open(install))).clone()
+    }
+
     /// Every zone `.xpak` that has local parts.
     pub fn open(install: &Path) -> Self {
         let mut paks = Vec::new();

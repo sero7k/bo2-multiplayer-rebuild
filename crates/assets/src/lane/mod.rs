@@ -24,6 +24,7 @@ mod t7_map;
 pub(crate) use t7_map::load_t7_world;
 // bo2mp: Modern Warfare III's (2023) maps, through the Black Ops III
 // builder.
+mod jup_cache;
 mod jup_light;
 mod jup_map;
 mod jup_sky;

@@ -9,7 +9,7 @@ pub mod t6_mod;
 pub mod zone;
 
 pub use artifact_cache::{
-    CacheFlight, cache_flight, cache_get, cache_open, cache_put, cache_put_with, fnv1a64,
+    CacheFlight, cache_flight, cache_get, cache_open, cache_prune, cache_put, cache_put_with, fnv1a64,
     fnv1a64_more,
 };
 pub use asset_core::ZoneGame;
