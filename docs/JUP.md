@@ -186,3 +186,44 @@ names, no other map zone more than one). Start one with `map jup:<zone>`.
 - A hidden test run spawns with `BO2MP_AUTOCLASS=class_smg` (the console's
   `spawn 0` waits for a class menu nobody answers):
   `iw4l map jup:mp_jup_escape5 --cmds "wait world; wait 50s; force_match_start &; …"`.
+
+## Guns (`fastfile_jup::gun`, `assets::lane::jup_gun`)
+
+Played: the Renetti (`jup_jp12_pi_mike93`, `bo2_profile::jup_names::JUP_PLAYED`);
+the other named guns are not listed in Create-a-Class, for bots or in the box.
+
+- Parts: a gun is a receiver and the attachments it carries, each its own
+  model in a `_tr` zone: `mp_av_*` the view model's, `mp_aw_*` the world
+  model's (the Renetti: `jp19_pi_mike93_rec_000` receiver, `bar_000` slide
+  and barrel, `mag_15_9mm_000`, `pgrip_000`). A zone is the mesh (world
+  zones: one per LOD, then a detail collision), the model, its skin
+  variants and a streaming info.
+- Mesh positions are 21-bit fractions spanning the largest extent either
+  side of the centre, in the model's space; the parts fit the receiver
+  only so. Bones: per bone a 32-byte pose in the model (quaternion,
+  position, 2.0), then the FNV-1a 32 hashes of their names (`j_gun`,
+  `tag_barrel_attach`, `tag_mag_attach`, `tag_pistolgrip_attach`,
+  `tag_flash`, `tag_brass`, ...). A part's root is at its origin and goes
+  on the receiver's tag of its kind.
+- Materials: one pointer per surface, -1/-2 for a 0x78-byte reference stub
+  after the pointers (the material's hash), else a pointer back to a
+  material loaded before (not read: drawn as dark gun metal). Gun
+  materials are defined in `global_stream_mp` (one pass for the header
+  word `c0 b6 73 2c`); their pictures are asset-list entries there, the
+  list's place found from the pointers themselves. A gun material's
+  colour is a tint in its constants (row 6, sRGB bytes), the game laying
+  camo and wear over it; its pictures are a normal map (format 0x2f, BC7,
+  x y z), an occlusion picture (0x30, usage 0x36, occlusion in alpha) and
+  masks. The colour map built is the tint darkened by the occlusion.
+- In the match the gun is a copy of a Black Ops II gun (the B23R) with its
+  own models, name and handling (semi-automatic, 15 rounds): Black Ops
+  II's view animations, arms, effects, sounds and HUD pictures
+  (`WeaponRegistry::borrowed_namespace_of`). The models are one bone,
+  `tag_weapon` at the receiver's grip tag, with `tag_flash` and
+  `tag_brass`.
+- Not read: Modern Warfare III's view animations (animpkg, xanims), its
+  weapon numbers, and its weapon sounds: the gun's sound package
+  (`jup_pi_mike93_sfxpackage` in `ingame_shared_mp`) names a handful of
+  `ingame_shared_mp` aliases (shells, a 0.46 s stereo sound twice) and
+  otherwise hashes no alias or sndasset of the zones read names.
+- `iw4l check-guns` (`BO2MP_CHECK_GUNS=jup`) reads and builds the models.
