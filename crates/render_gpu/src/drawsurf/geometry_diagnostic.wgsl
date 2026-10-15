@@ -540,6 +540,19 @@ fn primary_light_ray(index: u32, p: vec3<f32>) -> LightRay {
     return ray;
 }
 
+// bo2mp: a model's light plus a primary light's `lit * N.L`. On a Call of
+// Duty 4 / World at War map (the sun colour's alpha 3 or more) as their lit
+// model shaders add them (`lp_sun_*`: 2 * grid + visibility * N.L * sun),
+// in gamma space: `light` is the grid's (2 * colour)^2, the sun colour a
+// gamma value. Black Ops II adds them linear.
+fn add_light(light: vec3<f32>, lit: vec3<f32>, ndotl: f32) -> vec3<f32> {
+    if (t6.sun_color.a > 2.5) {
+        let g = sqrt(max(light, vec3(0.0))) + lit * ndotl;
+        return g * g;
+    }
+    return light + lit * ndotl;
+}
+
 fn primary_light(index: u32, p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     let ray = primary_light_ray(index, p);
     return ray.colour * saturate(dot(n, ray.dir));
@@ -721,23 +734,27 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
     let page1 = textureSample(lightmap, lightmap_sampler, vec2(in.lightmap_uv.x, v + 1.0 / 3.0));
     let page2 = textureSample(lightmap, lightmap_sampler, vec2(in.lightmap_uv.x, v + 2.0 / 3.0));
     // bo2mp: a Call of Duty 4 / World at War lightmap (the sun colour's
-    // alpha is 2; `world_iw3::iw3_lightmap` packs its pages): CoD4's own lit
-    // world shaders (`lm_sm_sun_*_sm3`, read from the zone's pixel shaders)
-    // light in gamma space: A + B * saturate(rsqrt(1 + x^2 + y^2)), x and y
-    // the dominant light's tangent direction from the alphas, plus the sun
-    // by N.L and its baked visibility (the primary image, page 2 alpha),
-    // times the colour map and vertex colour. Written as base * light^2 so
-    // the BO2 output's square root gives CoD4's texel * light back.
+    // alpha is 2 or more: 2 Ghosts' and Infinite Warfare's, 3 CoD4's and
+    // World at War's, 4 those with their own reflection probes;
+    // `world_iw3::iw3_lightmap` packs its pages): CoD4's own lit world
+    // shaders (`lm_sm_sun_*_sm3`, read from the zone's pixel shaders)
+    // light in gamma space: A + B * f, x and y the dominant light's
+    // tangent direction from the alphas, f = saturate(rsqrt(1 + x^2 +
+    // y^2)) on a flat surface, plus the sun by N.L and its baked visibility
+    // (the primary image, page 2 alpha), times the colour map and vertex
+    // colour. Written as base * light^2 so the BO2 output's square root
+    // gives CoD4's texel * light back.
     if (t6.sun_color.a > 1.5) {
         let x = page0.a * 4.08 - 2.08;
         let y = page1.a * 4.064516 - 2.064516;
         var f = saturate(inverseSqrt(1.0 + x * x + y * y));
         var n_iw3 = normalize(in.normal);
 #ifdef SHINE
-        // bo2mp: a surface given a Black Ops II material (`bo2_look`): its
-        // normal map (BO2's encoding) bends both the baked dominant light
-        // (tangent space (x, y, 1)) and the sun, and its specular map adds
-        // BO2's sun highlight and probe reflection, as the BO2 lit shader.
+        // bo2mp: the normal map (Black Ops II's layout: a CoD4 map's xGxR
+        // one is moved there when linked, `world_iw3::iw3_normal_to_bo2`)
+        // bends the baked dominant light (tangent space (x, y, 1)) and the
+        // sun: CoD4's `lm_*n0*` shaders take f = saturate(dot of the two,
+        // normalised) and the world normal N + nx * T + ny * B.
         let nm3 = textureSample(normal_map, colour_sampler, in.uv).xy * 4.015748 - 2.015748;
         f = saturate(dot(normalize(vec3(nm3, 1.0)), normalize(vec3(x, y, 1.0))));
         n_iw3 = normalize(nm3.x * in.tangent + nm3.y * in.binormal + n_iw3);
@@ -748,35 +765,54 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
         var lit_iw3 = base * (lg * lg + dyn_lights(in.world_position, n_iw3));
 #ifdef SHINE
         let st3 = textureSample(specular_map, colour_sampler, in.uv);
-        let sr3 = raw_texel(st3.rgb);
-        let spec3 = sr3 * sr3;
-        let gloss3 = st3.a;
         let v3 = normalize(in.world_position - view.world_position);
-        let l3 = t6.sun_dir_exposure.xyz;
-        let h3 = normalize(l3 - v3);
-        let ndotl3 = saturate(dot(n_iw3, l3));
-        let ndoth3 = saturate(dot(n_iw3, h3));
-        let ldoth3 = saturate(dot(h3, l3));
-        let power3 = exp2(gloss3 * 13.0);
-        let lobe3 = exp2(log2(max(ndoth3, 0.000001)) * power3) * (power3 * 0.125 + 0.25);
-        let k3 = saturate(gloss3 + 0.545);
-        let vis3 = ndotl3 / (ldoth3 * ldoth3 * k3 - k3 + 1.01);
-        let fres3 = spec3 + (1.0 - spec3) * exp2(-10.0 * ldoth3);
-        let sun_lin = t6.sun_color.rgb * sun_vis;
-        lit_iw3 += fres3 * lobe3 * vis3 * sun_lin * sun_lin;
-        // The reflection: the model map's probe (`bo2_look` picks one for
-        // every surface), lit as the light here.
-        let ndotv3 = saturate(dot(n_iw3, -v3));
-        let fk3 = gloss3 * vec4(1.041667, 0.475, 0.018229, 0.25) + vec4(0.0, 0.0, -0.015625, 0.75);
-        var ff3 = min(exp2(-9.28 * ndotv3), fk3.y);
-        ff3 = fk3.x * ff3 + fk3.z;
-        let ew3 = saturate(spec3 * (fk3.w - ff3) + ff3);
         let r3 = v3 - 2.0 * dot(v3, n_iw3) * n_iw3;
-        let env3 = textureSampleLevel(probe_cubes, probe_sampler, r3, i32(in.probe), 4.0 - 4.0 * gloss3);
-        let env3_rgb = env3.rgb / (env3.a + 0.000001);
-        let here3 = lg * lg;
-        let probe3 = max(dot(here3, vec3(0.299, 0.587, 0.114)), 0.0001);
-        lit_iw3 += ew3 * env3_rgb * clamp(probe3, 0.0, 2.0);
+        let gloss3 = st3.a;
+        if (t6.sun_color.a > 3.5) {
+            // bo2mp: the map's own specular map and reflection probes, as
+            // CoD4's `lm_sm_sun_r0c0n0s0` adds them, in gamma space: the
+            // probe (rgb times its alpha, folded in when linked) at level
+            // 6 - 8 * gloss, plus the sun's highlight e^((R.L - 0.99925) *
+            // (2^(9.3775 * gloss) + 7)) times the sun's colour, its
+            // visibility and 0.625 (envMapParms.w); both times the specular
+            // colour and the fresnel lerp(0.8, 2, 1 - |N.V|) (envMapParms
+            // 0.8 2 1: most of these maps' materials carry it).
+            let spec_g = raw_texel(st3.rgb);
+            let env_g = textureSampleLevel(probe_cubes, probe_sampler, r3, i32(in.probe), clamp(6.0 - 8.0 * gloss3, 0.0, 6.0)).rgb;
+            let power = exp2(gloss3 * 9.377518) + 7.0;
+            let lobe = saturate(exp((dot(r3, t6.sun_dir_exposure.xyz) - 0.99925) * power));
+            let sun_spec = t6.sun_color.rgb * (sun_vis * lobe * 0.625);
+            let fres = mix(0.8, 2.0, 1.0 - abs(dot(n_iw3, v3)));
+            let g = sqrt(lit_iw3) + (env_g + sun_spec) * spec_g * fres;
+            lit_iw3 = g * g;
+        } else {
+            let sr3 = raw_texel(st3.rgb);
+            let spec3 = sr3 * sr3;
+            let l3 = t6.sun_dir_exposure.xyz;
+            let h3 = normalize(l3 - v3);
+            let ndotl3 = saturate(dot(n_iw3, l3));
+            let ndoth3 = saturate(dot(n_iw3, h3));
+            let ldoth3 = saturate(dot(h3, l3));
+            let power3 = exp2(gloss3 * 13.0);
+            let lobe3 = exp2(log2(max(ndoth3, 0.000001)) * power3) * (power3 * 0.125 + 0.25);
+            let k3 = saturate(gloss3 + 0.545);
+            let vis3 = ndotl3 / (ldoth3 * ldoth3 * k3 - k3 + 1.01);
+            let fres3 = spec3 + (1.0 - spec3) * exp2(-10.0 * ldoth3);
+            let sun_lin = t6.sun_color.rgb * sun_vis;
+            lit_iw3 += fres3 * lobe3 * vis3 * sun_lin * sun_lin;
+            // The reflection: the model map's probe (`bo2_look` picks one
+            // for every surface), lit as the light here.
+            let ndotv3 = saturate(dot(n_iw3, -v3));
+            let fk3 = gloss3 * vec4(1.041667, 0.475, 0.018229, 0.25) + vec4(0.0, 0.0, -0.015625, 0.75);
+            var ff3 = min(exp2(-9.28 * ndotv3), fk3.y);
+            ff3 = fk3.x * ff3 + fk3.z;
+            let ew3 = saturate(spec3 * (fk3.w - ff3) + ff3);
+            let env3 = textureSampleLevel(probe_cubes, probe_sampler, r3, i32(in.probe), 4.0 - 4.0 * gloss3);
+            let env3_rgb = env3.rgb / (env3.a + 0.000001);
+            let here3 = lg * lg;
+            let probe3 = max(dot(here3, vec3(0.299, 0.587, 0.114)), 0.0001);
+            lit_iw3 += ew3 * env3_rgb * clamp(probe3, 0.0, 2.0);
+        }
 #endif
         return vec4(bo2_out(bo2_fog(lit_iw3, in.world_position)), albedo.a);
     }
@@ -1370,7 +1406,10 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
     let probe_plus = u32(in.primary.w + 0.5);
     let probe = select(0u, probe_plus - 1u, probe_plus > 0u);
     let env = textureSampleLevel(probe_cubes, probe_sampler, r, i32(probe), 4.0 - 4.0 * gloss);
-    let env_rgb = env.rgb / (env.a + 0.000001);
+    // bo2mp: a CoD4 / World at War map's own probes (sun colour alpha 4)
+    // are lit already (gamma, no lighting table): squared, not relit.
+    let own_probes = t6.sun_color.a > 3.5;
+    let env_rgb = select(env.rgb / (env.a + 0.000001), env.rgb * env.rgb, own_probes);
     let pi = min(probe, 31u) * 3u;
     let s0 = probes.v[pi];
     let s1 = probes.v[pi + 1u];
@@ -1378,12 +1417,16 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
     let sh = dot(s2, vec4(vn.z * vn.x, vn.y * vn.z, vn.x * vn.y, vn.x * vn.x - vn.y * vn.y))
         + dot(s1, vec4(vn, 1.0)) + s0.w * vn.z * vn.z;
     let probe_light = max(sh * s0.xyz, vec3(0.1));
-    let reflection = select(vec3(0.0), env_weight * env_rgb * light / probe_light, probe_plus > 0u);
+    let relit = select(light / probe_light, vec3(1.0), own_probes);
+    let reflection = select(vec3(0.0), env_weight * env_rgb * relit, probe_plus > 0u);
     // The primary light: diffuse and its highlight.
     let ray = primary_light_ray(u32(in.primary.x + 0.5), in.world_position);
-    let lit = ray.colour * in.primary.y;
+    // (bo2mp: a CoD4 / World at War sun is a gamma colour: its highlight
+    // takes it squared.)
+    let lit_g = ray.colour * in.primary.y;
+    let lit = select(lit_g, lit_g * lit_g, t6.sun_color.a > 2.5);
     let ndotl = saturate(dot(n, ray.dir));
-    light += lit * ndotl;
+    light = add_light(light, lit_g, ndotl);
     light += dyn_lights(in.world_position, n);
     let h = normalize(ray.dir - vdir);
     let ndoth = saturate(dot(n, h));
@@ -1402,7 +1445,8 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
     );
 #else
     let n = normalize(in.normal);
-    light += primary_light(u32(in.primary.x + 0.5), in.world_position, n) * in.primary.y;
+    let pray = primary_light_ray(u32(in.primary.x + 0.5), in.world_position);
+    light = add_light(light, pray.colour * in.primary.y, saturate(dot(n, pray.dir)));
     light += dyn_lights(in.world_position, n);
     return vec4(bo2_out(bo2_fog(base * light, in.world_position)), albedo.a * in.color.a);
 #endif

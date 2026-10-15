@@ -27,6 +27,7 @@ bevy.workspace = true
 
 [dev-dependencies]
 t4 = { path = "../t4" } # bo2mp: legacy_clip_probe example
+d3d9_sm3.workspace = true # bo2mp: legacy_light_probe example
 
 [lints]
 workspace = true

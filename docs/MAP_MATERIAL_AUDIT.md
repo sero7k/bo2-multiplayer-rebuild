@@ -57,7 +57,13 @@ The gaps that remain with a full copy (design gaps, not missing data):
    draw with colour maps and its lightmaps`), although nearly every
    `wc_l_sm_r0c0n0s0*` material carries normal and specular maps.
    BO2-look swaps are the only legacy surfaces that get normal and
-   specular maps.
+   specular maps. **Fixed on `wip/legacy-lighting`:** `link_world_materials`
+   binds each lit material's own `normalMap` (DXT5 xGxR moved to Black Ops
+   II's layout, `world_iw3::iw3_normal_to_bo2`) and `specularMap`. The IW3
+   branch of the fallback pass bumps the lightmap's dominant light and the
+   sun by the normal map, as CoD4's `lm_*n0*` shaders do. It adds the
+   specular map's probe reflection and sun highlight from the map's own
+   reflection probes (`lm_sm_sun_r0c0n0s0`, in gamma space).
 3. **BO1 technique routing.** The T5 catalog reports `unrouted=303` of 585
    materials before decode. 282 of those are stub-routed. Unrouted
    technique families include `mc_l_sm_r#c#n#s#x#` (93),

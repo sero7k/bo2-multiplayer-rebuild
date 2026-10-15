@@ -540,6 +540,10 @@ pub struct LightGrid {
     pub maxs: [u16; 3],
     pub row_axis: u32,
     pub col_axis: u32,
+    /// bo2mp: the primary light the grid's entries name for the sun (the
+    /// entries' `primary_light_index`; 255 and up is the sun's band).
+    pub sun_primary_light_index: u32,
+    pub has_light_regions: bool,
     /// Per row, its offset in `raw_row_data` in 4-byte units; 0xFFFF if empty.
     pub row_data_start: Vec<u16>,
     pub raw_row_data: Vec<u8>,
@@ -822,6 +826,8 @@ mod tests {
             maxs: [10, 23, 8],
             row_axis: 0,
             col_axis: 1,
+            sun_primary_light_index: 1,
+            has_light_regions: false,
             row_data_start: vec![0],
             raw_row_data: raw,
             entries: (0..7).map(entry).collect(),

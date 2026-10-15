@@ -368,6 +368,110 @@ pub fn iw3_lightmap(
     })
 }
 
+/// bo2mp: a CoD4 / World at War light grid in the form the moving things'
+/// sampler reads (`asset_model::OwnedLightGrid`, IW4's layout: IW3 keeps
+/// the same row/column run-length rows, 4-byte entries and 56-direction
+/// colour sets of 8-bit gamma RGB). `None` for a map without one (no
+/// entries or colours, or axes out of range).
+pub fn iw3_owned_light_grid(grid: &iw3::zone::LightGrid) -> Option<asset_model::OwnedLightGrid> {
+    if grid.entries.is_empty()
+        || grid.colors.is_empty()
+        || grid.row_data_start.is_empty()
+        || grid.row_axis > 1
+        || grid.col_axis > 1
+        || grid.row_axis == grid.col_axis
+    {
+        return None;
+    }
+    let row_data_start = grid.row_data_start.iter().flat_map(|v| v.to_le_bytes()).collect();
+    let entries = grid
+        .entries
+        .iter()
+        .flat_map(|e| {
+            let [lo, hi] = e.colors_index.to_le_bytes();
+            [lo, hi, e.primary_light_index, e.needs_trace]
+        })
+        .collect();
+    let colors = grid.colors.iter().flat_map(|c| c.0.iter().flatten().copied()).collect();
+    Some(asset_model::OwnedLightGrid {
+        mins: grid.mins,
+        maxs: grid.maxs,
+        row_axis: grid.row_axis as usize,
+        col_axis: grid.col_axis as usize,
+        color_count: grid.colors.len() as u32,
+        has_light_regions: grid.has_light_regions,
+        // (A zone that names none: the sun is primary light 1, as on every
+        // CoD4 / World at War map read.)
+        sun_primary_light_index: if grid.sun_primary_light_index == 0 { 1 } else { grid.sun_primary_light_index },
+        row_data_start,
+        raw_row_data: grid.raw_row_data.clone(),
+        entries,
+        colors,
+        color_encoding: asset_model::LightGridColorEncoding::Rgb8,
+    })
+}
+
+/// bo2mp: what a CoD4 / World at War lit model takes from the light grid at
+/// `pos`: the lookup's mean colour (8-bit gamma over 255) and the sun's
+/// visibility there (the share of the corners' weight whose entries name
+/// the sun: CoD4's model lighting keeps it in the lookup's alpha, which its
+/// `lp_sun_*` shaders multiply the sun by). `None` outside the grid.
+pub fn iw3_grid_light(grid: &asset_model::OwnedLightGrid, pos: [f32; 3]) -> Option<([f32; 3], f32)> {
+    let s = asset_model::sample_light_grid(&grid.view(), pos).ok()?;
+    let mean = asset_model::mean_tile_rgba01(&s.tile);
+    let sun = grid.sun_primary_light_index;
+    let band = lighting_iw4::light_grid_primary_light_sun_band(sun);
+    let (mut lit, mut all) = (0.0f32, 0.0f32);
+    for i in 0..8 {
+        if let Some(p) = s.corner_primaries[i] {
+            all += s.weights[i];
+            if u32::from(p) == sun || u32::from(p) >= band {
+                lit += s.weights[i];
+            }
+        }
+    }
+    Some((mean, if all > 1e-6 { (lit / all).clamp(0.0, 1.0) } else { 0.0 }))
+}
+
+/// bo2mp: a CoD4 / World at War reflection probe's cube (64x64 A8R8G8B8,
+/// each face with its mips before the next face) as the fallback pass's
+/// probe layers: RGBA with CoD4's alpha scale folded in (its lit shaders
+/// read `cube.rgb * cube.a`), alpha 1. Gamma values, as CoD4 adds them.
+/// `None` when the pixels are not that layout.
+pub fn iw3_probe_faces(size: u32, levels: u32, bgra: &[u8]) -> Option<Vec<u8>> {
+    let face: usize = (0..levels).map(|l| ((size >> l).max(1) as usize).pow(2) * 4).sum();
+    if size == 0 || bgra.len() < face * 6 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(face * 6);
+    for px in bgra[..face * 6].chunks_exact(4) {
+        let a = u32::from(px[3]);
+        let scale = |c: u8| ((u32::from(c) * a + 127) / 255) as u8;
+        out.extend_from_slice(&[scale(px[2]), scale(px[1]), scale(px[0]), 255]);
+    }
+    Some(out)
+}
+
+/// bo2mp: a CoD4 / World at War normal map (IWI DXT5 "xGxR": x in alpha, y
+/// in green; their lit shaders decode `(a, g) * 4.08 - 2.08` and leave z to
+/// the normalise) in Black Ops II's layout (x in red, y in green, z
+/// rebuilt in blue, alpha 1), which the fallback pass's shine path reads
+/// (`xy * 4.015748 - 2.015748`: the same scale within 2%). A map whose
+/// alpha is all 255 (an uncompressed or DXN-style map, x already in red)
+/// keeps its red.
+pub fn iw3_normal_to_bo2(rgba: &mut [u8]) {
+    let xgxr = rgba.chunks_exact(4).any(|p| p[3] != 255);
+    for p in rgba.chunks_exact_mut(4) {
+        let x = if xgxr { p[3] } else { p[0] };
+        let y = p[1];
+        let (fx, fy) = (f32::from(x) / 255.0 * 2.0 - 1.0, f32::from(y) / 255.0 * 2.0 - 1.0);
+        let z = (1.0 - fx * fx - fy * fy).max(0.0).sqrt();
+        p[0] = x;
+        p[2] = ((z * 0.5 + 0.5) * 255.0).round() as u8;
+        p[3] = 255;
+    }
+}
+
 /// One cell, one AABB node over every surface, identity sort order.
 fn one_cell(
     n: usize,
@@ -1052,6 +1156,79 @@ mod tests {
 #[cfg(test)]
 mod iw3_lightmap_tests {
     use super::*;
+
+    #[test]
+    fn a_light_grid_becomes_the_samplers_grid() {
+        // One row (x = 10) with columns y = 20..23 as in the iw3 crate's
+        // test: two columns of three points, a gap, one column of one.
+        let mut raw = Vec::new();
+        for v in [20u16, 4, 5, 3] {
+            raw.extend_from_slice(&v.to_le_bytes());
+        }
+        raw.extend_from_slice(&0u32.to_le_bytes());
+        raw.extend_from_slice(&[2, 3, 1, 1, 0, 1, 1, 0]);
+        let colour = |v: u8| iw3::zone::LightGridColors([[v, v, v]; 56]);
+        let grid = iw3::zone::LightGrid {
+            mins: [10, 20, 5],
+            maxs: [10, 23, 8],
+            row_axis: 0,
+            col_axis: 1,
+            sun_primary_light_index: 0,
+            has_light_regions: false,
+            row_data_start: vec![0],
+            raw_row_data: raw,
+            entries: (0..7u16)
+                .map(|i| iw3::zone::LightGridEntry { colors_index: i % 2, primary_light_index: 1, needs_trace: 0 })
+                .collect(),
+            colors: vec![colour(64), colour(128)],
+        };
+        let owned = iw3_owned_light_grid(&grid).expect("converts");
+        assert_eq!(owned.entries.len(), 7 * 4);
+        assert_eq!(&owned.entries[4..8], &[1, 0, 1, 0]);
+        assert_eq!(owned.colors.len(), 2 * 168);
+        assert_eq!(owned.colors[168], 128);
+        assert_eq!(owned.row_data_start, vec![0, 0]);
+        // No sun index stored: the sun is primary light 1.
+        assert_eq!(owned.sun_primary_light_index, 1);
+        // The sampler finds a point inside the stored column (x = 10 * 32,
+        // y = 20 * 32, z = 7 * 64, less the grid's offset).
+        let at = |p: [u32; 3]| iw3::zone::LightGrid::world_pos(p);
+        let s = asset_model::sample_light_grid(&owned.view(), at([10, 20, 7]));
+        assert!(s.is_ok(), "{s:?}");
+        let empty = iw3::zone::LightGrid::default();
+        assert!(iw3_owned_light_grid(&empty).is_none());
+    }
+
+    #[test]
+    fn probe_faces_fold_alpha_into_colour() {
+        // 2x2 faces with two levels: 4 + 1 texels a face, six faces.
+        let mut bgra = Vec::new();
+        for _ in 0..6 * 5 {
+            bgra.extend_from_slice(&[40, 80, 200, 128]);
+        }
+        let out = iw3_probe_faces(2, 2, &bgra).expect("layout");
+        assert_eq!(out.len(), 6 * 5 * 4);
+        assert_eq!(&out[..4], &[100, 40, 20, 255]);
+        assert!(iw3_probe_faces(2, 2, &bgra[..20]).is_none());
+    }
+
+    #[test]
+    fn xgxr_normals_move_x_to_red_and_rebuild_z() {
+        // x from alpha (255: +1), y from green (128: ~0): z ~0. A flat
+        // texel (x = y = 128): z ~1.
+        let mut px = vec![0, 128, 0, 255, 7, 128, 9, 128];
+        iw3_normal_to_bo2(&mut px);
+        assert_eq!(px[0], 255);
+        assert_eq!(px[1], 128);
+        assert!(px[2] <= 140, "{}", px[2]);
+        assert_eq!(px[3], 255);
+        assert_eq!(px[4], 128);
+        assert!(px[6] >= 250, "{}", px[6]);
+        // Alpha all 255: x stays in red.
+        let mut opaque = vec![200, 128, 0, 255];
+        iw3_normal_to_bo2(&mut opaque);
+        assert_eq!(opaque[0], 200);
+    }
 
     #[test]
     fn a_page_pair_becomes_three_stacked_pages() {
