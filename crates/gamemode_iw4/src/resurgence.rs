@@ -82,54 +82,74 @@ pub struct Rules {
     pub loot_spots: u16,
 }
 
+/// The numbers, from what Activision and the press published for Warzone's
+/// Resurgence in the Modern Warfare III era (none was read from the game's
+/// files: its game type keeps them in compiled scripts):
+///
+/// - Gas: 10 damage a tick ("Gas damage increased to 10 damage per tick, up
+///   from 9", Warzone Season 1 patch notes, callofduty.com, 2023-12).
+/// - Redeploy: off once Circle 3 has closed ("The Resurgence redeployment
+///   mechanic will now be disabled at the end of Circle 3", same notes,
+///   Urzikstan Resurgence); its wait 15 s in the first circle, 39 s after,
+///   and a squadmate's kill takes 7 s off it (Charlie Intel, "How to get
+///   your teammates to respawn faster in Warzone Rebirth Island
+///   Resurgence", 2021).
+/// - Armor: three 50-point plates (Heavy Armor "buffing the total number of
+///   health points from 150 to 200", Warzone Season 3 patch notes,
+///   callofduty.com, 2024-04); a plate costs $300 at a buy station ("down
+///   from $500", same notes).
+///
+/// Not published that we found, so still our own: the circles' waits,
+/// closing times and sizes, the loadout drop's, self-revive kit's, UAV's
+/// and buyback's prices on Rebirth Island, and the cash amounts.
 pub const PHASES: &[CirclePhase] = &[
     CirclePhase {
         wait_s: 120,
         close_s: 90,
         end_radius: 0.62,
-        gas_dps: 5,
-        redeploy_s: Some(10),
+        gas_dps: 10,
+        redeploy_s: Some(15),
     },
     CirclePhase {
         wait_s: 75,
         close_s: 75,
         end_radius: 0.40,
-        gas_dps: 8,
-        redeploy_s: Some(15),
+        gas_dps: 10,
+        redeploy_s: Some(39),
     },
     CirclePhase {
         wait_s: 60,
         close_s: 60,
         end_radius: 0.24,
         gas_dps: 10,
-        redeploy_s: Some(20),
+        redeploy_s: Some(39),
     },
     CirclePhase {
         wait_s: 50,
         close_s: 50,
         end_radius: 0.13,
-        gas_dps: 15,
-        redeploy_s: Some(25),
+        gas_dps: 10,
+        redeploy_s: None,
     },
     CirclePhase {
         wait_s: 40,
         close_s: 40,
         end_radius: 0.06,
-        gas_dps: 20,
+        gas_dps: 10,
         redeploy_s: None,
     },
     CirclePhase {
         wait_s: 30,
         close_s: 35,
         end_radius: 0.02,
-        gas_dps: 25,
+        gas_dps: 10,
         redeploy_s: None,
     },
     CirclePhase {
         wait_s: 20,
         close_s: 30,
         end_radius: 0.0,
-        gas_dps: 30,
+        gas_dps: 10,
         redeploy_s: None,
     },
 ];
@@ -159,11 +179,12 @@ pub const BUY: &[BuyItem] = &[
         label: "PERSONAL UAV",
         price: 4000,
     },
+    // ($300 a plate.)
     BuyItem {
         kind: BuyKind::ArmorPlates,
         key: "plates",
         label: "ARMOR PLATES (3)",
-        price: 1000,
+        price: 900,
     },
 ];
 
@@ -211,7 +232,7 @@ pub const REBIRTH: Rules = Rules {
     spawn_plates: 1,
     start_cash: 0,
     kill_cash: 400,
-    kill_redeploy_cut_s: 5,
+    kill_redeploy_cut_s: 7,
     cash_stacks: &[100, 200, 500, 1000],
     buy_station_count: 3,
     uav_s: 30,
