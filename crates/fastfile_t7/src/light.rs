@@ -256,6 +256,10 @@ pub fn cube_dir(f: usize, u: f32, w: f32) -> [f32; 3] {
     }
 }
 
+/// How far outside a probe's box its light still reaches (blending to
+/// the map-wide probe's).
+const BOX_BLEND: f32 = 96.0;
+
 /// The map's baked light, read once: the sky and the probes.
 pub struct Bake {
     pub sky: Option<SkyPicture>,
@@ -435,14 +439,28 @@ impl Bake {
     /// whose box holds `p` (the smallest such), blended toward the nearest
     /// box's within `BLEND` units of it, else the map-wide probe.
     pub fn ambient(&self, p: [f32; 3], n: [f32; 3]) -> [f32; 3] {
-        const BLEND: f32 = 96.0;
         if self.probes.is_empty() {
             return [1.0; 3];
         }
+        let best = self.box_at(p);
+        let global = self.probes[0].ambient(n);
+        match best {
+            Some((o, i)) => {
+                let local = self.probes[i].ambient(n);
+                let t = (o / BOX_BLEND).clamp(0.0, 1.0);
+                std::array::from_fn(|k| local[k] + (global[k] - local[k]) * t)
+            }
+            None => global,
+        }
+    }
+
+    /// The local probe whose box holds `p` (the smallest such), else the
+    /// nearest within `BOX_BLEND` units: (distance outside it, index).
+    pub fn box_at(&self, p: [f32; 3]) -> Option<(f32, usize)> {
         let mut best: Option<(f32, f32, usize)> = None;
         for (i, pr) in self.probes.iter().enumerate().skip(1) {
             let o = pr.outside(p);
-            if o > BLEND {
+            if o > BOX_BLEND {
                 continue;
             }
             // Inside boxes first (smallest volume), then the nearest.
@@ -451,15 +469,12 @@ impl Bake {
                 best = Some((key.0, key.1, i));
             }
         }
-        let global = self.probes[0].ambient(n);
-        match best {
-            Some((o, _, i)) => {
-                let local = self.probes[i].ambient(n);
-                let t = (o / BLEND).clamp(0.0, 1.0);
-                std::array::from_fn(|k| local[k] + (global[k] - local[k]) * t)
-            }
-            None => global,
-        }
+        best.map(|(o, _, i)| (o, i))
+    }
+
+    /// The probe a point reflects: its box's, else the map-wide one (0).
+    pub fn probe_at(&self, p: [f32; 3]) -> usize {
+        self.box_at(p).map_or(0, |(_, i)| i)
     }
 
     /// A short description of the probes (`t7_ambient`).
@@ -564,4 +579,45 @@ pub fn sky_cube(sky: &SkyPicture, size: u32) -> Vec<[f32; 4]> {
         }
     }
     out
+}
+
+/// The reflection probes `keep` as one cube array in layer-major order
+/// (each probe's six faces, each face its whole chain), as uploaded: BC6H
+/// (`format`), `size` px, `levels` levels.
+pub struct ProbeArray {
+    pub size: u32,
+    pub levels: u32,
+    pub format: u32,
+    pub data: Vec<u8>,
+}
+
+pub fn probe_array(map: &T7Map, keep: &[usize]) -> Result<ProbeArray, String> {
+    let p = map.light_refs.as_ref().and_then(|r| r.probes.as_ref()).ok_or("no probes")?;
+    let paks = map.paks().ok_or("no packages")?;
+    let d = paks.read(p.key).map_err(|e| e.to_string())?;
+    let lsize = |k: u32| crate::texture::level_size(p.format, p.size >> k, p.size >> k).unwrap_or(0);
+    let count = p.count as usize;
+    let mut level_at = Vec::with_capacity(p.levels as usize);
+    let mut at = 0usize;
+    for k in 0..p.levels {
+        level_at.push(at);
+        at += lsize(k) * 6 * count;
+    }
+    if d.len() < at {
+        return Err(format!("probes: {} bytes, {at} wanted", d.len()));
+    }
+    let mut data = Vec::with_capacity(keep.len() * 6 * (0..p.levels).map(lsize).sum::<usize>());
+    for &i in keep {
+        if i >= count {
+            return Err(format!("probe {i} of {count}"));
+        }
+        for f in 0..6 {
+            for k in 0..p.levels {
+                let s = lsize(k);
+                let o = level_at[k as usize] + (6 * i + f) * s;
+                data.extend_from_slice(&d[o..o + s]);
+            }
+        }
+    }
+    Ok(ProbeArray { size: p.size, levels: p.levels, format: p.format, data })
 }
