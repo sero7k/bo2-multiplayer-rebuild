@@ -245,8 +245,20 @@ impl Materials<'_> {
             return m;
         }
         let m = &self.map.materials[index];
-        let draw = t7_draw(&m.name, &m.technique_set, model);
+        let mut draw = t7_draw(&m.name, &m.technique_set, model);
         let mut textures = Vec::new();
+        // bo2mp: an emissive surface drawn unlit from its emissive map
+        // (`super::t7_look::emissive`).
+        let glow = if self.looks.is_some() { super::t7_look::emissive(self.map, index) } else { None };
+        let glow_slot = glow.as_ref().and_then(|(name, _)| self.image(name));
+        if let (Some(slot), Some((_, scale))) = (glow_slot, glow) {
+            draw.unlit = true;
+            draw.unlit_scale_exp = scale;
+            if let Some(looks) = self.looks.as_mut() {
+                looks.stats.emissive += 1;
+            }
+            textures.push(MaterialTextureBinding { name_hash: 0xa0ab_1041, name_start: 0, name_end: 0, sampler_state: 0x13, semantic: TS_COLOR_MAP, image: Some(slot) });
+        }
         // bo2mp: Black Ops III's look (`super::t7_look`): its colour map as
         // its G-buffer makes it, its normal and specular maps.
         let look = match (self.looks.as_mut(), super::t7_look::Looks::cover(&draw)) {
@@ -254,9 +266,11 @@ impl Materials<'_> {
             _ => [None; 3],
         };
         let m = &self.map.materials[index];
-        if let Some(slot) = look[0] {
+        let glowing = !textures.is_empty();
+        if let Some(slot) = look[0].filter(|_| !glowing) {
             textures.push(MaterialTextureBinding { name_hash: 0xa0ab_1041, name_start: 0, name_end: 0, sampler_state: 0x13, semantic: TS_COLOR_MAP, image: Some(slot) });
-        } else if let Some((hash, name)) = colour_map(self.map, &m.textures)
+        } else if !glowing
+            && let Some((hash, name)) = colour_map(self.map, &m.textures)
             && let Some(slot) = self.image(&name)
         {
             textures.push(MaterialTextureBinding { name_hash: hash, name_start: 0, name_end: 0, sampler_state: 0x13, semantic: TS_COLOR_MAP, image: Some(slot) });

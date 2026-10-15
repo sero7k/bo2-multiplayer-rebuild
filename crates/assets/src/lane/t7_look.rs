@@ -45,6 +45,8 @@ pub(super) struct Stats {
     pub specular: usize,
     /// Tinted, metal, gloss map, occlusion, detail normals.
     pub used: [usize; 5],
+    /// Emissive surfaces drawn from their emissive maps.
+    pub emissive: usize,
     pub failures: Vec<String>,
 }
 
@@ -119,7 +121,7 @@ impl Looks {
     pub fn report(&self) -> String {
         let s = &self.stats;
         format!(
-            "t7 look: {} materials with Black Ops III's look ({} normal maps, {} specular maps; {} tinted, {} with metal, {} with gloss maps, {} with occlusion, {} with detail normals), {} failed{}",
+            "t7 look: {} materials with Black Ops III's look ({} normal maps, {} specular maps; {} tinted, {} with metal, {} with gloss maps, {} with occlusion, {} with detail normals), {} emissive, {} failed{}",
             s.materials,
             s.normal,
             s.specular,
@@ -128,10 +130,27 @@ impl Looks {
             s.used[2],
             s.used[3],
             s.used[4],
+            s.emissive,
             s.failures.len(),
             s.failures.first().map_or(String::new(), |f| format!(" (first: {f})"))
         )
     }
+}
+
+/// An emissive material (`lit_emissive*`: screens, signs, lit panels; its
+/// diffuse mostly Black Ops III's black placeholder): its emissive map,
+/// and Black Ops II's unlit colour scale for its `hdrScale` (log2, at most
+/// 2: Black Ops III's HDR units run brighter than Black Ops II's display
+/// ones). The emissive programs add `emissiveMap * emissiveTint1 *
+/// hdrScale` to the lit surface; drawn unlit here, the glow alone.
+pub(super) fn emissive(map: &T7Map, index: usize) -> Option<(String, u8)> {
+    let m = &map.materials[index];
+    if !m.technique_set.split(['_', '/', '#']).any(|w| w == "emissive") {
+        return None;
+    }
+    let name = m.texture("emissiveMap")?.to_owned();
+    let hdr = m.constant::<1>("hdrScale").map_or(1.0, |v| v[0]).max(1.0);
+    Some((name, hdr.log2().round().clamp(0.0, 2.0) as u8))
 }
 
 /// Block-compressed levels into the catalog.
