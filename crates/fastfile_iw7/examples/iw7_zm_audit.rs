@@ -20,6 +20,15 @@ fn main() {
         println!("{l}");
     }
     println!("read in {:.1}s", started.elapsed().as_secs_f32());
+    if std::env::var("IW7_AUDIT_VISION").is_ok() {
+        if let Some((name, text)) = &map.vision {
+            println!("vision {name}:\n{text}");
+        }
+        for l in &map.lights {
+            println!("light kind {} colour {:?} dir {:?} origin {:?} radius {}", l.kind, l.color, l.dir, l.origin, l.radius);
+        }
+        return;
+    }
     // How often each material is drawn (world surfaces shown, placed models).
     let mut uses: HashMap<usize, usize> = HashMap::new();
     let mut hidden_uses: HashMap<usize, usize> = HashMap::new();
