@@ -905,6 +905,11 @@ pub(crate) fn read_game_image(prefix: &str, names: &[String]) -> Option<(u32, u3
             .and_then(|z| z.path.parent().map(std::path::Path::to_path_buf));
         return names.iter().find_map(|n| assets::t6_mod_picture_rgba(n, zone_all.as_deref()));
     }
+    // bo2mp: Modern Warfare III's (2023) emblems and calling cards: its
+    // `global` zone's names, their pictures in its packages.
+    if prefix == crate::jup_cards::PREFIX {
+        return crate::jup_cards::read_picture(names);
+    }
     // bo2mp: Ghosts' pictures are in its zones (ui_mp), not in IWDs.
     if prefix == "iw6" {
         let install = ghosts_install(asset_transport::games_root_from_env().ok().as_ref())?;

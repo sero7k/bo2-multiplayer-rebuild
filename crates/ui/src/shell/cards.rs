@@ -9,6 +9,10 @@
 //! their archives hold, read once off the main thread. Until they are in
 //! (or with neither game installed) a short list of Modern Warfare 2's
 //! names stands in.
+//!
+//! Modern Warfare III's (2023) emblems and calling cards come after them
+//! (`jup:<name>`, `crate::jup_cards`), many of them flipbooks. The pickers
+//! show one game at a time, its own category ([`GAMES`]).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -83,7 +87,55 @@ fn read_lists() -> Lists {
         }
     }
     diag::info!(Ui, "bo2mp shell: {} calling cards and {} emblems in Modern Warfare 2 and 3", lists.cards.len(), lists.emblems.len());
+    let (cards, emblems) = crate::jup_cards::names();
+    lists.cards.extend(cards);
+    lists.emblems.extend(emblems);
     lists
+}
+
+/// The games the pickers group them by, in order: (prefix, tab).
+pub(crate) const GAMES: [(&str, &str); 3] =
+    [("iw4", "MODERN WARFARE 2"), ("iw5", "MODERN WARFARE 3"), (crate::jup_cards::PREFIX, "MODERN WARFARE III")];
+
+fn game_of(name: &str) -> &str {
+    name.split_once(':').map_or("", |(g, _)| g)
+}
+
+/// The categories `list` has: indices into [`GAMES`], in order.
+pub(crate) fn categories_in(list: &[String]) -> Vec<usize> {
+    (0..GAMES.len()).filter(|&g| list.iter().any(|n| game_of(n) == GAMES[g].0)).collect()
+}
+
+/// The `cat`-th category of `list` (the last when past it): its names.
+pub(crate) fn in_category(list: &[String], cat: usize) -> Vec<String> {
+    let cats = categories_in(list);
+    let Some(&g) = cats.get(cat.min(cats.len().saturating_sub(1))) else { return list.to_vec() };
+    list.iter().filter(|n| game_of(n) == GAMES[g].0).cloned().collect()
+}
+
+/// The category of the picker a name is in (0 when none has it).
+pub(crate) fn category_of_in(list: &[String], name: &str) -> usize {
+    categories_in(list).iter().position(|&g| GAMES[g].0 == game_of(name)).unwrap_or(0)
+}
+
+/// What a picker shows of a kind: category `cat`'s names.
+pub(crate) fn shown(kind: Kind, cat: usize) -> Vec<String> {
+    in_category(&list(kind), cat)
+}
+
+/// The picker's category tabs of a kind.
+pub(crate) fn category_tabs(kind: Kind) -> Vec<String> {
+    categories_in(&list(kind)).iter().map(|&g| GAMES[g].1.to_owned()).collect()
+}
+
+/// How many frames a name's picture has (1: a still one, or not read yet).
+pub(crate) fn frames(name: &str) -> u32 {
+    if game_of(name) == crate::jup_cards::PREFIX { crate::jup_cards::frames(name) } else { 1 }
+}
+
+/// The shell name of a frame of a flipbook.
+pub(crate) fn frame_name(name: &str, frame: u32) -> String {
+    crate::jup_cards::frame_name(name, frame)
 }
 
 /// Starts reading the lists (once a run).
@@ -244,6 +296,9 @@ const WORDS: [(&str, &str); 12] = [
 /// (`iw4:cardtitle_army_ranger` -> `Army Ranger`, `cardicon_1st_place` ->
 /// `1st Place`).
 pub(crate) fn title(name: &str) -> String {
+    if game_of(name) == crate::jup_cards::PREFIX {
+        return crate::jup_cards::title(name);
+    }
     let material = name.split_once(':').map_or(name, |(_, m)| m);
     let rest = material.trim_start_matches("cardtitle_").trim_start_matches("cardicon_");
     let words: Vec<String> = rest
@@ -287,8 +342,12 @@ pub(crate) fn label(name: &str) -> String {
     let game = match game {
         "iw4" => "MW2",
         "iw5" => "MW3",
+        "jup" => "MWIII",
         _ => "",
     };
+    if game == "MWIII" {
+        return format!("{game} · {}", title(name).to_uppercase());
+    }
     let rest = material.trim_start_matches("cardtitle_").trim_start_matches("cardicon_").replace('_', " ").to_uppercase();
     if game.is_empty() { rest } else { format!("{game} · {rest}") }
 }
@@ -345,6 +404,17 @@ mod tests {
         // (No preferred one: the first Modern Warfare 2 name.)
         let l = names(&["iw5:cardicon_a", "iw4:cardicon_b"]);
         assert_eq!(default_in(Kind::Emblem, &l), "iw4:cardicon_b");
+    }
+
+    #[test]
+    fn categories_by_game() {
+        let l = names(&["iw4:cardicon_a", "iw4:cardicon_b", "jup:ui_emblem_005", "jup:ui_emblem_006"]);
+        assert_eq!(categories_in(&l), vec![0, 2]);
+        assert_eq!(in_category(&l, 1), names(&["jup:ui_emblem_005", "jup:ui_emblem_006"]));
+        assert_eq!(in_category(&l, 7), names(&["jup:ui_emblem_005", "jup:ui_emblem_006"]));
+        assert_eq!(category_of_in(&l, "jup:ui_emblem_006"), 1);
+        assert_eq!(category_of_in(&l, "iw4:cardicon_b"), 0);
+        assert_eq!(label("jup:ui_emblem_005"), "MWIII · EMBLEM 005");
     }
 
     #[test]

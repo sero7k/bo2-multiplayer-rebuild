@@ -303,6 +303,9 @@ pub(crate) struct Shell {
     /// WARZONE: players a squad (1-4) and squads in the match.
     pub br_squad_size: u8,
     pub br_squads: u32,
+    /// The calling card / emblem picker's category (an index into the
+    /// categories its kind has, `cards::category_tabs`).
+    pub look_cat: usize,
 }
 
 impl Default for Shell {
@@ -345,6 +348,7 @@ impl Default for Shell {
             ask_focus: 1,
             br_squad_size: gamemode_iw4::resurgence::REBIRTH.squad_size,
             br_squads: 4,
+            look_cat: 0,
         }
     }
 }
@@ -450,8 +454,8 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
         Screen::Barracks => {
             let mut r = vec![Row::new("COMBAT RECORD", "Your kills, wins and time played.", Act::Barracks)];
             for (label, sub, kind) in [
-                ("CALLING CARD", "Your calling card, from Modern Warfare 2 and 3.", cards::Kind::Card),
-                ("EMBLEM", "Your emblem, from Modern Warfare 2 and 3.", cards::Kind::Emblem),
+                ("CALLING CARD", "Your calling card, from Modern Warfare 2, 3 and III.", cards::Kind::Card),
+                ("EMBLEM", "Your emblem, from Modern Warfare 2, 3 and III.", cards::Kind::Emblem),
             ] {
                 let stat = if kind == cards::Kind::Card { &c.player.card } else { &c.player.emblem };
                 let mut row = Row::new(label, sub, Act::Looks(kind));
@@ -469,7 +473,7 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
         Screen::Warzone => warzone::rows(s, c),
         Screen::CardPick | Screen::EmblemPick => {
             let kind = look_kind(s.screen);
-            let list = cards::list(kind);
+            let list = cards::shown(kind, s.look_cat);
             cards::page_items(kind, &list, s.page).iter().enumerate().map(|(k, n)| Row::new(&cards::title(n), &cards::label(n), Act::Choose(k))).collect()
         }
         Screen::MapPick => {
@@ -482,6 +486,18 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
                         .collect()
                 })
                 .unwrap_or_default()
+        }
+    }
+}
+
+impl Shell {
+    /// The calling card / emblem picker shows another category, from its
+    /// first page.
+    pub(crate) fn set_look_cat(&mut self, cat: usize) {
+        if cat != self.look_cat {
+            self.look_cat = cat;
+            self.page = 0;
+            self.focus = 0;
         }
     }
 }
@@ -765,10 +781,14 @@ impl Shell {
             Act::Looks(kind) => {
                 // The page and place of the one he has.
                 let stat = if kind == cards::Kind::Card { &c.player.card } else { &c.player.emblem };
-                let list = cards::list(kind);
-                let at = list.iter().position(|n| *n == cards::mine(kind, stat)).unwrap_or(0);
+                let now = cards::mine(kind, stat);
+                // (In the category of the one he has.)
+                let cat = cards::category_of_in(&cards::list(kind), &now);
+                let list = cards::shown(kind, cat);
+                let at = list.iter().position(|n| *n == now).unwrap_or(0);
                 let per = cards::per_page(kind);
                 self.go(if kind == cards::Kind::Card { Screen::CardPick } else { Screen::EmblemPick });
+                self.look_cat = cat;
                 self.page = at / per;
                 self.focus = at % per;
             }
@@ -872,7 +892,7 @@ impl Shell {
                 }
                 Screen::CardPick | Screen::EmblemPick => {
                     let kind = look_kind(self.screen);
-                    let list = cards::list(kind);
+                    let list = cards::shown(kind, self.look_cat);
                     if let Some(name) = cards::page_items(kind, &list, self.page).get(i) {
                         cards::set(kind, name);
                         self.note(&format!("{} equipped.", cards::title(name)), now);
@@ -896,6 +916,8 @@ pub(crate) enum Hit {
     Step(usize, i32),
     /// A picker's page arrow: -1 or +1.
     PageStep(i32),
+    /// The calling card / emblem picker's category tab.
+    LookCat(usize),
     Back,
     /// A yes / no question's YES (0) or NO (1).
     Ask(usize),
@@ -1213,12 +1235,22 @@ fn shell_input(
         }
         Screen::CardPick | Screen::EmblemPick => {
             let kind = look_kind(s.screen);
-            let np = cards::pages(kind, cards::list(kind).len()) as i32;
+            let np = cards::pages(kind, cards::shown(kind, s.look_cat).len()) as i32;
             s.page = (s.page as i32 + by).rem_euclid(np) as usize;
             s.focus = 0;
         }
         _ => {}
     };
+    // (The calling card and emblem pickers' categories: Z / C, the
+    // triggers.)
+    if matches!(shell.screen, Screen::CardPick | Screen::EmblemPick) {
+        let by = i32::from(keys.just_pressed(KeyCode::KeyC) || pad(GamepadButton::RightTrigger2)) - i32::from(keys.just_pressed(KeyCode::KeyZ) || pad(GamepadButton::LeftTrigger2));
+        if by != 0 {
+            let n = cards::category_tabs(look_kind(shell.screen)).len().max(1) as i32;
+            let cat = (shell.look_cat as i32 + by).rem_euclid(n) as usize;
+            shell.set_look_cat(cat);
+        }
+    }
     if prev_tab {
         tabbed(&mut shell, -1);
     }
@@ -1305,6 +1337,10 @@ fn shell_input(
             }
             Hit::PageStep(by) if clicked => {
                 tabbed(&mut shell, by);
+                return;
+            }
+            Hit::LookCat(i) if clicked => {
+                shell.set_look_cat(i);
                 return;
             }
             // (The main menu's EXIT quits.)
@@ -1413,6 +1449,7 @@ pub(crate) fn register_shell(app: &mut App) {
                 background::shell_background,
                 prefetch_pictures,
                 view::shell_view,
+                view::turn_flipbooks,
                 loading::shell_loading,
                 loading::shell_loading_music,
                 ingame::ingame_input,
