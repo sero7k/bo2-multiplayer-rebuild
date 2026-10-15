@@ -68,6 +68,11 @@ const T7_EMISSIVE_HASH: u32 = 0x3461_4347;
 /// The largest level kept of a gun's pictures (first person), and of the
 /// third-person models' (`BO2MP_BO3_TEXTURE=<size>` changes the first).
 const FIRST_PERSON_MAX: u32 = 1024;
+
+/// (Nanoseconds spent reading pictures' levels, on every thread together;
+/// and making the pictures `link_image` found not made ahead.)
+static PROBE_LEVELS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PROBE_MAKE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 const WORLD_MAX: u32 = 512;
 
 /// Black Ops III's multiplayer guns (`<gun>_mp` in core_common), without
@@ -405,6 +410,57 @@ struct Builder<'a> {
     images: HashMap<(String, u32), Option<usize>>,
     image_failures: Vec<String>,
     decoded: usize,
+    /// Pictures made ahead, on several threads ([`Builder::make_ahead`]),
+    /// by (key, size cap): `link_image` takes its picture from here.
+    ready: HashMap<(String, u32), Result<Made, String>>,
+}
+
+/// A picture made: its levels and their GPU form.
+type Made = (fastfile_iw6::image::ImagePixels, bevy::prelude::Image);
+
+/// How a picture a material may want is made (see `Builder::material`).
+enum Recipe {
+    /// A picture's levels as they are (a colour map, or a stand-in's).
+    Levels(String),
+    /// A normal map as BC5.
+    Normal(String),
+    /// A specular colour map with its gloss in alpha, as BC3.
+    SpecGloss(String, String),
+}
+
+/// A picture's levels at most `max` on a side.
+fn levels_of(cap: &Capture, zone: &[u8], paks: &XpakSet, name: &str, max: u32) -> Result<ImageLevels, String> {
+    let t = std::time::Instant::now();
+    let im = cap.image(name).ok_or_else(|| format!("{name}: not in core_common"))?;
+    let out = texture::image_levels_max(im, zone, paks, max).map_err(|e| format!("{name}: {e}"));
+    PROBE_LEVELS.fetch_add(t.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+    out
+}
+
+/// A picture made by its recipe (its levels, converted), and its GPU form
+/// (`colour`: read as sRGB).
+fn make_picture(cap: &Capture, zone: &[u8], paks: &XpakSet, recipe: &Recipe, max: u32, colour: bool) -> Result<Made, String> {
+    let levels = match recipe {
+        Recipe::Levels(name) => levels_of(cap, zone, paks, name, max),
+        Recipe::Normal(normal) => {
+            let l = levels_of(cap, zone, paks, normal, max)?;
+            texture::normal_map_bc5(&l).ok_or_else(|| format!("{normal}: format {} not decoded", l.format))
+        }
+        Recipe::SpecGloss(spec, gloss) => {
+            let s = levels_of(cap, zone, paks, spec, max)?;
+            // (The gloss map at least as big as the specular map.)
+            let g = levels_of(cap, zone, paks, gloss, max.max(s.width.max(s.height)))?;
+            texture::specular_gloss_bc3(&s, &g).ok_or_else(|| format!("{spec} + {gloss}: formats {} and {} not paired", s.format, g.format))
+        }
+    }?;
+    let px = fastfile_iw6::image::ImagePixels {
+        width: levels.width,
+        height: levels.height,
+        levels: levels.levels,
+        dxgi_format: levels.format,
+        data: levels.data,
+    };
+    super::iw6::gpu_image(&px, colour).map(|img| (px, img))
 }
 
 impl<'a> Builder<'a> {
@@ -571,8 +627,78 @@ impl<'a> Builder<'a> {
 
     /// A picture's levels at most `max` on a side.
     fn levels(&self, name: &str, max: u32) -> Result<ImageLevels, String> {
-        let im = self.cap.image(name).ok_or_else(|| format!("{name}: not in core_common"))?;
-        texture::image_levels_max(im, &self.zone.image, &self.paks, max).map_err(|e| format!("{name}: {e}"))
+        levels_of(self.cap, &self.zone.image, &self.paks, name, max)
+    }
+
+    /// Makes ahead, on the machine's threads, the pictures these
+    /// materials will ask `link_image` for (as `material` and
+    /// `stand_in_colour` ask for them), so the build links them without
+    /// reading and converting one at a time.
+    fn make_ahead(&mut self, materials: &[(String, u32)]) {
+        let mut jobs: Vec<((String, u32), Recipe, bool)> = Vec::new();
+        let mut seen: std::collections::HashSet<(String, u32)> = std::collections::HashSet::new();
+        let mut want = |key: String, max: u32, recipe: Recipe, colour: bool, jobs: &mut Vec<_>| {
+            if seen.insert((key.clone(), max)) {
+                jobs.push(((key, max), recipe, colour));
+            }
+        };
+        let real = |n: &String| !n.starts_with(',') && !n.starts_with('$');
+        for (name, max) in materials {
+            let Some(m) = self.cap.material(name).filter(|_| !name.starts_with(',')) else { continue };
+            let technique = m.techset.clone().unwrap_or_default();
+            let draw = t7_draw(&m.name, technique.trim_start_matches(','), true);
+            let mut picks: HashMap<Kind, String> = HashMap::new();
+            for (hash, image) in m.textures.iter().filter(|(_, n)| real(n)) {
+                if let Some(kind) = slot_kind(*hash, image) {
+                    picks.entry(kind).or_insert_with(|| image.clone());
+                }
+            }
+            match picks.get(&Kind::Colour) {
+                Some(colour) => want(colour.clone(), *max, Recipe::Levels(colour.clone()), true, &mut jobs),
+                // (A stand-in's: its specular colour map, else its
+                // emissive picture.)
+                None => {
+                    let t = technique.trim_start_matches(',');
+                    if let Some(spec) = picks.get(&Kind::Specular) {
+                        want(spec.clone(), *max, Recipe::Levels(spec.clone()), true, &mut jobs);
+                    }
+                    if t.contains("emissive")
+                        && let Some((_, glow)) = m.textures.iter().find(|(h, n)| *h == T7_EMISSIVE_HASH && real(n))
+                    {
+                        want(glow.clone(), *max, Recipe::Levels(glow.clone()), true, &mut jobs);
+                    }
+                }
+            }
+            if !draw.unlit {
+                if let Some(normal) = picks.get(&Kind::Normal) {
+                    want(format!("{normal}#bc5"), *max, Recipe::Normal(normal.clone()), false, &mut jobs);
+                }
+                let gloss = m.textures.iter().find(|(h, n)| *h == T7_GLOSS_HASH && real(n)).map(|(_, n)| n.clone());
+                if let (Some(spec), Some(gloss)) = (picks.get(&Kind::Specular), gloss) {
+                    want(format!("{spec}+{gloss}"), *max, Recipe::SpecGloss(spec.clone(), gloss), false, &mut jobs);
+                }
+            }
+        }
+        let (cap, zone, paks) = (self.cap, &self.zone.image[..], &self.paks);
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(2, 16);
+        let made: Vec<Vec<((String, u32), Result<Made, String>)>> = std::thread::scope(|s| {
+            let workers: Vec<_> = (0..threads)
+                .map(|_| {
+                    s.spawn(|| {
+                        let mut out = Vec::new();
+                        loop {
+                            let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            let Some((key, recipe, colour)) = jobs.get(k) else { break };
+                            out.push((key.clone(), make_picture(cap, zone, paks, recipe, key.1, *colour)));
+                        }
+                        out
+                    })
+                })
+                .collect();
+            workers.into_iter().map(|w| w.join().unwrap_or_default()).collect()
+        });
+        self.ready.extend(made.into_iter().flatten());
     }
 
     /// One picture into the catalog (`key` names the converted form).
@@ -581,16 +707,22 @@ impl<'a> Builder<'a> {
             return *slot;
         }
         let colour = semantic == TS_COLOR_MAP;
-        let slot = match make(self).and_then(|l| {
-            let px = fastfile_iw6::image::ImagePixels {
-                width: l.width,
-                height: l.height,
-                levels: l.levels,
-                dxgi_format: l.format,
-                data: l.data,
-            };
-            super::iw6::gpu_image(&px, colour).map(|img| (px, img))
-        }) {
+        let t = std::time::Instant::now();
+        let made = match self.ready.remove(&(key.clone(), max)) {
+            Some(made) => made,
+            None => make(self).and_then(|l| {
+                let px = fastfile_iw6::image::ImagePixels {
+                    width: l.width,
+                    height: l.height,
+                    levels: l.levels,
+                    dxgi_format: l.format,
+                    data: l.data,
+                };
+                super::iw6::gpu_image(&px, colour).map(|img| (px, img))
+            }),
+        };
+        PROBE_MAKE.fetch_add(t.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        let slot = match made {
             Ok((px, gpu)) => {
                 self.decoded += 1;
                 Some(self.catalog.link_image(AuthoredImage {
@@ -994,6 +1126,8 @@ fn chosen<'a>(cap: &'a Capture) -> Vec<(String, &'a WeaponRec)> {
 /// `material_seed`.
 fn load_t7_guests(z: T7Zone, material_seed: MaterialCatalog) -> T7Guests {
     let T7Zone { dir, zone, cap, mut report, started } = z;
+    let build_started = std::time::Instant::now();
+    let mut phases: Vec<(&str, f32)> = Vec::new();
     let paks = match XpakSet::open_dir(&dir) {
         Ok((paks, bad)) => {
             if !bad.is_empty() {
@@ -1016,6 +1150,7 @@ fn load_t7_guests(z: T7Zone, material_seed: MaterialCatalog) -> T7Guests {
         images: HashMap::new(),
         image_failures: Vec::new(),
         decoded: 0,
+        ready: HashMap::new(),
     };
     let first_person_max = std::env::var("BO2MP_BO3_TEXTURE")
         .ok()
@@ -1040,18 +1175,63 @@ fn load_t7_guests(z: T7Zone, material_seed: MaterialCatalog) -> T7Guests {
             }
         }
     }
+    phases.push(("packages", build_started.elapsed().as_secs_f32()));
+    // The models' meshes (each its densest LOD, as `model_ref` reads it)
+    // and their materials' pictures, read and converted on several
+    // threads; then linked in order, one at a time, below.
+    let sets = [(&first_person, first_person_max, true), (&third_person, WORLD_MAX, false)];
+    let names: Vec<&String> = sets.iter().flat_map(|(set, ..)| set.iter()).collect();
+    let mut refs: HashMap<&str, Result<(asset_t6::XModelRef, Vec<Option<String>>), String>> = {
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(2, 16);
+        let b = &b;
+        let cap = &cap;
+        std::thread::scope(|s| {
+            let workers: Vec<_> = (0..threads)
+                .map(|_| {
+                    s.spawn(|| {
+                        let mut out = Vec::new();
+                        loop {
+                            let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            let Some(name) = names.get(k) else { break };
+                            if let Some(rec) = cap.model(name) {
+                                out.push((name.as_str(), b.model_ref(rec)));
+                            }
+                        }
+                        out
+                    })
+                })
+                .collect();
+            workers.into_iter().flat_map(|w| w.join().unwrap_or_default()).collect()
+        })
+    };
+    let mut wanted_materials: Vec<(String, u32)> = Vec::new();
+    for (set, max, _) in &sets {
+        for name in set.iter() {
+            if let Some(Ok((_, mats))) = refs.get(name.as_str()) {
+                wanted_materials.extend(mats.iter().flatten().map(|m| (m.clone(), *max)));
+            }
+        }
+    }
+    b.make_ahead(&wanted_materials);
+    phases.push(("made ahead", build_started.elapsed().as_secs_f32()));
     let mut fpv = FpvMeshBuild::default();
     fpv.set_capture_ns(NS);
     let mut world_guns = WorldWeaponBuild::default();
     world_guns.set_capture_ns(NS);
     let mut unreadable = Vec::new();
-    for (set, max, first) in [(&first_person, first_person_max, true), (&third_person, WORLD_MAX, false)] {
+    for (set, max, first) in sets {
         for name in set {
             let Some(rec) = cap.model(name) else {
                 unreadable.push(format!("{name} (not in core_common)"));
                 continue;
             };
-            let (xref, mats) = match b.model_ref(rec) {
+            // (A model in both sets is read again the second time.)
+            let read = match refs.remove(name.as_str()) {
+                Some(r) => r,
+                None => b.model_ref(rec),
+            };
+            let (xref, mats) = match read {
                 Ok(x) => x,
                 Err(e) => {
                     unreadable.push(format!("{name} ({e})"));
@@ -1113,6 +1293,7 @@ fn load_t7_guests(z: T7Zone, material_seed: MaterialCatalog) -> T7Guests {
         &b.image_failures[..b.image_failures.len().min(6)]
     ));
 
+    phases.push(("models", build_started.elapsed().as_secs_f32()));
     // Animations every gun names.
     let mut xanims = XAnimBuild::default();
     xanims.set_capture_ns(NS);
@@ -1133,6 +1314,7 @@ fn load_t7_guests(z: T7Zone, material_seed: MaterialCatalog) -> T7Guests {
         &anim_refused[..anim_refused.len().min(6)]
     ));
 
+    phases.push(("animations", build_started.elapsed().as_secs_f32()));
     // The weapon catalog, through Black Ops II's own capture.
     let mut catalog = WeaponCatalog::default();
     catalog.set_capture_ns(NS);
@@ -1163,6 +1345,15 @@ fn load_t7_guests(z: T7Zone, material_seed: MaterialCatalog) -> T7Guests {
         no_def.len(),
         &no_def[..no_def.len().min(6)],
         started.elapsed().as_secs_f64()
+    ));
+    phases.push(("weapons", build_started.elapsed().as_secs_f32()));
+    let ns = |a: &std::sync::atomic::AtomicU64| a.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e9;
+    report.push(format!(
+        "t7 guest guns: built in {:.1} s ({}); pictures: levels read {:.1} s (all threads), {:.1} s making those not made ahead",
+        build_started.elapsed().as_secs_f32(),
+        phases.iter().map(|(p, at)| format!("{p} at {at:.1} s")).collect::<Vec<_>>().join(", "),
+        ns(&PROBE_LEVELS),
+        ns(&PROBE_MAKE),
     ));
     let Builder { catalog: material_seed, .. } = b;
     T7Guests { weapons, fpv, world_guns, xanims, material_seed, report }
