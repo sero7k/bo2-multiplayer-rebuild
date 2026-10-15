@@ -402,7 +402,20 @@ fn main() {
     }
 
     // The camera.
-    let spawns: Vec<_> = map.spawns.iter().filter(|s| s.classname.contains("spawn")).collect();
+    // (A Zombies map has no spawn list: its player starts, from the
+    // entities.)
+    let starts: Vec<fastfile_iw7::map::SpawnPoint> = fastfile_iw7::map::parse_entities(&map.entities)
+        .into_iter()
+        .filter(|e| e.get("classname").is_some_and(|c| c == "info_player_start"))
+        .filter_map(|e| {
+            let v = |k: &str| -> Option<[f32; 3]> {
+                let v: Vec<f32> = e.get(k)?.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+                (v.len() == 3).then(|| [v[0], v[1], v[2]])
+            };
+            Some(fastfile_iw7::map::SpawnPoint { classname: "info_player_start_spawn".to_owned(), origin: v("origin")?, angles: v("angles").unwrap_or_default(), ..Default::default() })
+        })
+        .collect();
+    let spawns: Vec<_> = map.spawns.iter().filter(|s| s.classname.contains("spawn")).chain(starts.iter()).collect();
     let cam = if view == "top" {
         let pts: Vec<[f32; 3]> = if spawns.is_empty() { vec![map.mins, map.maxs] } else { spawns.iter().map(|s| s.origin).collect() };
         let lo = [0, 1].map(|k| pts.iter().map(|p| p[k]).fold(f32::MAX, f32::min));
