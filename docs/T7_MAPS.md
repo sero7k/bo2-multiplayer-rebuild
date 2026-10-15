@@ -120,8 +120,9 @@ III maps take it. Read from the GfxWorld's first sun volume:
   a `create_lut2dv` source: 1024 x 1024 R10G10B10A2, 32 tables of 32 x 32
   per 32 rows; band 0) and a highlight bloom (ours; `BO2MP_T7_GRADE=0`,
   `BO2MP_T7_BLOOM`).
-- Test aids: `BO2MP_T7_SUN`, `BO2MP_T7_AMBIENT` scale the sun and the
-  ambient light.
+- The sun's light is its intensity over probe 0's scale times 1.5 (against
+  pictures of the game; `BO2MP_T7_SUN` sets the factor). `BO2MP_T7_AMBIENT`
+  scales the ambient light (a test aid).
 
 - Probe volume (`gProbeX/Y/ZArray`, three BC6H 3D textures, 248 x 280 x
   608 on Redwood): an atlas of each probe's light volume. A probe's region
