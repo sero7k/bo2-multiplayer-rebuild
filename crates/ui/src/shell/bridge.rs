@@ -137,6 +137,8 @@ pub(crate) struct StartSpec {
     pub bot_difficulty: u32,
     /// bo2mp: a public match (FIND A MATCH), not a Custom Game.
     pub public: bool,
+    /// bo2mp: Resurgence with squads of this size (WARZONE).
+    pub br: Option<u8>,
 }
 
 /// bo2mp: whether the shell's last START was a public match (FIND A
@@ -466,6 +468,7 @@ pub(crate) fn lui_side(host: &mut Host, mp: Option<&Mp>) {
         match r {
             Request::Start(spec) => {
                 PUBLIC_START.store(spec.public, Ordering::Relaxed);
+                sim::set_resurgence(spec.br);
                 {
                     let mut v = host.values.borrow_mut();
                     for (k, x) in [

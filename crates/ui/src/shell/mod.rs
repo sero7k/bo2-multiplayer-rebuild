@@ -41,6 +41,7 @@ pub(crate) mod pics; // (hud_match reuses the picture resolver)
 pub mod preview;
 pub(crate) mod theme; // (hud_match reuses the colours and fonts)
 mod view;
+mod warzone;
 pub(crate) mod zombies;
 mod zombies_view;
 
@@ -89,6 +90,8 @@ pub(crate) enum Screen {
     /// its combat record (rank and stats).
     ZmLobby,
     ZmRecord,
+    /// WARZONE: Resurgence's lobby (`warzone`).
+    Warzone,
 }
 
 impl Screen {
@@ -135,6 +138,9 @@ pub(crate) enum Setting {
     ZmCustomWeapons,
     /// An Options row (of the tab he is on).
     Option(u8),
+    /// WARZONE: the squad size and the number of squads.
+    BrSquadSize,
+    BrSquads,
 }
 
 /// What a row does.
@@ -191,12 +197,14 @@ pub(crate) enum Act {
     Leaderboard,
     /// The main menu's modes that are not built yet: a notice, nothing else.
     Soon(Soon),
+    /// WARZONE: its lobby, and its START.
+    Warzone,
+    BrStart,
 }
 
-/// The main menu's modes still to come (WARZONE, SPEC OPS).
+/// The main menu's modes still to come (SPEC OPS).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Soon {
-    Warzone,
     SpecOps,
 }
 
@@ -292,6 +300,9 @@ pub(crate) struct Shell {
     /// A yes / no question up, and YES (0) or NO (1) in focus.
     pub ask: Option<Ask>,
     pub ask_focus: usize,
+    /// WARZONE: players a squad (1-4) and squads in the match.
+    pub br_squad_size: u8,
+    pub br_squads: u32,
 }
 
 impl Default for Shell {
@@ -332,6 +343,8 @@ impl Default for Shell {
             public: false,
             ask: None,
             ask_focus: 1,
+            br_squad_size: gamemode_iw4::resurgence::REBIRTH.squad_size,
+            br_squads: 4,
         }
     }
 }
@@ -365,7 +378,7 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
         Screen::Main => vec![
             Row::new("MULTIPLAYER", "Find a match, or a custom game with bots on every map.", Act::Multiplayer),
             Row::new("ZOMBIES", "Survive the undead.", Act::Zombies),
-            Row::new("WARZONE", "Coming soon.", Act::Soon(Soon::Warzone)),
+            Row::new("WARZONE", "Resurgence on Rebirth Island: squads, the gas, redeploys.", Act::Warzone),
             Row::new("SPEC OPS", "Coming soon.", Act::Soon(Soon::SpecOps)),
             Row::new("OPTIONS", "Graphics, sound and controls.", Act::Options),
             Row::new("FRIENDS", "Add friends by their code and see where they are.", Act::Friends),
@@ -453,6 +466,7 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
             r
         }
         Screen::Zombies | Screen::ZmMapPick | Screen::ZmStartPick | Screen::ZmLobby | Screen::ZmRecord => zombies::rows(s),
+        Screen::Warzone => warzone::rows(s, c),
         Screen::CardPick | Screen::EmblemPick => {
             let kind = look_kind(s.screen);
             let list = cards::list(kind);
@@ -489,7 +503,6 @@ impl Ask {
     pub(crate) fn text(self) -> (&'static str, &'static str) {
         match self {
             Ask::Prestige => ("ENTER PRESTIGE?", "You go back to level 1 with the next prestige icon. Your unlocks start over."),
-            Ask::Soon(Soon::Warzone) => ("WARZONE", "Coming soon."),
             Ask::Soon(Soon::SpecOps) => ("SPEC OPS", "Coming soon."),
         }
     }
@@ -590,6 +603,10 @@ impl Shell {
             // (The shell leaves the room screen once he is out of it.)
             Screen::Room => crate::online_match::queue_leave(),
             Screen::Multiplayer => self.go(Screen::Main),
+            Screen::Warzone => {
+                self.go(Screen::Main);
+                self.focus = main_row(Act::Warzone);
+            }
             Screen::Zombies => {
                 self.go(Screen::Main);
                 self.focus = main_row(Act::Zombies);
@@ -640,6 +657,7 @@ impl Shell {
             Setting::ZmRound => self.zm_round = step(self.zm_round as u32, zombies::ROUNDS.len() as u32 - 1) as usize,
             Setting::ZmBots => self.zm_bots = step(self.zm_bots, zombies::MAX_BOTS),
             Setting::ZmCustomWeapons => self.zm_custom_weapons = !self.zm_custom_weapons,
+            Setting::BrSquadSize | Setting::BrSquads => warzone::cycle(self, what, by),
             Setting::Option(k) => options::queue(self.page, k, by),
             Setting::LethalCount | Setting::TacticalCount => {
                 if let Some(b) = classes::book() {
@@ -659,6 +677,12 @@ impl Shell {
     fn activate(&mut self, act: Act, c: &Catalog, now: f64, exit: &mut MessageWriter<AppExit>) {
         match act {
             Act::Multiplayer => self.go(Screen::Multiplayer),
+            Act::Warzone => self.go(Screen::Warzone),
+            Act::BrStart => {
+                if let Err(e) = warzone::start(self, c) {
+                    self.note(&e, now);
+                }
+            }
             Act::Zombies => {
                 zombies::refresh();
                 self.go(Screen::Zombies);
@@ -781,6 +805,7 @@ impl Shell {
                     bot_enemies: self.enemies,
                     bot_difficulty: self.difficulty,
                     public: self.public,
+                    br: None,
                 }));
             }
             Act::PickMap => {

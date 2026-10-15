@@ -6548,6 +6548,7 @@ dependencies = [
  "fastfile_s1",
  "fastfile_t7",
  "frame",
+ "gamemode_iw4",
  "hks_t6",
  "image",
  "net",

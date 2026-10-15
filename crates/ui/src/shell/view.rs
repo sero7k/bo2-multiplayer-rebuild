@@ -1153,6 +1153,7 @@ pub(crate) fn shell_view(
                 Screen::Zombies | Screen::ZmMapPick | Screen::ZmStartPick | Screen::ZmLobby | Screen::ZmRecord => {
                     super::zombies_view::view(c, &mut cx, &shell, &rows);
                 }
+                Screen::Warzone => super::warzone::view(c, &mut cx, &shell, &rows),
             }
             // (The main menu has its own foot, and no player card; the
             // calling card and emblem pickers show his card in their middle.)

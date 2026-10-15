@@ -395,6 +395,7 @@ pub(crate) fn tick(shell: &mut Shell, now: f64) {
                 bot_enemies: shell.enemies,
                 bot_difficulty: shell.difficulty,
                 public: true,
+                br: None,
             }));
         }
         return;
