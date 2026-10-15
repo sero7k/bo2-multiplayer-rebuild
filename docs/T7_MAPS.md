@@ -89,14 +89,62 @@ III maps take it. Read from the GfxWorld's first sun volume:
   sun x N.L x sun map x moving shadows), plus with normal/specular maps the
   ambient bent by the probe's level 6, a GGX sun highlight and the probe's
   reflection at level `5 (1 - gloss)` (BO3's `lit` shader), split-sum
-  weighted; then a filmic tone curve (`BO2MP_T7_EXPOSURE`, default 0.6)
-  and Black Ops II's roll-off, bloom and grade.
+  weighted, the reflection corrected against the probe's parallax box
+  (config words 29..31 centre, 26..28 half size, in its axes; BO3 uses six
+  planes, words 46..70; `BO2MP_T7_PARALLAX=0` off).
+- Fog (`t7_fog_core`): BO3's atmospheric fog, the maths of its forward
+  `lit` and sky shaders (`CoreFogConstants`): optical length (distance past
+  the start x density at the eye x the height falloff's (1 - e^-h) / h),
+  transmittance `2^(length x total density)` eased by the extinction
+  strength, plus Rayleigh (phase blended by the sun strength) and Mie
+  (Schlick, faded in past the haze distance) in-scatter x (1 - T). Settings
+  from the fog volume (`GfxWorld` 0x148, 624 bytes: planes, priority at
+  0x20, a bank per lighting state at 0x40/0xd0/0x160) holding most spawns.
+  Bank words as read (names ours; BO3 builds its constants from them in
+  code not read): 1 start, 2 half distance, 3 base height, 4 half height,
+  16..18 fog colour, 19 extinction, 20..22 haze colour, 23 haze start, 24
+  haze spread, 25 Schlick k, 26 haze density, 27 haze light (stops), 28
+  in-scatter, 30 sun strength, 31 sky distance. The fog's in-scatter is its
+  colour at the sky horizon's brightness. Added: the haze toward the sun is
+  shadowed by the baked sun map along the first 2500 units of the ray (16
+  steps), which draws the sun's shafts. `BO2MP_T7_FOG` (density scale, 0
+  off), `BO2MP_T7_HAZE`, `BO2MP_T7_SHAFTS`.
+- Tone curve: BO3's own (`bloom_apply_lut` in core_patch, fxc
+  disassembly): `t = saturate(log2(x + 0.00873) x 0.072703 + 0.598206)`,
+  then the polynomial `((((7.712947 t - 19.311527) t + 14.275167) t -
+  2.490045) t + 0.878083) t - 0.06691`, x the light times the exposure
+  (`BO2MP_T7_EXPOSURE`, default 1.6: BO3's auto-exposure is not drawn).
+  Written without BO2's roll-off.
+- Final pass: the map's colour table (the `GfxWorld` header's LUT material,
+  a `create_lut2dv` source: 1024 x 1024 R10G10B10A2, 32 tables of 32 x 32
+  per 32 rows; band 0) and a highlight bloom (ours; `BO2MP_T7_GRADE=0`,
+  `BO2MP_T7_BLOOM`).
+- Test aids: `BO2MP_T7_SUN`, `BO2MP_T7_AMBIENT` scale the sun and the
+  ambient light.
 
-Not read: the probe volume (gProbeX/Y/Z 3D textures), the sun shadow tree,
-lightmaps (BO3 has none for MP), the exposure grids, BO3's own colour LUT,
-height fog, parallax-corrected probe lookups.
+Not read: the probe volume (gProbeX/Y/Z: an atlas of per-probe volumes, the
+lit shader maps each probe's box into it from its 224-byte GPU pack; the
+config's words 4..9 and 34..37 look like its atlas place and size), the sun
+shadow tree, the exposure grids and auto-exposure, the lit fog volumes
+(360 bytes: local volumetric fog boxes; BO3's `volumetric_light_sun`
+marches them with the sun's shadow map), BO3's bloom settings and lens
+flares.
+
+## Black Ops III's look on Black Ops II maps
+
+`BO2MP_BO3_LOOK=1` (off by default; `assets::lane::bo3_look`): a Black Ops
+II map is drawn by the same branch. Black Ops II supplies its textures
+(colour, normal, specular with gloss in alpha), sun, sky cube, probes (`rgb
+/ a`), fog and the light without the sun: the lightmap's ambient and
+directional pages for the world (its vertex colours are tints or layer
+weights, so not used for a baked light) and the light grid for models. A
+sun map is baked at load from the world's and placed models' triangles
+round the spawn points (the same bake), and the sun's shafts drawn through
+it. Water, lava flow, tiles and flags keep their own shaders.
+`BO2MP_BO3_EXPOSURE` (default 2) scales BO2's exposure into BO3's tone
+curve.
 
 ## Not done
 
-Fog, the probe volume; glass and doors static; map pictures; Zombies menu
+The probe volume; glass and doors static; map pictures; Zombies menu
 entries (use `iw4l map t7:zm_factory`).
