@@ -432,8 +432,10 @@ pub(super) fn gfxworld(w: &mut Walker, h: usize) -> Result<AssetId> {
         w.blob(h + G::lightGrid__probeData__gpuVisibleProbePositions, L::GfxGpuLightGridProbePosition::SIZE * vis, 3)?;
         w.blob(h + G::lightGrid__probeData__gpuVisibleProbesData, (vis + 0x2000) * 64, 63)?;
         let probes = u32f(w, h + G::lightGrid__probeData__probeCount)?;
-        w.blob(h + G::lightGrid__probeData__probes, probes * 64, 63)?;
-        w.blob(h + G::lightGrid__probeData__probePositions, L::GfxGpuLightGridProbePosition::SIZE * probes, 3)?;
+        let data = w.blob(h + G::lightGrid__probeData__probes, probes * 64, 63)?;
+        let positions = w.blob(h + G::lightGrid__probeData__probePositions, L::GfxGpuLightGridProbePosition::SIZE * probes, 3)?;
+        rec.light_probes = data.map(|pos| Span { pos, len: probes * 64 });
+        rec.light_probe_positions = positions.map(|pos| Span { pos, len: L::GfxGpuLightGridProbePosition::SIZE * probes });
         let zones = u32f(w, h + G::lightGrid__probeData__zoneCount)?;
         w.blob(h + G::lightGrid__probeData__zones, L::GfxGpuLightGridZone::SIZE * zones, 63)?;
         let tets = u32f(w, h + G::lightGrid__probeData__tetrahedronCount)?;

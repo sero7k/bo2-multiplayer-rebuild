@@ -254,6 +254,8 @@ pub struct WorldScene {
     /// bo2mp: the world's lightmaps are CoD4's / World at War's
     /// (`WorldDraw::iw3_lightmaps`).
     pub iw3_lightmaps: bool,
+    /// bo2mp: linear pages (`WorldDraw::linear_lightmaps`).
+    pub linear_lightmaps: bool,
 
     /// bo2mp: the map's `sm_sunSampleSizeNear` (units per texel of the near
     /// sun-shadow partition); 0 = not set.
@@ -785,6 +787,7 @@ impl WorldScene {
             t5_sun_parse_exposure: None,
             t5_sky_dynamic_intensity: None,
             iw3_lightmaps: false,
+            linear_lightmaps: false,
             t6_sun_sample_size_near: 0.0,
             t5_tree_scatter_intensity: None,
             t5_tree_scatter_amount: None,
@@ -898,6 +901,7 @@ impl WorldScene {
             t5_sun_parse_exposure: None,
             t5_sky_dynamic_intensity: None,
             iw3_lightmaps: false,
+            linear_lightmaps: false,
             t6_sun_sample_size_near: 0.0,
             t5_tree_scatter_intensity: None,
             t5_tree_scatter_amount: None,
@@ -1666,6 +1670,7 @@ pub fn world_scene_from_draw(
     scene.t5_sun_parse_exposure = draw.t5_sun_parse_exposure;
     scene.t5_sky_dynamic_intensity = draw.t5_sky_dynamic_intensity;
     scene.iw3_lightmaps = draw.iw3_lightmaps;
+    scene.linear_lightmaps = draw.linear_lightmaps;
     scene.t5_tree_scatter_intensity = draw.t5_tree_scatter_intensity;
     scene.t5_tree_scatter_amount = draw.t5_tree_scatter_amount;
     scene.t5_exposure_volume_count = draw.t5_exposure_volume_count;

@@ -243,6 +243,7 @@ pub fn build_iw3_world_draw(
         t5_sky_dynamic_intensity: lighting.map(|l| l.sky),
         t5_sun_light: lighting.map(|l| l.sun),
         iw3_lightmaps: lightmaps_present,
+        linear_lightmaps: false,
         t5_tree_scatter_intensity: None,
         t5_tree_scatter_amount: None,
         t5_exposure_volume_count: 0,

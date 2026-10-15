@@ -546,7 +546,8 @@ fn primary_light_ray(index: u32, p: vec3<f32>) -> LightRay {
 // in gamma space: `light` is the grid's (2 * colour)^2, the sun colour a
 // gamma value. Black Ops II adds them linear.
 fn add_light(light: vec3<f32>, lit: vec3<f32>, ndotl: f32) -> vec3<f32> {
-    if (t6.sun_color.a > 2.5) {
+    // (bo2mp: an Infinite Warfare map's, alpha 5, adds them linear.)
+    if (t6.sun_color.a > 2.5 && t6.sun_color.a < 4.5) {
         let g = sqrt(max(light, vec3(0.0))) + lit * ndotl;
         return g * g;
     }
@@ -812,16 +813,32 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
         f = saturate(dot(normalize(vec3(nm3, 1.0)), normalize(vec3(x, y, 1.0))));
         n_iw3 = normalize(nm3.x * in.tangent + nm3.y * in.binormal + n_iw3);
 #endif
-        let sun_vis = page2.a * sun_shadow_at(in.world_position);
+        // bo2mp: an Infinite Warfare map's pages (the sun colour's alpha 5,
+        // `fastfile_iw7::light`) hold linear light: each page is the square
+        // root of its light over 4 (squared and added: A + B * f, IW7's
+        // `lmap_specenv_*` shaders), the sun linear, its baked shadow a
+        // signed distance (`smoothstep(saturate((2p - 1 + k) / 2k))`, k
+        // `light::SUN_SHADOW_SOFTNESS`).
+        let linear_iw3 = t6.sun_color.a > 4.5;
+        var sun_vis = page2.a;
+        if (linear_iw3) {
+            let st = saturate((page2.a * 2.0 - 1.0 + 0.25) / 0.5);
+            sun_vis = st * st * (3.0 - 2.0 * st);
+        }
+        sun_vis *= sun_shadow_at(in.world_position);
         let sun_iw3 = t6.sun_color.rgb * sun_vis * saturate(dot(n_iw3, t6.sun_dir_exposure.xyz));
         let lg = page0.rgb + page1.rgb * f + sun_iw3;
-        var lit_iw3 = base * (lg * lg + dyn_lights(in.world_position, n_iw3));
+        var here_iw3 = lg * lg;
+        if (linear_iw3) {
+            here_iw3 = (page0.rgb * page0.rgb + page1.rgb * page1.rgb * f) * 4.0 + sun_iw3;
+        }
+        var lit_iw3 = base * (here_iw3 + dyn_lights(in.world_position, n_iw3));
 #ifdef SHINE
         let st3 = textureSample(specular_map, colour_sampler, in.uv);
         let v3 = normalize(in.world_position - view.world_position);
         let r3 = v3 - 2.0 * dot(v3, n_iw3) * n_iw3;
         let gloss3 = st3.a;
-        if (t6.sun_color.a > 3.5) {
+        if (t6.sun_color.a > 3.5 && !linear_iw3) {
             // bo2mp: the map's own specular map and reflection probes, as
             // CoD4's `lm_sm_sun_r0c0n0s0` adds them, in gamma space: the
             // probe (rgb times its alpha, folded in when linked) at level
@@ -852,7 +869,7 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
             let vis3 = ndotl3 / (ldoth3 * ldoth3 * k3 - k3 + 1.01);
             let fres3 = spec3 + (1.0 - spec3) * exp2(-10.0 * ldoth3);
             let sun_lin = t6.sun_color.rgb * sun_vis;
-            lit_iw3 += fres3 * lobe3 * vis3 * sun_lin * sun_lin;
+            lit_iw3 += fres3 * lobe3 * vis3 * select(sun_lin * sun_lin, sun_lin, linear_iw3);
             // The reflection: the model map's probe (`bo2_look` picks one
             // for every surface), lit as the light here.
             let ndotv3 = saturate(dot(n_iw3, -v3));
@@ -862,7 +879,7 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
             let ew3 = saturate(spec3 * (fk3.w - ff3) + ff3);
             let env3 = textureSampleLevel(probe_cubes, probe_sampler, r3, i32(in.probe), 4.0 - 4.0 * gloss3);
             let env3_rgb = env3.rgb / (env3.a + 0.000001);
-            let here3 = lg * lg;
+            let here3 = here_iw3;
             let probe3 = max(dot(here3, vec3(0.299, 0.587, 0.114)), 0.0001);
             lit_iw3 += ew3 * env3_rgb * clamp(probe3, 0.0, 2.0);
         }
@@ -1461,7 +1478,7 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
     let env = textureSampleLevel(probe_cubes, probe_sampler, r, i32(probe), 4.0 - 4.0 * gloss);
     // bo2mp: a CoD4 / World at War map's own probes (sun colour alpha 4)
     // are lit already (gamma, no lighting table): squared, not relit.
-    let own_probes = t6.sun_color.a > 3.5;
+    let own_probes = t6.sun_color.a > 3.5 && t6.sun_color.a < 4.5;
     let env_rgb = select(env.rgb / (env.a + 0.000001), env.rgb * env.rgb, own_probes);
     let pi = min(probe, 31u) * 3u;
     let s0 = probes.v[pi];
@@ -1477,7 +1494,7 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
     // (bo2mp: a CoD4 / World at War sun is a gamma colour: its highlight
     // takes it squared.)
     let lit_g = ray.colour * in.primary.y;
-    let lit = select(lit_g, lit_g * lit_g, t6.sun_color.a > 2.5);
+    let lit = select(lit_g, lit_g * lit_g, t6.sun_color.a > 2.5 && t6.sun_color.a < 4.5);
     let ndotl = saturate(dot(n, ray.dir));
     light = add_light(light, lit_g, ndotl);
     light += dyn_lights(in.world_position, n);
