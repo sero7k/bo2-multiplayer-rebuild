@@ -212,6 +212,14 @@ impl T7Map {
         if m.texture("mixMap").is_some() && m.constant::<2>("detailScale1").is_some() {
             return self.micro_tile_blend(m, max_dim, spec_max);
         }
+        if m.technique_set.starts_with("mc/glass_nocolor") || m.technique_set.starts_with("wc/glass_nocolor") {
+            return self.clear_glass(m, max_dim, spec_max);
+        }
+        self.look_inner(m, max_dim, spec_max, cover)
+    }
+
+    /// `look` for a plain lit material.
+    fn look_inner(&self, m: &MapMaterial, max_dim: u32, spec_max: u32, cover: Cover) -> Result<Look, String> {
         let mut out = Look::default();
         let binds = |s: &str| m.bound.iter().any(|b| b == s);
         let known = !m.bound.is_empty();
@@ -347,6 +355,43 @@ impl T7Map {
             out.used[3] = matches!(ao, Slot::Image(_));
             out.colour = encode(w, h, rgba, if any_alpha { Format::Bc3 } else { Format::Bc1 });
         }
+        Ok(out)
+    }
+}
+
+impl T7Map {
+    /// Clear glass (`glass_nocolor`: windows, tanks, condensation): Black
+    /// Ops III's forward glass program (`lit_glass_nocolor`) colours it
+    /// `colorTint` and covers `(1 - g)^3.4 * (1 - a0) + a0` of what is
+    /// behind, `g` its gloss (`glossMap` over `glossRange`, less its normal
+    /// map's variance), `a0 = tintAmount * 0.92 + 0.08`: smooth glass shows
+    /// through, rough or dirty glass less so. Made here as a colour map with
+    /// that coverage in alpha, and the specular map (glass reflects 0.04).
+    fn clear_glass(&self, m: &MapMaterial, max_dim: u32, spec_max: u32) -> Result<Look, String> {
+        let mut out = self.look_inner(m, max_dim, spec_max, Cover::Alpha)?;
+        let tint = m.constant::<3>("colorTint").unwrap_or([1.0; 3]);
+        let a0 = m.constant::<1>("tintAmount").map_or(0.0, |v| v[0]) * 0.92 + 0.08;
+        let range = m.constant::<2>("glossRange").unwrap_or([6.0, 17.0]);
+        let gloss = match self.slot(m, "glossMap", spec_max)? {
+            Slot::Image(i) => i,
+            Slot::Solid(c) => Rgba { w: 4, h: 4, px: c.repeat(16) },
+            Slot::None => Rgba { w: 4, h: 4, px: [255u8; 4].repeat(16) },
+        };
+        let (w, h) = (gloss.w.max(4), gloss.h.max(4));
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let o = ((y * w + x) * 4) as usize;
+                let g = ((range[0] + (range[1] - range[0]) * gloss.at(x, y, w, h, 0)) / 17.0).clamp(0.0, 1.0);
+                let a = (1.0 - g).powf(3.4) * (1.0 - a0) + a0;
+                for k in 0..3 {
+                    rgba[o + k] = to_srgb(tint[k]);
+                }
+                rgba[o + 3] = (a.clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
+        }
+        out.colour = encode(w, h, rgba, Format::Bc3);
+        out.used[0] = true;
         Ok(out)
     }
 }
