@@ -59,7 +59,7 @@ use crate::session_load::PreparedWorld;
 const TEXTURE_CAPS: [u32; 4] = [4096, 2048, 1024, 512];
 
 /// The video memory the map's pictures may take (MB).
-const TEXTURE_BUDGET_MB: usize = 2048;
+const TEXTURE_BUDGET_MB: usize = 1536;
 
 /// The world light table's row the placed models' sun is in (a primary
 /// light of type 1: the shader's sun, its shadow included).
@@ -70,7 +70,7 @@ const COLLIDE_MIN_RADIUS: f32 = 24.0;
 
 /// The largest specular map kept (half the colour map's at most: the
 /// specular colour and gloss vary more slowly than the colour).
-const SPECULAR_MAX: u32 = 1024;
+const SPECULAR_MAX: u32 = 512;
 
 /// Whether materials get their normal and specular maps
 /// (`BO2MP_IW7_SHINE=0` draws colour maps only).
@@ -138,27 +138,48 @@ fn texture_cap(map: &Iw7Map, used: &[usize]) -> (u32, usize) {
     (512, mb_at(512))
 }
 
+/// What a material's shine (`Iw7Map::shine`) is made from: materials
+/// sharing it share its pictures (3000 of mp_riot's materials, half as
+/// many distinct pictures).
+fn shine_key(m: &fastfile_iw7::map::MapMaterial, colour: bool) -> String {
+    let t = |slot: &str| m.texture(slot).unwrap_or("");
+    format!("{}|{}|{}|{:?}|{colour}", t("colorMap"), t("normalMap"), t("specularMap"), fastfile_iw7::look::tint(m, 0))
+}
+
+/// What a layer's colour map with its opacity (`Iw7Map::layer_rgba`) is
+/// made from.
+fn alpha_key(m: &fastfile_iw7::map::MapMaterial, layer: usize, keep: bool) -> String {
+    let slot = if layer == 0 { "colorMap".to_owned() } else { format!("colorMap{layer}") };
+    let hash = fastfile_iw7::look::layer_alpha_hash(layer);
+    let alpha = m.textures.iter().find(|t| t.0 == hash).map_or("", |t| t.3.as_str());
+    let reveal = fastfile_iw7::look::reveals(&m.technique_set, layer).then(|| m.constants.iter().find(|c| c.0 == "revealParams").map(|c| c.1));
+    format!("{}|{alpha}|{:?}|{reveal:?}|{layer}|{keep}", m.texture(&slot).unwrap_or(""), fastfile_iw7::look::tint(m, layer))
+}
+
 /// What the materials' pictures are made from, read and decoded ahead on
 /// every core (`prepare_pictures`): each lit material's shine
 /// (`Iw7Map::shine`), each colour map with its opacity
 /// (`Iw7Map::layer_rgba`, block compressed again), each picture's levels.
 #[derive(Default)]
 struct Prepared {
-    shine: HashMap<usize, Result<fastfile_iw7::shine::Shine, String>>,
-    /// Block compressed (`shine::compress_rgba`), else as RGBA8.
-    alpha: HashMap<(usize, usize), Result<Result<fastfile_iw7::texture::ImageLevels, fastfile_iw7::look::Rgba>, String>>,
+    /// By `shine_key`.
+    shine: HashMap<String, Result<fastfile_iw7::shine::Shine, String>>,
+    /// By `alpha_key`: block compressed (`shine::compress_rgba`), else as
+    /// RGBA8.
+    alpha: HashMap<String, Result<Result<fastfile_iw7::texture::ImageLevels, fastfile_iw7::look::Rgba>, String>>,
     images: HashMap<String, Result<fastfile_iw7::texture::ImageLevels, String>>,
 }
 
 /// Reads and decodes the pictures `Materials` will link, in parallel.
 fn prepare_pictures(map: &Iw7Map, used: &[usize], max: u32, shine_on: bool) -> Prepared {
     enum Job {
-        Shine(usize, bool),
-        Alpha(usize, usize, bool),
+        Shine(usize, bool, String),
+        Alpha(usize, usize, bool, String),
         Image(String),
     }
     let mut jobs = Vec::new();
     let mut names = std::collections::BTreeSet::new();
+    let mut keys = std::collections::HashSet::new();
     for &m in used {
         let mm = &map.materials[m];
         let draw = iw7_draw(&mm.technique_set, mm.sort_key, false);
@@ -170,11 +191,18 @@ fn prepare_pictures(map: &Iw7Map, used: &[usize], max: u32, shine_on: bool) -> P
             let wants_alpha = draw.alpha_test || matches!(draw.blend, T6Blend::Blend);
             let lit = shine_on && !draw.unlit && matches!(draw.blend, T6Blend::Opaque);
             if lit {
-                jobs.push(Job::Shine(m, !draw.alpha_test));
+                let key = shine_key(mm, !draw.alpha_test);
+                if keys.insert(key.clone()) {
+                    jobs.push(Job::Shine(m, !draw.alpha_test, key));
+                }
             }
             let tinted = fastfile_iw7::look::tint(mm, 0).is_some();
             if (wants_alpha && (has_alpha_map || fastfile_iw7::look::colour_alpha_is_opacity(name))) || tinted {
-                jobs.push(Job::Alpha(m, 0, fastfile_iw7::look::colour_alpha_is_opacity(name)));
+                let keep = fastfile_iw7::look::colour_alpha_is_opacity(name);
+                let key = alpha_key(mm, 0, keep);
+                if keys.insert(key.clone()) {
+                    jobs.push(Job::Alpha(m, 0, keep, key));
+                }
             }
             names.insert(name.to_owned());
         }
@@ -183,7 +211,11 @@ fn prepare_pictures(map: &Iw7Map, used: &[usize], max: u32, shine_on: bool) -> P
                 if draw.layers[k] != 0
                     && let Some(n) = mm.texture(&format!("colorMap{}", k + 1))
                 {
-                    jobs.push(Job::Alpha(m, k + 1, fastfile_iw7::look::colour_alpha_is_opacity(n)));
+                    let keep = fastfile_iw7::look::colour_alpha_is_opacity(n);
+                    let key = alpha_key(mm, k + 1, keep);
+                    if keys.insert(key.clone()) {
+                        jobs.push(Job::Alpha(m, k + 1, keep, key));
+                    }
                 }
             }
         }
@@ -201,16 +233,16 @@ fn prepare_pictures(map: &Iw7Map, used: &[usize], max: u32, shine_on: bool) -> P
                     let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let Some(job) = jobs.get(i) else { break };
                     match job {
-                        Job::Shine(m, colour) => {
+                        Job::Shine(m, colour, key) => {
                             let r = map.shine(&map.materials[*m], max, SPECULAR_MAX.min(max / 2).max(64), *colour);
                             if let Ok(mut o) = out.lock() {
-                                o.shine.insert(*m, r);
+                                o.shine.insert(key.clone(), r);
                             }
                         }
-                        Job::Alpha(m, layer, keep) => {
+                        Job::Alpha(m, layer, keep, key) => {
                             let r = map.layer_rgba(&map.materials[*m], *layer, max, *keep).map(|rgba| fastfile_iw7::shine::compress_rgba(&rgba).ok_or(rgba));
                             if let Ok(mut o) = out.lock() {
-                                o.alpha.insert((*m, *layer), r);
+                                o.alpha.insert(key.clone(), r);
                             }
                         }
                         Job::Image(n) => {
@@ -344,6 +376,10 @@ struct Materials<'a> {
     with_glow: usize,
     /// Pictures read ahead (`prepare_pictures`).
     prepared: Prepared,
+    /// Shines and colour maps with opacity linked, by what they are made
+    /// from (`shine_key`, `alpha_key`).
+    shine_by_key: HashMap<String, [Option<usize>; 3]>,
+    alpha_by_key: HashMap<String, Option<usize>>,
 }
 
 impl Materials<'_> {
@@ -387,7 +423,16 @@ impl Materials<'_> {
             return *s;
         }
         let m = &self.map.materials[material];
-        let read = match self.prepared.shine.remove(&material) {
+        let key = shine_key(m, colour);
+        if let Some(s) = self.shine_by_key.get(&key) {
+            let s = *s;
+            self.shine.insert(material, s);
+            if s[1].is_some() || s[2].is_some() {
+                self.with_shine += 1;
+            }
+            return s;
+        }
+        let read = match self.prepared.shine.remove(&key) {
             Some(r) => r,
             None => self.map.shine(m, self.max, SPECULAR_MAX.min(self.max / 2).max(64), colour),
         };
@@ -410,6 +455,7 @@ impl Materials<'_> {
             }
         };
         self.shine.insert(material, slots);
+        self.shine_by_key.insert(key, slots);
         slots
     }
 
@@ -475,10 +521,16 @@ impl Materials<'_> {
         let keep = m.texture(&slot_name).is_some_and(fastfile_iw7::look::colour_alpha_is_opacity);
         // Block compressed again (BC3, or BC1 when opaque), as the game's
         // own are: full size in a quarter (BC3) or an eighth of RGBA8's.
+        let key = alpha_key(m, layer, keep);
+        if let Some(slot) = self.alpha_by_key.get(&key) {
+            let slot = *slot;
+            self.alpha_images.insert((material, layer), slot);
+            return slot;
+        }
         let read = self
             .prepared
             .alpha
-            .remove(&(material, layer))
+            .remove(&key)
             .unwrap_or_else(|| self.map.layer_rgba(m, layer, self.max, keep).map(|rgba| fastfile_iw7::shine::compress_rgba(&rgba).ok_or(rgba)));
         let read = match read {
             Ok(Ok(levels)) => {
@@ -488,6 +540,7 @@ impl Materials<'_> {
                     self.with_alpha += 1;
                 }
                 self.alpha_images.insert((material, layer), slot);
+                self.alpha_by_key.insert(key, slot);
                 return slot;
             }
             Ok(Err(rgba)) => Ok(rgba),
@@ -545,6 +598,7 @@ impl Materials<'_> {
             }
         };
         self.alpha_images.insert((material, layer), slot);
+        self.alpha_by_key.insert(key, slot);
         slot
     }
 
@@ -1453,6 +1507,8 @@ fn build_iw7_world(
         glow_scale: 0.0,
         with_glow: 0,
         prepared,
+        shine_by_key: HashMap::new(),
+        alpha_by_key: HashMap::new(),
     };
     let surface_materials: Vec<Option<usize>> = map
         .surfaces
@@ -1701,7 +1757,7 @@ fn build_iw7_world(
             }));
         }
         report.push(format!(
-            "iw7 static models: {} placed of {}, {} distinct models built, {lit} lit by the floor under and around them (the rest by the median of those)",
+            "iw7 static models: {} placed of {}, {} distinct models built, {lit} lit by the light grid's probes round them or the floor under them (the rest by the median of those)",
             placements.iter().filter(|p| p.is_some()).count(),
             map.static_models.len(),
             meshes.len()
