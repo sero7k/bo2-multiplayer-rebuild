@@ -114,8 +114,12 @@ fn photo(i: usize, zm: bool, pics: &mut ShellPics, images: &mut Assets<Image>) -
 fn photo_screen(shell: &Shell) -> bool {
     match shell.screen {
         Screen::Main | Screen::Multiplayer | Screen::Options | Screen::Barracks | Screen::CardPick | Screen::EmblemPick => true,
-        Screen::Classes | Screen::ClassEdit | Screen::ItemPick => shell.cac_from != Screen::Lobby,
+        Screen::Classes | Screen::ClassEdit | Screen::ItemPick => !matches!(shell.cac_from, Screen::Lobby | Screen::WzLobby),
         Screen::Zombies | Screen::ZmRecord => true,
+        Screen::WzMenu => true,
+        // (WARZONE's lobby and picker show its map, or the photos until
+        // it is installed.)
+        Screen::WzLobby | Screen::WzModePick => bridge::catalog().is_none_or(|c| super::warzone::map(&c).is_err()),
         _ => false,
     }
 }
@@ -193,7 +197,7 @@ pub(crate) fn shell_background(
         return;
     }
     // (New colours: the backdrop is made again; its pictures stay.)
-    let pal = palette(shell.screen);
+    let pal = palette(&shell);
     if roots.is_empty() || st.pal != Some(pal) {
         for e in &roots {
             commands.entity(e).despawn();
@@ -241,6 +245,9 @@ pub(crate) fn shell_background(
                 .and_then(|&i| zm(zombies::MAPS[i].map, 0)),
             Screen::ZmStartPick => zm(&shell.zm_map, shell.focus),
             Screen::ZmLobby => zm(&shell.zm_map, shell.zm_start),
+            Screen::Classes | Screen::ClassEdit | Screen::ItemPick | Screen::WzLobby | Screen::WzModePick if shell.wz => {
+                super::warzone::map(&c).ok().map(|(ui, _)| ui)
+            }
             _ => Some(shell.map.clone()),
         };
         if let Some(name) = target

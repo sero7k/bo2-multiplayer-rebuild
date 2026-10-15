@@ -99,6 +99,12 @@ pub(crate) fn header(c: &mut Kids, cx: &Ctx, trail: &[&str]) {
     });
 }
 
+/// The first word of a shared screen's header (Barracks, Create-a-Class):
+/// MULTIPLAYER, or WARZONE when opened from its menus.
+pub(crate) fn section(shell: &Shell) -> &'static str {
+    if shell.wz { super::wz_theme::HEADER } else { "MULTIPLAYER" }
+}
+
 /// A calling card: the picture covering a box, dark to its left so a name
 /// over it reads (`name`: the name and its size).
 pub(crate) fn banner(c: &mut Kids, cx: &mut Ctx, card: &str, w: f32, h: f32, name: Option<(&str, f32)>) {
@@ -259,12 +265,16 @@ fn footer(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, online: &Onl
         f.spawn((Node { column_gap: cx.px(28.0), align_items: AlignItems::Center, ..default() }, Hit::Back, Button))
             .with_children(|l| {
                 if shell.screen != Screen::Main {
-                    let back = if shell.screen == Screen::Lobby { "LEAVE LOBBY" } else { "BACK" };
+                    let back = match shell.screen {
+                        Screen::Lobby => "LEAVE LOBBY",
+                        Screen::WzLobby => super::wz_theme::LEAVE_LOBBY,
+                        _ => "BACK",
+                    };
                     hint(l, cx, "ESC", "xenonbutton_b", back);
                 }
                 hint(l, cx, "ENTER", "xenonbutton_a", "SELECT");
                 match shell.screen {
-                    Screen::Lobby | Screen::Options | Screen::MatchFilter => hint(l, cx, "Q / E", "xenonbutton_lb", "TABS"),
+                    Screen::Lobby | Screen::WzLobby | Screen::Options | Screen::MatchFilter => hint(l, cx, "Q / E", "xenonbutton_lb", "TABS"),
                     Screen::MapPick => hint(l, cx, "Q / E", "xenonbutton_lb", "SECTIONS"),
                     Screen::ItemPick => hint(l, cx, "Q / E", "xenonbutton_lb", "CATEGORIES"),
                     Screen::CardPick | Screen::EmblemPick => hint(l, cx, "Q / E", "xenonbutton_lb", "PAGES"),
@@ -794,7 +804,7 @@ pub(crate) fn options_view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Ro
 
 /// Barracks: his card large, then his record or his prestiges.
 fn barracks_view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row]) {
-    header(c, cx, &["MULTIPLAYER", "BARRACKS"]);
+    header(c, cx, &[section(shell), "BARRACKS"]);
     c.spawn(Node {
         flex_direction: FlexDirection::Column,
         row_gap: cx.px(8.0),
@@ -1117,7 +1127,7 @@ pub(crate) fn shell_view(
         icons: icons.as_deref(),
         images: &mut images,
         pad,
-        pal: palette(shell.screen),
+        pal: palette(&shell),
     };
     commands
         .spawn((
@@ -1153,7 +1163,7 @@ pub(crate) fn shell_view(
                 Screen::Zombies | Screen::ZmMapPick | Screen::ZmStartPick | Screen::ZmLobby | Screen::ZmRecord => {
                     super::zombies_view::view(c, &mut cx, &shell, &rows);
                 }
-                Screen::Warzone => super::warzone::view(c, &mut cx, &shell, &rows),
+                Screen::WzMenu | Screen::WzLobby | Screen::WzModePick => super::wz_view::view(c, &mut cx, &shell, &cat, &rows),
             }
             // (The main menu has its own foot, and no player card; the
             // calling card and emblem pickers show his card in their middle.)

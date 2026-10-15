@@ -2,7 +2,8 @@
 //! loading screen and the in-game HUD (`hud_modern` uses the same blue and
 //! panels): near-black navy panels, one blue accent, white text that dims
 //! when it is not the thing in focus, and a condensed sans. The Zombies
-//! screens are the same screens in red (`Palette::ZOMBIES`).
+//! screens are the same screens in red (`Palette::ZOMBIES`), WARZONE's in
+//! grey and hazard orange (`wz_theme::PALETTE`).
 
 use bevy::prelude::*;
 
@@ -74,9 +75,16 @@ impl Palette {
     }
 }
 
-/// The palette a screen is drawn in.
-pub(crate) fn palette(screen: super::Screen) -> Palette {
-    if screen.is_zombies() { Palette::ZOMBIES } else { Palette::MULTIPLAYER }
+/// The palette the screen he is on is drawn in: WARZONE's screens, and the
+/// shared ones opened from them, in `wz_theme::PALETTE`.
+pub(crate) fn palette(shell: &super::Shell) -> Palette {
+    if shell.screen.is_zombies() {
+        Palette::ZOMBIES
+    } else if shell.screen.is_warzone() || (shell.wz && shell.screen != super::Screen::Main) {
+        super::wz_theme::PALETTE
+    } else {
+        Palette::MULTIPLAYER
+    }
 }
 
 const REGULAR: &[u8] = include_bytes!("../../assets/BarlowCondensed-400.ttf");
