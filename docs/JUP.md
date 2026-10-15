@@ -59,7 +59,13 @@ offset in the entry, u32 the next one's (0 = last), u16 segment count, u16
 index, u8 block count, then per block 21 bytes (u8 compressor, u32 compressed,
 u32 decoded, u32 stream offset from the segment start, u32 offset in the
 decoded entry, u32 checksum — not checked), then the streams. Decoded blocks
-are 0x3ffe0 bytes, a segment's last shorter.
+are 0x3ffe0 bytes, a segment's last shorter. Segments start exactly 1 MiB
+apart. Swept on every entry of the 139 parts: 517,923 stored, 2,021,780
+compressed (2,013,394 in one segment, the rest in 2 to 9+), all segment
+headers and block tables consistent and summing to the row's decoded size;
+2.4 M blocks, all compressor 6; a random 4,906 of them decoded through the
+DLL, and `jup_inventory` decodes the first/middle/last 3 entries of each
+part (1,231) and the first entry of every `.xpak` with parts.
 
 The 139 `.xsub` parts (2,539,703 entries) carry data and their own table at
 the end. The 39 zone `.xpak` are tables only, one row per entry of all their
