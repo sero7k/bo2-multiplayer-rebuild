@@ -867,7 +867,26 @@ fn t7_shade(base: vec3<f32>, amb_in: vec3<f32>, vn: vec3<f32>, n: vec3<f32>, st:
     let fq = 1.0 - ldh;
     let fr = f0 + (1.0 - f0) * (fq * fq * fq * fq * fq);
     colour += sun * (vis * ndl * d / max(4.0 * ldh * ldh, 0.05)) * fr;
-    let r = reflect(-v, n);
+    var r = reflect(-v, n);
+    // The reflection corrected against the probe's parallax box (Black
+    // Ops III's lit shader against six planes round it; here its box, in
+    // its axes turned about z): where the ray leaves the box, seen from
+    // where the probe was taken (`t7_light::Lit::probe_rows`).
+    let pb = probes.v[pi * 3u + 2u];
+    if (!t7_bo2() && pb.x > 0.0) {
+        let p0 = probes.v[pi * 3u];
+        let p1 = probes.v[pi * 3u + 1u];
+        let cs = vec2(p1.w, pb.w);
+        let d0 = p - p1.xyz;
+        let lp = vec3(cs.x * d0.x + cs.y * d0.y, -cs.y * d0.x + cs.x * d0.y, d0.z);
+        let lr = vec3(cs.x * r.x + cs.y * r.y, -cs.y * r.x + cs.x * r.y, r.z);
+        let inv = 1.0 / select(lr, vec3(1e-6), abs(lr) < vec3(1e-6));
+        let far = max((pb.xyz - lp) * inv, (-pb.xyz - lp) * inv);
+        let t = min(min(far.x, far.y), far.z);
+        if (t > 0.0 && all(abs(lp) <= pb.xyz * 1.5)) {
+            r = normalize(p + r * t - p0.yzw);
+        }
+    }
     let mip = clamp(5.0 * (1.0 - g) - 0.35, 0.0, 6.0);
     let env = t7_probe(r, pi, mip) * gain;
     let rough = sqrt(sqrt(a2));

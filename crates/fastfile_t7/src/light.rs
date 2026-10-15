@@ -281,6 +281,12 @@ pub struct Probe {
     pub mean: [f32; 3],
     /// Config word 0 (the scale its texels are stored at, it seems).
     pub scale: f32,
+    /// bo2mp: its parallax box: centre (words 29..31) and half size
+    /// (26..28), in its own axes (the lit shader corrects the reflection
+    /// against six planes round it, words 46..70; the box is their
+    /// stand-in).
+    pub box_centre: [f32; 3],
+    pub box_half: [f32; 3],
     /// +X, -X, +Y, -Y, +Z, -Z (world axes) of the smallest level.
     pub faces: [[f32; 3]; 6],
 }
@@ -430,6 +436,8 @@ impl Bake {
                             half: [w(23), w(24), w(25)].map(|v| if v.is_finite() { v.abs() } else { 0.0 }),
                             mean: [w(1), w(2), w(3)],
                             scale: w(0),
+                            box_centre: [w(29), w(30), w(31)],
+                            box_half: [w(26), w(27), w(28)].map(|v| if v.is_finite() { v.abs() } else { 0.0 }),
                             faces: world,
                         });
                     }
