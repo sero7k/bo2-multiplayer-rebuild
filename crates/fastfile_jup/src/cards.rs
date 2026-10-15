@@ -188,9 +188,10 @@ pub struct Packages {
     search_all: bool,
 }
 
-/// The packages the pictures were found in on build 1.21, asked first
-/// (`boot_shared` the older ones, `codhq23b` the seasons').
-pub const LIKELY_PACKAGES: &[&str] = &["boot_shared", "codhq23b", "codhq23a", "boot"];
+/// The packages the pictures are in on build 1.21, asked in this order
+/// (`boot_shared` the older ones, `codhq23b` and `codhq23a` the seasons',
+/// `codhq_shared` 87 more); 2 of 5,272 are in no installed package.
+pub const LIKELY_PACKAGES: &[&str] = &["boot_shared", "codhq23b", "codhq23a", "boot", "codhq_shared"];
 
 impl Packages {
     /// Over an install's `zone` folder: the likely packages only, or with

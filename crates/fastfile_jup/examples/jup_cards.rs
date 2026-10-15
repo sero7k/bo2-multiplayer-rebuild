@@ -140,18 +140,20 @@ fn main() {
         // no installed package at all.)
         let (mut likely, mut all) = (Packages::new(&zone_dir, false), Packages::new(&zone_dir, true));
         let mut missing = Vec::new();
-        let mut elsewhere = 0usize;
+        let mut elsewhere: BTreeMap<usize, usize> = BTreeMap::new();
         for it in &items {
             let Some(g) = it.image.groups.last() else { continue };
             if likely.find(g.key).is_none() {
-                if all.find(g.key).is_some() {
-                    elsewhere += 1;
-                } else {
-                    missing.push(it.name.as_str());
+                match all.find(g.key) {
+                    Some((i, _)) => *elsewhere.entry(i).or_default() += 1,
+                    None => missing.push(it.name.as_str()),
                 }
             }
         }
-        println!("pixels: {} in the likely packages, {elsewhere} only in others, {} in none: {:?}", items.len() - elsewhere - missing.len(), missing.len(), &missing[..missing.len().min(20)]);
+        let names = all.opened();
+        let others: Vec<String> = elsewhere.iter().map(|(i, n)| format!("{} {n}", names.get(*i).map_or("?", String::as_str))).collect();
+        let n_else: usize = elsewhere.values().sum();
+        println!("pixels: {} in the likely packages, {n_else} only in others {others:?}, {} in none: {:?}", items.len() - n_else - missing.len(), missing.len(), &missing[..missing.len().min(20)]);
         println!("flipbooks {books:?}, stills {stills:?}, square emblems not decoded {failed} ({:?})", t.elapsed());
     }
     if !show.is_empty() {
