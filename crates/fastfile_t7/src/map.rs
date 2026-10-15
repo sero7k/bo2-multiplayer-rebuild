@@ -117,19 +117,34 @@ fn techset_layout(ts: &crate::walk::capture::TechsetRec, image: &[u8]) -> Techse
 /// most others in `core_common`, `mp_common`, `zm_levelcommon`), by name,
 /// read once per folder. (A zone whose walk stops still gives the
 /// technique sets it read before the stop.)
-fn common_layouts(dir: &Path) -> std::sync::Arc<HashMap<String, TechsetLayout>> {
+fn common_layouts(dir: &Path) -> std::sync::Arc<Common> {
     use std::sync::{Arc, Mutex, OnceLock};
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<HashMap<String, TechsetLayout>>>>> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<Common>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     if let Some(c) = cache.lock().ok().and_then(|c| c.get(dir).cloned()) {
         return c;
     }
-    let mut out: HashMap<String, TechsetLayout> = HashMap::new();
+    let mut out = Common::default();
     for zone in ["core_pre_gfx", "core_common", "mp_common", "zm_common", "zm_levelcommon", "core_post_gfx", "core_ui"] {
         let Ok(z) = crate::Zone::open(&dir.join(format!("{zone}.ff"))) else { continue };
         let w = crate::walk::walk(&z);
         for ts in &w.capture.techsets {
-            out.entry(bare(&ts.name).to_owned()).or_insert_with(|| techset_layout(ts, &z.image));
+            out.layouts.entry(bare(&ts.name).to_owned()).or_insert_with(|| techset_layout(ts, &z.image));
+        }
+        // The pictures (their records; pixels in the zone kept as bytes).
+        for im in &w.capture.images {
+            if im.name.starts_with(',') || out.images.contains_key(&im.name) {
+                continue;
+            }
+            let mut rec = im.clone();
+            if im.xpak.is_empty() {
+                let Some((at, n)) = im.pixels else { continue };
+                let Some(px) = z.image.get(at..at + n) else { continue };
+                out.pixels.insert(im.name.clone(), px.to_vec());
+                rec.pixels = Some((0, n));
+                rec.fallback = None;
+            }
+            out.images.insert(im.name.clone(), rec);
         }
     }
     let out = Arc::new(out);
@@ -139,13 +154,24 @@ fn common_layouts(dir: &Path) -> std::sync::Arc<HashMap<String, TechsetLayout>> 
     out
 }
 
+/// bo2mp: what the zones loaded before a map give its materials: their
+/// technique sets' layouts, and their pictures (the shared `i_t7_micro_*`
+/// tiles, decals' grunge): records, and the pixels of those kept in the
+/// zone (from offset 0 of their own bytes).
+#[derive(Default)]
+pub struct Common {
+    pub layouts: HashMap<String, TechsetLayout>,
+    images: HashMap<String, ImageRec>,
+    pixels: HashMap<String, Vec<u8>>,
+}
+
 /// bo2mp: a material's named constants and bound texture slots, from its
 /// technique set's programs (`MapMaterial::constants`): the zone's own
 /// technique set, else the common zones' (`common`).
 fn material_constants(
     cap: &Capture,
     image: &[u8],
-    common: &HashMap<String, TechsetLayout>,
+    common: &Common,
     m: &crate::walk::capture::MaterialRec,
 ) -> (HashMap<String, Vec<f32>>, Vec<String>) {
     let mut constants: HashMap<String, Vec<f32>> = HashMap::new();
@@ -157,7 +183,7 @@ fn material_constants(
             own = techset_layout(ts, image);
             &own
         }
-        None => match common.get(bare(name)) {
+        None => match common.layouts.get(bare(name)) {
             Some(l) => l,
             None => return (constants, bound),
         },
@@ -361,6 +387,8 @@ pub struct T7Map {
     pub report: Vec<String>,
     images: HashMap<String, ImageRec>,
     zone_image: Vec<u8>,
+    /// bo2mp: the common zones' pictures (`Common`).
+    common: Option<std::sync::Arc<Common>>,
     paks: Option<XpakSet>,
 }
 
@@ -419,6 +447,7 @@ impl T7Map {
         out.read_clip(&cap, image);
         // bo2mp: the materials' named constants and bound texture slots.
         let common = common_layouts(&src.pak_dir);
+        out.common = Some(common.clone());
         let mut named = 0;
         for i in 0..out.materials.len() {
             let n = out.materials[i].name.clone();
@@ -714,9 +743,17 @@ impl T7Map {
     /// most `max_dim` (its single level; the smallest part's whole chain
     /// when that is the one), or the zone's own pixels.
     pub fn image(&self, name: &str, max_dim: u32) -> Result<ImageLevels, String> {
-        let im = self.images.get(bare(name)).ok_or_else(|| format!("{name}: not in the zone"))?;
+        let (im, zone_image) = match self.images.get(bare(name)) {
+            // (A record without pixels or packages is a reference: the
+            // common zones' copy, when they have one.)
+            Some(im) if im.pixels.is_some() || !im.xpak.is_empty() => (im, self.zone_image.as_slice()),
+            own => match self.common.as_ref().and_then(|c| Some((c.images.get(bare(name))?, c))) {
+                Some((im, c)) => (im, c.pixels.get(bare(name)).map_or(&[][..], Vec::as_slice)),
+                None => (own.ok_or_else(|| format!("{name}: not in the zone"))?, self.zone_image.as_slice()),
+            },
+        };
         if im.xpak.is_empty() {
-            return texture::zone_levels(im, &self.zone_image).map_err(|e| format!("{name}: {e}"));
+            return texture::zone_levels(im, zone_image).map_err(|e| format!("{name}: {e}"));
         }
         let paks = self.paks.as_ref().ok_or_else(|| format!("{name}: no packages"))?;
         let dim = |k: usize| u32::from(im.xpak[k].width.max(im.xpak[k].height));
@@ -734,7 +771,7 @@ impl T7Map {
 
     /// The image record of a name (format, size).
     pub fn image_info(&self, name: &str) -> Option<&ImageRec> {
-        self.images.get(bare(name))
+        self.images.get(bare(name)).or_else(|| self.common.as_ref()?.images.get(bare(name)))
     }
 }
 
