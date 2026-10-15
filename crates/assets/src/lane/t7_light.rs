@@ -48,6 +48,18 @@ const EXPOSURE: f32 = 0.6;
 /// reach.
 const MARGIN: f32 = 3000.0;
 
+/// A test view (`BO2MP_T7_VIEW`): 1 the sun's visibility, 2 the ambient
+/// light, 3 the albedo, 4 the light (no albedo); 0 the picture.
+fn view() -> f32 {
+    match std::env::var("BO2MP_T7_VIEW").as_deref().map(str::trim) {
+        Ok("sun") => 1.0,
+        Ok("ambient") => 2.0,
+        Ok("albedo") => 3.0,
+        Ok("light") => 4.0,
+        _ => 0.0,
+    }
+}
+
 fn exposure() -> f32 {
     std::env::var("BO2MP_T7_EXPOSURE").ok().and_then(|v| v.trim().parse().ok()).filter(|v: &f32| *v > 0.0 && *v < 100.0).unwrap_or(EXPOSURE)
 }
@@ -198,6 +210,7 @@ impl Lit {
         }
         let mut b = [0f32; 16];
         b[..4].copy_from_slice(&m[3]);
+        b[4] = view();
         b[7] = 7.0;
         [a, b]
     }
