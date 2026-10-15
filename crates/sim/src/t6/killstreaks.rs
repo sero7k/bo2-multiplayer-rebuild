@@ -77,6 +77,9 @@ pub(crate) struct Streaks {
     /// When each player last pressed each d-pad slot's key (server ms), by
     /// client: `actionslot*buttonpressed`.
     pub slot_presses: BTreeMap<u32, [i64; 4]>,
+    /// The frame (server ms) each press was first read in (his trickshot
+    /// script's taps: `slot_pressed`).
+    pub slot_reads: BTreeMap<u32, [i64; 4]>,
     /// Client flags the scripts set on entities (`setclientflag`), by
     /// entity: bit n is flag n. A counter-UAV jams its enemies' minimaps
     /// while it carries flag 11.
@@ -130,10 +133,25 @@ pub(super) fn action_slot_pressed(world: &mut World, client: u32, slot: u8) {
 /// Whether his slot key (0-based) was pressed just now.
 fn slot_pressed(world: &mut World, client: u32, slot: usize) -> bool {
     let now = world.resource::<Zm>().now_ms;
-    streaks(world)
+    let pressed = streaks(world)
         .slot_presses
         .get(&client)
-        .is_some_and(|p| now.saturating_sub(p[slot]) <= SLOT_PRESS_MS)
+        .is_some_and(|p| now.saturating_sub(p[slot]) <= SLOT_PRESS_MS);
+    // bo2mp: with his trickshot script, a press is one tap: it reads as
+    // held for the rest of the frame it is first read in, not 150 ms (its
+    // menu polls every 50 ms and would scroll three rows a press).
+    if pressed && super::trickshot::active() {
+        let pressed_at = streaks(world).slot_presses[&client][slot];
+        let mut st = streaks(world);
+        let read = st.slot_reads.entry(client).or_insert([i64::MIN; 4]);
+        if read[slot] >= pressed_at && read[slot] < now {
+            return false;
+        }
+        if read[slot] < pressed_at {
+            read[slot] = now;
+        }
+    }
+    pressed
 }
 
 /// His client's vision dvar (`bo2mp_vision`): the server's vision for him

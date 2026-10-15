@@ -1427,10 +1427,21 @@ fn handle_console_input(
             } else if command.name == "clear" {
                 state.log.clear();
             } else if registry.resolve(&command.name).is_none() {
-                state.echo(
-                    format!("unknown command `{}`", command.name),
-                    settings.log_capacity,
-                );
+                // bo2mp: as Black Ops II's console does, a command it does
+                // not know goes to the server as a client command (`cmd`):
+                // a script's notifyonplayercommand may listen for it.
+                if registry.resolve("cmd").is_some() {
+                    let mut command = command;
+                    command.args.insert(0, std::mem::take(&mut command.name));
+                    command.name = "cmd".to_owned();
+                    command.interactive = true;
+                    queue.0.push_back(command);
+                } else {
+                    state.echo(
+                        format!("unknown command `{}`", command.name),
+                        settings.log_capacity,
+                    );
+                }
             } else {
                 let mut command = command;
                 command.interactive = true;

@@ -479,6 +479,10 @@ pub(crate) fn lui_side(host: &mut Host, mp: Option<&Mp>) {
         match r {
             Request::Start(spec) => {
                 PUBLIC_START.store(spec.public, Ordering::Relaxed);
+                // bo2mp: TRICKSHOT MODE is Custom Games' only.
+                if spec.public || spec.br.is_some() {
+                    sim::set_trickshot(false);
+                }
                 sim::set_resurgence(spec.br);
                 // (The Warzone HUD draws what the script's text lines would.)
                 sim::set_warzone_hud(crate::hud_modern::modern_hud_enabled());

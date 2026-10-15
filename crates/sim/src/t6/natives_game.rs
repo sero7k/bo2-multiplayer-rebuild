@@ -273,7 +273,17 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         // bo2zm M4: Zombies' (the front end's picks, then the defaults).
         Ok(gametype_setting(&name))
     });
-    f!("setgametypesetting", |_, _, _, _| Ok(Value::Undefined));
+    // bo2mp: a script's own limits (his trickshot script's time and score
+    // limits): later reads (`updategametypedvars`) see them.
+    f!("setgametypesetting", |vm, world, _, a| {
+        let name = text(vm, a, 0).to_ascii_lowercase();
+        let value = vm.to_text(arg(a, 1));
+        let mut zm = world.resource_mut::<Zm>();
+        if zm.mp && !name.is_empty() {
+            zm.gamesettings.insert(name, value);
+        }
+        Ok(Value::Undefined)
+    });
     f!("sessionmodeisonlinegame", |_, _, _, _| Ok(Value::Int(0)));
     f!("sessionmodeisprivate", |_, _, _, _| Ok(Value::Int(0)));
     f!("sessionmodeisprivateonlinegame", |_, _, _, _| Ok(

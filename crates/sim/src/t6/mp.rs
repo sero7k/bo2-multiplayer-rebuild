@@ -150,6 +150,11 @@ pub(super) fn engine_scripts() -> Result<Vec<ScriptObject>, String> {
         gsc_t6::compile("bo2mp/resurgence", super::br::SCRIPT)?,
     ];
     register_moab_visions();
+    // bo2mp: his trickshot script (Custom Games' TRICKSHOT MODE).
+    super::trickshot::set_active(super::trickshot::enabled());
+    if super::trickshot::active() {
+        out.push(gsc_t6::compile(super::trickshot::NAME, super::trickshot::SCRIPT)?);
+    }
     if let Ok(path) = std::env::var("BO2MP_DEBUG_GSC") {
         let src = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
         out.push(gsc_t6::compile("bo2mp/debug", &src)?);
@@ -212,5 +217,27 @@ mod moab_tests {
     fn the_nuke_is_on_by_default_at_25_kills() {
         assert_eq!(super::moab_kills(), 25);
         assert!(super::MOAB.contains("getdvarint( \"scr_moab\" ) == 0"));
+    }
+}
+
+#[cfg(test)]
+mod trickshot_tests {
+    /// His Plutonium trickshot script compiles as he wrote it (the ternary
+    /// `?:` included) with its entry points and its menu.
+    #[test]
+    fn his_trickshot_script_compiles() {
+        let s = gsc_t6::compile(super::super::trickshot::NAME, super::super::trickshot::SCRIPT)
+            .expect("trickshot/main.gsc compiles");
+        for f in ["init", "main", "onplayerconnect", "onplayerspawned", "add_menu", "add_option", "menuinit", "callback_playerdamagehook"] {
+            assert!(s.functions.iter().any(|x| x.name == f), "{f}");
+        }
+        assert!(s.includes.iter().any(|i| i.contains("_hud_util")));
+    }
+
+    #[test]
+    fn trickshot_mode_is_off_by_default() {
+        if std::env::var_os("BO2MP_TRICKSHOT").is_none() {
+            assert!(!super::super::trickshot::enabled());
+        }
     }
 }

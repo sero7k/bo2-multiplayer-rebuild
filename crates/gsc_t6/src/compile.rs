@@ -83,10 +83,10 @@ struct Token {
 }
 
 /// Longest first.
-const PUNCTS: [&str; 46] = [
+const PUNCTS: [&str; 47] = [
     "<<=", ">>=", "::", "==", "!=", "<=", ">=", "&&", "||", "++", "--", "+=", "-=", "*=", "/=",
     "%=", "|=", "&=", "^=", "<<", ">>", "[[", "]]", "(", ")", "{", "}", "[", "]", ",", ";", ".",
-    ":", "=", "+", "-", "*", "/", "%", "<", ">", "!", "~", "&", "|", "^",
+    ":", "=", "+", "-", "*", "/", "%", "<", ">", "!", "~", "&", "|", "^", "?",
 ];
 
 fn lex(src: &str) -> Result<Vec<Token>, String> {
@@ -250,6 +250,8 @@ enum Expr {
     Bin(u8, Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
+    /// `c ? a : b` (Plutonium's compiler accepts it for T6).
+    Cond(Box<Expr>, Box<Expr>, Box<Expr>),
 }
 
 #[derive(Clone, Debug)]
@@ -625,7 +627,14 @@ impl Parser {
     }
 
     fn expr(&mut self) -> Result<Expr, String> {
-        self.binary(0)
+        let c = self.binary(0)?;
+        if self.eat_punct("?") {
+            let a = self.expr()?;
+            self.expect(":")?;
+            let b = self.expr()?;
+            return Ok(Expr::Cond(Box::new(c), Box::new(a), Box::new(b)));
+        }
+        Ok(c)
     }
 
     fn binary(&mut self, level: usize) -> Result<Expr, String> {
@@ -1352,6 +1361,16 @@ impl Gen {
                 self.expr(b)?;
                 self.plain(*code);
             }
+            Expr::Cond(c, a, b) => {
+                let (other, end) = (self.label(), self.label());
+                self.expr(c)?;
+                self.code.push(I::Jump(op::JUMP_ON_FALSE, other));
+                self.expr(a)?;
+                self.code.push(I::Jump(op::JUMP, end));
+                self.here(other);
+                self.expr(b)?;
+                self.here(end);
+            }
             Expr::And(a, b) | Expr::Or(a, b) => {
                 let end = self.label();
                 self.expr(a)?;
@@ -1459,6 +1478,24 @@ mod tests {
             "{} functions",
             obj.functions.len()
         );
+    }
+
+    /// Plutonium's `c ? a : b` (his trickshot script uses it).
+    #[test]
+    fn ternary_picks_a_branch() {
+        let mut vm = run(
+            "main() {
+                 level.a = 1 ? 5 : 6;
+                 level.b = 0 ? 5 : 6;
+                 level.c = 2 + ( level.a == 5 ? 10 : 20 );
+                 level.d = 0 ? 1 : 0 ? 2 : 3;
+             }",
+            0,
+        );
+        assert_eq!(level_int(&mut vm, "a"), Some(5));
+        assert_eq!(level_int(&mut vm, "b"), Some(6));
+        assert_eq!(level_int(&mut vm, "c"), Some(12));
+        assert_eq!(level_int(&mut vm, "d"), Some(3));
     }
 
     #[test]

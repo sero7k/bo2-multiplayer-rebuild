@@ -52,6 +52,7 @@ mod loadout;
 mod map_natives;
 mod movers;
 pub(crate) mod mp;
+pub(crate) mod trickshot;
 mod natives_ai;
 mod natives_ent;
 mod highrise;
@@ -739,6 +740,46 @@ pub(crate) fn expected_players() -> i32 {
     })
 }
 
+/// Every engine builtin, bound on a linked program (`mp`: multiplayer's too).
+pub(crate) fn bind_natives(vm: &mut Vm<World>, mp: bool) {
+    gsc_t6::natives::bind_core(vm);
+    natives_game::bind(vm);
+    natives_ent::bind(vm);
+    natives_player::bind(vm);
+    if !mp {
+        globallogic::bind(vm);
+    }
+    // Sounds and effects replace the quiet stubs bound above.
+    natives_fx::bind(vm);
+    natives_ai::bind(vm);
+    zbarrier::bind(vm);
+    darts::bind(vm);
+    clientfields::bind(vm);
+    brushes::bind(vm);
+    vehicles::bind(vm);
+    turrets::bind(vm);
+    riotshield::bind(vm);
+    jetgun::bind(vm);
+    offhand::bind(vm);
+    limits::bind(vm);
+    stats::bind(vm);
+    hud::bind(vm);
+    if mp {
+        influencers::bind(vm);
+        natives_mp::bind(vm);
+        bots::bind(vm);
+        killstreaks::bind(vm);
+        loadout::bind(vm);
+        objectives::bind(vm);
+        items::bind(vm);
+        // bo2mp lane F: the body's animation natives (the death path).
+        playeranim::bind(vm);
+        // bo2mp: Plutonium's additions his trickshot script calls, and the
+        // engine builtins it shares with BO2's scripts (suicide, kick...).
+        trickshot::bind(vm);
+    }
+}
+
 pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> {
     cheats::reset();
     let mp = mp::is_mp(&inst.map);
@@ -791,39 +832,7 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
         })
         .wrapping_mul(0x9e37_79b9_7f4a_7c15)
         | 1;
-    gsc_t6::natives::bind_core(&mut vm);
-    natives_game::bind(&mut vm);
-    natives_ent::bind(&mut vm);
-    natives_player::bind(&mut vm);
-    if !mp {
-        globallogic::bind(&mut vm);
-    }
-    // Sounds and effects replace the quiet stubs bound above.
-    natives_fx::bind(&mut vm);
-    natives_ai::bind(&mut vm);
-    zbarrier::bind(&mut vm);
-    darts::bind(&mut vm);
-    clientfields::bind(&mut vm);
-    brushes::bind(&mut vm);
-    vehicles::bind(&mut vm);
-    turrets::bind(&mut vm);
-    riotshield::bind(&mut vm);
-    jetgun::bind(&mut vm);
-    offhand::bind(&mut vm);
-    limits::bind(&mut vm);
-    stats::bind(&mut vm);
-    hud::bind(&mut vm);
-    if mp {
-        influencers::bind(&mut vm);
-        natives_mp::bind(&mut vm);
-        bots::bind(&mut vm);
-        killstreaks::bind(&mut vm);
-        loadout::bind(&mut vm);
-        objectives::bind(&mut vm);
-        items::bind(&mut vm);
-        // bo2mp lane F: the body's animation natives (the death path).
-        playeranim::bind(&mut vm);
-    }
+    bind_natives(&mut vm, mp);
     // IW4L_T6_TRACE=name,name: log those builtins' calls (debugging).
     if let Ok(names) = std::env::var("IW4L_T6_TRACE") {
         vm.trace_builtins(&names, 5000);
@@ -876,6 +885,9 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
             vm.dvars.insert("scr_moab".to_owned(), "1".to_owned());
             vm.dvars.insert("scr_moab_kills".to_owned(), moab.to_string());
         }
+        // bo2mp: TRICKSHOT MODE (his script is linked only when on).
+        let ts = if trickshot::enabled() { "1" } else { "0" };
+        vm.dvars.insert("bo2mp_trickshot".to_owned(), ts.to_owned());
         // bo2mp: Resurgence (`bo2mp/resurgence`): the lobby's WARZONE, or
         // BO2MP_BR=<squad size> with the free-for-all.
         if let Some(rules) = br::rules() {
@@ -1322,6 +1334,14 @@ pub(crate) fn with_vm<R>(
 /// "popup_leavegame" "endround", ...) reaches the scripts as his
 /// `menuresponse` notify. False when no BO2 map runs.
 pub(crate) fn menu_response(world: &mut World, client: u32, menu: &str, response: &str) -> bool {
+    // bo2mp: a client command he typed (`cmd drop`): Plutonium's
+    // notifyonplayercommand listeners hear it.
+    if menu == CLIENT_COMMAND_MENU {
+        if world.contains_resource::<T6Runtime>() {
+            trickshot::player_command(world, client, response);
+        }
+        return true;
+    }
     // bo2mp: choosing a class reads his classes again (he may have changed
     // them since the match began).
     if response.starts_with("custom") {
@@ -1340,6 +1360,10 @@ pub(crate) fn menu_response(world: &mut World, client: u32, menu: &str, response
     })
     .is_some()
 }
+
+/// bo2mp: the menu name a client command travels under (the console's
+/// `cmd <text>`, and any command it does not know).
+pub const CLIENT_COMMAND_MENU: &str = "bo2mp_cmd";
 
 /// The level start: map entities and structs, then the game type's and
 /// the map's `main` and `codecallback_startgametype`.
@@ -1436,6 +1460,13 @@ pub(crate) fn start(world: &mut World) {
             // bo2mp: the optional M.O.A.B. (off unless scr_moab 1).
             calls.push(("bo2mp/moab".to_owned(), "main", false));
             calls.push(("bo2mp/resurgence".to_owned(), "main", false));
+            // bo2mp: his trickshot script, as Plutonium runs a custom
+            // script: `main` before the level loads, `init` once the game
+            // type has started (TRICKSHOT MODE only).
+            if vm.program.scripts.iter().any(|s| s.name == trickshot::NAME) {
+                calls.insert(0, (trickshot::NAME.to_owned(), "main", false));
+                calls.push((trickshot::NAME.to_owned(), "init", false));
+            }
             calls.push(("bo2mp/debug".to_owned(), "main", false));
         }
         for (script, func, required) in calls {
@@ -1776,6 +1807,8 @@ fn advance_inner(world: &mut World) {
         // bo2mp: the bots' commands too.
         if world.resource::<Zm>().mp {
             bots::drive(world, now);
+            // bo2mp: buttons bound with notifyonplayercommand ("+frag").
+            trickshot::buttons(world);
         }
     });
     // Scorestreaks once every command is in (a bot capturing a crate
@@ -1977,6 +2010,7 @@ pub(crate) fn gate_streak_switch(world: &mut World, client: u32, cmd: &mut playe
 pub(crate) fn action_slot_pressed(world: &mut World, client: u32, slot: u8) {
     if world.get_resource::<Zm>().is_some_and(|z| z.mp) {
         killstreaks::action_slot_pressed(world, client, slot);
+        trickshot::action_slot(world, client, slot);
     }
 }
 

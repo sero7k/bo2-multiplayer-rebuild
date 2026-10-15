@@ -64,6 +64,12 @@ pub(crate) fn register_weapon_commands(
                 .arg(LiveListCompleter(Arc::clone(&completions.give))),
         );
     }
+    if registry.resolve("cmd").is_none() {
+        registry.register(
+            crate::CommandSpec::new("cmd")
+                .usage("cmd <command> [args...] — send a client command to the server (a script's notifyonplayercommand hears it; a command the console does not know goes there too)"),
+        );
+    }
     if registry.resolve("attach").is_none() {
         registry.register(
             crate::CommandSpec::new("attach")
@@ -125,6 +131,32 @@ pub(crate) fn route_weapon_commands(
 
     for cmd in events.read() {
         match cmd.name.as_str() {
+            "cmd" => {
+                let text = cmd.args.join(" ");
+                if text.trim().is_empty() {
+                    echo("usage: cmd <command> [args...]".into(), &mut console, &mut line);
+                    continue;
+                }
+                let Some(field) = sim::menu_response_field(&text) else {
+                    echo(format!("cmd: `{text}` is too long"), &mut console, &mut line);
+                    continue;
+                };
+                let Some(menu) = sim::menu_response_field(sim::CLIENT_COMMAND_MENU) else {
+                    continue;
+                };
+                let request_id = seq.allocate();
+                match inbox.push(
+                    local.0,
+                    ClientAction::MenuResponse {
+                        request_id,
+                        menu,
+                        response: field,
+                    },
+                ) {
+                    Ok(()) => diag::info!(Console, "cmd: sent `{text}`"),
+                    Err(error) => echo(format!("cmd: {error}"), &mut console, &mut line),
+                }
+            }
             "give" => {
                 let Some(arg) = cmd.args.first() else {
                     echo(

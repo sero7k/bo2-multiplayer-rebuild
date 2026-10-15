@@ -143,6 +143,8 @@ pub(crate) enum Setting {
     Difficulty,
     /// The optional M.O.A.B. (off, or its kill count).
     Moab,
+    /// Custom Games: his trickshot script (`bo2mp/trickshot`).
+    Trickshot,
     LethalCount,
     TacticalCount,
     /// Zombies' starting round, and its bots (Custom Games).
@@ -273,6 +275,8 @@ pub(crate) struct Shell {
     pub difficulty: u32,
     /// The optional M.O.A.B.: an index into `MOAB_KILLS` (0: off).
     pub moab: u32,
+    /// Custom Games' TRICKSHOT MODE (his Plutonium trickshot script); off.
+    pub trickshot: bool,
     /// The map picker's page (a group, split by `PAGE`).
     pub page: usize,
     pub note: Option<(String, f64)>,
@@ -347,6 +351,7 @@ impl Default for Shell {
             enemies: 6,
             difficulty: 1,
             moab: 1,
+            trickshot: false,
             page: 0,
             note: None,
             played: false,
@@ -458,6 +463,16 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
                     0 => "OFF".to_owned(),
                     n => format!("{n} KILLS"),
                 });
+                // Custom Games only: never in a public match.
+                if !s.public {
+                    let mut t = Row::new(
+                        "TRICKSHOT MODE",
+                        "Custom games only: your Plutonium trickshot script (its menu, binds, teleport flags, crates and platforms) runs in the match.",
+                        Act::Cycle(Setting::Trickshot),
+                    );
+                    t.value = Some(if s.trickshot { "ON" } else { "OFF" }.to_owned());
+                    r.push(t);
+                }
                 r
             }
         },
@@ -720,6 +735,7 @@ impl Shell {
             Setting::Enemies => self.enemies = step(self.enemies, 9),
             Setting::Difficulty => self.difficulty = step(self.difficulty, 3),
             Setting::Moab => self.moab = step(self.moab, MOAB_KILLS.len() as u32 - 1),
+            Setting::Trickshot => self.trickshot = !self.trickshot,
             Setting::ZmRound => self.zm_round = step(self.zm_round as u32, zombies::ROUNDS.len() as u32 - 1) as usize,
             Setting::ZmBots => self.zm_bots = step(self.zm_bots, zombies::MAX_BOTS),
             Setting::ZmCustomWeapons => self.zm_custom_weapons = !self.zm_custom_weapons,
@@ -891,6 +907,8 @@ impl Shell {
                 }
                 self.played = true;
                 sim::set_moab_kills(MOAB_KILLS.get(self.moab as usize).copied().unwrap_or(0));
+                // (Never in a public match: the bridge turns it off for one.)
+                sim::set_trickshot(!self.public && self.trickshot);
                 bridge::request(Request::Start(StartSpec {
                     map: self.map.clone(),
                     gametype: self.mode.clone(),
