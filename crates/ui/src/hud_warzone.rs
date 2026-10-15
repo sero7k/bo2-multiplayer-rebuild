@@ -653,6 +653,23 @@ pub(crate) fn spawn(
     }
 }
 
+/// How far (on a 1080-line screen) the kill feed rises over the modern
+/// HUD's name line to clear the squad list: tenths of a pixel, 0 outside
+/// Resurgence.
+static FEED_LIFT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The squad list's height over the modern HUD's name line, for `b` (or
+/// none outside Resurgence).
+pub(crate) fn set_feed_lift(b: Option<&Br>) {
+    let lift = b.map_or(0.0, |b| 30.0 + b.mates.len() as f32 * 46.0);
+    FEED_LIFT.store((lift * 10.0) as u32, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// See `set_feed_lift`.
+pub(crate) fn feed_lift() -> f32 {
+    FEED_LIFT.load(std::sync::atomic::Ordering::Relaxed) as f32 / 10.0
+}
+
 // --- Markers: hits on armor, plates breaking, kills. ---
 
 #[derive(Component)]

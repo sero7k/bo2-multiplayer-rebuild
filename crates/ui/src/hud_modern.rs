@@ -549,6 +549,7 @@ fn modern_hud(
         return;
     };
     let Some(font) = font else { return };
+    crate::hud_warzone::set_feed_lift(values.br.as_ref());
     values.height = height as u32;
     if shown.as_ref() == Some(&values) && !roots.is_empty() {
         return;

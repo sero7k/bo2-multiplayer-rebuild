@@ -715,7 +715,8 @@ pub(crate) fn spawn_feed(commands: &mut Commands, faces: &Faces, rows: &[FeedRow
                 position_type: PositionType::Absolute,
                 left: Val::Percent(1.2),
                 // (Above `hud_modern`'s name and bar.)
-                bottom: Val::Px(height * 0.026 + 44.0 * k),
+                // (Resurgence: above the Warzone HUD's squad list.)
+                bottom: Val::Px(height * 0.026 + (44.0 + crate::hud_warzone::feed_lift()) * k),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::FlexStart,
                 row_gap: Val::Px(3.0 * k),
