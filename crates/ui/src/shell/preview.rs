@@ -557,6 +557,39 @@ fn step(
             s.screen = Screen::Main;
             s.focus = 1;
         }),
+        // WARZONE: Multiplayer's screens again, in its grey and orange.
+        ("wz0_menu", |s, _| {
+            *s = Shell::default();
+            s.wz = true;
+            s.screen = Screen::WzMenu;
+            s.focus = 0;
+        }),
+        ("wz1_modes", |s, _| {
+            s.screen = Screen::WzModePick;
+            s.wz_quick = true;
+            s.focus = 0;
+        }),
+        ("wz2_lobby", |s, _| {
+            s.wz_quick = false;
+            s.screen = Screen::WzLobby;
+            s.tab = Tab::Lobby;
+            s.br_squad_size = 3;
+            s.br_squads = 5;
+            s.focus = 0;
+        }),
+        ("wz3_lobby_settings", |s, _| {
+            s.tab = Tab::Settings;
+            s.focus = 1;
+        }),
+        ("wz4_classes", |s, _| {
+            s.cac_from = Screen::WzMenu;
+            s.screen = Screen::Classes;
+            s.focus = 0;
+        }),
+        ("wz5_barracks", |s, _| {
+            s.screen = Screen::Barracks;
+            s.focus = 0;
+        }),
         ("12_loading", |_, c| {
             c.remove_resource::<crate::lui_frontend::Bo2mpFrontend>();
             c.insert_resource(session::Bo2mpMatchSetup { map: "mp_terminal".to_owned(), gametype: "gun".to_owned(), ..default() });
