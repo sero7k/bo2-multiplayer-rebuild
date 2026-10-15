@@ -13,10 +13,14 @@
 //! A surface (`gfx_map`, 128 bytes):
 //! ```text
 //! +0x00 f32[3] origin, f32 step       position = origin + q * step
-//! +0x18 u32 ?, u32 stream count (1, 4 with an extra stream)
+//! +0x10 u32 its world zone: 0 the map's own, k the k-th streamed tile
+//!       (the map's `<map>_*_0_tr` zones in name order, see [`super::tiles`])
+//! +0x14 u32 0xffff
+//! +0x18 u32 lightmap (510: none), u32 stream count (1..4)
 //! +0x20 u32 vertices, u32 packed triangle bytes
 //! +0x28 u32 positions (8 each: three 21-bit q), tangent frames (4),
-//!       lightmap UVs (f32 x2), extra stream, texture UVs (f32 x2)
+//!       lightmap UVs (f32 x2, 0: none), extra stream, texture UVs (f32 x2)
+//!       (offsets in its world zone's vertex streams)
 //! +0x40 u32 its packed triangles' offset
 //! ```
 //! A table (40 bytes, at most 64 triangles): +0x1C u32 its first entry in
@@ -37,6 +41,10 @@ pub struct WorldSurface {
     pub tris: Vec<[u16; 3]>,
     /// Its index in the map's surface list.
     pub index: usize,
+    /// Its world zone (0: the map's own; k: the k-th tile).
+    pub zone: u32,
+    /// Its lightmap (510: none).
+    pub lightmap: u32,
 }
 
 const SURFACE: usize = 0x80;
@@ -98,7 +106,9 @@ pub fn find_buffers(z: &[u8], name_hash: u64) -> Option<WorldBuffers> {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct SurfaceRec {
+pub struct SurfaceRec {
+    pub zone: u32,
+    pub lightmap: u32,
     origin: [f32; 3],
     step: f32,
     verts: usize,
@@ -111,6 +121,8 @@ struct SurfaceRec {
 
 fn surface_rec(z: &[u8], at: usize) -> SurfaceRec {
     SurfaceRec {
+        zone: u32_at(z, at + 0x10),
+        lightmap: u32_at(z, at + 0x18),
         origin: v3_at(z, at),
         step: f32_at(z, at + 0x0C),
         verts: u32_at(z, at + 0x20) as usize,
@@ -122,51 +134,61 @@ fn surface_rec(z: &[u8], at: usize) -> SurfaceRec {
     }
 }
 
-/// A record reads as a surface whose streams follow one another.
-fn plausible(z: &[u8], at: usize, b: &WorldBuffers) -> bool {
+/// A record reads as a surface whose streams follow one another (its
+/// world zone's buffers are not needed to tell).
+fn plausible(z: &[u8], at: usize) -> bool {
+    if at + SURFACE > z.len() {
+        return false;
+    }
     let r = surface_rec(z, at);
     let tan = u32_at(z, at + 0x2C) as usize;
     let streams = u32_at(z, at + 0x1C);
     r.verts > 0
         && r.verts < 0x10000
+        && u32_at(z, at + 0x14) == 0xFFFF
         && (1..=8).contains(&streams)
         && r.step.is_finite()
         && r.step > 0.0
         && r.step < 1.0
         && tan == r.pos + 8 * r.verts
-        && r.lmap == tan + 4 * r.verts
-        && r.pos + 8 * r.verts <= b.vertex_bytes
-        && r.uv + 8 * r.verts <= b.vertex_bytes
-        && r.packed_at + r.packed_size <= b.packed_bytes
+        && (r.lmap == 0 || r.lmap == tan + 4 * r.verts)
+        && r.packed_size > 0
 }
 
-/// The map's surface list: the longest run of plausible records whose
-/// packed triangles add up to the world zone's.
-pub fn find_surfaces(z: &[u8], b: &WorldBuffers) -> Option<(usize, usize)> {
+/// The map's surface list: the longest run of plausible records.
+pub fn find_surfaces(z: &[u8]) -> Option<(usize, usize)> {
     let mut best: Option<(usize, usize)> = None;
-    // Every record of the list starts with its origin and step; the first
-    // has its positions at the start of the vertices (or 4 bytes in).
     let mut at = 0usize;
     while at + SURFACE <= z.len() {
-        if plausible(z, at, b) && !(at >= SURFACE && plausible(z, at - SURFACE, b)) {
-            let mut n = 0;
-            let mut packed = 0usize;
-            while at + SURFACE * (n + 1) <= z.len() && plausible(z, at + SURFACE * n, b) {
-                packed += surface_rec(z, at + SURFACE * n).packed_size;
+        if plausible(z, at) {
+            let mut n = 1;
+            while plausible(z, at + SURFACE * n) {
                 n += 1;
-            }
-            if packed == b.packed_bytes {
-                return Some((at, n));
             }
             if n > best.map_or(0, |x| x.1) {
                 best = Some((at, n));
             }
-            at += SURFACE * n.max(1);
+            at += SURFACE * n;
             continue;
         }
         at += 1;
     }
-    best.filter(|&(_, n)| n > 0)
+    best
+}
+
+/// The records of the list at `list_at`.
+pub fn records(z: &[u8], list_at: usize, count: usize) -> Vec<SurfaceRec> {
+    (0..count)
+        .map(|i| surface_rec(z, list_at + SURFACE * i))
+        .collect()
+}
+
+/// The packed triangle bytes the records give a world zone.
+pub fn packed_of(recs: &[SurfaceRec], zone: u32) -> usize {
+    recs.iter()
+        .filter(|r| r.zone == zone)
+        .map(|r| r.packed_size)
+        .sum()
 }
 
 fn bits_for(n: usize) -> u32 {
@@ -177,24 +199,17 @@ fn bits_for(n: usize) -> u32 {
     b
 }
 
-/// Decodes every surface of the list.
+/// Decodes the surfaces of the list that are in world zone `zone` (its
+/// buffers `b` in the zone image `z`).
 pub fn read_surfaces(
     z: &[u8],
     b: &WorldBuffers,
-    list_at: usize,
-    count: usize,
+    recs: &[SurfaceRec],
+    zone: u32,
 ) -> Result<Vec<WorldSurface>, String> {
-    let recs: Vec<SurfaceRec> = (0..count)
-        .map(|i| surface_rec(z, list_at + SURFACE * i))
-        .collect();
-    let mut order: Vec<usize> = (0..count).collect();
+    let mut order: Vec<usize> = (0..recs.len()).filter(|&i| recs[i].zone == zone).collect();
     order.sort_by_key(|&i| recs[i].packed_at);
-    let mut out: Vec<WorldSurface> = (0..count)
-        .map(|index| WorldSurface {
-            index,
-            ..Default::default()
-        })
-        .collect();
+    let mut out: Vec<WorldSurface> = Vec::with_capacity(order.len());
     let mut table = 0usize;
     let mut list = 0usize;
     for &si in &order {
@@ -248,7 +263,12 @@ pub fn read_surfaces(
             }
         }
         list += used;
-        let s = &mut out[si];
+        let mut s = WorldSurface {
+            index: si,
+            zone,
+            lightmap: r.lightmap,
+            ..Default::default()
+        };
         s.positions = (0..r.verts)
             .map(|k| {
                 let q = u64_at(z, b.vertices + r.pos + 8 * k);
@@ -264,6 +284,7 @@ pub fn read_surfaces(
             })
             .collect();
         s.lightmap_uvs = (0..r.verts)
+            .filter(|_| r.lmap != 0)
             .map(|k| {
                 [
                     f32_at(z, b.vertices + r.lmap + 8 * k),
@@ -273,6 +294,7 @@ pub fn read_surfaces(
             .collect();
         tris.retain(|t| t.iter().all(|&v| usize::from(v) < r.verts));
         s.tris = tris;
+        out.push(s);
     }
     if list != b.list_len {
         return Err(format!("index list: {list} entries used of {}", b.list_len));
