@@ -394,6 +394,14 @@ pub struct T7Map {
     /// (bo2mp: placed models left out of the collision built from the
     /// drawn world, by index into `static_models`; empty: none.)
     pub static_no_collision: Vec<bool>,
+    /// (bo2mp: a map whose light is baked into its vertex colours: the
+    /// ambient light of the uniform lightmap it is drawn with, in gamma
+    /// space; the sun comes from worldspawn. Set by the Modern Warfare III
+    /// lane.)
+    pub baked_ambient: Option<[f32; 3]>,
+    /// (bo2mp: per placed model, its light as a Black Ops II light grid
+    /// sample gives it (rgb = sqrt(light / 32)); empty: a neutral light.)
+    pub static_light: Vec<[u8; 4]>,
     /// (bo2mp: a sky cube another game's reader made (six faces, +x -x
     /// +y -y +z -z, z up), drawn behind the world.)
     pub sky_cube: Option<ImageLevels>,

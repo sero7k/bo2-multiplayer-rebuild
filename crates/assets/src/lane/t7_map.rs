@@ -329,6 +329,32 @@ fn sun_of(map: &T7Map, entities: &[iw3::ents::Entity]) -> ([f32; 3], [f32; 3], f
     (vec3("sundirection").unwrap_or([-60.0, 45.0, 0.0]), vec3("suncolor").unwrap_or([1.0; 3]), 1.0)
 }
 
+/// bo2mp: one Call of Duty 4 lightmap of a single light everywhere: page A
+/// the ambient light (gamma space), its dominant direction straight along
+/// the normal (both alphas the middle), page B none, the sun's baked
+/// visibility whole (the vertex colours carry the shadows).
+fn uniform_lightmap(ambient: [f32; 3]) -> Result<asset_world::WorldLightmap, asset_world::WorldLightmapGap> {
+    use asset_world::world_iw3::{IW3_LIGHTMAP_PRIMARY_FORMAT, IW3_LIGHTMAP_SECONDARY_FORMAT, iw3_lightmap};
+    const SIZE: u16 = 4;
+    let byte = |c: f32| (c.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let texels = usize::from(SIZE) * usize::from(SIZE);
+    // A8R8G8B8 as stored: B G R A; x = A.a * 4.08 - 2.08 and y = B.a *
+    // 4.064516 - 2.064516 are 0 at alpha 130.
+    let mut secondary = Vec::with_capacity(texels * 2 * 4);
+    for _ in 0..texels {
+        secondary.extend_from_slice(&[byte(ambient[2]), byte(ambient[1]), byte(ambient[0]), 130]);
+    }
+    for _ in 0..texels {
+        secondary.extend_from_slice(&[0, 0, 0, 130]);
+    }
+    let primary = vec![255u8; texels];
+    iw3_lightmap(
+        (SIZE, SIZE, IW3_LIGHTMAP_PRIMARY_FORMAT, &primary),
+        (SIZE, SIZE * 2, IW3_LIGHTMAP_SECONDARY_FORMAT, &secondary),
+        ("bo2mp_baked_sun", "bo2mp_baked_ambient"),
+    )
+}
+
 /// The world as CoD4's `GfxWorld` (materials beside it, not in it).
 fn iw3_world(map: &T7Map, sun: ([f32; 3], [f32; 3], f32)) -> iw3::zone::GfxWorld {
     iw3::zone::GfxWorld {
@@ -695,7 +721,7 @@ pub(super) fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, 
         let mut meshes: Vec<asset_world::ModelMesh> = Vec::new();
         let mut built: HashMap<usize, Option<usize>> = HashMap::new();
         let mut placements = Vec::with_capacity(map.static_models.len());
-        for sm in &map.static_models {
+        for (placed, sm) in map.static_models.iter().enumerate() {
             let entry = *built.entry(sm.model).or_insert_with(|| {
                 let m = &map.models[sm.model];
                 let (mins, maxs, radius) = model_bounds(m);
@@ -766,8 +792,9 @@ pub(super) fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, 
                 reflection_probe_index: 0,
                 primary_light_index: 0,
                 flags: 0,
-                // No light grid read: a neutral light (sqrt(1 / 32)).
-                packed_lighting: Some([45, 45, 45, 0]),
+                // No light grid read: the light baked for it, else a
+                // neutral light (sqrt(1 / 32)).
+                packed_lighting: Some(map.static_light.get(placed).copied().unwrap_or([45, 45, 45, 0])),
                 t6_primary: [0, 0],
             }));
         }
@@ -810,7 +837,17 @@ pub(super) fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, 
     let iw3w = iw3_world(map, sun);
     let (pitch, yaw) = (sun.0[0].to_radians(), sun.0[1].to_radians());
     let dir = [pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), -pitch.sin()];
-    let colour = [sun.1[0] * sun.2, sun.1[1] * sun.2, sun.1[2] * sun.2, 1.0];
+    // (bo2mp: a map with its light baked into its vertex colours is drawn
+    // through the fallback draw's Call of Duty 4 branch, the sun colour's
+    // alpha 3, over one uniform page of its ambient light.)
+    let baked = map.baked_ambient.and_then(|a| match uniform_lightmap(a) {
+        Ok(l) => Some(l),
+        Err(e) => {
+            report.push(format!("t7 baked light: no page ({e:?})"));
+            None
+        }
+    });
+    let colour = [sun.1[0] * sun.2, sun.1[1] * sun.2, sun.1[2] * sun.2, if baked.is_some() { 3.0 } else { 1.0 }];
     report.push(format!("t7 sun: toward {dir:?} colour {colour:?}; sky models {:?} (not drawn)", map.sky_models));
     let lighting = asset_world::T6WorldLighting {
         sun: asset_world::WorldSunLight { direction: dir, diffuse: colour, specular: colour },
@@ -820,11 +857,16 @@ pub(super) fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, 
         saturation: None,
         grade: None,
     };
-    match asset_world::world_iw3::build_iw3_world_draw(&iw3w, &surface_materials, &hidden, Vec::new(), Some(lighting)) {
+    let lit = baked.is_some();
+    let lightmaps = baked.map(|l| vec![Some(l)]).unwrap_or_default();
+    match asset_world::world_iw3::build_iw3_world_draw(&iw3w, &surface_materials, &hidden, lightmaps, Some(lighting)) {
         Ok(draw) => {
             report.push(format!(
-                "world mesh: {} vertices, {} triangles, {} surfaces (Black Ops III, fallback draw with colour maps, no lightmaps)",
-                draw.stats.vertices, draw.stats.triangles, draw.stats.surfaces
+                "world mesh: {} vertices, {} triangles, {} surfaces (Black Ops III, fallback draw with colour maps, {})",
+                draw.stats.vertices,
+                draw.stats.triangles,
+                draw.stats.surfaces,
+                if lit { "light baked into vertex colours" } else { "no lightmaps" }
             ));
             let (min, max) = (draw.stats.min, draw.stats.max);
             materials.set_capture_ns(AssetNamespace::T6);
