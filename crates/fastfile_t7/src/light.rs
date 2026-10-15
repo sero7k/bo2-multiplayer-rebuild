@@ -485,8 +485,8 @@ impl Bake {
         let mut s = self.report.join("\n");
         for (i, p) in self.probes.iter().enumerate().take(24) {
             s.push_str(&format!(
-                "\nprobe {i}: origin {:.0?} half {:.0?} mean {:.2?} up {:.2?} down {:.2?}",
-                p.origin, p.half, p.mean, p.faces[4], p.faces[5]
+                "\nprobe {i}: origin {:.0?} half {:.0?} scale {:.1} mean {:.2?} up {:.2?} down {:.2?}",
+                p.origin, p.half, p.scale, p.mean, p.faces[4], p.faces[5]
             ));
         }
         s
