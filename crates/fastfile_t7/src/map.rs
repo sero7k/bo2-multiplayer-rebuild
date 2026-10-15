@@ -95,20 +95,71 @@ pub fn hash_string(s: &str) -> u32 {
     s.bytes().fold(0u32, |h, c| u32::from(c.to_ascii_lowercase()) ^ h.wrapping_mul(33))
 }
 
-/// bo2mp: a material's named constants and bound texture slots, from its
-/// technique set's programs (`MapMaterial::constants`).
-fn material_constants(cap: &Capture, image: &[u8], m: &crate::walk::capture::MaterialRec) -> (HashMap<String, Vec<f32>>, Vec<String>) {
-    let mut constants: HashMap<String, Vec<f32>> = HashMap::new();
-    let mut bound: Vec<String> = Vec::new();
-    let Some(ts) = m.techset.as_deref().and_then(|t| cap.techset(t)) else { return (constants, bound) };
+/// bo2mp: per technique (12) of a technique set, its vertex and pixel
+/// programs' reflection.
+pub type TechsetLayout = Vec<[Option<crate::dxbc::Reflection>; 2]>;
+
+/// A technique set's programs reflected (`crate::dxbc`).
+fn techset_layout(ts: &crate::walk::capture::TechsetRec, image: &[u8]) -> TechsetLayout {
     let reflect = |p: Option<(usize, usize)>| p.and_then(|(at, n)| image.get(at..at + n)).and_then(crate::dxbc::reflect);
-    let mut reflected: Vec<[Option<crate::dxbc::Reflection>; 2]> = Vec::with_capacity(12);
-    for t in &ts.programs {
-        reflected.push(match t {
+    ts.programs
+        .iter()
+        .map(|t| match t {
             Some([vs, ps]) => [reflect(*vs), reflect(*ps)],
             None => [None, None],
-        });
+        })
+        .collect()
+}
+
+/// bo2mp: the technique sets of the zones a map's materials borrow theirs
+/// from (`core_common`, `mp_common` or `zm_common`, `zm_levelcommon`: a
+/// map's `,mc/lit...` technique sets are references to theirs), by name,
+/// read once per folder.
+fn common_layouts(dir: &Path) -> std::sync::Arc<HashMap<String, TechsetLayout>> {
+    use std::sync::{Arc, Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<HashMap<String, TechsetLayout>>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(c) = cache.lock().ok().and_then(|c| c.get(dir).cloned()) {
+        return c;
     }
+    let mut out: HashMap<String, TechsetLayout> = HashMap::new();
+    for zone in ["mp_common", "zm_common", "zm_levelcommon", "core_common"] {
+        let Ok(z) = crate::Zone::open(&dir.join(format!("{zone}.ff"))) else { continue };
+        let w = crate::walk::walk(&z);
+        for ts in &w.capture.techsets {
+            out.entry(bare(&ts.name).to_owned()).or_insert_with(|| techset_layout(ts, &z.image));
+        }
+    }
+    let out = Arc::new(out);
+    if let Ok(mut c) = cache.lock() {
+        c.insert(dir.to_owned(), out.clone());
+    }
+    out
+}
+
+/// bo2mp: a material's named constants and bound texture slots, from its
+/// technique set's programs (`MapMaterial::constants`): the zone's own
+/// technique set, else the common zones' (`common`).
+fn material_constants(
+    cap: &Capture,
+    image: &[u8],
+    common: &HashMap<String, TechsetLayout>,
+    m: &crate::walk::capture::MaterialRec,
+) -> (HashMap<String, Vec<f32>>, Vec<String>) {
+    let mut constants: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut bound: Vec<String> = Vec::new();
+    let Some(name) = m.techset.as_deref() else { return (constants, bound) };
+    let own;
+    let reflected: &TechsetLayout = match cap.techset(name).filter(|t| t.programs.iter().any(Option::is_some)) {
+        Some(ts) => {
+            own = techset_layout(ts, image);
+            &own
+        }
+        None => match common.get(bare(name)) {
+            Some(l) => l,
+            None => return (constants, bound),
+        },
+    };
     for r in reflected.iter().filter_map(|r| r[1].as_ref()) {
         for (name, _) in &r.textures {
             if !bound.contains(name) {
@@ -365,11 +416,12 @@ impl T7Map {
         out.read_models(&cap, image, src);
         out.read_clip(&cap, image);
         // bo2mp: the materials' named constants and bound texture slots.
+        let common = common_layouts(&src.pak_dir);
         let mut named = 0;
         for i in 0..out.materials.len() {
             let n = out.materials[i].name.clone();
             if let Some(m) = cap.material(&n).or_else(|| cap.material(&format!(",{n}"))) {
-                let (c, b) = material_constants(&cap, image, m);
+                let (c, b) = material_constants(&cap, image, &common, m);
                 named += usize::from(!c.is_empty());
                 out.materials[i].constants = c;
                 out.materials[i].bound = b;
