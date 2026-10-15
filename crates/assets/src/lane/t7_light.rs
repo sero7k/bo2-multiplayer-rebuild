@@ -41,9 +41,11 @@ pub(super) fn on() -> bool {
 const MAX_PROBES: usize = 32;
 /// The sky cube's face size (the 2048-wide picture's quarter).
 const SKY_FACE: u32 = 512;
-/// What the tone curve's input is: light in the probes' unit times this
-/// (`BO2MP_T7_EXPOSURE`).
-const EXPOSURE: f32 = 0.6;
+/// What Black Ops III's tone curve's input is: light in the probes' unit
+/// times this (`BO2MP_T7_EXPOSURE`). BO3's own is its auto-exposure's
+/// (histograms and exposure volumes: not drawn); this is chosen against
+/// pictures of the game.
+const EXPOSURE: f32 = 1.6;
 /// How far, round the spawn points' square, the sun map and the occlusion
 /// reach.
 const MARGIN: f32 = 3000.0;
