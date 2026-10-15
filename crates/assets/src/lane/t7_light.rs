@@ -46,6 +46,11 @@ const SKY_FACE: u32 = 512;
 /// (histograms and exposure volumes: not drawn); this is chosen against
 /// pictures of the game.
 const EXPOSURE: f32 = 1.6;
+/// The sun's light over the probes' unit is its intensity over probe 0's
+/// scale (a guess at the unit); against pictures of the game (Redwood's
+/// sunlit dirt and shade, with the probe volume's ambient) it reads this
+/// much weak (`BO2MP_T7_SUN` sets it).
+const SUN_SCALE: f32 = 1.5;
 /// How far, round the spawn points' square, the sun map and the occlusion
 /// reach.
 const MARGIN: f32 = 3000.0;
@@ -256,7 +261,7 @@ impl Lit {
         let m = self.sun_map.rows();
         let mut a = [0f32; 16];
         a[0] = self.exposure;
-        a[1] = self.sun_light * env_scale("BO2MP_T7_SUN", 1.0) / drawn_sun.max(1e-3);
+        a[1] = self.sun_light * env_scale("BO2MP_T7_SUN", SUN_SCALE) / drawn_sun.max(1e-3);
         a[3] = 7.0;
         for k in 0..3 {
             a[4 + 4 * k..8 + 4 * k].copy_from_slice(&m[k]);
