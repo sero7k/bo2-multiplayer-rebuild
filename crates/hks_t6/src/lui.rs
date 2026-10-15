@@ -518,6 +518,16 @@ pub fn take_streamed_ready() -> Vec<Rc<UserData>> {
     std::mem::take(&mut lui().borrow_mut().streamed_ready)
 }
 
+/// The thread's LUI state (the last installed or activated).
+pub fn current() -> Rc<RefCell<Lui>> {
+    lui()
+}
+
+/// Make `l` the thread's LUI state (`Host::activate`).
+pub fn set_current(l: Rc<RefCell<Lui>>) {
+    LUI.with(|slot| *slot.borrow_mut() = Some(l));
+}
+
 fn lui() -> Rc<RefCell<Lui>> {
     LUI.with(|l| l.borrow().clone()).expect("LUI natives installed")
 }

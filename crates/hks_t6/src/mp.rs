@@ -1629,7 +1629,12 @@ pub fn install(host: &mut Host) -> Mp {
         let t = Table::new_ref();
         let vb = v.borrow();
         let mut n = 0;
-        for r in table(&vb, "mp/mapstable.csv").into_iter().flatten().filter(|r| cell(r, 0).starts_with("mp_")) {
+        // (bo2mp: not a Warzone map: those play from the WARZONE menu.)
+        for r in table(&vb, "mp/mapstable.csv")
+            .into_iter()
+            .flatten()
+            .filter(|r| cell(r, 0).starts_with("mp_") && !crate::mapvote::is_warzone_map(&cell(r, 0)))
+        {
             let e = Table::new_ref();
             for (k, x) in [("loadName", 0), ("name", 3), ("icon", 4), ("description", 6)] {
                 e.borrow_mut().set_str(k, Value::str(&cell(r, x)));

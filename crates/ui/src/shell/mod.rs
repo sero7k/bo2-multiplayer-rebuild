@@ -748,6 +748,8 @@ impl Shell {
             }
             Act::Warzone => {
                 self.wz = true;
+                // (Resurgence's sounds read ahead, off the match's load.)
+                audio::prefetch_warzone_sounds();
                 self.go(Screen::WzMenu);
             }
             Act::WzQuickPlay => {
@@ -1205,7 +1207,7 @@ fn shell_input(
         shell.note = None;
     }
     // Keep the lobby's map and mode ones the catalog has.
-    if !c.maps.is_empty() && c.map(&shell.map).is_none() {
+    if !c.maps.is_empty() && c.mp_map(&shell.map).is_none() {
         shell.map = c.maps[0].ui_name.clone();
     }
     if !c.modes.is_empty() && c.mode(&shell.mode).is_none() {

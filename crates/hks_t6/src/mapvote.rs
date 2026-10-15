@@ -21,12 +21,20 @@
 //! nor PREVIOUS. PREVIOUS cannot win twice running
 //! (`party_sequentialPreviousMapVotingAllowed`, off).
 
+/// bo2mp: a Warzone map (Rebirth Island, `mp_jup_escape*`; any `mp_br_`
+/// map): played only from the WARZONE menu, never listed or rotated in
+/// multiplayer.
+pub fn is_warzone_map(map: &str) -> bool {
+    let m = map.trim().rsplit(':').next().unwrap_or("").to_ascii_lowercase();
+    m.starts_with("mp_jup_escape") || m.starts_with("mp_br_") || m.starts_with("mp_jup_br")
+}
+
 /// The maps a public lobby may offer: mapsTable's multiplayer rows (load
 /// name in the first column) that `installed` has, in the table's order.
 pub fn offered(maps_table: &[Vec<String>], installed: impl Fn(&str) -> bool) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for name in maps_table.iter().filter_map(|r| r.first()).map(|c| c.trim()) {
-        if name.starts_with("mp_") && installed(name) && !out.iter().any(|m| m == name) {
+        if name.starts_with("mp_") && !is_warzone_map(name) && installed(name) && !out.iter().any(|m| m == name) {
             out.push(name.to_owned());
         }
     }
@@ -225,6 +233,14 @@ impl Vote {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn warzone_maps_are_not_offered() {
+        assert!(is_warzone_map("mp_jup_escape5") && is_warzone_map("jup:mp_jup_escape5"));
+        assert!(!is_warzone_map("mp_jup_elevated") && !is_warzone_map("mp_nuketown_2020"));
+        let maps = offered(&table(&["mp_la", "mp_jup_escape5", "mp_jup_elevated"]), |_| true);
+        assert_eq!(maps, vec!["mp_la".to_owned(), "mp_jup_elevated".to_owned()]);
+    }
 
     fn table(names: &[&str]) -> Vec<Vec<String>> {
         names.iter().map(|n| vec![n.to_string(), "x".into()]).collect()

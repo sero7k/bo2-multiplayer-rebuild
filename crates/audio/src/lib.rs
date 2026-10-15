@@ -61,3 +61,10 @@ mod resurgence_warm; // bo2mp
 
 mod ads_sounds;
 mod weapon_lock;
+
+/// bo2mp: start reading Warzone's (Resurgence's) MW3 (2023) sounds on a
+/// background thread (the WARZONE menu opened), so a Resurgence match's
+/// sound bank is composed from them at once while it loads.
+pub fn prefetch_warzone_sounds() {
+    asset_audio::prefetch_jup_resurgence_sounds();
+}

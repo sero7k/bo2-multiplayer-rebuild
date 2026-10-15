@@ -267,6 +267,8 @@ struct LuiIo<'w, 's> {
     menu_dims: ResMut<'w, frame::MenuDims>,
     /// bo2mp: booted into BO2's multiplayer front end; its match swap.
     front: Option<Res<'w, crate::lui_frontend::Bo2mpFrontend>>,
+    /// bo2mp: the front end's own assets, kept through a match.
+    front_assets: Option<Res<'w, crate::lui_frontend::Bo2mpFrontendAssets>>,
     /// Where he left the front end for a match (its lobby, reopened).
     lobby_return: Option<ResMut<'w, crate::lui_frontend::LobbyReturn>>,
     identity: Option<Res<'w, frame::LaunchIdentity>>,
@@ -764,6 +766,36 @@ thread_local! {
     /// The match's HUD built during its loading screen, for that match.
     static PREBUILT: std::cell::RefCell<Option<(MatchSpec, LuiHud)>> = const { std::cell::RefCell::new(None) };
     static LOADING_FRAMES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// bo2mp: the multiplayer front end, kept while a match runs (its
+    /// scripts took ~10 s to build again on the way back), and the stats
+    /// file it read.
+    static FRONT_KEPT: std::cell::RefCell<Option<(std::path::PathBuf, LuiHud)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// bo2mp: the front end kept from before the match, made ready to open
+/// again: its LUI state the thread's, its menus (the loading screen over
+/// the lobby) closed, his stats read again (the match changed them); it
+/// opens as a new one does (`lui_frontend::open`, the lobby he left).
+fn take_kept_front(front: &crate::lui_frontend::Bo2mpFrontend, scripts: usize) -> Option<LuiHud> {
+    let (stats, mut hud) = FRONT_KEPT.with(|k| k.borrow_mut().take())?;
+    if stats != front.stats_path || hud.built_from != scripts {
+        diag::info!(Ui, "bo2mp front end: the one kept from before the match is not this one's; building it again");
+        return None;
+    }
+    hud.host.activate();
+    let closed = hud.host.close_menus();
+    if let (Some(mp), Ok(text)) = (hud.mp.as_ref(), bo2_profile::read_stats_text(&front.stats_path)) {
+        mp.borrow_mut().load_text(&text);
+    }
+    FRONT_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    hud.opened = false;
+    hud.loading_open = false;
+    hud.sent = None;
+    hud.mouse_at = None;
+    hud.binding = false;
+    hud.back_in = 0;
+    diag::info!(Ui, "bo2mp front end: the one kept from before the match taken again ({closed} menus closed)");
+    Some(hud)
 }
 
 /// The HUD built during the loading screen when it is this match's (the
@@ -1504,8 +1536,19 @@ fn lui_hud(
         let t = std::time::Instant::now();
         let ready = match (&front, match_spec.as_ref()) {
             (None, Some(m)) => take_prebuilt(m, ui.scripts.len()),
+            (Some(f), _) => take_kept_front(f, ui.scripts.len()),
             _ => None,
         };
+        // bo2mp: the front end handing over to a match is kept (hidden,
+        // not run) for the way back.
+        if front.is_none()
+            && let Some(old) = slot.0.take_if(|h| h.mp.is_some() && !h.match_mp)
+        {
+            let stats = io.front_assets.as_deref().map(|a| a.front.stats_path.clone());
+            if let Some(stats) = stats {
+                FRONT_KEPT.with(|k| *k.borrow_mut() = Some((stats, old)));
+            }
+        }
         let hud = match ready {
             Some(hud) => hud,
             None => build(&ui, front.as_ref(), match_spec.as_ref()),
@@ -1529,6 +1572,9 @@ fn lui_hud(
     let Some(hud) = slot.0.as_mut() else {
         return;
     };
+    // (Other hosts may have run since: the match's HUD built during the
+    // loading screen, the front end kept.)
+    hud.host.activate();
     // Font metrics for the scripts' text measure, once the fonts load.
     if hud.metrics.borrow().is_empty()
         && let Some(f) = fonts.as_deref()

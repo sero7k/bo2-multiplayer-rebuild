@@ -146,6 +146,10 @@ fn oodle_for(install: &Path) -> Result<&'static dyn Decompressor, String> {
 /// Resurgence's sounds of the install (read once per process; with the
 /// Rebirth Island map zone when `with_map`).
 pub fn jup_resurgence_sounds(install: &Path, with_map: bool) -> Result<Arc<SoundCatalog>, String> {
+    // (One read at a time: a match's bank asking while the prefetch reads
+    // waits for it and takes its catalog.)
+    static LOAD: Mutex<()> = Mutex::new(());
+    let _one = LOAD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let key = (install.to_path_buf(), with_map);
     if let Some(hit) = cache().lock().ok().and_then(|c| c.get(&key).cloned()) {
         return Ok(hit);
@@ -159,6 +163,38 @@ pub fn jup_resurgence_sounds(install: &Path, with_map: bool) -> Result<Arc<Sound
         c.insert(key, catalog.clone());
     }
     Ok(catalog)
+}
+
+/// bo2mp: read Resurgence's sounds (with Rebirth Island's map zone) on a
+/// background thread ahead of the match (the WARZONE menu opened, the
+/// mode chosen): the match's sound bank then takes them from the cache
+/// instead of reading 270 MB of zones while the island loads. Once per
+/// process; nothing when the install is not there.
+pub fn prefetch_jup_resurgence_sounds() {
+    static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if STARTED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let Some(install) = jup_install() else {
+        return;
+    };
+    let spawned = std::thread::Builder::new()
+        .name("jup-sounds".to_owned())
+        .spawn(move || {
+            let t = std::time::Instant::now();
+            match jup_resurgence_sounds(&install, true) {
+                Ok(c) => diag::info!(
+                    Zone,
+                    "sound bank: Resurgence's MW3 (2023) sounds read ahead in {:.1} s ({} aliases)",
+                    t.elapsed().as_secs_f32(),
+                    c.sounds.len()
+                ),
+                Err(e) => diag::warn!(Zone, "sound bank: Resurgence's MW3 (2023) sounds not read ahead: {e}"),
+            }
+        });
+    if spawned.is_err() {
+        STARTED.store(false, Ordering::Relaxed);
+    }
 }
 
 /// The zone Modern Warfare III's guns' sounds are read from: `ingame`,

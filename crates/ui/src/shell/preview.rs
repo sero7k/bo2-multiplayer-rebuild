@@ -53,6 +53,7 @@ fn stand_in_catalog() -> Catalog {
     ];
     Catalog {
         maps,
+        warzone_maps: Vec::new(),
         modes: modes
             .iter()
             .map(|(k, t, d)| ModeEntry {

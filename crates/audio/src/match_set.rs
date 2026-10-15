@@ -359,6 +359,33 @@ fn queue_match_clips(
             request_named(clips, &bank.0, ns, alias, &mut set);
         }
     }
+    // bo2mp: Resurgence's Modern Warfare III (2023) sounds are decoded
+    // before play (the loading screen waits on them through AudioReady):
+    // its opening (pre-lobby, drop music, first lines) and every non-music
+    // sound of the mode (pickups, plates, cash, the announcer). Decoded on
+    // first play, they stalled the island's first seconds.
+    if sim::resurgence_on() && asset_audio::has_jup_sounds(&bank.0) {
+        let mut jup: Vec<&str> = sim::resurgence_opening_aliases().collect();
+        jup.extend(
+            gamemode_iw4::resurgence::SOUNDS
+                .iter()
+                .filter(|r| !r.key.starts_with("music_"))
+                .flat_map(|r| r.jup.iter().copied()),
+        );
+        jup.sort_unstable();
+        jup.dedup();
+        let before = set.required.len();
+        for alias in &jup {
+            aliases += 1;
+            request_named(clips, &bank.0, AssetNamespace::Jup, &asset_audio::jup_alias_key(alias), &mut set);
+        }
+        diag::info!(
+            Audio,
+            "audio: Resurgence: {} MW3 (2023) aliases queued with the match set ({} clips to decode)",
+            jup.len(),
+            set.required.len() - before
+        );
+    }
     for alias in &type10.0 {
         aliases += 1;
         request_fx_type10(clips, &bank.0, alias, &mut set);

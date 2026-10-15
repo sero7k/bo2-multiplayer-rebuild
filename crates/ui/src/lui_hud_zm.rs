@@ -2218,6 +2218,8 @@ fn lui_hud(
     let Some(hud) = slot.0.as_mut() else {
         return;
     };
+    // (Another host's LUI state may be the thread's: bo2mp's.)
+    hud.host.activate();
     // Font metrics for the scripts' text measure, once the fonts load.
     if hud.metrics.borrow().is_empty()
         && let Some(f) = fonts.as_deref()

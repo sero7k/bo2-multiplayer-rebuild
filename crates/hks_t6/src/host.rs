@@ -341,6 +341,9 @@ pub struct Host {
     /// Text width in root units (font, height): GetTextDimensions and
     /// tight text.
     measure: Rc<MeasureFn>,
+    /// This host's LUI state (its elements' clock, ids, roots): one host's
+    /// at a time is the thread's (`activate`).
+    lui: Rc<RefCell<lui::Lui>>,
 }
 
 /// A script name as a lookup key: lower case, no separators, no
@@ -556,6 +559,7 @@ impl Host {
             vm.set_global(name, v);
         }
         lui::install(&mut vm);
+        let lui_state = lui::current();
 
         // Dvar.<name>: :get() reads the host's dvar, :set(v) writes it.
         {
@@ -2005,7 +2009,15 @@ impl Host {
             errors: Vec::new(),
             step_budget: 20_000_000,
             measure: measure_out,
+            lui: lui_state,
         }
+    }
+
+    /// Make this host's LUI state the thread's (several hosts may be kept:
+    /// bo2mp's front end stays alive during a match, the match's HUD is
+    /// built during the loading screen). Call before running this host.
+    pub fn activate(&self) {
+        lui::set_current(self.lui.clone());
     }
 
     /// Call into the scripts with a fresh step budget; an error is kept in
@@ -2361,6 +2373,31 @@ impl Host {
             .iter()
             .filter_map(lui::element)
             .find_map(|r| lui::ids_under_named(&r, id))
+    }
+
+    /// bo2mp: close every menu open on the roots (their own `close`), as the
+    /// engine does when a level goes; the roots and the scripts stay. The
+    /// count closed.
+    pub fn close_menus(&mut self) -> usize {
+        let mut n = 0;
+        for root in self.roots.clone() {
+            let Some(r) = lui::element(&root) else { continue };
+            for k in lui::with(&r, |e| e.children.clone()) {
+                let menu = lui::with(&k, |e| e.fields.borrow().get_str("id").as_str().is_some_and(|i| i.starts_with("Menu.")));
+                if !menu {
+                    continue;
+                }
+                let v = Value::User(k);
+                let Ok(close) = self.vm.index(&v, &Value::str("close")) else { continue };
+                if matches!(close, Value::Nil) {
+                    continue;
+                }
+                if self.call(close, vec![v]).is_some() {
+                    n += 1;
+                }
+            }
+        }
+        n
     }
 
     /// Open a menu on the root (the root's `addmenu`), as the engine does.

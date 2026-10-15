@@ -101,13 +101,21 @@ pub(crate) struct PlayerCard {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Catalog {
+    /// Multiplayer's maps (the map picker, matchmaking's pool).
     pub maps: Vec<MapEntry>,
+    /// bo2mp: Warzone's maps (Rebirth Island), for the WARZONE menu only.
+    pub warzone_maps: Vec<MapEntry>,
     pub modes: Vec<ModeEntry>,
     pub player: PlayerCard,
 }
 
 impl Catalog {
     pub fn map(&self, ui_name: &str) -> Option<&MapEntry> {
+        self.maps.iter().chain(&self.warzone_maps).find(|m| m.ui_name.eq_ignore_ascii_case(ui_name))
+    }
+
+    /// A multiplayer map (never a Warzone one).
+    pub fn mp_map(&self, ui_name: &str) -> Option<&MapEntry> {
         self.maps.iter().find(|m| m.ui_name.eq_ignore_ascii_case(ui_name))
     }
 
@@ -388,8 +396,11 @@ fn build_catalog(host: &Host, mp: Option<&Mp>) -> Catalog {
     };
     let (card, emblem) = (look(super::cards::CARD_STAT), look(super::cards::EMBLEM_STAT));
     let can_prestige = level >= bo2_profile::progression::MAX_LEVEL && prestige < bo2_profile::progression::MAX_PRESTIGE;
+    let (warzone_maps, maps): (Vec<MapEntry>, Vec<MapEntry>) =
+        maps.into_iter().map(|(_, m)| m).partition(|m| hks_t6::mapvote::is_warzone_map(&m.ui_name));
     Catalog {
-        maps: maps.into_iter().map(|(_, m)| m).collect(),
+        maps,
+        warzone_maps,
         modes,
         player: PlayerCard {
             name,
