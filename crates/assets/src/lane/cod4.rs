@@ -681,6 +681,9 @@ fn legacy_film_vision(
         })
         .map(|(i, d)| (if i == 0 { "zone" } else { "common_mp" }, d))
         .or_else(|| main.and_then(|m| asset_transport::read_main_iwd_file(m, &name)).map(|d| ("iwd", d)));
+    // (Without its comments: Cargoship's keeps an older look in a /* */
+    // block after its own, whose lines would win.)
+    let found = found.map(|(source, bytes)| (source, strip_gsc_comments(&String::from_utf8_lossy(&bytes)).into_bytes()));
     match found {
         Some((source, bytes)) => match asset_world::parse_film_vision_rawfile(&name, &bytes, false) {
             Ok(Some(v)) => {
@@ -1332,6 +1335,12 @@ mod fog_tests {
         assert!(super::legacy_fog(cargo).is_none());
         assert!(super::legacy_fog("/* setExpFog(1, 2, 0.5, 0.5, 0.5, 0); */").is_none());
         assert_eq!(super::strip_gsc_comments("a // b\nc /* d */ e"), "a \nc  e");
+        // Cargoship's vision: the commented-out look after its own loses.
+        let vision = "r_filmEnable \"1\"\nr_filmContrast \"1.615\"\nr_filmBrightness \"0.25\"\nr_filmDesaturation \"0.6\"\nr_filmInvert \"0\"\nr_filmLightTint \"1.141 1.275 1.360\"\nr_filmDarkTint \"1 1.158 1.169\"\n/*\nr_filmContrast \"1.4\"\n*/\n";
+        let v = asset_world::parse_film_vision_rawfile("vision/mp_cargoship.vision", super::strip_gsc_comments(vision).as_bytes(), false)
+            .expect("parses")
+            .expect("a vision");
+        assert_eq!(v.contrast, 1.615);
     }
 }
 
