@@ -151,6 +151,8 @@ pub(super) async fn walk_prepared_match(
                 "iw7" => crate::lane::load_iw7_world(path, &progress, material_seed),
                 // bo2mp: Black Ops III's maps.
                 "t7" => crate::lane::load_t7_world(path, &progress, material_seed),
+                // bo2mp: Modern Warfare III's (2023) maps.
+                "jup" => crate::lane::load_jup_world(path, &progress, material_seed),
                 _ => {
                     drop(material_seed);
                     LoadedWorld::with_gap(

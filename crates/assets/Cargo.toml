@@ -30,6 +30,7 @@ fastfile_iw6.workspace = true # bo2mp: Ghosts guest guns
 fastfile_s1.workspace = true # bo2mp: Advanced Warfare guest guns
 fastfile_iw7.workspace = true # bo2mp: Infinite Warfare maps
 fastfile_t7.workspace = true # bo2mp: Black Ops III maps
+fastfile_jup.workspace = true # bo2mp: Modern Warfare III (2023) maps
 hks_t6.workspace = true # bo2zm M4
 bcdec_rs.workspace = true # bo2zm M4: additive HUD pictures
 ipak_t6.workspace = true # bo2zm

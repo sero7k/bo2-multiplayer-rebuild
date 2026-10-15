@@ -18,6 +18,7 @@
 pub mod cards;
 pub mod container;
 pub mod hash;
+pub mod map;
 pub mod image;
 pub mod oodle;
 #[cfg(windows)]

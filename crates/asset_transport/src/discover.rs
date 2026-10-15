@@ -245,6 +245,32 @@ pub const IW7_ZONE_VERSION: u32 = 0x653;
 pub const T7_ZONE_VERSION: u32 = 0x251;
 /// bo2mp: Black Ops III's envelope magic.
 const T7_MAGIC: &[u8; 8] = b"TAff0000";
+/// bo2mp: Call of Duty: Modern Warfare III's (2023) fast file version
+/// (`IWffa100`, 0x18): its maps load through `fastfile_jup`
+/// (`assets::lane::jup_map`).
+pub const JUP_ZONE_VERSION: u32 = 0x18;
+
+/// bo2mp: the Modern Warfare III (2023) maps this rebuild plays, by zone
+/// name: Rebirth Island (`mp_jup_escape5`, Resurgence's map) and Tokyo
+/// (`mp_jup_elevated`, Season 4: its zone is the one dressed as Japan —
+/// `jup_appliance_vending_machine_food_japan_01`, `jup_sign_arcade_japan_*`,
+/// `jup_sign_convenience_japan_*`, pachinko and ramen props; no other map
+/// zone has more than one such name). The install's other maps (`mp_jup_*`)
+/// are left out on purpose.
+pub const JUP_MAPS: [&str; 2] = ["mp_jup_escape5", "mp_jup_elevated"];
+
+/// bo2mp: a Modern Warfare III zone is a map this rebuild plays.
+pub fn is_jup_map(stem: &str) -> bool {
+    JUP_MAPS.contains(&stem)
+}
+
+/// bo2mp: zone names no map has (Modern Warfare III's gun and character
+/// parts, streamed world tiles: thousands of `mp_*` zones in its folder),
+/// left out before their headers are read.
+fn is_part_zone(stem: &str) -> bool {
+    stem.ends_with("_tr")
+        || ["mp_av_", "mp_aw_", "mp_vm_", "mp_wm_", "mp_hd_", "mp_bd_", "mp_vh_"].iter().any(|p| stem.starts_with(p))
+}
 
 /// bo2mp: the version of a legacy game's zones by its prefix.
 pub fn legacy_version(prefix: &str) -> Option<u32> {
@@ -254,6 +280,7 @@ pub fn legacy_version(prefix: &str) -> Option<u32> {
         "iw6" => Some(IW6_ZONE_VERSION),
         "iw7" => Some(IW7_ZONE_VERSION),
         "t7" => Some(T7_ZONE_VERSION),
+        "jup" => Some(JUP_ZONE_VERSION),
         _ => None,
     }
 }
@@ -267,6 +294,7 @@ pub fn legacy_game_for_path(path: &Path) -> Option<&'static str> {
         IW6_ZONE_VERSION => Some("iw6"),
         IW7_ZONE_VERSION => Some("iw7"),
         T7_ZONE_VERSION => Some("t7"),
+        JUP_ZONE_VERSION => Some("jup"),
         _ => None,
     }
 }
@@ -289,7 +317,7 @@ pub fn list_legacy_mp_map_files(root: &GamesRoot) -> Vec<(String, String, PathBu
             continue;
         };
         let is_ff = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ff"));
-        if !is_ff || !stem.starts_with("mp_") || stem.ends_with("_load") {
+        if !is_ff || !stem.starts_with("mp_") || stem.ends_with("_load") || is_part_zone(&stem) {
             continue;
         }
         if let Some(game) = legacy_game_for_path(&path)
@@ -297,6 +325,7 @@ pub fn list_legacy_mp_map_files(root: &GamesRoot) -> Vec<(String, String, PathBu
             && (game != "iw6" || is_ghosts_mp_map(&path, &stem))
             && (game != "iw7" || is_iw7_map(&path, &stem))
             && (game != "t7" || is_t7_map(&stem))
+            && (game != "jup" || is_jup_map(&stem))
         {
             out.push((game.to_owned(), stem, path));
         }

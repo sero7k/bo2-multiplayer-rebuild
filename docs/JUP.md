@@ -143,3 +143,46 @@ nearly the same picture (`detect_grid`).
 The game shows them at runtime through `crates/ui/src/jup_cards.rs`
 (`jup:<name>`, a frame `jup:<name>#<n>`), from `$BO2_JUP_INSTALL` or the
 game folders file's `jup` line.
+
+## Maps (`fastfile_jup::map`, `assets::lane::jup_map`)
+
+Played: Rebirth Island (`mp_jup_escape5`, Resurgence) and Tokyo
+(`mp_jup_elevated`); the rest of the install's `mp_jup_*` maps are left out
+(`asset_transport::JUP_MAPS`). Tokyo's zone is the one dressed as Japan
+(`jup_appliance_vending_machine_food_japan_01`, `jup_sign_arcade_japan_*`,
+`jup_sign_convenience_japan_*`, pachinko and ramen props: 198 `japan`
+names, no other map zone more than one). Start one with `map jup:<zone>`.
+
+- World: the `gfx_map`'s 128-byte surface records over `gfx_map_trzone`
+  vertex streams (`map/world.rs`). Each record names its world zone: 0 the
+  map zone's own, k the k-th `<map>_*_0_tr` zone in name order (Rebirth: 24
+  grid tiles `_<x>_<y>_0_0_tr` and 11 swap zones; checked by every zone's
+  packed triangle bytes). Swap zones' other states (`_swap_dest_`,
+  `_swap_t_`) are left out. Triangle tables run in the records' packed order
+  but for a few surfaces placed later: matched by size, read in table order.
+  Rebirth: 8297 surfaces, 1.40 M triangles, read in about 9 s.
+- Materials (`map/materials.rs`): the `gfx_map`'s material table (back-
+  pointers to asset-list entries, all materials) and a 40-byte record per
+  surface (+0 surface record, +4 table entry, +0x0e world zone). Material
+  headers (0x78 bytes; +0x1b picture count, +0x30 the pictures) are found by
+  shape as the run of exactly the zone's material count (Rebirth: 5841);
+  pictures are asset-list entries of the image run. Format 0x25 (BC1) is
+  the colour maps' form; 0x2a (BC1) holds masks and terrain blend maps, 0x2f
+  BC5, 0x30 BC7. Pixels: the largest streamed group within 1024 px from the
+  zone `.xpak` indexes (levels placed from the top: BC1 streams to 2x2).
+  Terrain (virtual textures) and materials whose pictures are shared tables
+  draw without a picture.
+- Sheets wider than 16384 units (Rebirth's sea, sea bed and far vista
+  ground: 15 surfaces) are not drawn: they stretched the world's bounds to
+  ±144k (the far plane with them) and lay over the island. Bounds are those
+  of what is drawn (Rebirth about -26k..11k by -17k..21k).
+- Collision: the drawn world inside the play area (not the far backdrop
+  tiles); the zone's `col_map` is not read. Spawns: made over the map's path
+  nodes when the install has its entity text
+  (`jupiter/Assets/MapEnts/SpawnVars/<map>.d3dbsp`: Tokyo), else over the
+  walkable floor of the play area (Rebirth).
+- Not read yet: placed static models, the sky (it clears black), the sea,
+  lightmaps, `col_map`, the zone's `map_ents`.
+- A hidden test run spawns with `BO2MP_AUTOCLASS=class_smg` (the console's
+  `spawn 0` waits for a class menu nobody answers):
+  `iw4l map jup:mp_jup_escape5 --cmds "wait world; wait 50s; force_match_start &; …"`.

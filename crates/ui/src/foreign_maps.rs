@@ -403,6 +403,19 @@ const GAMES: &[Game] = &[
             ("mp_city", "Rupture"),
         ],
     },
+    // bo2mp: Call of Duty: Modern Warfare III (2023) (its maps through
+    // `assets::lane::jup_map`). Only two of its maps are played (the rest
+    // of the install's are left out on purpose, `asset_transport::JUP_MAPS`):
+    // Tokyo (Season 4, `mp_jup_elevated`) and Rebirth Island (Resurgence's
+    // map, under WARZONE). Its English text is not readable from the zones,
+    // so the titles are the maps' public names.
+    Game {
+        prefix: "jup",
+        key: "MWIII",
+        title: "Modern Warfare III (2023)",
+        base: &[],
+        dlc: &[("mp_jup_elevated", "Tokyo"), ("mp_jup_escape5", "Rebirth Island")],
+    },
 ];
 
 /// A map from another game, as the menus list it.
@@ -542,7 +555,7 @@ fn discover() -> Vec<Category> {
     installed.extend(
         asset_transport::list_legacy_mp_maps(&root)
             .into_iter()
-            .filter(|(game, _)| game == "iw3" || game == "t4" || game == "iw6" || game == "iw7" || game == "t7"),
+            .filter(|(game, _)| game == "iw3" || game == "t4" || game == "iw6" || game == "iw7" || game == "t7" || game == "jup"),
     );
     installed.sort();
     installed.dedup();

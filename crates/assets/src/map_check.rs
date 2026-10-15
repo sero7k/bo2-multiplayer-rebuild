@@ -120,6 +120,8 @@ fn load_for_check(game: &str, path: &Path) -> Result<LoadedWorld, String> {
         "iw7" => crate::lane::load_iw7_world(path, &progress, Default::default()),
         // bo2mp: Black Ops III's maps.
         "t7" => crate::lane::load_t7_world(path, &progress, Default::default()),
+        // bo2mp: Modern Warfare III's (2023) maps.
+        "jup" => crate::lane::load_jup_world(path, &progress, Default::default()),
         "iw4" => {
             let image = match asset_transport::open_zone(path) {
                 Ok(image) => image,

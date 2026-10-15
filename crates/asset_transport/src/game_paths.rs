@@ -3,7 +3,7 @@
 //! `game_paths.cfg` beside the game (`IW4L_GAME_PATHS` overrides where):
 //! one `key=folder` line per game, for Black Ops II (needed), Black Ops,
 //! Modern Warfare 2, Modern Warfare 3, World at War, Call of Duty 4, Ghosts,
-//! Advanced Warfare and Black Ops III.
+//! Advanced Warfare, Black Ops III and Modern Warfare III (2023).
 //! Every folder set here is searched for zones and archives as if it were
 //! under `IW4L_GAMES`, so no links or copies are needed. The first launch
 //! asks for each game's folder; the front end's Game Folders panel changes
@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 
 /// (key, title, needed) for every game the rebuild reads.
-pub const GAMES: [(&str, &str, bool); 9] = [
+pub const GAMES: [(&str, &str, bool); 10] = [
     ("bo2", "Call of Duty: Black Ops II", true),
     ("bo1", "Call of Duty: Black Ops", false),
     ("mw2", "Call of Duty: Modern Warfare 2", false),
@@ -23,6 +23,8 @@ pub const GAMES: [(&str, &str, bool); 9] = [
     ("aw", "Call of Duty: Advanced Warfare", false),
     // bo2mp: its maps and guest guns (`zone/core_common.ff`, `mp_common.ff`).
     ("bo3", "Call of Duty: Black Ops III", false),
+    // bo2mp: its multiplayer maps and Rebirth Island (`zone/mp_jup_*.ff`).
+    ("jup", "Call of Duty: Modern Warfare III (2023)", false),
 ];
 
 /// Where the folders are kept.

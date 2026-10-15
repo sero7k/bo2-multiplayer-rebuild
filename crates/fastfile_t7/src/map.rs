@@ -385,7 +385,14 @@ pub struct T7Map {
     pub maxs: [f32; 3],
     /// What was read and what was missing, line by line.
     pub report: Vec<String>,
+    /// (bo2mp: surfaces drawn but left out of the collision built from the
+    /// drawn world, by index; empty: none. Set by the Modern Warfare III
+    /// lane for a big map's sea sheets and far backdrop.)
+    pub no_collision: Vec<bool>,
     images: HashMap<String, ImageRec>,
+    /// (bo2mp: pictures another game's reader decoded for its materials,
+    /// by name: [`Self::add_image`].)
+    added_images: HashMap<String, ImageLevels>,
     zone_image: Vec<u8>,
     /// bo2mp: the common zones' pictures (`Common`).
     common: Option<std::sync::Arc<Common>>,
@@ -743,7 +750,10 @@ impl T7Map {
     /// most `max_dim` (its single level; the smallest part's whole chain
     /// when that is the one), or the zone's own pixels.
     pub fn image(&self, name: &str, max_dim: u32) -> Result<ImageLevels, String> {
-        let (im, zone_image) = match self.images.get(bare(name)) {
+        if let Some(l) = self.added_images.get(name) {
+            return Ok(l.clone());
+        }
+                let (im, zone_image) = match self.images.get(bare(name)) {
             // (A record without pixels or packages is a reference: the
             // common zones' copy, when they have one.)
             Some(im) if im.pixels.is_some() || !im.xpak.is_empty() => (im, self.zone_image.as_slice()),
@@ -767,6 +777,12 @@ impl T7Map {
             return Err(format!("{name}: part {k} decodes to {:#x} bytes, expected {want:#x}", data.len()));
         }
         Ok(ImageLevels { format: im.format, width: w, height: h, levels, data: data[..want].to_vec(), part: Some(k) })
+    }
+
+    /// (bo2mp: a picture another game's reader decoded, for a material of
+    /// its own to name; [`Self::image`] hands it out as it is.)
+    pub fn add_image(&mut self, name: String, levels: ImageLevels) {
+        self.added_images.insert(name, levels);
     }
 
     /// The image record of a name (format, size).

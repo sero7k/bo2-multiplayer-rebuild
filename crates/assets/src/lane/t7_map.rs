@@ -513,7 +513,7 @@ fn collision_of(map: &T7Map, hidden: &[bool], report: &mut Vec<String>) -> asset
     let Some(clip) = &map.clip else {
         // No clip map read: the drawn world and every placed model.
         for (i, s) in map.surfaces.iter().enumerate() {
-            if hidden.get(i).copied().unwrap_or(false) {
+            if hidden.get(i).copied().unwrap_or(false) || map.no_collision.get(i).copied().unwrap_or(false) {
                 continue;
             }
             for t in 0..s.tri_count as usize {
@@ -598,7 +598,9 @@ fn walk_soup(map: &T7Map, hidden: &[bool]) -> Vec<asset_world::world_iw7::SoupTr
     tris
 }
 
-fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, progress: &LoadProgress, material_seed: MaterialCatalog) -> LoadedWorld {
+/// (bo2mp: also Modern Warfare III's maps, read into a `T7Map` by
+/// `super::jup_map`.)
+pub(super) fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, progress: &LoadProgress, material_seed: MaterialCatalog) -> LoadedWorld {
     super::bo2_look::set_pending_grade(None);
     let map_name = path.file_stem().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
 
