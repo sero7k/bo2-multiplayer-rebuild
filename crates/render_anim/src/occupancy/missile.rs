@@ -223,6 +223,7 @@ fn collect_t6_script_models(
     )>,
     map_models: Option<Res<asset_world::MapXModelSceneCatalog>>,
     pieces: Query<(&render_scene::WorldDynEntInstance, &Transform, &Visibility)>,
+    world_weapons: Option<Res<assets::PreparedWorldWeapons>>,
     mut out: ResMut<T6ScriptModels>,
 ) {
     let _slow = crate::occupancy::t6_body::SlowGuard::new("collect_t6_script_models");
@@ -369,7 +370,18 @@ fn collect_t6_script_models(
         let mut bone_base = 0u32;
         for (i, desc) in state.composition.models.iter().enumerate() {
             let base = bone_base;
-            let Some(entry) = fpv.0.get(asset_core::AssetNamespace::T6, &desc.model) else {
+            // bo2mp: a guest gun's world model (the Mystery Box's rising
+            // gun, a wall buy) is in the third-person gun catalog under its
+            // own game, not Black Ops II's.
+            let found = fpv
+                .0
+                .get(asset_core::AssetNamespace::T6, &desc.model)
+                .map(|e| (&e.skel, &e.material_edges))
+                .or_else(|| {
+                    guest_world_gun(world_weapons.as_deref(), &desc.model)
+                        .map(|e| (&e.skel, &e.material_edges))
+                });
+            let Some((skel, edges)) = found else {
                 // Once per name: a BO2 model the catalog lacks draws nothing.
                 static MISSING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
                 if let Ok(mut m) = MISSING.lock()
@@ -384,11 +396,10 @@ fn collect_t6_script_models(
                 }
                 continue;
             };
-            bone_base += u32::try_from(entry.skel.bones.len()).unwrap_or(0);
+            bone_base += u32::try_from(skel.bones.len()).unwrap_or(0);
             out.items.push(T6MissileModel {
-                skel: entry.skel.clone(),
-                materials: entry
-                    .material_edges
+                skel: skel.clone(),
+                materials: edges
                     .iter()
                     .map(|edge| edge.bound_index().map(|i| i as u32))
                     .collect(),
@@ -451,6 +462,22 @@ fn collect_t6_script_models(
             camo: 0,
         });
     }
+}
+
+/// bo2mp: another game's gun model by name (`wpn_t7_ar_standard_world`).
+/// The guest guns' third-person models are kept under their own game, so a
+/// script model naming one (the Mystery Box's rising gun, `useweaponmodel`)
+/// is in none of Black Ops II's catalogs.
+fn guest_world_gun<'a>(
+    world_weapons: Option<&'a assets::PreparedWorldWeapons>,
+    name: &str,
+) -> Option<&'a asset_model::WorldWeaponEntry> {
+    use asset_core::AssetNamespace as Ns;
+    let catalog = &world_weapons?.0;
+    [Ns::T7, Ns::Iw6, Ns::S1, Ns::Iw5, Ns::Iw4, Ns::T5, Ns::T4, Ns::Iw3, Ns::Jup]
+        .into_iter()
+        .find_map(|ns| catalog.get(ns, name))
+        .filter(|e| e.skel.pose.is_some())
 }
 
 /// bo2zm M3: pose a composition (a zombie's body and head) with its
