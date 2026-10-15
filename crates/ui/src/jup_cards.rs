@@ -5,8 +5,9 @@
 //! copied or kept on disk.
 //!
 //! The shell names one `jup:<name>` (`jup:ui_emblem_005`,
-//! `jup:jup_playercard_animated_opc_..._atlas`); a flipbook's frames are
-//! `jup:<name>#<frame>` (`#0` the same as no frame). Their titles are
+//! `jup:jup_playercard_animated_opc_..._atlas`): a still picture, or a
+//! flipbook's fullest frame (some fade in from blank ones); its frames are
+//! `jup:<name>#<frame>`, from `#0`. Their titles are
 //! encrypted in the game's files and are not read: the names stand in.
 //!
 //! The install is `$BO2_JUP_INSTALL`, else the `jup` line of the game
@@ -105,22 +106,24 @@ pub(crate) fn is_look(material: &str) -> bool {
     material.split_once(':').is_some_and(|(g, n)| g == PREFIX && jc::kind_of(split_frame(n).0).is_some())
 }
 
-/// `name#3` -> (`name`, 3).
-fn split_frame(name: &str) -> (&str, u32) {
+/// `name#3` -> (`name`, Some(3)); `name` -> (`name`, None).
+fn split_frame(name: &str) -> (&str, Option<u32>) {
     match name.rsplit_once('#') {
-        Some((n, f)) => (n, f.parse().unwrap_or(0)),
-        None => (name, 0),
+        Some((n, f)) => (n, f.parse().ok()),
+        None => (name, None),
     }
 }
 
 /// A frame's shell name.
 pub(crate) fn frame_name(name: &str, frame: u32) -> String {
-    if frame == 0 { name.to_owned() } else { format!("{name}#{frame}") }
+    format!("{name}#{frame}")
 }
 
-/// A flipbook's frames, decoded and shrunk.
+/// A picture's frames (one for a still one), decoded and shrunk, and the
+/// one shown when it stands still.
 struct Book {
     frames: Vec<Rgba>,
+    poster: usize,
 }
 
 /// The decoded books by name, the last used last; and how many frames each
@@ -188,7 +191,7 @@ fn decode(name: &str) -> Option<Arc<Book>> {
         Kind::Card => CARD_SIZE,
     };
     let frames: Vec<Rgba> = (0..n).map(|i| jc::shrink(&jc::frame(&pic, grid, i), w, h)).collect();
-    let book = Arc::new(Book { frames });
+    let book = Arc::new(Book { frames, poster: jc::poster_frame(&pic, grid) as usize });
     if let Ok(mut b) = BOOKS.lock() {
         let b = b.get_or_insert_with(Books::default);
         b.counts.insert(name.to_owned(), n);
@@ -207,7 +210,7 @@ pub(crate) fn read_picture(names: &[String]) -> Option<(u32, u32, Vec<u8>)> {
     names.iter().find_map(|n| {
         let (name, f) = split_frame(n);
         let book = book(name)?;
-        let frame = book.frames.get(f as usize % book.frames.len().max(1))?;
+        let frame = book.frames.get(f.map_or(book.poster, |f| f as usize % book.frames.len().max(1)))?;
         Some((frame.width, frame.height, frame.pixels.clone()))
     })
 }
@@ -246,9 +249,9 @@ mod tests {
         assert_eq!(title("jup:ui_emblem_005"), "Emblem 005");
         assert_eq!(title("jup:ui_playercard_100#3"), "Calling Card 100");
         assert_eq!(title("jup:ui_emblem_mastery_gold_apapa"), "Mastery Gold Apapa");
-        assert_eq!(split_frame("ui_emblem_1#12"), ("ui_emblem_1", 12));
-        assert_eq!(frame_name("jup:x", 0), "jup:x");
-        assert_eq!(frame_name("jup:x", 2), "jup:x#2");
+        assert_eq!(split_frame("ui_emblem_1#12"), ("ui_emblem_1", Some(12)));
+        assert_eq!(split_frame("ui_emblem_1"), ("ui_emblem_1", None));
+        assert_eq!(frame_name("jup:x", 0), "jup:x#0");
         assert!(is_look("jup:ui_emblem_005#2"));
         assert!(!is_look("jup:ui_group_bg_emblem_1"));
         assert!(!is_look("iw4:cardicon_skull"));

@@ -112,7 +112,7 @@ pub(crate) fn banner(c: &mut Kids, cx: &mut Ctx, card: &str, w: f32, h: f32, nam
             match (pic, size) {
                 (Some(p), Some(size)) => {
                     let s = cover(size, Vec2::new(w, h) * cx.s);
-                    let book = flipbook(cx, card, &p);
+                    let book = flipbook(cx, card);
                     let mut e = b.spawn((
                         ImageNode::new(p),
                         Node {
@@ -171,17 +171,17 @@ pub(crate) struct Flipbook {
 /// Frames a second a flipbook turns at.
 const FLIPBOOK_FPS: f32 = 12.0;
 
-/// The flipbook of a calling card's or emblem's picture `first` (its frame
-/// 0), once its other frames are in: `None` for a still one, and while
-/// they are being read (asking for them; the view is drawn again as they
-/// come in).
-pub(crate) fn flipbook(cx: &mut Ctx, name: &str, first: &Handle<Image>) -> Option<Flipbook> {
+/// The flipbook of a calling card's or emblem's picture, once its frames
+/// are in (its still picture shows till then): `None` for a still one, and
+/// while they are being read (asking for them; the view is drawn again as
+/// they come in).
+pub(crate) fn flipbook(cx: &mut Ctx, name: &str) -> Option<Flipbook> {
     let n = cards::frames(name);
     if n < 2 || cx.still {
         return None;
     }
-    let mut frames = vec![first.clone()];
-    for i in 1..n {
+    let mut frames = Vec::with_capacity(n as usize);
+    for i in 0..n {
         frames.push(cx.pic(&[cards::frame_name(name, i)])?);
     }
     Some(Flipbook { frames })
@@ -210,7 +210,7 @@ pub(crate) fn emblem(c: &mut Kids, cx: &mut Ctx, name: &str, size: f32) {
         Some(p) => {
             let sz = cx.pic_size(&p);
             let k = (size / sz.x.max(1.0)).min(size / sz.y.max(1.0));
-            let book = flipbook(cx, name, &p);
+            let book = flipbook(cx, name);
             let mut e = b.spawn((ImageNode::new(p), Node { width: cx.px(sz.x * k), height: cx.px(sz.y * k), ..default() }));
             if let Some(book) = book {
                 e.insert(book);
