@@ -137,6 +137,8 @@ pub struct StaticModel {
     pub lighting_origin: [f32; 3],
     /// Its index among the world's placed models.
     pub index: u32,
+    /// `GfxStaticModelDrawInst::flags`.
+    pub draw_flags: u16,
 }
 
 /// A spawn point from the zone's spawn list.
@@ -730,6 +732,7 @@ impl Iw7Map {
                     cull_dist: f32::from(u16_at(d, D::cullDist)),
                     lighting_origin,
                     index: i as u32,
+                    draw_flags: u16_at(d, D::flags),
                 });
             }
         }
