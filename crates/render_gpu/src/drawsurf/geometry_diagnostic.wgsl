@@ -683,6 +683,17 @@ fn t7_shade(base: vec3<f32>, amb_in: vec3<f32>, vn: vec3<f32>, n: vec3<f32>, st:
     colour += env * (f0 * ab.x + ab.y) * so;
 #endif
     colour += base * (amb + sun * (vis * ndl));
+    // A test view (`BO2MP_T7_VIEW`).
+    let test = u32(t6_lights.v[(T7_ROW + 1u) * 4u + 1u].x + 0.5);
+    if (test == 1u) {
+        return vec3(vis) / max(t7_row(0u).x, 0.0001);
+    } else if (test == 2u) {
+        return amb;
+    } else if (test == 3u) {
+        return base / max(t7_row(0u).x, 0.0001);
+    } else if (test == 4u) {
+        return amb + sun * (vis * ndl);
+    }
     return colour;
 }
 

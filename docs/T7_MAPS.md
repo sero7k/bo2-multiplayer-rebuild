@@ -44,7 +44,7 @@ StreamerHint 0x28; ZBarrier 0x300 (name only); XCam lists at 0x78 and 0x88.
 
 ## What converts
 
-World (IW3 builder, colour maps, sun, no lightmaps), placed models (BO2
+World (IW3 builder, BO3 materials, its own light below), placed models (BO2
 model builder), materials hidden by their words (sky, tools, clip,
 shadow), entities (plain text, BO2 class names: read as a Treyarch map).
 Collision is the zone's own: brushes under a k-d tree of their boxes (BO3's
@@ -59,7 +59,44 @@ spots, Pack-a-Punch, power switch, wall buys, dog spots, traversals) to
 carried: teleporters, traps, Gobblegum, Dead Shot. `zm_factory` is also
 Der Riese's name: registered as a foreign map, `bo1_maps` leaves it alone.
 
+## Light (`assets::lane::t7_light`, `fastfile_t7::light`)
+
+On by default; `BO2MP_T7_LIGHT=0` gives the old flat light. Only Black Ops
+III maps take it. Read from the GfxWorld's first sun volume:
+
+- Sky: the sky box model's material (`mc/sky_latlong_hdr`) names a BC6H
+  lat-long picture (8192 x 4096) whose pixels are the sun volume's sky
+  buffer (an xpak entry); `$Globals.skyScale` scales it. Lookup (sky shader):
+  `u = 0.5 - atan2(d.x, d.y) / 2pi`, `v = acos(d.z) / pi`. Drawn as a 512px
+  RGBA16F cube in the probes' unit.
+- Probes: one BC6H cube array (256px, 7 levels), stored mip-major (all
+  probes' faces at level 0, then level 1, ...), faces world +X -X +Y -Y +Z
+  -Z. Configs 328 bytes: word 0 the probe's scale (texels times it are the
+  game's light; probe 0's is the map's unit), 1..3 mean colour, 11..13
+  origin, 14..22 rotation rows, 23..25 half size, 26..31 parallax box. The
+  32 most used round the spawns are drawn (probe 0 first), each surface and
+  model taking the smallest box holding it.
+- Sun: the sun volume's pitch and yaw aim the light; toward the sun is
+  `(-cos p cos y, -cos p sin y, sin p)` (matches the probes' brightest
+  texel on Redwood, Nuketown, Apartments). Brightness: intensity over
+  probe 0's scale.
+- Baked at load (~1 s): a 4096px sun height map over the spawn points'
+  square from the world and placed models' opaque triangles (cut-outs
+  dithered), and per world vertex the ambient (probe ambient cube by
+  normal, times each probe's scale over the unit) times a short-ray
+  occlusion; placed models take the mean ambient at their origin.
+- Shader (`t7_shade` in `geometry_diagnostic.wgsl`): albedo x (ambient +
+  sun x N.L x sun map x moving shadows), plus with normal/specular maps the
+  ambient bent by the probe's level 6, a GGX sun highlight and the probe's
+  reflection at level `5 (1 - gloss)` (BO3's `lit` shader), split-sum
+  weighted; then a filmic tone curve (`BO2MP_T7_EXPOSURE`, default 0.6)
+  and Black Ops II's roll-off, bloom and grade.
+
+Not read: the probe volume (gProbeX/Y/Z 3D textures), the sun shadow tree,
+lightmaps (BO3 has none for MP), the exposure grids, BO3's own colour LUT,
+height fog, parallax-corrected probe lookups.
+
 ## Not done
 
-Lightmaps, probes, fog, sky box models; glass and doors static; map
-pictures; Zombies menu entries (use `iw4l map t7:zm_factory`).
+Fog, the probe volume; glass and doors static; map pictures; Zombies menu
+entries (use `iw4l map t7:zm_factory`).
