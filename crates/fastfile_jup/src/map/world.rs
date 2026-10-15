@@ -199,6 +199,21 @@ fn bits_for(n: usize) -> u32 {
     b
 }
 
+/// The packed bytes a surface's tables `first..end` take and the most
+/// index list entries one of them has.
+fn group_needs(z: &[u8], b: &WorldBuffers, first: usize, end: usize) -> (usize, usize) {
+    let last = b.tables + TABLE * (end - 1);
+    let entries = z[last + 0x22] as usize;
+    let ntri = z[last + 0x23] as usize;
+    let bits = bits_for(entries) as usize;
+    let need = u32_at(z, last + 0x24) as usize + (3 * ntri * bits).div_ceil(8);
+    let most = (first..end)
+        .map(|t| z[b.tables + TABLE * t + 0x22] as usize)
+        .max()
+        .unwrap_or(0);
+    (need, most)
+}
+
 /// Decodes the surfaces of the list that are in world zone `zone` (its
 /// buffers `b` in the zone image `z`).
 pub fn read_surfaces(
@@ -207,26 +222,40 @@ pub fn read_surfaces(
     recs: &[SurfaceRec],
     zone: u32,
 ) -> Result<Vec<WorldSurface>, String> {
-    let mut order: Vec<usize> = (0..recs.len()).filter(|&i| recs[i].zone == zone).collect();
-    order.sort_by_key(|&i| recs[i].packed_at);
-    let mut out: Vec<WorldSurface> = Vec::with_capacity(order.len());
+    let mut pending: Vec<usize> = (0..recs.len()).filter(|&i| recs[i].zone == zone).collect();
+    pending.sort_by_key(|&i| recs[i].packed_at);
+    let mut out: Vec<WorldSurface> = Vec::with_capacity(pending.len());
     let mut table = 0usize;
     let mut list = 0usize;
-    for &si in &order {
-        let r = recs[si];
+    while !pending.is_empty() {
         if table >= b.table_count {
             return Err(format!(
-                "surface {si}: no triangle table left ({} read)",
+                "{} surfaces left, no triangle table left ({} read)",
+                pending.len(),
                 b.table_count
             ));
         }
-        // This surface's tables: the next, and the ones after it that do not
-        // start at triangle 0.
+        // The next surface's tables: the next, and the ones after it that do
+        // not start at triangle 0.
         let first = table;
         table += 1;
         while table < b.table_count && u16_at(z, b.tables + TABLE * table + 0x20) != 0 {
             table += 1;
         }
+        // Its surface: the tables run in packed-triangle order but for a few
+        // surfaces placed later, so the first nearby one whose packed bytes
+        // and vertices fit them.
+        let (need, most) = group_needs(z, b, first, table);
+        let pick = pending
+            .iter()
+            .take(32)
+            .position(|&i| {
+                let r = &recs[i];
+                (need..need + 8).contains(&r.packed_size) && most <= r.verts
+            })
+            .unwrap_or(0);
+        let si = pending.remove(pick);
+        let r = recs[si];
         let mut used = 0usize;
         let mut tris = Vec::new();
         for t in first..table {
