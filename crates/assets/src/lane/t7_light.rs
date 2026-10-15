@@ -181,8 +181,10 @@ impl Lit {
 
     /// How open a point is (0..1): short rays over the hemisphere round
     /// `n`, softened (the probes already hold the room's light).
+    /// (`BO2MP_T7_AMBIENT` scales the ambient light: a test aid.)
     fn occlusion(&self, p: [f32; 3], n: [f32; 3], seed: u32, reach: f32) -> f32 {
-        0.35 + 0.65 * self.tracer.openness(p, n, reach, 12, seed, 1.0)
+        static SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+        (0.35 + 0.65 * self.tracer.openness(p, n, reach, 12, seed, 1.0)) * *SCALE.get_or_init(|| env_scale("BO2MP_T7_AMBIENT", 1.0))
     }
 
     /// Each world vertex's ambient light (probes' unit, occlusion in), as
@@ -228,7 +230,7 @@ impl Lit {
         let m = self.sun_map.rows();
         let mut a = [0f32; 16];
         a[0] = self.exposure;
-        a[1] = self.sun_light / drawn_sun.max(1e-3);
+        a[1] = self.sun_light * env_scale("BO2MP_T7_SUN", 1.0) / drawn_sun.max(1e-3);
         a[3] = 7.0;
         for k in 0..3 {
             a[4 + 4 * k..8 + 4 * k].copy_from_slice(&m[k]);
