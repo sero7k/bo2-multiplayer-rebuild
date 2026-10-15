@@ -413,6 +413,10 @@ struct Builder<'a> {
     /// Pictures made ahead, on several threads ([`Builder::make_ahead`]),
     /// by (key, size cap): `link_image` takes its picture from here.
     ready: HashMap<(String, u32), Result<Made, String>>,
+    /// The disk cache's key for the converted pictures
+    /// (`t7_gun_cache`), and how many came from it.
+    pic_cache: Option<String>,
+    pic_cache_hits: usize,
 }
 
 /// A picture made: its levels and their GPU form.
@@ -679,6 +683,21 @@ impl<'a> Builder<'a> {
                 }
             }
         }
+        // (Those the disk cache holds are taken from it: only their GPU
+        // form is made again.)
+        let mut kept = self.pic_cache.as_deref().map(super::t7_gun_cache::load).unwrap_or_default();
+        let had = kept.len();
+        jobs.retain(|(key, _, colour)| match kept.get(key) {
+            Some(px) => match super::iw6::gpu_image(px, *colour) {
+                Ok(img) => {
+                    self.ready.insert(key.clone(), Ok((px.clone(), img)));
+                    self.pic_cache_hits += 1;
+                    false
+                }
+                Err(_) => true,
+            },
+            None => true,
+        });
         let (cap, zone, paks) = (self.cap, &self.zone.image[..], &self.paks);
         let next = std::sync::atomic::AtomicUsize::new(0);
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(2, 16);
@@ -698,7 +717,28 @@ impl<'a> Builder<'a> {
                 .collect();
             workers.into_iter().map(|w| w.join().unwrap_or_default()).collect()
         });
-        self.ready.extend(made.into_iter().flatten());
+        let mut new_ones = 0usize;
+        for (key, result) in made.into_iter().flatten() {
+            if let Ok((px, _)) = &result {
+                kept.insert(key.clone(), px.clone());
+                new_ones += 1;
+            }
+            self.ready.insert(key, result);
+        }
+        if let Some(cache_key) = self.pic_cache.as_deref()
+            && new_ones > 0
+        {
+            let total = kept.len();
+            let cache_key = cache_key.to_owned();
+            // (Written off the load's path: the next start reads it.)
+            std::thread::Builder::new()
+                .name("t7-gun-cache".into())
+                .spawn(move || match super::t7_gun_cache::store(&cache_key, &kept) {
+                    Ok(()) => diag::info!(World, "t7 guest guns: {total} converted pictures kept in the cache ({had} were)"),
+                    Err(e) => diag::warn!(World, "t7 guest guns: pictures not kept in the cache: {e}"),
+                })
+                .ok();
+        }
     }
 
     /// One picture into the catalog (`key` names the converted form).
@@ -1151,11 +1191,18 @@ fn load_t7_guests(z: T7Zone, material_seed: MaterialCatalog) -> T7Guests {
         image_failures: Vec::new(),
         decoded: 0,
         ready: HashMap::new(),
+        pic_cache: None,
+        pic_cache_hits: 0,
     };
     let first_person_max = std::env::var("BO2MP_BO3_TEXTURE")
         .ok()
         .and_then(|v| v.trim().parse().ok())
         .unwrap_or(FIRST_PERSON_MAX);
+    b.pic_cache = if std::env::var("BO2MP_BO3_GUN_CACHE").map_or(true, |v| v.trim() != "0") {
+        super::t7_gun_cache::key_for(&dir, first_person_max)
+    } else {
+        None
+    };
     let guns = chosen(&cap);
 
     // Models: each gun's view and world model and the models it hangs on
@@ -1286,9 +1333,10 @@ fn load_t7_guests(z: T7Zone, material_seed: MaterialCatalog) -> T7Guests {
         &unreadable[..unreadable.len().min(8)]
     ));
     report.push(format!(
-        "t7 guest guns: materials: {} linked, {} pictures decoded, {} failed {:?}",
+        "t7 guest guns: materials: {} linked, {} pictures decoded ({} from the cache), {} failed {:?}",
         b.materials.values().filter(|m| m.is_some()).count(),
         b.decoded,
+        b.pic_cache_hits,
         b.image_failures.len(),
         &b.image_failures[..b.image_failures.len().min(6)]
     ));

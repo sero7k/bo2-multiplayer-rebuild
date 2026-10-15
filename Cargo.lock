@@ -6572,6 +6572,7 @@ dependencies = [
  "gamemode_iw4",
  "hks_t6",
  "image",
+ "lz4_flex",
  "net",
  "playerstate_iw4",
  "session",

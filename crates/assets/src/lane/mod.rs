@@ -45,6 +45,7 @@ pub(crate) use s1::{S1Guests, build_s1_guest_guns, prefetch_s1_guest_guns, s1_an
 mod legacy_guns;
 // bo2mp: Black Ops III's guns as guest guns.
 mod t7;
+mod t7_gun_cache; // bo2mp: the BO3 guns' converted pictures kept on disk
 mod t7_fields;
 pub(crate) use t7::{T7Guests, build_t7_guest_guns, prefetch_t7_guest_guns, t7_anim_check, t7_sound_check, walk_t7_guest_guns};
 // bo2mp: one Modern Warfare III (2023) gun as a guest gun.
