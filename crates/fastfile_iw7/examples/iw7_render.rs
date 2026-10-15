@@ -41,6 +41,19 @@ enum Kind {
     Add,
 }
 
+/// Layers 1 and 2 of a technique set: 0 none, 1 blend (`b1c1`, `t1c1`,
+/// `a1c1`), 2 multiply (`m1c1`).
+fn layer_kinds(techset: &str) -> [u8; 2] {
+    let mut out = [0u8; 2];
+    for t in techset.split('_') {
+        let b = t.as_bytes();
+        if b.len() >= 3 && matches!(b[0], b'b' | b'm' | b'a' | b't') && (b'1'..=b'2').contains(&b[1]) && b[2] == b'c' {
+            out[usize::from(b[1] - b'1')] = if b[0] == b'm' { 2 } else { 1 };
+        }
+    }
+    out
+}
+
 fn kind_of(techset: &str) -> Kind {
     use fastfile_iw7::look::{Blend, look};
     let l = look(techset);
@@ -62,6 +75,8 @@ struct V {
     lm: [f32; 2],
     n: [f32; 3],
     c: [f32; 4],
+    /// Layer 1 and 2 weights (a layered world surface's vertex colour).
+    w: [f32; 2],
 }
 
 fn lerp(a: &V, b: &V, t: f32) -> V {
@@ -72,6 +87,7 @@ fn lerp(a: &V, b: &V, t: f32) -> V {
         lm: std::array::from_fn(|k| l(a.lm[k], b.lm[k])),
         n: std::array::from_fn(|k| l(a.n[k], b.n[k])),
         c: std::array::from_fn(|k| l(a.c[k], b.c[k])),
+        w: std::array::from_fn(|k| l(a.w[k], b.w[k])),
     }
 }
 
@@ -118,6 +134,8 @@ impl Cam {
 struct Target {
     colour: Vec<[f32; 3]>,
     depth: Vec<f32>,
+    /// Per pixel: (material + 1, placed model + 1) of what was drawn there.
+    ids: Vec<(u32, u32)>,
 }
 
 /// What a pixel's colour comes from.
@@ -130,6 +148,11 @@ struct Shade<'a> {
     sun_dir: [f32; 3],
     sun: [f32; 3],
     lit: bool,
+    /// Layer 1 and 2 colour maps (opacity in alpha) and whether each
+    /// multiplies (else blends) by its weight.
+    layers: [Option<(&'a Tex, bool)>; 2],
+    /// (material + 1, placed model + 1), for `IW7_RENDER_PICK`.
+    id: (u32, u32),
 }
 
 fn draw_tri(cam: &Cam, t: &mut Target, tri: [V; 3], sh: &Shade) {
@@ -197,7 +220,15 @@ fn raster(cam: &Cam, t: &mut Target, tri: [(V, [f32; 3]); 3], sh: &Shade) {
             let b = [w0 * iz[0] * z, w1 * iz[1] * z, w2 * iz[2] * z];
             let at = |f: &dyn Fn(&V) -> f32| b[0] * f(&tri[0].0) + b[1] * f(&tri[1].0) + b[2] * f(&tri[2].0);
             let uv = [at(&|v| v.uv[0]), at(&|v| v.uv[1])];
-            let texel = sh.tex.map_or([0.6, 0.6, 0.6, 1.0], |tx| tx.sample(uv));
+            let mut texel = sh.tex.map_or([0.6, 0.6, 0.6, 1.0], |tx| tx.sample(uv));
+            for (k, l) in sh.layers.iter().enumerate() {
+                let Some((lt, multiply)) = l else { continue };
+                let wgt = b[0] * tri[0].0.w[k] + b[1] * tri[1].0.w[k] + b[2] * tri[2].0.w[k];
+                let lx = lt.sample(uv);
+                for c in 0..3 {
+                    texel[c] = if *multiply { texel[c] * (1.0 + wgt * (lx[c] - 1.0)) } else { texel[c] + (lx[c] - texel[c]) * lx[3] * wgt };
+                }
+            }
             if matches!(sh.kind, Kind::AlphaTest) && texel[3] < 0.5 {
                 continue;
             }
@@ -240,6 +271,7 @@ fn raster(cam: &Cam, t: &mut Target, tri: [(V, [f32; 3]); 3], sh: &Shade) {
                 _ => {
                     t.colour[o] = out;
                     t.depth[o] = z;
+                    t.ids[o] = sh.id;
                 }
             }
         }
@@ -249,7 +281,7 @@ fn raster(cam: &Cam, t: &mut Target, tri: [(V, [f32; 3]); 3], sh: &Shade) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let started = std::time::Instant::now();
-    let map = Iw7Map::load(&MapSources::beside(Path::new(&args[1]))).expect("map");
+    let map = Iw7Map::load(&{ let src = MapSources::beside(Path::new(&args[1])); if std::env::var("IW7_NO_COMMON").is_ok() { src } else { src.with_common() } }).expect("map");
     for l in &map.report {
         println!("{l}");
     }
@@ -310,6 +342,34 @@ fn main() {
     for m in 0..map.materials.len() {
         tex_of(m);
     }
+    // Layered world materials' layer colour maps (`IW7_RENDER_NOLAYERS`
+    // draws the base alone, as before).
+    let layered_tex: Vec<[Option<Tex>; 2]> = map
+        .materials
+        .iter()
+        .map(|mm| {
+            let layers = layer_kinds(&mm.technique_set);
+            std::array::from_fn(|k| {
+                if layers[k] == 0 || std::env::var("IW7_RENDER_NOLAYERS").is_ok() {
+                    return None;
+                }
+                let keep = mm.texture(&format!("colorMap{}", k + 1)).is_some_and(fastfile_iw7::look::colour_alpha_is_opacity);
+                let rgba = map.layer_rgba(mm, k + 1, tex_size, keep).ok()?;
+                let to = |b: u8| f32::from(b) / 255.0;
+                Some(Tex { w: rgba.width as usize, h: rgba.height as usize, px: rgba.levels[0].chunks_exact(4).map(|p| [to(p[0]), to(p[1]), to(p[2]), to(p[3])]).collect() })
+            })
+        })
+        .collect();
+    let layer_texs: Vec<[Option<(&Tex, bool)>; 2]> = map
+        .materials
+        .iter()
+        .zip(&layered_tex)
+        .map(|(mm, t)| {
+            let kinds = layer_kinds(&mm.technique_set);
+            std::array::from_fn(|k| t[k].as_ref().map(|t| (t, kinds[k] == 2)))
+        })
+        .collect();
+    println!("layered materials: {}", layer_texs.iter().filter(|l| l[0].is_some() || l[1].is_some()).count());
     if std::env::var("IW7_RENDER_NMDUMP").is_ok() {
         let mut seen = std::collections::BTreeMap::new();
         for mm in &map.materials {
@@ -369,7 +429,7 @@ fn main() {
     };
 
     let sky = [0.55, 0.65, 0.8];
-    let mut t = Target { colour: vec![sky; w * h], depth: vec![f32::MAX; w * h] };
+    let mut t = Target { colour: vec![sky; w * h], depth: vec![f32::MAX; w * h], ids: vec![(0, 0); w * h] };
 
     // The world: opaque first, then alpha-tested, then blended.
     let order: Vec<Kind> = if std::env::var("IW7_RENDER_OPAQUE").is_ok() {
@@ -390,7 +450,7 @@ fn main() {
     for &pass in &order {
         for s in &map.surfaces {
             let kind = s.material.map_or(Kind::Opaque, |m| kind_of(&map.materials[m].technique_set));
-            if kind != pass {
+            if kind != pass || s.hidden_brush {
                 continue;
             }
             let shade = Shade {
@@ -401,12 +461,15 @@ fn main() {
                 sun_dir,
                 sun,
                 lit,
+                layers: s.material.map_or([None, None], |m| layer_texs[m]),
+                id: (s.material.map_or(0, |m| m as u32 + 1), 0),
             };
             for k in 0..s.tri_count as usize {
                 let v = |j: usize| -> Option<V> {
                     let ix = *map.indices.get(s.base_index as usize + 3 * k + j)?;
                     let wv = map.vertices.get((s.first_vertex + u32::from(ix)) as usize)?;
-                    Some(V { p: wv.xyz, uv: wv.uv, lm: wv.lmap_uv, n: wv.normal, c: vcol(wv.color) })
+                    let raw = wv.color.to_le_bytes();
+                    Some(V { p: wv.xyz, uv: wv.uv, lm: wv.lmap_uv, n: wv.normal, c: vcol(wv.color), w: [f32::from(raw[1]) / 255.0, f32::from(raw[2]) / 255.0] })
                 };
                 let (Some(a), Some(b), Some(c)) = (v(0), v(1), v(2)) else { continue };
                 draw_tri(&cam, &mut t, [a, b, c], &shade);
@@ -437,8 +500,7 @@ fn main() {
     println!("world drawn at {:.1}s: {drawn:?}", started.elapsed().as_secs_f32());
 
     // The placed models.
-    let origins: Vec<[f32; 3]> = map.static_models.iter().map(|s| s.lighting_origin).collect();
-    let ground = map.ground_light(&pages, &origins, 4096.0);
+    let ground = map.static_model_light(&pages);
     for sp in spawns.iter().take(3) {
         let g = map.ground_light(&pages, &[[sp.origin[0], sp.origin[1], sp.origin[2] + 8.0]], 256.0);
         println!("spawn {:?}: floor light {:?}", sp.origin, g[0]);
@@ -455,6 +517,23 @@ fn main() {
         let m = f32::from(b & 0x3ff);
         s * if e == 0 { m * 2f32.powi(-24) } else { (1.0 + m / 1024.0) * 2f32.powi(e - 15) }
     };
+    let prop_vcol = std::env::var("IW7_RENDER_PROPVCOL").is_ok();
+    {
+        // How dark the placed models' vertex colours are.
+        let (mut sum, mut n, mut black) = ([0f64; 4], 0usize, 0usize);
+        for m in &map.models {
+            for s in &m.surfaces {
+                for v in &s.verts {
+                    for k in 0..4 {
+                        sum[k] += f64::from(v[16 + k]);
+                    }
+                    n += 1;
+                    black += usize::from(v[16] < 16 && v[17] < 16 && v[18] < 16);
+                }
+            }
+        }
+        println!("prop vertex colour mean (bytes 16..20) {:?}, {black} of {n} near black", sum.map(|x| (x / n.max(1) as f64) as u32));
+    }
     for &pass in &order {
         for (i, sm) in map.static_models.iter().enumerate() {
             let m = &map.models[sm.model];
@@ -472,6 +551,8 @@ fn main() {
                     sun_dir,
                     sun,
                     lit,
+                    layers: [None, None],
+                    id: (surf.material.map_or(0, |k| k as u32 + 1), i as u32 + 1),
                 };
                 let vert = |ix: u16| -> Option<V> {
                     let v = surf.verts.get(usize::from(ix))?;
@@ -481,8 +562,10 @@ fn main() {
                     let ln = fastfile_iw7::map::unpack_unit(u32::from_le_bytes([v[24], v[25], v[26], v[27]]));
                     let n = std::array::from_fn(|k| ln[0] * sm.axis[0][k] + ln[1] * sm.axis[1][k] + ln[2] * sm.axis[2][k]);
                     let uv = [half_f(u16::from_le_bytes([v[20], v[21]])), half_f(u16::from_le_bytes([v[22], v[23]]))];
-                    let c = [v[18], v[17], v[16], v[19]].map(|x| f32::from(x) / 255.0);
-                    Some(V { p, uv, lm: [0.0; 2], n, c })
+                    // (A placed model's vertex colour is no tint: white, as
+                    // the game's lane draws it; `IW7_RENDER_PROPVCOL` shows it.)
+                    let c = if prop_vcol { [v[18], v[17], v[16], v[19]].map(|x| f32::from(x) / 255.0) } else { [1.0; 4] };
+                    Some(V { p, uv, lm: [0.0; 2], n, c, w: [0.0; 2] })
                 };
                 for tri in &surf.tris {
                     let (Some(a), Some(b), Some(c)) = (vert(tri[0]), vert(tri[1]), vert(tri[2])) else { continue };
@@ -493,6 +576,27 @@ fn main() {
     }
     println!("models drawn at {:.1}s", started.elapsed().as_secs_f32());
 
+    // `IW7_RENDER_PICK=x,y;x,y`: what is drawn at those pixels.
+    if let Ok(picks) = std::env::var("IW7_RENDER_PICK") {
+        for p in picks.split(';') {
+            let Some((x, y)) = p.split_once(',').and_then(|(a, b)| Some((a.trim().parse::<usize>().ok()?, b.trim().parse::<usize>().ok()?))) else { continue };
+            let Some(&(m, sm)) = t.ids.get(y.min(h - 1) * w + x.min(w - 1)) else { continue };
+            let model = (sm > 0).then(|| {
+                let s = &map.static_models[sm as usize - 1];
+                format!("{} at {:?} (ground {:?})", map.models[s.model].name, s.origin, ground[sm as usize - 1])
+            });
+            println!("pick {x},{y}: colour {:?} model {model:?}", t.colour[y.min(h - 1) * w + x.min(w - 1)]);
+            if m > 0 {
+                let mm = &map.materials[m as usize - 1];
+                let tx: Vec<String> = mm
+                    .textures
+                    .iter()
+                    .map(|t| format!("{}={}{}", texture::sampler_name(t.0).map_or_else(|| format!("{:08x}", t.0), str::to_owned), t.3, map.image_info(&t.3).map_or(" (MISSING)".to_owned(), |i| format!(" fmt {}", i.format))))
+                    .collect();
+                println!("    material {} techset {} sort {} [{}] consts {:?}", mm.name, mm.technique_set, mm.sort_key, tx.join(", "), mm.constants);
+            }
+        }
+    }
     let mut rgba = vec![0u8; w * h * 4];
     for (i, c) in t.colour.iter().enumerate() {
         rgba[i * 4..i * 4 + 4].copy_from_slice(&[c[0], c[1], c[2]].map(|x| (x.clamp(0.0, 1.0) * 255.0) as u8).into_iter().chain([255]).collect::<Vec<_>>());

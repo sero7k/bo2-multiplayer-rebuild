@@ -17,6 +17,7 @@ pub mod light;
 pub mod look;
 pub mod map;
 pub mod pak;
+pub mod shared;
 pub mod shine;
 pub mod ptr;
 pub mod stream;

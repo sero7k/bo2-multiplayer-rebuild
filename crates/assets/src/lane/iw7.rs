@@ -10,7 +10,17 @@
 //! vertex is CoD4's layout but for its unit vectors), the placed models
 //! through Black Ops II's model builder (IW7's packed vertex is BO2's but
 //! for its unit vectors), materials onto BO2's draw path by their technique
-//! set's name with their colour maps.
+//! set's name with their colour maps (tinted by `colorTint`), a layered
+//! world material's layers (`colorMap1`, `colorMap2`, weighted by the vertex
+//! colour), and what the map names but the common zones hold
+//! (`fastfile_iw7::shared`).
+//!
+//! Light: the lightmaps (`fastfile_iw7::light`, exposed per map), the
+//! ComWorld's sun, the vision's fog; each placed model the floor's light
+//! under and around it; players and other moving things a light grid made
+//! from the lightmaps (`light_grid`). Brush models (doors, signs) are drawn
+//! where their entities place them as the map starts
+//! (`Iw7Map::place_brush_models`).
 //!
 //! IW7 collides through Havok shapes; the collision here is the drawn
 //! triangles instead (`asset_world::world_iw7`): the world's surfaces and
@@ -83,11 +93,15 @@ fn t6_unit_vec(v: [f32; 3]) -> u32 {
 }
 
 /// An IW7 model vertex (`GfxPackedVertex`) as Black Ops II's: the same
-/// layout but for the unit vectors (unsigned 10:10:10 over 1023 there) and
-/// the binormal sign (packed differently: taken as +1).
+/// layout but for the unit vectors (unsigned 10:10:10 over 1023 there), the
+/// binormal sign (packed differently: taken as +1) and the colour: as in
+/// Ghosts, a placed model's vertex colour is no tint (foliage keeps its wind
+/// weights there, other props near black: mp_proto's speakers and crates
+/// drew black), so white.
 fn iw7_vertex_to_t6(v: &[u8; 32]) -> [u8; 32] {
     let mut out = *v;
     out[12..16].copy_from_slice(&1.0f32.to_le_bytes());
+    out[16..20].fill(0xff);
     for at in [24usize, 28] {
         let p = u32::from_le_bytes([v[at], v[at + 1], v[at + 2], v[at + 3]]);
         out[at..at + 4].copy_from_slice(&t6_unit_vec(fastfile_iw7::map::unpack_unit(p)).to_le_bytes());
@@ -104,14 +118,18 @@ fn hidden_kind(technique_set: &str) -> Option<&'static str> {
 /// An IW7 technique set as Black Ops II's draw: its blend, alpha test,
 /// lighting and decal step by the words of its name
 /// (`fastfile_iw7::look`: `replace`, `atest`, `blend`, `blendadd`, `add`,
-/// `multiply`, `unlit`, `ndw`), without BO2's layers (IW7's vertex colour
-/// is no layer weight) and drawn double-sided for models.
+/// `multiply`, `unlit`, `ndw`), drawn double-sided for models. A world
+/// material's layers (`r0c0.._b1c1..`, `m1c1`, `t1c1`, `b2c2`: two- and
+/// three-layer walls, streets and terrain) are BO2's, their weights in the
+/// vertex colour (`iw3_colour`); a model's are not drawn.
 fn iw7_draw(technique_set: &str, sort_key: u8, model: bool) -> T6Draw {
     use fastfile_iw7::look::Blend;
     let look = fastfile_iw7::look::look(technique_set);
     let mut draw = T6Draw::from_technique_set(technique_set, sort_key, None);
-    draw.layered = false;
-    draw.layers = [0, 0];
+    if model {
+        draw.layered = false;
+        draw.layers = [0, 0];
+    }
     draw.water = false;
     draw.flow = false;
     draw.tile = false;
@@ -151,8 +169,10 @@ struct Materials<'a> {
     /// (map material, as a model's) -> catalog material.
     linked: HashMap<(usize, bool), Option<usize>>,
     images: HashMap<String, Option<usize>>,
-    /// Material -> its colour map with opacity in alpha.
-    alpha_images: HashMap<usize, Option<usize>>,
+    /// (material, layer) -> that layer's colour map with opacity in alpha.
+    alpha_images: HashMap<(usize, usize), Option<usize>>,
+    /// Layered world materials drawn with their layers.
+    layered: usize,
     decoded: usize,
     with_alpha: usize,
     failures: Vec<String>,
@@ -275,13 +295,17 @@ impl Materials<'_> {
 
     /// A material's colour map as RGBA8 with its opacity in alpha
     /// (`Iw7Map::colour_rgba`), mipmapped.
-    fn image_with_alpha(&mut self, material: usize) -> Option<usize> {
-        if let Some(slot) = self.alpha_images.get(&material) {
+    fn image_with_alpha(&mut self, material: usize, layer: usize) -> Option<usize> {
+        if let Some(slot) = self.alpha_images.get(&(material, layer)) {
             return *slot;
         }
         let m = &self.map.materials[material];
-        let keep = m.texture("colorMap").is_some_and(fastfile_iw7::look::colour_alpha_is_opacity);
-        let slot = match self.map.colour_rgba(m, self.max, keep) {
+        // (A layer with no alpha map of its own and a packed colour map is
+        // opaque: its vertex weight alone blends it in. A layer's plain colour map, `signage_logo_corporate_05_c_white`,
+        // keeps its own alpha as its opacity, as the base's does.)
+        let slot_name = if layer == 0 { "colorMap".to_owned() } else { format!("colorMap{layer}") };
+        let keep = m.texture(&slot_name).is_some_and(fastfile_iw7::look::colour_alpha_is_opacity);
+        let slot = match self.map.layer_rgba(m, layer, self.max, keep) {
             Ok(rgba) => {
                 use bevy::asset::RenderAssetUsages;
                 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
@@ -307,7 +331,7 @@ impl Materials<'_> {
                 self.with_alpha += 1;
                 Some(self.catalog.link_image(AuthoredImage {
                     namespace: AssetNamespace::T6,
-                    name: AssetRef::Real(format!("iw7:{}#alpha#{}", m.name, self.max)),
+                    name: AssetRef::Real(format!("iw7:{}#alpha{layer}#{}", m.name, self.max)),
                     map_type: 0,
                     semantic: TS_COLOR_MAP,
                     category: 0,
@@ -332,7 +356,7 @@ impl Materials<'_> {
                 None
             }
         };
-        self.alpha_images.insert(material, slot);
+        self.alpha_images.insert((material, layer), slot);
         slot
     }
 
@@ -341,7 +365,7 @@ impl Materials<'_> {
             return m;
         }
         let m = &self.map.materials[index];
-        let draw = iw7_draw(&m.technique_set, m.sort_key, model);
+        let mut draw = iw7_draw(&m.technique_set, m.sort_key, model);
         let colour = m.texture("colorMap").map(str::to_owned);
         let mut textures = Vec::new();
         if let Some(name) = colour {
@@ -353,12 +377,16 @@ impl Materials<'_> {
             let has_alpha_map = m.textures.iter().any(|t| t.0 == fastfile_iw7::look::ALPHA_MAP_HASH);
             let wants_alpha = draw.alpha_test || matches!(draw.blend, T6Blend::Blend);
             // A lit material's shine (`fastfile_iw7::shine`): its colour
-            // without the metal's diffuse (opaque ones), normal and
-            // specular maps.
+            // without the metal's diffuse (opaque ones; tinted as below),
+            // normal and specular maps.
             let lit = self.shine_on && !draw.unlit && matches!(draw.blend, T6Blend::Opaque);
             let shine = if lit { self.shine(index, !draw.alpha_test) } else { [None; 3] };
+            // (A tinted material's colour, `colorTint`, is its own picture.)
+            let tinted = fastfile_iw7::look::tint(m, 0).is_some();
             let slot = if wants_alpha && (has_alpha_map || fastfile_iw7::look::colour_alpha_is_opacity(&name)) {
-                self.image_with_alpha(index).or_else(|| self.image(&name))
+                self.image_with_alpha(index, 0).or_else(|| self.image(&name))
+            } else if tinted && shine[0].is_none() {
+                self.image_with_alpha(index, 0).or_else(|| self.image(&name))
             } else {
                 shine[0].or_else(|| self.image(&name))
             };
@@ -385,6 +413,36 @@ impl Materials<'_> {
                 });
             }
         }
+        // A layered world material's layers: `colorMap1` and `colorMap2`
+        // (each with its alpha map's opacity) as BO2's layer pictures. A
+        // layer whose picture is not read is not drawn (the surface stays
+        // untinted by its weights all the same).
+        if draw.layered {
+            let mut drawn = false;
+            for (k, (hash, semantic)) in super::t6_materials::LAYER_MAPS.into_iter().enumerate() {
+                if draw.layers[k] == 0 {
+                    continue;
+                }
+                let slot = m.texture(&format!("colorMap{}", k + 1)).is_some().then(|| self.image_with_alpha(index, k + 1)).flatten();
+                match slot {
+                    Some(slot) => {
+                        drawn = true;
+                        let sampler = m.textures.iter().find(|t| t.0 == hash).map_or(0x13, |t| t.1);
+                        textures.push(MaterialTextureBinding {
+                            name_hash: hash,
+                            name_start: 0,
+                            name_end: 0,
+                            sampler_state: sampler,
+                            semantic,
+                            image: Some(slot),
+                        });
+                    }
+                    None => draw.layers[k] = 0,
+                }
+            }
+            self.layered += usize::from(drawn);
+        }
+        let m = &self.map.materials[index];
         let index_in_catalog = self.catalog.link_material(AuthoredMaterial {
             name: AssetRef::Real(format!("iw7:{}{}", m.name, if model { "#m" } else { "" })),
             namespace: AssetNamespace::T6,
@@ -587,6 +645,150 @@ fn vision_fog(text: &str) -> Option<super::cod4::LegacyFog> {
     })
 }
 
+/// IW7's world vertex colour (bytes R, G, B, A) as CoD4's D3DCOLOR (bytes
+/// B, G, R, A), which the IW3 world builder reads, opaque.
+///
+/// It is no tint: a single-layer surface's is white (every vertex of
+/// mp_riot's and mp_geneva's); a layered surface's holds its layers'
+/// weights, green layer 1 and blue layer 2, as Ghosts' and BO2's (red 255,
+/// alpha 0 on two-layer surfaces). Read as D3DCOLOR it was the tint that
+/// turned mp_riot's streets magenta and cyan; its alpha, no opacity, is
+/// made opaque.
+fn iw3_colour(rgba: u32) -> u32 {
+    let [r, g, b, _] = rgba.to_le_bytes();
+    u32::from_le_bytes([b, g, r, 0xff])
+}
+
+/// The light grid Black Ops II's rules light players, guns and other
+/// moving things by (`asset_world::T6LightSampler`); with none they took a
+/// flat 0.5 everywhere. IW7's own grid (its light probes) is not read; this
+/// one is made from the lightmaps, in Modern Warfare 2's layout
+/// (`asset_model::OwnedLightGrid`, the sampler's `row_rle`): a point every
+/// 32 x 32 x 64 units over the area of the spawn points and AI path nodes
+/// (`places`: a Zombies map's player starts and its nodes through every
+/// room) and `GRID_MARGIN` round it, from below the lowest to above the
+/// highest, each the light of
+/// the floor under it (`Iw7Map::light_volume`) plus the sun where the floor
+/// sees it, the same in every direction but a little brighter from above.
+/// Rows run along x, columns along y, every column one solid run of every
+/// height.
+fn light_grid(
+    map: &Iw7Map,
+    places: &[[f32; 3]],
+    pages: &[Option<fastfile_iw7::light::LightmapPage>],
+    sun_linear: [f32; 3],
+    fallback: Option<fastfile_iw7::light::LightSample>,
+) -> Result<(asset_model::OwnedLightGrid, String), String> {
+    const BIAS: f32 = 131_072.0;
+    const SPACING: [f32; 3] = [32.0, 32.0, 64.0];
+    const GRID_MARGIN: f32 = 1024.0;
+    const MAX_POINTS: usize = 6_000_000;
+    let spawns: Vec<[f32; 3]> = places.iter().copied().filter(|p| p.iter().all(|v| v.is_finite())).collect();
+    if spawns.is_empty() {
+        return Err("no spawn points or path nodes".to_owned());
+    }
+    // (The 1st to 99th percentile on each axis: a stray node far out does
+    // not stretch the grid.)
+    let bound = |k: usize, q: f32| {
+        let mut v: Vec<f32> = spawns.iter().map(|p| p[k]).collect();
+        v.sort_by(f32::total_cmp);
+        v[((v.len() - 1) as f32 * q).round() as usize]
+    };
+    let lo: [f32; 3] = std::array::from_fn(|k| bound(k, 0.01));
+    let hi: [f32; 3] = std::array::from_fn(|k| bound(k, 0.99));
+    let mut margin = GRID_MARGIN;
+    let (cmin, dims) = loop {
+        let wlo = [(lo[0] - margin).max(map.mins[0]), (lo[1] - margin).max(map.mins[1]), lo[2] - 192.0];
+        let whi = [(hi[0] + margin).min(map.maxs[0]), (hi[1] + margin).min(map.maxs[1]), hi[2] + 704.0];
+        let cmin: [i64; 3] = std::array::from_fn(|k| ((wlo[k] + BIAS) / SPACING[k]).floor() as i64);
+        let cmax: [i64; 3] = std::array::from_fn(|k| ((whi[k] + BIAS) / SPACING[k]).ceil() as i64);
+        let dims: [usize; 3] = std::array::from_fn(|k| (cmax[k] - cmin[k] + 1).max(1) as usize);
+        if dims[0] * dims[1] * dims[2] <= MAX_POINTS || margin <= 0.0 {
+            break (cmin, dims);
+        }
+        margin -= 256.0;
+    };
+    if cmin.iter().any(|&c| c < 0) || dims[2] > 255 || dims[0] > 0xffff || dims[1] > 0xffff || dims[0] * dims[1] * dims[2] > MAX_POINTS * 2 {
+        return Err(format!("grid {dims:?} out of range"));
+    }
+    let world0: [f32; 3] = std::array::from_fn(|k| cmin[k] as f32 * SPACING[k] - BIAS);
+    let volume = map.light_volume(pages, world0, std::array::from_fn(|k| world0[k] + (dims[k] - 1) as f32 * SPACING[k]), SPACING, 640.0);
+    // Light as the sampler decodes it: mean of the colours (0..1), squared,
+    // times 4 (`ForeignGridLight::scale` for 8-bit colours).
+    let encode = |l: f32| ((l.max(0.0) / 4.0).sqrt() * 255.0).round().clamp(0.0, 255.0) as u8;
+    let dirs = iw3::zone::LightGrid::directions();
+    let mut palette: HashMap<[u8; 4], u16> = HashMap::new();
+    let mut colors: Vec<u8> = Vec::new();
+    let mut entries: Vec<u8> = Vec::with_capacity(dims[0] * dims[1] * dims[2] * 4);
+    let (mut found, mut sunlit) = (0usize, 0usize);
+    for ix in 0..dims[0] {
+        for iy in 0..dims[1] {
+            for iz in 0..dims[2] {
+                let sample = volume.at(ix, iy, iz);
+                found += usize::from(sample.is_some());
+                let l = sample.or(fallback).map_or([0.5; 3], |s| {
+                    let a = s.ambient_linear();
+                    // (Half the sun: a body faces it on one side.)
+                    std::array::from_fn(|k| a[k] + sun_linear[k] * s.sun * 0.5)
+                });
+                let sun = sample.is_some_and(|s| s.sun > 0.5);
+                sunlit += usize::from(sun);
+                // Quantised to 6 bits a channel for the palette.
+                let key = [encode(l[0]) & 0xfc, encode(l[1]) & 0xfc, encode(l[2]) & 0xfc, 0];
+                let next = palette.len();
+                let index = match palette.get(&key) {
+                    Some(&i) => i,
+                    None if next < 0xffff => {
+                        palette.insert(key, next as u16);
+                        for d in &dirs {
+                            let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(1e-6);
+                            // (A quarter brighter from above, as much darker
+                            // from below: the mean is the floor's light.)
+                            let up = 1.0 + 0.25 * (d[2] / n);
+                            colors.extend((0..3).map(|k| encode(l[k] * up)));
+                        }
+                        next as u16
+                    }
+                    None => 0,
+                };
+                entries.extend_from_slice(&index.to_le_bytes());
+                entries.push(if sun { SUN_LIGHT_ROW as u8 } else { 0 });
+                entries.push(0);
+            }
+        }
+    }
+    // The rows (`lighting_iw4::grid_build`: every column one run of every
+    // height, the entries in the order made above).
+    let (cols, heights) = (dims[1] as u16, dims[2] as u16);
+    let row_len = lighting_iw4::grid_build::full_box_row_len(cols);
+    let mut row_data_start = Vec::with_capacity(dims[0] * 2);
+    let mut raw_row_data = vec![0u8; dims[0] * row_len];
+    for ix in 0..dims[0] {
+        let at = u16::try_from(ix * row_len / 4).map_err(|_| "row data too large".to_owned())?;
+        row_data_start.extend_from_slice(&at.to_le_bytes());
+        if lighting_iw4::grid_build::full_box_row(ix, cmin[1] as u16, cols, cmin[2] as u16, heights, &mut raw_row_data[ix * row_len..]) == 0 {
+            return Err(format!("row {ix} of {dims:?} does not fit"));
+        }
+    }
+    let to16 = |c: i64| c as u16;
+    let grid = asset_model::OwnedLightGrid {
+        mins: [to16(cmin[0]), to16(cmin[1]), to16(cmin[2])],
+        maxs: std::array::from_fn(|k| to16(cmin[k] + dims[k] as i64 - 1)),
+        row_axis: 0,
+        col_axis: 1,
+        color_count: palette.len() as u32,
+        has_light_regions: false,
+        sun_primary_light_index: SUN_LIGHT_ROW as u32,
+        row_data_start,
+        raw_row_data,
+        entries,
+        colors,
+        color_encoding: asset_model::LightGridColorEncoding::Rgb8,
+    };
+    let total = dims[0] * dims[1] * dims[2];
+    Ok((grid, format!("{dims:?} = {total} points from {world0:?}, {found} over a lit floor ({sunlit} in the sun), {} colours", palette.len())))
+}
+
 /// The largest lightmap page width kept (`BO2MP_IW7_LIGHTMAP=<px>`): IW7's
 /// pages are 4096 wide; the fallback draw's page is three times the page's
 /// texels in RGBA8, 25 MB at 2048.
@@ -610,10 +812,7 @@ fn iw3_world(map: &Iw7Map, sun: ([f32; 3], [f32; 3], f32, &'static str)) -> iw3:
             .map(|v| iw3::zone::WorldVertex {
                 xyz: v.xyz,
                 binormal_sign: v.binormal_sign,
-                // IW7's world vertex colour is no tint (layer weights and
-                // the like: it turned mp_riot's streets magenta and cyan,
-                // mp_geneva's blue); white, its alpha kept.
-                color: v.color | 0x00ff_ffff,
+                color: iw3_colour(v.color),
                 tex_coord: v.uv,
                 lmap_coord: v.lmap_uv,
                 normal: iw3_unit_vec(v.normal),
@@ -685,13 +884,43 @@ fn spawns_of(entities: &[iw3::ents::Entity]) -> Vec<asset_world::SpawnPoint> {
         .collect()
 }
 
+/// The pictures and materials IW7's map zones name but do not hold (the
+/// common zones' and `global_core_mp`'s: `fastfile_iw7::shared`), read once
+/// per folder (a few seconds; image records, small inline pictures and
+/// material texture lists kept, streamed pictures read from the paks when a
+/// map wants them), as Ghosts' `iw6_map::shared_images`.
+fn shared_zones(dir: &Path) -> Option<Arc<fastfile_iw7::shared::SharedZones>> {
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<std::path::PathBuf, Arc<fastfile_iw7::shared::SharedZones>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(hit) = cache.lock().ok()?.get(dir) {
+        return Some(hit.clone());
+    }
+    let zones = fastfile_iw7::shared::common_zones(dir);
+    let read = std::panic::catch_unwind(|| fastfile_iw7::shared::SharedZones::read(&zones));
+    let shared = match read {
+        Ok(s) => Arc::new(s),
+        Err(_) => {
+            diag::warn!(World, "bo2mp iw7: reading the common zones in {} panicked", dir.display());
+            return None;
+        }
+    };
+    diag::info!(World, "bo2mp iw7: common zones: {:?}", shared.zones);
+    cache.lock().ok()?.insert(dir.to_path_buf(), shared.clone());
+    Some(shared)
+}
+
 /// Loads an Infinite Warfare map zone into the match's world. A zone that
 /// cannot be read becomes a gap with the reason, never a crash.
 pub(crate) fn load_iw7_world(path: &Path, progress: &LoadProgress, material_seed: MaterialCatalog) -> LoadedWorld {
     let mut report = vec![format!("game: IW7 / Infinite Warfare ({})", path.display())];
     let stage = progress.begin_scoped(StageId::MapAssets, "infinite warfare zone", None);
     let started = std::time::Instant::now();
-    let read = std::panic::catch_unwind(|| Iw7Map::load(&MapSources::beside(path)));
+    let read = std::panic::catch_unwind(|| {
+        let mut src = MapSources::beside(path);
+        src.shared = path.parent().and_then(shared_zones);
+        Iw7Map::load(&src)
+    });
     let map = match read {
         Ok(Ok(map)) => {
             stage.done();
@@ -742,9 +971,9 @@ pub(crate) fn load_iw7_world(path: &Path, progress: &LoadProgress, material_seed
 /// of its bounds for the entity that names it, and each trigger model
 /// (`?1`...: a Zombies area, a buy trigger) its hulls. Also the triangles,
 /// for the Zombies maps' walk graph.
-fn collision_of(map: &Iw7Map, hidden: &[bool]) -> (asset_world::ClipCollision, Vec<asset_world::world_iw7::SoupTri>) {
+fn collision_of(map: &Iw7Map, hidden: &[bool]) -> (asset_world::ClipCollision, Vec<asset_world::world_iw7::SoupTri>, usize) {
     use asset_world::world_iw7::build_soup_clip_collision;
-    let tris = collision_tris(map, hidden);
+    let (tris, cleared) = collision_tris(map, hidden);
     let cmodels: Vec<asset_world::world_iw7::SoupCmodel> = map
         .brush_models
         .iter()
@@ -760,7 +989,7 @@ fn collision_of(map: &Iw7Map, hidden: &[bool]) -> (asset_world::ClipCollision, V
         .iter()
         .map(|hulls| hulls.iter().map(|&(mid, half)| asset_world::MapTriggerHull { mid, half, slabs: Vec::new() }).collect())
         .collect();
-    (clip, tris)
+    (clip, tris, cleared)
 }
 
 /// Whether a world surface of this material collides: opaque and
@@ -780,11 +1009,57 @@ fn collides(m: &fastfile_iw7::map::MapMaterial) -> bool {
     }
 }
 
-fn collision_tris(map: &Iw7Map, hidden: &[bool]) -> Vec<asset_world::world_iw7::SoupTri> {
+/// Whether a triangle overlaps a box (`mid`, `half`): the separating axis
+/// test (the box's axes, the triangle's normal, their edges' crossings).
+fn tri_overlaps_box(t: &[[f32; 3]; 3], mid: [f32; 3], half: [f32; 3]) -> bool {
+    let v: [[f32; 3]; 3] = std::array::from_fn(|i| std::array::from_fn(|k| t[i][k] - mid[k]));
+    let sub = |a: [f32; 3], b: [f32; 3]| -> [f32; 3] { std::array::from_fn(|k| a[k] - b[k]) };
+    let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let separated = |axis: [f32; 3]| {
+        let p = v.map(|q| dot(q, axis));
+        let r = half[0] * axis[0].abs() + half[1] * axis[1].abs() + half[2] * axis[2].abs();
+        p.iter().copied().fold(f32::MAX, f32::min) > r || p.iter().copied().fold(f32::MIN, f32::max) < -r
+    };
+    let edges = [sub(v[1], v[0]), sub(v[2], v[1]), sub(v[0], v[2])];
+    let units = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    if units.iter().any(|&u| separated(u)) || separated(cross(edges[0], edges[1])) {
+        return false;
+    }
+    !edges.iter().any(|&e| units.iter().any(|&u| {
+        let axis = cross(e, u);
+        dot(axis, axis) > 1e-12 && separated(axis)
+    }))
+}
+
+fn collision_tris(map: &Iw7Map, hidden: &[bool]) -> (Vec<asset_world::world_iw7::SoupTri>, usize) {
     use asset_world::world_iw7::{IW7_SOLID, SoupTri};
+    // A spawn point's player box (lifted off its floor): a placed model's
+    // triangle in it is left out of the collision, or the player spawned
+    // stuck (50 of mp_fallen's 377 spawns stood in a prop's collision).
+    const SPAWN_HALF: [f32; 3] = [16.0, 16.0, 33.0];
+    const CELL: f32 = 256.0;
+    let cell = |x: f32, y: f32| ((x / CELL).floor() as i32, (y / CELL).floor() as i32);
+    let mut spawn_cells: HashMap<(i32, i32), Vec<[f32; 3]>> = HashMap::new();
+    for sp in &map.spawns {
+        let mid = [sp.origin[0], sp.origin[1], sp.origin[2] + 4.0 + SPAWN_HALF[2]];
+        spawn_cells.entry(cell(mid[0], mid[1])).or_default().push(mid);
+    }
+    let in_a_spawn = |t: &[[f32; 3]; 3]| {
+        let lo = [0, 1].map(|k| t.iter().map(|p| p[k]).fold(f32::MAX, f32::min) - SPAWN_HALF[k]);
+        let hi = [0, 1].map(|k| t.iter().map(|p| p[k]).fold(f32::MIN, f32::max) + SPAWN_HALF[k]);
+        let (c0, c1) = (cell(lo[0], lo[1]), cell(hi[0], hi[1]));
+        if (c1.0 - c0.0 + 1) * (c1.1 - c0.1 + 1) > 64 {
+            // (A huge triangle: tested against every spawn.)
+            return spawn_cells.values().flatten().any(|&mid| tri_overlaps_box(t, mid, SPAWN_HALF));
+        }
+        (c0.0..=c1.0).any(|cx| (c0.1..=c1.1).any(|cy| spawn_cells.get(&(cx, cy)).is_some_and(|list| list.iter().any(|&mid| tri_overlaps_box(t, mid, SPAWN_HALF)))))
+    };
+    let mut cleared = 0usize;
     let mut tris = Vec::new();
     for (i, s) in map.surfaces.iter().enumerate() {
-        if hidden.get(i).copied().unwrap_or(false) {
+        // (A brush model collides as its entity's box brush instead.)
+        if hidden.get(i).copied().unwrap_or(false) || s.brush_model != 0 {
             continue;
         }
         if let Some(m) = s.material
@@ -819,11 +1094,16 @@ fn collision_tris(map: &Iw7Map, hidden: &[bool]) -> Vec<asset_world::world_iw7::
                 let (Some(a), Some(b), Some(c)) = (s.verts.get(usize::from(t[0])), s.verts.get(usize::from(t[1])), s.verts.get(usize::from(t[2]))) else {
                     continue;
                 };
-                tris.push(SoupTri { p: [place(a), place(b), place(c)], surface_flags: 0, contents: IW7_SOLID });
+                let p = [place(a), place(b), place(c)];
+                if in_a_spawn(&p) {
+                    cleared += 1;
+                    continue;
+                }
+                tris.push(SoupTri { p, surface_flags: 0, contents: IW7_SOLID });
             }
         }
     }
-    tris
+    (tris, cleared)
 }
 
 fn build_iw7_world(
@@ -844,6 +1124,13 @@ fn build_iw7_world(
     let mut hidden = vec![false; map.surfaces.len()];
     let mut hidden_kinds: HashMap<&'static str, usize> = HashMap::new();
     for (i, s) in map.surfaces.iter().enumerate() {
+        // A brush model's surface its entity does not show as the map
+        // starts (`Iw7Map::place_brush_models`).
+        if s.hidden_brush {
+            hidden[i] = true;
+            *hidden_kinds.entry("brush model not shown").or_default() += 1;
+            continue;
+        }
         if let Some(kind) = s.material.and_then(|m| hidden_kind(&map.materials[m].technique_set)) {
             hidden[i] = true;
             *hidden_kinds.entry(kind).or_default() += 1;
@@ -852,10 +1139,10 @@ fn build_iw7_world(
 
     // Collision.
     let stage = progress.begin_scoped(StageId::MapAssets, "infinite warfare collision", None);
-    let (collision, soup) = collision_of(map, &hidden);
+    let (collision, soup, cleared) = collision_of(map, &hidden);
     let census = asset_world::world_iw3::spawn_ground_census(&collision, &map.spawns.iter().map(|s| s.origin).collect::<Vec<_>>());
     report.push(format!(
-        "iw7 clip: {} triangles ({} vertices, {} partitions) from the drawn world and placed models; {census}",
+        "iw7 clip: {} triangles ({} vertices, {} partitions) from the drawn world and placed models ({cleared} props' triangles in spawn points' player boxes left out); {census}",
         collision.mesh.tri_count(),
         collision.mesh.verts.len(),
         collision.mesh.partitions.len()
@@ -911,6 +1198,7 @@ fn build_iw7_world(
         linked: HashMap::new(),
         images: HashMap::new(),
         alpha_images: HashMap::new(),
+        layered: 0,
         decoded: 0,
         with_alpha: 0,
         failures: Vec::new(),
@@ -988,8 +1276,18 @@ fn build_iw7_world(
         lightmaps.len(),
         if lightmap_gaps.is_empty() { String::new() } else { format!(" ({})", lightmap_gaps.join("; ")) }
     ));
-    let origins: Vec<[f32; 3]> = map.static_models.iter().map(|s| s.lighting_origin).collect();
-    let ground = map.ground_light(&pages, &origins, 4096.0);
+    let ground = map.static_model_light(&pages);
+    // (A model with no floor found takes the middle light of those that
+    // found one, not a flat grey.)
+    let fallback_light = {
+        let mut lit: Vec<fastfile_iw7::light::LightSample> = ground.iter().flatten().copied().collect();
+        let lum = |l: &fastfile_iw7::light::LightSample| {
+            let a = l.ambient_linear();
+            0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2]
+        };
+        lit.sort_by(|a, b| lum(a).total_cmp(&lum(b)));
+        lit.get(lit.len() / 2).copied()
+    };
     // (The pages' exposure: the sun is brought into the same units.)
     let exposure = pages.iter().flatten().next().map(|p| p.exposure);
     report.push(format!(
@@ -1001,6 +1299,21 @@ fn build_iw7_world(
             .collect::<Vec<_>>()
             .join(", ")
     ));
+    // The light grid for players and other moving things, in the sun's
+    // units (`sun_of`: gamma; linear is its square).
+    let sun = sun_of(map, &entities, exposure);
+    let sun_linear: [f32; 3] = std::array::from_fn(|k| (sun.1[k] * sun.2).powi(2));
+    let places: Vec<[f32; 3]> = spawns.iter().map(|s| s.origin).chain(map.path_nodes.iter().map(|n| n.origin)).collect();
+    let light_grid = match light_grid(map, &places, &pages, sun_linear, fallback_light) {
+        Ok((grid, line)) => {
+            report.push(format!("iw7 light grid: {line}"));
+            Some(grid)
+        }
+        Err(e) => {
+            report.push(format!("iw7 light grid: none ({e}): moving things take a flat light"));
+            None
+        }
+    };
     drop(pages);
     stage_light.done();
 
@@ -1090,9 +1403,8 @@ fn build_iw7_world(
                 // light grid's sqrt(light / 32)) and the sun (primary light
                 // 1, `SUN_LIGHT_ROW`) by the floor's sun visibility; with no
                 // lit floor below, a neutral light and half the sun.
-                packed_lighting: Some(match ground.get(i).copied().flatten() {
+                packed_lighting: Some(match ground.get(i).copied().flatten().inspect(|_| lit += 1).or(fallback_light) {
                     Some(g) => {
-                        lit += 1;
                         let a = g.ambient_linear();
                         let p = |v: f32| ((v.max(0.0) / 32.0).sqrt() * 255.0).round().clamp(1.0, 255.0) as u8;
                         [p(a[0]), p(a[1]), p(a[2]), 0]
@@ -1101,12 +1413,12 @@ fn build_iw7_world(
                 }),
                 t6_primary: [
                     SUN_LIGHT_ROW as u8,
-                    ground.get(i).copied().flatten().map_or(128, |g| (g.sun * 255.0).round() as u8),
+                    ground.get(i).copied().flatten().or(fallback_light).map_or(128, |g| (g.sun * 255.0).round() as u8),
                 ],
             }));
         }
         report.push(format!(
-            "iw7 static models: {} placed of {}, {} distinct models built, {lit} lit by the floor under them",
+            "iw7 static models: {} placed of {}, {} distinct models built, {lit} lit by the floor under and around them (the rest by the median of those)",
             placements.iter().filter(|p| p.is_some()).count(),
             map.static_models.len(),
             meshes.len()
@@ -1114,8 +1426,10 @@ fn build_iw7_world(
         (meshes, placements)
     };
     report.push(format!(
-        "iw7 materials: {} linked, {} colour maps decoded ({} with their alpha maps, at most {}px), {} failed{}; not drawn: {hidden_kinds:?}",
+        "iw7 materials: {} linked ({} layered drawn with their layers, {} from the common zones), {} colour maps decoded ({} with their alpha maps, at most {}px), {} failed{}; not drawn: {hidden_kinds:?}",
         b.linked.len(),
+        b.layered,
+        map.shared_materials,
         b.decoded,
         b.with_alpha,
         b.max,
@@ -1138,7 +1452,6 @@ fn build_iw7_world(
     };
     stage.done();
 
-    let sun = sun_of(map, &entities, exposure);
     let iw3w = iw3_world(map, sun);
     let (pitch, yaw) = (sun.0[0].to_radians(), sun.0[1].to_radians());
     let dir = [pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), -pitch.sin()];
@@ -1191,6 +1504,7 @@ fn build_iw7_world(
                     policy: WorldDrawPolicy::t5(),
                     static_model_meshes: prop_meshes,
                     static_model_instances: prop_placements,
+                    light_grid,
                     ..Default::default()
                 },
                 materials,
@@ -1221,6 +1535,20 @@ fn build_iw7_world(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn triangles_in_a_box() {
+        let mid = [0.0, 0.0, 37.0];
+        let half = [16.0, 16.0, 33.0];
+        // Through the box, beside it, under its floor, a big one across it.
+        assert!(super::tri_overlaps_box(&[[-50.0, 0.0, 30.0], [50.0, 0.0, 30.0], [0.0, 0.0, 60.0]], mid, half));
+        assert!(!super::tri_overlaps_box(&[[20.0, 20.0, 30.0], [60.0, 20.0, 30.0], [20.0, 60.0, 30.0]], mid, half));
+        assert!(!super::tri_overlaps_box(&[[-500.0, -500.0, 0.0], [500.0, -500.0, 0.0], [0.0, 500.0, 0.0]], mid, half));
+        assert!(super::tri_overlaps_box(&[[-500.0, -500.0, 40.0], [500.0, -500.0, 40.0], [0.0, 500.0, 40.0]], mid, half));
+        // Diagonal past a corner.
+        assert!(!super::tri_overlaps_box(&[[45.0, -5.0, 0.0], [-5.0, 45.0, 0.0], [45.0, -5.0, 80.0]], mid, half));
+        assert!(super::tri_overlaps_box(&[[30.0, -10.0, 0.0], [-10.0, 30.0, 0.0], [30.0, -10.0, 80.0]], mid, half));
+    }
+
     #[test]
     fn unit_vectors_pack_for_bo2() {
         let v = [0.6, 0.0, -0.8];

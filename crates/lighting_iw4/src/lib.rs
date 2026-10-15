@@ -9,6 +9,7 @@ mod entry;
 mod expand;
 mod fragment;
 mod glow;
+pub mod grid_build;
 mod isvalid;
 mod light_probe;
 mod lit_tech;

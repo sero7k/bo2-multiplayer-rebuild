@@ -70,7 +70,9 @@ pub fn look(technique_set: &str) -> Look {
     } else {
         Blend::Opaque
     };
-    let decal = has("ndw") && blend != Blend::Opaque;
+    // (A `wc_` set is a world decal whatever its blend: mp_riot's
+    // alpha-tested `wc_l_sm_flag_atest_*` grime and flags lie on the walls.)
+    let decal = (has("ndw") && blend != Blend::Opaque) || words.first() == Some(&"wc");
     Look { hidden, blend, alpha_test: alpha_test && blend == Blend::Opaque, unlit, decal }
 }
 
@@ -106,21 +108,48 @@ impl Iw7Map {
     /// its alpha map when it has one (else the colour map's own when
     /// `keep_alpha`, else opaque), with a full mip chain.
     pub fn colour_rgba(&self, m: &MapMaterial, max_dim: u32, keep_alpha: bool) -> Result<Rgba, String> {
-        let name = m.texture("colorMap").ok_or("no colour map")?;
+        self.layer_rgba(m, 0, max_dim, keep_alpha)
+    }
+
+    /// A layer's colour map (`colorMap`, `colorMap1`, `colorMap2`) as RGBA8
+    /// with its opacity from the layer's alpha map (`layer_alpha_hash`), as
+    /// `colour_rgba` does for the base.
+    pub fn layer_rgba(&self, m: &MapMaterial, layer: usize, max_dim: u32, keep_alpha: bool) -> Result<Rgba, String> {
+        let slot = if layer == 0 { "colorMap".to_owned() } else { format!("colorMap{layer}") };
+        let name = m.texture(&slot).ok_or_else(|| format!("no {slot}"))?;
         let levels = self.image(name, max_dim)?;
         let (w, h, mut px) = crate::texture::level_rgba(&levels, 0).ok_or_else(|| format!("{name}: format {} not decoded", levels.format))?;
-        let alpha_map = m.textures.iter().find(|t| t.0 == ALPHA_MAP_HASH).map(|t| t.3.clone());
+        let alpha_hash = layer_alpha_hash(layer);
+        let alpha_map = m.textures.iter().find(|t| t.0 == alpha_hash).map(|t| t.3.clone());
         match alpha_map.as_deref().map(|a| (a, self.image(a, max_dim))) {
             Some((a, Ok(al))) => {
                 let (aw, ah, apx) = crate::texture::level_rgba(&al, 0).ok_or_else(|| format!("{a}: format {} not decoded", al.format))?;
                 // A one-channel picture decodes as grey (BC4, R8) or white
                 // with alpha (A8): take the red unless only alpha varies.
                 let use_alpha = al.format == 65;
+                // A revealed layer (`v<k>` in its technique set's layer
+                // word, its map a `*_packed_r` height): it shows where the
+                // height clears the threshold (`revealParams`: softness,
+                // threshold), not in proportion to it (mp_riot's street
+                // debris covered the road as a white sheet).
+                let reveal = layer > 0 && reveals(&m.technique_set, layer) && a.ends_with("_packed_r");
+                let (soft, threshold) = m
+                    .constants
+                    .iter()
+                    .find(|c| c.0 == "revealParams")
+                    .map_or((0.1, 0.5), |c| (c.1[0].clamp(0.01, 1.0), c.1[1].clamp(0.0, 1.0)));
+                let curve: [u8; 256] = std::array::from_fn(|v| {
+                    if !reveal {
+                        return v as u8;
+                    }
+                    let t = ((v as f32 / 255.0 - (threshold - soft)) / (2.0 * soft)).clamp(0.0, 1.0);
+                    ((t * t * (3.0 - 2.0 * t)) * 255.0).round() as u8
+                });
                 for y in 0..h {
                     for x in 0..w {
                         let (sx, sy) = ((x * aw / w).min(aw - 1), (y * ah / h).min(ah - 1));
                         let s = ((sy * aw + sx) * 4) as usize;
-                        px[((y * w + x) * 4 + 3) as usize] = if use_alpha { apx[s + 3] } else { apx[s] };
+                        px[((y * w + x) * 4 + 3) as usize] = curve[usize::from(if use_alpha { apx[s + 3] } else { apx[s] })];
                     }
                 }
             }
@@ -132,6 +161,11 @@ impl Iw7Map {
             }
             None => {}
         }
+        // The layer's tint (`colorTint`, `colorTint1`...: mp_proto's red
+        // hull plates are a grey picture tinted red), in linear light.
+        if let Some(t) = tint(m, layer) {
+            apply_tint(&mut px, t);
+        }
         let mut out = Rgba { width: w, height: h, levels: vec![px] };
         let (mut lw, mut lh) = (w, h);
         while lw > 1 || lh > 1 {
@@ -141,6 +175,60 @@ impl Iw7Map {
         }
         Ok(out)
     }
+}
+
+/// The texture slot of layer `k`'s alpha map: the base's slot name with the
+/// layer's digit (`ALPHA_MAP_HASH` for the base, 0x4ab0fd05 for layer 1,
+/// as mp_riot's two-layer walls name their crack decals' alpha).
+pub fn layer_alpha_hash(layer: usize) -> u32 {
+    if layer == 0 {
+        return ALPHA_MAP_HASH;
+    }
+    let digit = b'0' + (layer as u8 % 10);
+    u32::from(digit | 0x20) ^ ALPHA_MAP_HASH.wrapping_mul(33)
+}
+
+/// Whether layer `k`'s word in a technique set (`b2c2s2ol2nl2v2p2`) names
+/// a reveal map (`v2`).
+pub fn reveals(technique_set: &str, layer: usize) -> bool {
+    let digit = char::from(b'0' + (layer as u8 % 10));
+    technique_set.split('_').any(|w| {
+        let b = w.as_bytes();
+        b.len() >= 3 && b[1] == digit as u8 && b[2] == b'c' && matches!(b[0], b'b' | b'm' | b't' | b'a') && w.contains(&format!("v{digit}"))
+    })
+}
+
+/// A layer's tint (`colorTint` for the base, `colorTint<k>` for layer k),
+/// when it is not white.
+pub fn tint(m: &MapMaterial, layer: usize) -> Option<[f32; 3]> {
+    let name = if layer == 0 { "colorTint".to_owned() } else { format!("colorTint{layer}") };
+    let t = m.constants.iter().find(|c| c.0 == name)?.1;
+    (t[..3].iter().all(|v| v.is_finite()) && t[..3].iter().any(|v| (v - 1.0).abs() > 0.01)).then(|| [t[0], t[1], t[2]])
+}
+
+/// RGBA8 pixels (sRGB colour) times a linear tint.
+pub fn apply_tint(px: &mut [u8], t: [f32; 3]) {
+    let lut: Vec<[u8; 256]> = (0..3)
+        .map(|c| {
+            std::array::from_fn(|v| {
+                let lin = srgb_to_linear(v as f32 / 255.0) * t[c].max(0.0);
+                (linear_to_srgb(lin).clamp(0.0, 1.0) * 255.0).round() as u8
+            })
+        })
+        .collect();
+    for p in px.chunks_exact_mut(4) {
+        for c in 0..3 {
+            p[c] = lut[c][usize::from(p[c])];
+        }
+    }
+}
+
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+}
+
+fn linear_to_srgb(c: f32) -> f32 {
+    if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
 }
 
 /// Whether a colour map's alpha is its own opacity: a plain `_c` picture,
@@ -163,8 +251,14 @@ mod tests {
         assert_eq!(look("w_unlit_add_lin_ct_ndw").blend, Blend::Add);
         assert!(look("w_unlit_add_lin_ct_ndw").unlit);
         assert_eq!(look("w_sky").hidden, Some("sky"));
+        assert!(look("wc_l_sm_flag_atest_i0c0s0n0a0t0pa0_ssvsc_trans").decal);
+        assert!(!look("w_l_sm_replace_i0c0s0n0p0").decal);
+        assert!(reveals("w_l_sm_replace_r0c0s0o0nl0p0_b1cx1_b2c2s2ol2nl2v2p2", 2));
+        assert!(!reveals("w_l_sm_replace_r0c0s0o0nl0p0_b1cx1_b2c2s2ol2nl2v2p2", 1));
         assert_eq!(look("wc_distortion_scale_ua").hidden, Some("distortion"));
         assert_eq!(look("w_unlit_multiply_lin_ndw").blend, Blend::Multiply);
         assert_eq!(crate::texture::name_hash("colorMap"), 0xa0ab_1041);
+        assert_eq!(layer_alpha_hash(1), 0x4ab0_fd05);
+        assert_eq!(layer_alpha_hash(0), ALPHA_MAP_HASH);
     }
 }

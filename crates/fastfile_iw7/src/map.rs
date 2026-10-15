@@ -76,6 +76,11 @@ pub struct WorldSurface {
     pub flags: u8,
     pub mins: [f32; 3],
     pub maxs: [f32; 3],
+    /// The brush model (`*<n>`) the surface is part of; 0 the world's own.
+    pub brush_model: u32,
+    /// A brush model's surface not shown as the map starts (see
+    /// `Iw7Map::place_brush_models`): not drawn and not collided with.
+    pub hidden_brush: bool,
 }
 
 /// A material: its technique set's name, sort key and textures by sampler
@@ -199,6 +204,9 @@ pub struct MapSources {
     /// cluster grenades and debris are `common_core_mp`'s), each with its
     /// material zone; read only when a placed model is missing.
     pub model_zones: Vec<(PathBuf, Option<PathBuf>)>,
+    /// The common zones' pictures and materials (`crate::shared`), for
+    /// those the map names but does not hold; read once by the caller.
+    pub shared: Option<std::sync::Arc<crate::shared::SharedZones>>,
 }
 
 impl MapSources {
@@ -217,7 +225,15 @@ impl MapSources {
             .map(|z| (dir.join(format!("{z}.ff")), Some(dir.join(format!("techsets_{z}.ff"))).filter(|p| p.is_file())))
             .filter(|(p, _)| p.is_file())
             .collect();
-        Self { zone: zone.to_owned(), techsets, pak_dir: dir, shared_ranges: None, extra_zones: Vec::new(), model_zones }
+        Self { zone: zone.to_owned(), techsets, pak_dir: dir, shared_ranges: None, extra_zones: Vec::new(), model_zones, shared: None }
+    }
+
+    /// With the common zones beside the map read for the pictures and
+    /// materials it names but does not hold (`crate::shared`).
+    pub fn with_common(mut self) -> Self {
+        let zones = crate::shared::common_zones(&self.pak_dir);
+        self.shared = Some(std::sync::Arc::new(crate::shared::SharedZones::read(&zones)));
+        self
     }
 }
 
@@ -261,8 +277,11 @@ pub struct Iw7Map {
     pub maxs: [f32; 3],
     /// What was read and what was missing, line by line.
     pub report: Vec<String>,
+    /// Materials taken from the common zones (`MapSources::shared`).
+    pub shared_materials: usize,
     images: HashMap<String, ImageSource>,
     pak_dir: PathBuf,
+    shared: Option<std::sync::Arc<crate::shared::SharedZones>>,
 }
 
 /// Where an image's pixels are.
@@ -330,6 +349,7 @@ impl Iw7Map {
         let mut out = Iw7Map {
             name: src.zone.file_stem().map(|s| s.to_string_lossy().trim_start_matches("iw7_").to_owned()).unwrap_or_default(),
             pak_dir: src.pak_dir.clone(),
+            shared: src.shared.clone(),
             ..Default::default()
         };
         // Materials: the map's material zone, then the map and extra zones.
@@ -410,6 +430,13 @@ impl Iw7Map {
             if let Some(i) = material_index.get(&name) {
                 return *i;
             }
+            let shared = out.shared.clone();
+            let from_shared = |out: &mut Iw7Map| -> Option<usize> {
+                let m = shared.as_ref()?.material(&name)?;
+                out.materials.push(m.clone());
+                out.shared_materials += 1;
+                Some(out.materials.len() - 1)
+            };
             let found = material_defs.get(&name).map(|&(z, i)| {
                 let w = all[z];
                 let m = &w.cap.materials[i];
@@ -427,6 +454,7 @@ impl Iw7Map {
                 });
                 out.materials.len() - 1
             });
+            let found = found.or_else(|| from_shared(out));
             if found.is_none() && missing_materials.len() < 12 {
                 missing_materials.push(name.clone());
             }
@@ -499,6 +527,8 @@ impl Iw7Map {
                     flags: s[S::flags],
                     mins: bounds.map_or([0.0; 3], |b| b.0),
                     maxs: bounds.map_or([0.0; 3], |b| b.1),
+                    brush_model: 0,
+                    hidden_brush: false,
                 });
             }
         }
@@ -568,6 +598,10 @@ impl Iw7Map {
         let mut model_index: HashMap<String, Option<usize>> = HashMap::new();
         let mut no_mesh = Vec::new();
         let mut from_model_zones = 0usize;
+        // A model placed twice exactly in one place (mp_riot has 45, mp_proto
+        // 39): drawn once (twice, its faces flickered through each other).
+        let mut placed_at: std::collections::HashSet<(usize, [i64; 12])> = std::collections::HashSet::new();
+        let mut doubled = 0usize;
         if let Some(at) = g.smodels {
             use L::GfxStaticModelDrawInst as D;
             for i in 0..g.smodel_count as usize {
@@ -658,6 +692,12 @@ impl Iw7Map {
                     .map(|at| v3(image, at + L::GfxStaticModelInst::SIZE * i + L::GfxStaticModelInst::lightingOrigin))
                     .filter(|p| p.iter().all(|c| c.is_finite()))
                     .unwrap_or(origin);
+                let q = |v: f32| (v * 64.0).round() as i64;
+                let key: [i64; 12] = std::array::from_fn(|k| if k < 3 { q(origin[k]) } else if k < 12 { q(axis[(k - 3) / 3][(k - 3) % 3] * 64.0) } else { 0 });
+                if !placed_at.insert((model, key)) {
+                    doubled += 1;
+                    continue;
+                }
                 out.static_models.push(StaticModel {
                     model,
                     origin,
@@ -682,6 +722,9 @@ impl Iw7Map {
             out.models.len(),
             if no_mesh.is_empty() { String::new() } else { format!("; no mesh for {}", no_mesh.join(", ")) },
         ));
+        if doubled > 0 {
+            out.report.push(format!("{doubled} placements left out: the same model again exactly where it already stands"));
+        }
         if from_model_zones > 0 {
             out.report.push(format!("{from_model_zones} placed models' meshes from {} model zones", model_zones.len()));
         }
@@ -781,6 +824,7 @@ impl Iw7Map {
                 });
             }
         }
+        out.place_brush_models();
         if let Some(p) = map.cap.path_datas.first()
             && let Some(nodes) = p.nodes
         {
@@ -813,6 +857,9 @@ impl Iw7Map {
             out.path_nodes.len(),
             out.path_nodes.iter().map(|n| n.links.len()).sum::<usize>()
         ));
+        if let Some(sh) = &out.shared {
+            out.report.push(format!("common zones: {} materials taken from {:?}", out.shared_materials, sh.zones));
+        }
         if out.name.starts_with("cp_") {
             let layout = crate::zombies::ZmLayout::read(&out);
             out.report.push(format!("zombies layout: {}", layout.summary()));
@@ -820,10 +867,112 @@ impl Iw7Map {
         Ok(out)
     }
 
+    /// The brush models (`*<n>`, n > 0) the map's `script_brushmodel`
+    /// entities show as it starts, moved into place.
+    ///
+    /// IW7 stores a brush model's surfaces about its own origin, in the
+    /// world's surface list after the world's own (mp_riot's Geneva signs
+    /// `window_decals`, its hardpoint grids; mp_flip's doors): drawn as they
+    /// are, they stood at the world's origin. Those placed as the map starts
+    /// are moved to their entity's origin and angles; the rest are left out
+    /// (`WorldSurface::hidden_brush`): a later state (`hide_on_load`, a
+    /// script's `show`, an `exploder`), a game mode's own (the hardpoint
+    /// zones' grids: `hardpoint_zone_visual*`), one no entity names, and on
+    /// a Zombies map (`cp_*`) every one (its doors and debris are its
+    /// scripts' to open and clear).
+    fn place_brush_models(&mut self) {
+        let n = self.surfaces.len();
+        let mut owner: Vec<Option<usize>> = vec![None; n];
+        for (k, b) in self.brush_models.iter().enumerate().skip(1) {
+            if b.first_surface == u32::MAX {
+                continue;
+            }
+            let start = b.first_surface as usize;
+            for o in owner.iter_mut().take((start + b.surface_count as usize).min(n)).skip(start) {
+                *o = Some(k);
+            }
+        }
+        let zombies = self.name.starts_with("cp_");
+        let mut placed = vec![false; n];
+        let mut moved = vec![false; self.vertices.len()];
+        let mut count = 0usize;
+        for e in parse_entities(&self.entities) {
+            if zombies || !e.get("classname").is_some_and(|c| c.starts_with("script_brushmodel")) {
+                continue;
+            }
+            let has = |k: &str, w: &str| e.get(k).is_some_and(|v| v.split([',', ' ']).any(|t| t == w));
+            let targetname = e.get("targetname").map_or("", String::as_str);
+            if targetname == "exploder" || targetname.starts_with("hardpoint_zone_visual") || has("script_noteworthy", "hide_on_load") || has("script_noteworthy", "show") {
+                continue;
+            }
+            let Some(k) = e.get("model").and_then(|m| m.strip_prefix('*')).and_then(|m| m.parse::<usize>().ok()) else { continue };
+            let Some(b) = self.brush_models.get(k).copied() else { continue };
+            if k == 0 || b.first_surface == u32::MAX || b.surface_count == 0 {
+                continue;
+            }
+            let vec3 = |key: &str| -> Option<[f32; 3]> {
+                let v: Vec<f32> = e.get(key)?.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+                (v.len() == 3).then(|| [v[0], v[1], v[2]])
+            };
+            let origin = vec3("origin").unwrap_or_default();
+            let axis = axis_of(vec3("angles").unwrap_or_else(|| [0.0, e.get("angle").and_then(|a| a.parse().ok()).unwrap_or(0.0), 0.0]));
+            let rot = |v: [f32; 3]| -> [f32; 3] { std::array::from_fn(|c| axis[0][c] * v[0] + axis[1][c] * v[1] + axis[2][c] * v[2]) };
+            let start = b.first_surface as usize;
+            for si in start..(start + b.surface_count as usize).min(n) {
+                if std::mem::replace(&mut placed[si], true) {
+                    continue;
+                }
+                count += 1;
+                let s = &mut self.surfaces[si];
+                let verts = s.first_vertex as usize..(s.first_vertex as usize + usize::from(s.vertex_count)).min(self.vertices.len());
+                for vi in verts.clone() {
+                    if std::mem::replace(&mut moved[vi], true) {
+                        continue;
+                    }
+                    let v = &mut self.vertices[vi];
+                    let p = rot(v.xyz);
+                    v.xyz = std::array::from_fn(|c| origin[c] + p[c]);
+                    v.normal = rot(v.normal);
+                    v.tangent = rot(v.tangent);
+                }
+                let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                for v in &self.vertices[verts] {
+                    for c in 0..3 {
+                        lo[c] = lo[c].min(v.xyz[c]);
+                        hi[c] = hi[c].max(v.xyz[c]);
+                    }
+                }
+                if lo[0] <= hi[0] {
+                    (s.mins, s.maxs) = (lo, hi);
+                }
+            }
+        }
+        let mut hidden = 0usize;
+        for (i, s) in self.surfaces.iter_mut().enumerate() {
+            s.brush_model = owner[i].map_or(0, |k| k as u32);
+            s.hidden_brush = owner[i].is_some() && !placed[i];
+            hidden += usize::from(s.hidden_brush);
+        }
+        self.report.push(format!("brush models: {count} surfaces placed by their entities, {hidden} not shown as the map starts"));
+    }
+
     /// An image's pixels at the largest stream whose top level is at most
     /// `max_dim` (the smallest stream when none is), with the levels below.
     pub fn image(&self, name: &str, max_dim: u32) -> Result<ImageLevels, String> {
-        let src = self.images.get(bare(name)).ok_or_else(|| format!("{name}: not in the map's zones"))?;
+        let shared;
+        let src = match self.images.get(bare(name)) {
+            Some(src) => src,
+            None => {
+                // A picture of the common zones, else one of the engine's.
+                match self.shared.as_ref().and_then(|s| Some((s.image_rec(name)?.clone(), s.inline(name).map(<[u8]>::to_vec)))) {
+                    Some((rec, inline)) => {
+                        shared = ImageSource { rec, inline };
+                        &shared
+                    }
+                    None => return crate::shared::builtin(name).ok_or_else(|| format!("{name}: not in the map's zones")),
+                }
+            }
+        };
         let im = &src.rec;
         if let Some(px) = &src.inline {
             return Ok(ImageLevels {
@@ -847,11 +996,14 @@ impl Iw7Map {
 
     /// The `imagefile` ranges `image(name, max_dim)` reads.
     pub fn image_ranges(&self, name: &str, max_dim: u32) -> Vec<StreamFile> {
-        let Some(src) = self.images.get(bare(name)) else { return Vec::new() };
-        if src.inline.is_some() {
-            return Vec::new();
-        }
-        let im = &src.rec;
+        let im = match self.images.get(bare(name)) {
+            Some(src) if src.inline.is_some() => return Vec::new(),
+            Some(src) => &src.rec,
+            None => match self.shared.as_ref().and_then(|s| s.image_rec(name)) {
+                Some(r) if r.pixels.is_none() => r,
+                _ => return Vec::new(),
+            },
+        };
         let Some(k) = pick_stream(im, max_dim) else {
             return Vec::new();
         };
@@ -860,7 +1012,7 @@ impl Iw7Map {
 
     /// The image record of a name (format, size, map type).
     pub fn image_info(&self, name: &str) -> Option<&ImageRec> {
-        self.images.get(bare(name)).map(|s| &s.rec)
+        self.images.get(bare(name)).map(|s| &s.rec).or_else(|| self.shared.as_ref()?.image_rec(name))
     }
 }
 
@@ -920,6 +1072,33 @@ pub(crate) fn read_image_range(dir: &Path, f: &StreamFile) -> Result<Vec<u8>, St
     }
     let one = dir.join(format!("iw7_imagefile{}_{:x}.bin", f.file_index, f.offset));
     std::fs::read(&one).map_err(|_| format!("{} not found", pak.display()))
+}
+
+/// An entity's axes (forward, left, up) from its pitch, yaw and roll in
+/// degrees, as the engine's `AnglesToAxis`.
+pub fn axis_of(angles: [f32; 3]) -> [[f32; 3]; 3] {
+    let [p, y, r] = angles.map(f32::to_radians);
+    let (sp, cp, sy, cy, sr, cr) = (p.sin(), p.cos(), y.sin(), y.cos(), r.sin(), r.cos());
+    let forward = [cp * cy, cp * sy, -sp];
+    let right = [-sr * sp * cy + cr * sy, -sr * sp * sy - cr * cy, -sr * cp];
+    let up = [cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp];
+    [forward, right.map(|v| -v), up]
+}
+
+/// A (named) entity string's entities as key/value maps.
+pub fn parse_entities(text: &str) -> Vec<HashMap<String, String>> {
+    let mut out = Vec::new();
+    for block in text.split('{').skip(1) {
+        let body = block.split('}').next().unwrap_or("");
+        let mut e = HashMap::new();
+        for l in body.lines() {
+            if let Some((k, v)) = l.trim().split_once(' ') {
+                e.insert(k.trim_matches('"').to_owned(), v.trim().trim_matches('"').to_owned());
+            }
+        }
+        out.push(e);
+    }
+    out
 }
 
 /// The entity string with its keys named, and the spawn points added.

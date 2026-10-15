@@ -1,5 +1,6 @@
 //! `iw7_find <zone.ff>... -- <name>...`: which zones define (not just
-//! reference) an XModel or XModelSurfs of each name, with its LODs.
+//! reference) an XModel or XModelSurfs of each name, with its LODs, and an
+//! image (with pixels or streams) or a material (with a technique set).
 use fastfile_iw7::walk::walk_zone;
 
 fn main() {
@@ -20,6 +21,19 @@ fn main() {
                     x.name,
                     x.lods.iter().map(|l| (l.numsurfs, l.surfs.map(|s| cap.name_of(s).to_owned()))).collect::<Vec<_>>()
                 );
+            }
+        }
+        // Images with pixels (or streams) and materials with a technique
+        // set of those names: where a map's references are held.
+        let want = |n: &str| names.iter().any(|w| n.trim_start_matches(',').eq_ignore_ascii_case(w.trim_start_matches(',')));
+        for im in &cap.images {
+            if want(&im.name) && (im.pixels.is_some() || im.streamed) {
+                println!("  image {} fmt {} {}x{} streamed {}", im.name, im.format, im.width, im.height, im.streamed);
+            }
+        }
+        for m in &cap.materials {
+            if want(&m.name) && m.techset.is_some() {
+                println!("  material {} techset {}", m.name, m.techset.map_or("", |t| cap.name_of(t)));
             }
         }
         for m in &cap.model_surfs {

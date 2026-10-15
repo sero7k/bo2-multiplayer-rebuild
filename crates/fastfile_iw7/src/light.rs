@@ -28,6 +28,8 @@ pub struct LightmapPage {
     /// lit texels' base plus directional luminance before it.
     pub exposure: f32,
     pub mean_light: f32,
+    /// The exposure the pages alone would take (`TARGET_LIGHT`).
+    pub auto_exposure: f32,
 }
 
 /// The light a lit texel of a page is brought to on average (linear, base
@@ -37,6 +39,25 @@ pub struct LightmapPage {
 /// `EXPOSURE_RANGE`.
 pub const TARGET_LIGHT: f32 = 0.22;
 pub const EXPOSURE_RANGE: (f32, f32) = (0.03, 4.0);
+
+/// The scale that turns a vision's exposure (`tonemapExposure` plus
+/// `tonemapExposureAdjust`, in stops) into the pages' linear scale:
+/// `VISION_EXPOSURE_K * 2^-stops`, fitted on mp_riot. For reports only (see
+/// `Iw7Map::lightmap_page`: the pages' own exposure is used).
+pub const VISION_EXPOSURE_K: f32 = 965.0;
+
+/// A vision's exposure as the pages' linear scale (`VISION_EXPOSURE_K`),
+/// when it sets `tonemapExposure`.
+pub fn vision_exposure(vision: &str) -> Option<f32> {
+    let get = |k: &str| {
+        vision.lines().find_map(|l| {
+            let (key, v) = l.trim().split_once(' ')?;
+            key.eq_ignore_ascii_case(k).then(|| v.trim().trim_matches('"').split_whitespace().next()?.parse::<f32>().ok()).flatten()
+        })
+    };
+    let stops = get("tonemapExposure")? + get("tonemapExposureAdjust").unwrap_or(0.0);
+    (stops.is_finite() && (4.0..=20.0).contains(&stops)).then(|| VISION_EXPOSURE_K * 2f32.powf(-stops))
+}
 
 /// What a point on the world takes from its lightmap: the base and
 /// directional light (CoD4 gamma, 0..1 each) and the sun's visibility.
@@ -230,8 +251,19 @@ impl Iw7Map {
             }
         }
         let mean_light = if lit > 0 { (log_sum / lit as f64).exp() as f32 } else { TARGET_LIGHT };
-        let exposure = (TARGET_LIGHT / mean_light).clamp(EXPOSURE_RANGE.0, EXPOSURE_RANGE.1);
-        let gamma = |v: f32| ((v * exposure).clamp(0.0, 1.0).sqrt() * 255.0).round() as u8;
+        let auto = (TARGET_LIGHT / mean_light).clamp(EXPOSURE_RANGE.0, EXPOSURE_RANGE.1);
+        // (The vision's own exposure, `vision_exposure`, was tried and left:
+        // against the pages it runs from 3.8 stops darker to half a stop
+        // brighter map by map, mp_riot and mp_proto about even, mp_mansion
+        // and mp_pixel nearly four stops under: IW7 adapts most maps' exposure
+        // at run time, `tonemapAuto`.)
+        let exposure = auto;
+        // Highlights rolled off above `KNEE` toward 1 (as IW7's filmic tone
+        // map's shoulder does) rather than clipped: mp_proto's snow and
+        // mp_fallen's sunlit concrete kept no detail clipped.
+        const KNEE: f32 = 0.6;
+        let shoulder = |v: f32| if v <= KNEE { v } else { KNEE + (1.0 - KNEE) * (1.0 - (-(v - KNEE) / (1.0 - KNEE)).exp()) };
+        let gamma = |v: f32| (shoulder((v * exposure).max(0.0)).sqrt() * 255.0).round() as u8;
         let mut secondary = vec![0u8; ow * oh * 4];
         for y in 0..oh {
             for x in 0..ow {
@@ -285,39 +317,149 @@ impl Iw7Map {
             _ => vec![255u8; ow * opage],
         };
         let to16 = |v: usize| u16::try_from(v).map_err(|_| format!("{v} is too large"));
-        Ok(LightmapPage { primary: (to16(ow)?, to16(opage)?, primary), secondary: (to16(ow)?, to16(oh)?, secondary), exposure, mean_light })
+        Ok(LightmapPage { primary: (to16(ow)?, to16(opage)?, primary), secondary: (to16(ow)?, to16(oh)?, secondary), exposure, mean_light, auto_exposure: auto })
     }
 
     /// The light under each point: the highest lightmapped, upward-facing
     /// world triangle below it (within `reach` units), its lightmap
     /// sampled where the point stands. `None` where nothing is below.
     pub fn ground_light(&self, pages: &[Option<LightmapPage>], points: &[[f32; 3]], reach: f32) -> Vec<Option<LightSample>> {
-        const CELL: f32 = 256.0;
-        let (x0, y0) = (self.mins[0], self.mins[1]);
-        let cols = (((self.maxs[0] - x0) / CELL).ceil() as usize).clamp(1, 4096);
-        let rows = (((self.maxs[1] - y0) / CELL).ceil() as usize).clamp(1, 4096);
-        let cell = |x: f32, y: f32| -> Option<usize> {
-            let (cx, cy) = (((x - x0) / CELL).floor(), ((y - y0) / CELL).floor());
-            (cx >= 0.0 && cy >= 0.0 && (cx as usize) < cols && (cy as usize) < rows).then(|| cy as usize * cols + cx as usize)
-        };
-        // Triangles: (surface, first index), binned by their XY bounds.
-        let mut bins: Vec<Vec<(u32, u32)>> = vec![Vec::new(); cols * rows];
-        let vert = |s: &crate::map::WorldSurface, k: u32| -> Option<&crate::map::WorldVertex> {
-            let ix = *self.indices.get(s.base_index as usize + k as usize)?;
-            self.vertices.get((s.first_vertex + u32::from(ix)) as usize)
-        };
-        for (si, s) in self.surfaces.iter().enumerate() {
-            if !pages.get(usize::from(s.lightmap_index)).is_some_and(Option::is_some) {
+        let floors = FloorIndex::new(self, pages);
+        points
+            .iter()
+            .map(|p| {
+                floors
+                    .floors(self, pages, p[0], p[1])
+                    .into_iter()
+                    .filter(|(z, _)| *z <= p[2] + 4.0 && p[2] - *z <= reach)
+                    .max_by(|a, b| a.0.total_cmp(&b.0))
+                    .map(|f| f.1)
+            })
+            .collect()
+    }
+
+    /// The light each placed model takes: the floor's light under it and
+    /// around it (eight points on a ring of about its radius), the middle
+    /// one by brightness. The floor right under a model is in its own baked
+    /// shadow (mp_proto's crates, mp_hawkwar's station wagon drew black by
+    /// it); one ring point out in the sun would light a model in the shade.
+    /// `None` where no floor is found.
+    pub fn static_model_light(&self, pages: &[Option<LightmapPage>]) -> Vec<Option<LightSample>> {
+        let floors = FloorIndex::new(self, pages);
+        self.static_models
+            .iter()
+            .map(|sm| {
+                let m = &self.models[sm.model];
+                let c = sm.lighting_origin;
+                let r = (m.radius * sm.scale * 0.75).clamp(8.0, 192.0);
+                let mut found: Vec<LightSample> = Vec::with_capacity(9);
+                for k in 0..9 {
+                    let (x, y) = if k == 0 {
+                        (c[0], c[1])
+                    } else {
+                        let a = (k - 1) as f32 * std::f32::consts::FRAC_PI_4;
+                        (c[0] + r * a.cos(), c[1] + r * a.sin())
+                    };
+                    let below = floors
+                        .floors(self, pages, x, y)
+                        .into_iter()
+                        .filter(|(z, _)| *z <= c[2] + 4.0 && c[2] - *z <= 1024.0)
+                        .max_by(|a, b| a.0.total_cmp(&b.0));
+                    if let Some((_, l)) = below {
+                        found.push(l);
+                    }
+                }
+                let lum = |l: &LightSample| {
+                    let a = l.ambient_linear();
+                    0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2]
+                };
+                found.sort_by(|a, b| lum(a).total_cmp(&lum(b)));
+                found.get(found.len() / 2).copied()
+            })
+            .collect()
+    }
+
+    /// Baked light through the space players move in, for lighting them
+    /// (`LightVolume`): at points `spacing` apart over `mins..maxs`, the
+    /// light of the floor under each point (`ground_light`, within `reach`
+    /// units), or `None` where there is none.
+    pub fn light_volume(&self, pages: &[Option<LightmapPage>], mins: [f32; 3], maxs: [f32; 3], spacing: [f32; 3], reach: f32) -> LightVolume {
+        let floors = FloorIndex::new(self, pages);
+        let dims: [usize; 3] = std::array::from_fn(|k| (((maxs[k] - mins[k]) / spacing[k]).floor().max(0.0) as usize + 1).min(4096));
+        let mut samples = Vec::with_capacity(dims[0] * dims[1] * dims[2]);
+        for ix in 0..dims[0] {
+            for iy in 0..dims[1] {
+                let (x, y) = (mins[0] + ix as f32 * spacing[0], mins[1] + iy as f32 * spacing[1]);
+                let mut col = floors.floors(self, pages, x, y);
+                col.sort_by(|a, b| a.0.total_cmp(&b.0));
+                for iz in 0..dims[2] {
+                    let z = mins[2] + iz as f32 * spacing[2];
+                    let below = col.iter().rev().find(|(fz, _)| *fz <= z + 4.0 && z - *fz <= reach);
+                    samples.push(below.map(|f| f.1));
+                }
+            }
+        }
+        LightVolume { mins, spacing, dims, samples }
+    }
+}
+
+/// Baked light at points of a box (`Iw7Map::light_volume`): x slowest, z
+/// fastest.
+#[derive(Clone, Debug, Default)]
+pub struct LightVolume {
+    pub mins: [f32; 3],
+    pub spacing: [f32; 3],
+    pub dims: [usize; 3],
+    pub samples: Vec<Option<LightSample>>,
+}
+
+impl LightVolume {
+    pub fn at(&self, ix: usize, iy: usize, iz: usize) -> Option<LightSample> {
+        self.samples.get((ix * self.dims[1] + iy) * self.dims[2] + iz).copied().flatten()
+    }
+}
+
+/// The world's lightmapped, upward-facing triangles binned by their XY
+/// bounds (256-unit cells), to find the floors under points.
+struct FloorIndex {
+    x0: f32,
+    y0: f32,
+    cols: usize,
+    rows: usize,
+    /// Per cell: (surface, first index).
+    bins: Vec<Vec<(u32, u32)>>,
+}
+
+impl FloorIndex {
+    const CELL: f32 = 256.0;
+
+    fn cell(&self, x: f32, y: f32) -> Option<usize> {
+        let (cx, cy) = (((x - self.x0) / Self::CELL).floor(), ((y - self.y0) / Self::CELL).floor());
+        (cx >= 0.0 && cy >= 0.0 && (cx as usize) < self.cols && (cy as usize) < self.rows).then(|| cy as usize * self.cols + cx as usize)
+    }
+
+    fn vert<'a>(map: &'a Iw7Map, s: &crate::map::WorldSurface, k: u32) -> Option<&'a crate::map::WorldVertex> {
+        let ix = *map.indices.get(s.base_index as usize + k as usize)?;
+        map.vertices.get((s.first_vertex + u32::from(ix)) as usize)
+    }
+
+    fn new(map: &Iw7Map, pages: &[Option<LightmapPage>]) -> Self {
+        let (x0, y0) = (map.mins[0], map.mins[1]);
+        let cols = (((map.maxs[0] - x0) / Self::CELL).ceil() as usize).clamp(1, 4096);
+        let rows = (((map.maxs[1] - y0) / Self::CELL).ceil() as usize).clamp(1, 4096);
+        let mut out = FloorIndex { x0, y0, cols, rows, bins: vec![Vec::new(); cols * rows] };
+        for (si, s) in map.surfaces.iter().enumerate() {
+            if s.hidden_brush || !pages.get(usize::from(s.lightmap_index)).is_some_and(Option::is_some) {
                 continue;
             }
             for t in 0..u32::from(s.tri_count) {
-                let (Some(a), Some(b), Some(c)) = (vert(s, 3 * t), vert(s, 3 * t + 1), vert(s, 3 * t + 2)) else { continue };
+                let (Some(a), Some(b), Some(c)) = (Self::vert(map, s, 3 * t), Self::vert(map, s, 3 * t + 1), Self::vert(map, s, 3 * t + 2)) else { continue };
                 if a.normal[2] + b.normal[2] + c.normal[2] < 0.9 {
                     continue;
                 }
                 let lo = [a.xyz[0].min(b.xyz[0]).min(c.xyz[0]), a.xyz[1].min(b.xyz[1]).min(c.xyz[1])];
                 let hi = [a.xyz[0].max(b.xyz[0]).max(c.xyz[0]), a.xyz[1].max(b.xyz[1]).max(c.xyz[1])];
-                let (Some(c0), Some(c1)) = (cell(lo[0].max(x0), lo[1].max(y0)), cell(hi[0].min(self.maxs[0] - 0.01), hi[1].min(self.maxs[1] - 0.01))) else {
+                let (Some(c0), Some(c1)) = (out.cell(lo[0].max(x0), lo[1].max(y0)), out.cell(hi[0].min(map.maxs[0] - 0.01), hi[1].min(map.maxs[1] - 0.01))) else {
                     continue;
                 };
                 let (cx0, cy0, cx1, cy1) = (c0 % cols, c0 / cols, c1 % cols, c1 / cols);
@@ -326,42 +468,39 @@ impl Iw7Map {
                 }
                 for cy in cy0..=cy1 {
                     for cx in cx0..=cx1 {
-                        bins[cy * cols + cx].push((si as u32, 3 * t));
+                        out.bins[cy * cols + cx].push((si as u32, 3 * t));
                     }
                 }
             }
         }
-        points
-            .iter()
-            .map(|p| {
-                let bin = &bins[cell(p[0], p[1])?];
-                let mut best: Option<(f32, LightSample)> = None;
-                for &(si, k) in bin {
-                    let s = &self.surfaces[si as usize];
-                    let (Some(a), Some(b), Some(c)) = (vert(s, k), vert(s, k + 1), vert(s, k + 2)) else { continue };
-                    // Barycentric in XY.
-                    let d = (b.xyz[1] - c.xyz[1]) * (a.xyz[0] - c.xyz[0]) + (c.xyz[0] - b.xyz[0]) * (a.xyz[1] - c.xyz[1]);
-                    if d.abs() < 1e-6 {
-                        continue;
-                    }
-                    let l1 = ((b.xyz[1] - c.xyz[1]) * (p[0] - c.xyz[0]) + (c.xyz[0] - b.xyz[0]) * (p[1] - c.xyz[1])) / d;
-                    let l2 = ((c.xyz[1] - a.xyz[1]) * (p[0] - c.xyz[0]) + (a.xyz[0] - c.xyz[0]) * (p[1] - c.xyz[1])) / d;
-                    let l3 = 1.0 - l1 - l2;
-                    if l1 < -1e-4 || l2 < -1e-4 || l3 < -1e-4 {
-                        continue;
-                    }
-                    let z = l1 * a.xyz[2] + l2 * b.xyz[2] + l3 * c.xyz[2];
-                    if z > p[2] + 4.0 || p[2] - z > reach || best.is_some_and(|(bz, _)| bz >= z) {
-                        continue;
-                    }
-                    let uv = [0, 1].map(|k| l1 * a.lmap_uv[k] + l2 * b.lmap_uv[k] + l3 * c.lmap_uv[k]);
-                    if let Some(Some(page)) = pages.get(usize::from(s.lightmap_index)) {
-                        best = Some((z, page.sample(uv)));
-                    }
-                }
-                best.map(|b| b.1)
-            })
-            .collect()
+        out
+    }
+
+    /// Every floor at (x, y): its height and its light there.
+    fn floors(&self, map: &Iw7Map, pages: &[Option<LightmapPage>], x: f32, y: f32) -> Vec<(f32, LightSample)> {
+        let Some(cell) = self.cell(x, y) else { return Vec::new() };
+        let mut out = Vec::new();
+        for &(si, k) in &self.bins[cell] {
+            let s = &map.surfaces[si as usize];
+            let (Some(a), Some(b), Some(c)) = (Self::vert(map, s, k), Self::vert(map, s, k + 1), Self::vert(map, s, k + 2)) else { continue };
+            // Barycentric in XY.
+            let d = (b.xyz[1] - c.xyz[1]) * (a.xyz[0] - c.xyz[0]) + (c.xyz[0] - b.xyz[0]) * (a.xyz[1] - c.xyz[1]);
+            if d.abs() < 1e-6 {
+                continue;
+            }
+            let l1 = ((b.xyz[1] - c.xyz[1]) * (x - c.xyz[0]) + (c.xyz[0] - b.xyz[0]) * (y - c.xyz[1])) / d;
+            let l2 = ((c.xyz[1] - a.xyz[1]) * (x - c.xyz[0]) + (a.xyz[0] - c.xyz[0]) * (y - c.xyz[1])) / d;
+            let l3 = 1.0 - l1 - l2;
+            if l1 < -1e-4 || l2 < -1e-4 || l3 < -1e-4 {
+                continue;
+            }
+            let z = l1 * a.xyz[2] + l2 * b.xyz[2] + l3 * c.xyz[2];
+            let uv = [0, 1].map(|k| l1 * a.lmap_uv[k] + l2 * b.lmap_uv[k] + l3 * c.lmap_uv[k]);
+            if let Some(Some(page)) = pages.get(usize::from(s.lightmap_index)) {
+                out.push((z, page.sample(uv)));
+            }
+        }
+        out
     }
 }
 

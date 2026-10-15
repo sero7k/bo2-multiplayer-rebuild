@@ -160,6 +160,11 @@ impl Iw7Map {
                     }
                     p[3] = 255;
                 }
+                // bo2mp: the material's tint (`colorTint`: mp_proto's red
+                // hull plates), as `Iw7Map::layer_rgba` gives the colour.
+                if let Some(t) = crate::look::tint(m, 0) {
+                    crate::look::apply_tint(&mut rgba, t);
+                }
                 out.colour = encode(*cw, *ch, rgba, Format::Bc1);
             }
         }
