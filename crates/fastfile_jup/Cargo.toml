@@ -3,9 +3,11 @@ name = "fastfile_jup"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "Call of Duty: Modern Warfare III (2023, cod23) containers: the .ff Oodle block envelope and the KAPI .xsub/.xpak packages."
+description = "Call of Duty: Modern Warfare III (2023, cod23): the .ff Oodle block envelope, the KAPI .xsub/.xpak packages, and its Opus sounds."
 
 [dependencies]
+# Pure-Rust Opus decoder (MIT OR Apache-2.0): the sounds are Opus streams.
+opus-decoder = "0.1.1"
 
 [target.'cfg(windows)'.dependencies]
 libloading.workspace = true
