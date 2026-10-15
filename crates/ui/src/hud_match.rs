@@ -22,13 +22,16 @@
 //!   last kill (the final killcam has it).
 //! - Killed By: at his death, before the killcam, the killer's card the
 //!   same way under "KILLED BY" (BO2's own LUI card is not sent).
-//! - Killcam card: through the killcam, the killer's card at the bottom
-//!   middle where BO2's Killcam widget had its NamePlate (that one is not
-//!   made; the widget's title, bands and prompts stay).
+//! - Killcam: through the killcam and the final killcam, in place of BO2's
+//!   Killcam widget (built, never drawn): letterbox bars, the title
+//!   (KILLCAM / FINAL KILLCAM / ROUND WINNING KILLCAM), the killer's card
+//!   at the bottom middle (his rank's title under his name), his perks in
+//!   three slanted slots bottom right and his weapon bottom left.
 //! - Scoreboard: while his scores key is held and at the match's end (BO2's
 //!   LUI `Scoreboard` menu is not opened then, `lui_hud`): the game type and
-//!   the clock, then each side's players (or one list in a free-for-all)
-//!   with rank, score, kills, assists, deaths, K/D and ping.
+//!   the clock, then the two sides side by side under their banners (or one
+//!   ranked list in a free-for-all) with rank, score, kills, assists,
+//!   deaths, ratio and the game type's own BO2 columns.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, OnceLock};
@@ -39,7 +42,7 @@ use frame::ClientSet;
 use net::{LocalPresentClient, PresentedSnapshot};
 
 use crate::layers::{GameUiFont, UiLayer, UiLayerVisibility};
-use crate::shell::theme::{ACCENT, DIM, ENEMY, FAINT, GOLD, LINE, PANEL, ShellFonts, TEXT, WHITE};
+use crate::shell::theme::{ACCENT, DIM, ENEMY, FAINT, GOLD, PANEL, ShellFonts, TEXT, WHITE};
 
 /// Free-for-all game types (one list, no sides).
 const FFA_TYPES: [&str; 5] = ["dm", "gun", "oic", "sas", "shrp"];
@@ -75,9 +78,6 @@ const CARD_SETTLE: f32 = 0.22;
 const KILL_CARD_SOUND: Option<&str> = None;
 
 const HIT_RED: Color = Color::srgb(0.96, 0.16, 0.12);
-const MINE_ROW: Color = Color::srgba(0.26, 0.62, 0.95, 0.24);
-const ENEMY_ROW: Color = Color::srgba(0.90, 0.26, 0.22, 0.24);
-const PLAIN_ROW: Color = Color::srgba(0.70, 0.80, 0.95, 0.06);
 
 // --- Shared: faces, fades, pictures ---------------------------------------
 
@@ -989,6 +989,10 @@ pub(crate) struct BannerModel {
     /// His kill streak this life, in a red box over the card ("2ND KILL",
     /// as Modern Warfare's kill card).
     pub streak: Option<String>,
+    /// A line under his name (the killcam card's: his rank's title).
+    pub subtitle: Option<String>,
+    /// The card's size against the kill card's (the killcam's is bigger).
+    pub scale: f32,
     pub start: f64,
     /// How long it holds before it fades (s).
     pub hold: f32,
@@ -996,7 +1000,7 @@ pub(crate) struct BannerModel {
 
 impl BannerModel {
     pub(crate) fn new(name: String, level: i32, start: f64) -> Self {
-        BannerModel { name, level, rank: None, card: None, emblem: None, title: None, streak: None, start, hold: BANNER_HOLD }
+        BannerModel { name, level, rank: None, card: None, emblem: None, title: None, streak: None, subtitle: None, scale: 1.0, start, hold: BANNER_HOLD }
     }
 }
 
@@ -1040,7 +1044,7 @@ fn card_top(size: Vec2) -> f32 {
 /// it (shaded a little), his emblem on the left, his name at the top and
 /// his rank icon and level small at the bottom right; a title over it.
 pub(crate) fn spawn_banner(commands: &mut Commands, faces: &Faces, m: &BannerModel, size: Vec2) -> Entity {
-    let k = card_scale(size);
+    let k = card_scale(size) * m.scale;
     let (w, h) = ((CARD_W * k).round(), (CARD_H * k).round());
     let life = BANNER_IN + m.hold + BANNER_OUT;
     let fade = Fade::new(m.start, BANNER_IN, life, BANNER_OUT);
@@ -1200,6 +1204,23 @@ pub(crate) fn spawn_banner(commands: &mut Commands, faces: &Faces, m: &BannerMod
                     },
                     fade,
                 ));
+                // A line under it (his rank's title on the killcam card).
+                if let Some(sub) = &m.subtitle {
+                    card.spawn((
+                        Text::new(sub.clone()),
+                        font(&faces.regular, 15.0 * k),
+                        TextColor(Color::srgba(0.86, 0.88, 0.92, 0.90)),
+                        shadow(15.0 * k),
+                        TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(side + 17.0 * k),
+                            top: Val::Px(33.0 * k),
+                            ..default()
+                        },
+                        fade.with(0.90),
+                    ));
+                }
                 // His rank and level, small at the bottom right.
                 card.spawn(Node {
                     position_type: PositionType::Absolute,
@@ -1539,25 +1560,232 @@ fn killed_by_card(
     st.shown = Some((killer, model, key));
 }
 
+// --- Killcam --------------------------------------------------------------------
+//
+// Through the killcam and the final killcam (`bo2mp_killcam` "1|<killer>" /
+// "2|<killer>"), in place of BO2's LUI Killcam widget (its title, bands and
+// NamePlate are not drawn under this HUD, `lui_frontend::modern_killcam_card`;
+// the scripts' skip / respawn prompt stays): dark letterbox bars top and
+// bottom, the title centred in the top one (KILLCAM; FINAL KILLCAM, or
+// ROUND WINNING KILLCAM when a round that is not the match's last ends on
+// it, as BO2's `_killcam::finalkillcam` flags it), the killer's card at the
+// bottom middle over the bottom bar's edge (his calling card, emblem, name,
+// his rank's title, his rank icon and level), his perks 1 to 3 in three
+// slanted slots at the bottom right (where BO2's `showperks` puts them;
+// an empty slot stays grey) and the weapon he killed with at the bottom
+// left.
+
 /// The killcam's card (a `BannerRoot` too, for its slide in).
 #[derive(Component)]
 struct KillcamCardRoot;
 
-/// Where the killcam card's middle sits, as a share of the screen's height:
-/// where BO2's Killcam widget put its NamePlate (killcam.lua: the bottom
-/// band, 120 of 720 high, the plate anchored to its bottom from -2 to -1
-/// `PlayerCallout_Height` (60), so 600..660), just above the respawn and
-/// skip prompts under it.
-const KILLCAM_CARD_CENTRE: f32 = 630.0 / 720.0;
-
 /// It holds while the killcam plays (it goes with it, no fade out).
 const KILLCAM_CARD_HOLD: f32 = 3600.0;
 
-/// The killer's card through the killcam and the final killcam
-/// (`bo2mp_killcam` "1|<killer>" / "2|<killer>"), in place of the NamePlate
-/// BO2's LUI Killcam widget draws (that one is not made under this HUD,
-/// `lui_frontend::modern_killcam_card`; the widget's KILLCAM title, its
-/// bands and the prompts stay BO2's). No title: the widget's says it.
+/// The killcam's card against the kill card (BO2's NamePlate is about 420 x
+/// 96 at 1080 lines).
+const KILLCAM_CARD_SCALE: f32 = 1.3;
+
+/// The bars' heights at 1080 lines, and how far above the screen's bottom
+/// the card's, the perks' and the weapon's middles sit (over the bottom
+/// bar's edge, as BO2's).
+const KILLCAM_TOP_BAR: f32 = 92.0;
+const KILLCAM_BOTTOM_BAR: f32 = 84.0;
+const KILLCAM_FOOT_MIDDLE: f32 = 72.0;
+
+const KILLCAM_BAR: Color = Color::srgba(0.06, 0.065, 0.075, 0.80);
+const PERK_SLOT: Color = Color::srgba(0.70, 0.72, 0.76, 0.62);
+const PERK_SLOT_EMPTY: Color = Color::srgba(0.62, 0.64, 0.68, 0.38);
+
+/// The killcam's frame as drawn.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct KillcamModel {
+    pub title: String,
+    /// The killer's perks 1 to 3 (their pictures; none: not in yet). Fewer
+    /// than three: the rest are empty slots.
+    pub perks: Vec<Option<Handle<Image>>>,
+    /// The kill icon of the weapon he killed with, and its width per height.
+    pub weapon: Option<(Handle<Image>, f32)>,
+}
+
+#[derive(Component)]
+struct KillcamFrameRoot;
+
+/// The title over the killcam: the final one's is ROUND WINNING KILLCAM
+/// when a round that is not the match's last ends on it.
+fn killcam_title(kind: u8, round_end: bool) -> &'static str {
+    match (kind, round_end) {
+        (2, true) => "ROUND WINNING KILLCAM",
+        (2, false) => "FINAL KILLCAM",
+        _ => "KILLCAM",
+    }
+}
+
+/// Black Ops' rank titles, one per `BO1_RANKS` row.
+const BO1_RANK_TITLES: [&str; 18] = [
+    "Private",
+    "Private First Class",
+    "Specialist",
+    "Corporal",
+    "Sergeant",
+    "Staff Sergeant",
+    "Sergeant First Class",
+    "Master Sergeant",
+    "Lieutenant",
+    "Captain",
+    "Major",
+    "Lt. Colonel",
+    "Colonel",
+    "Brigadier General",
+    "Major General",
+    "Lieutenant General",
+    "General",
+    "Commander",
+];
+
+/// The line under the killer's name: his rank's title (a prestige's
+/// number past the first).
+fn rank_title(level: i32, prestige: i32) -> String {
+    if prestige > 0 {
+        return format!("Prestige {prestige}");
+    }
+    BO1_RANK_TITLES.get(bo1_rank_row(level)).copied().unwrap_or("Private").to_owned()
+}
+
+/// A perk slot's shape: a parallelogram leaning right, white (tinted when
+/// drawn), a little darker toward its foot, its edges smoothed.
+pub(crate) fn slant_image() -> Image {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let (w, h) = (160u32, 124u32);
+    let slant = 0.30 * w as f32;
+    let mut px = vec![0u8; (w * h * 4) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+            // (The left edge runs from `slant` at the top to 0 at the foot,
+            // the right from `w` to `w - slant`.)
+            let left = slant * (1.0 - fy / h as f32);
+            let right = w as f32 - slant * fy / h as f32;
+            let d = (fx - left).min(right - fx) * 0.96;
+            let a = d.clamp(0.0, 1.0);
+            let shade = 1.0 - 0.22 * fy / h as f32;
+            let o = ((y * w + x) * 4) as usize;
+            let v = (shade * 255.0) as u8;
+            px[o] = v;
+            px[o + 1] = v;
+            px[o + 2] = v;
+            px[o + 3] = (a * 255.0) as u8;
+        }
+    }
+    let mut img = Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, px, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::default());
+    img.sampler = bevy::image::ImageSampler::linear();
+    img
+}
+
+/// The killcam's bars, title, perks and weapon (the card is `spawn_banner`'s).
+pub(crate) fn spawn_killcam_frame(commands: &mut Commands, faces: &Faces, m: &KillcamModel, slant: &Handle<Image>, size: Vec2) -> Entity {
+    let k = card_scale(size);
+    let foot = KILLCAM_FOOT_MIDDLE * k;
+    let (slot_w, slot_h) = ((84.0 * k).round(), (65.0 * k).round());
+    commands
+        .spawn((
+            KillcamFrameRoot,
+            UiLayer::Hud,
+            UiLayerVisibility,
+            GlobalZIndex(105),
+            Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+        ))
+        .with_children(|root| {
+            // The top bar and its title.
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(0.0),
+                    width: Val::Percent(100.0),
+                    height: Val::Px((KILLCAM_TOP_BAR * k).round()),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border: UiRect::bottom(Val::Px((1.0 * k).max(1.0))),
+                    ..default()
+                },
+                BackgroundColor(KILLCAM_BAR),
+                BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.10)),
+            ))
+            .with_children(|bar| {
+                bar.spawn((
+                    Text::new(m.title.clone()),
+                    font(&faces.bold, 54.0 * k),
+                    TextColor(WHITE),
+                    shadow(54.0 * k),
+                    TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
+                ));
+            });
+            // The bottom bar.
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: Val::Px(0.0),
+                    width: Val::Percent(100.0),
+                    height: Val::Px((KILLCAM_BOTTOM_BAR * k).round()),
+                    border: UiRect::top(Val::Px((1.0 * k).max(1.0))),
+                    ..default()
+                },
+                BackgroundColor(KILLCAM_BAR),
+                BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.10)),
+            ));
+            // His perks, bottom right: three slanted slots, each with its
+            // perk's icon (an empty one stays grey).
+            root.spawn(Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px((60.0 * k).round()),
+                bottom: Val::Px((foot - slot_h * 0.5).round()),
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px((3.0 * k).round()),
+                ..default()
+            })
+            .with_children(|row| {
+                for i in 0..3 {
+                    let perk = m.perks.get(i);
+                    let filled = perk.is_some();
+                    row.spawn((
+                        ImageNode::new(slant.clone()).with_color(if filled { PERK_SLOT } else { PERK_SLOT_EMPTY }),
+                        Node {
+                            width: Val::Px(slot_w),
+                            height: Val::Px(slot_h),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                    ))
+                    .with_children(|s| {
+                        if let Some(Some(icon)) = perk {
+                            let side = (54.0 * k).round();
+                            s.spawn((ImageNode::new(icon.clone()), Node { width: Val::Px(side), height: Val::Px(side), ..default() }));
+                        }
+                    });
+                }
+            });
+            // The weapon he killed with, bottom left.
+            if let Some((icon, ratio)) = &m.weapon {
+                let h = (46.0 * k).round();
+                root.spawn((
+                    ImageNode::new(icon.clone()).with_color(Color::srgba(1.0, 1.0, 1.0, 0.92)),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px((60.0 * k).round()),
+                        bottom: Val::Px((foot - h * 0.5).round()),
+                        width: Val::Px((h * ratio).round()),
+                        height: Val::Px(h),
+                        ..default()
+                    },
+                ));
+            }
+        })
+        .id()
+}
+
+/// The killer's card and the killcam's frame (see above).
 #[allow(clippy::too_many_arguments)]
 fn killcam_card(
     mut commands: Commands,
@@ -1567,12 +1795,13 @@ fn killcam_card(
     (shell_fonts, game_font, mut pics): (Option<Res<ShellFonts>>, Option<Res<GameUiFont>>, Option<ResMut<crate::shell::pics::ShellPics>>),
     slot: NonSend<crate::lui_hud::LuiHudSlot>,
     window: Query<&Window, With<PrimaryWindow>>,
-    roots: Query<Entity, With<KillcamCardRoot>>,
+    roots: Query<Entity, Or<(With<KillcamCardRoot>, With<KillcamFrameRoot>)>>,
     time: Res<Time<Real>>,
     mut images: ResMut<Assets<Image>>,
     mut cache: Local<HashMap<String, Option<(Handle<Image>, Vec2)>>>,
+    mut slant: Local<Option<Handle<Image>>>,
     // The killer's client and the card as built (its key).
-    mut st: Local<Option<(i32, BannerModel, u32)>>,
+    mut st: Local<Option<(i32, BannerModel, u64)>>,
 ) {
     let clear = |commands: &mut Commands| {
         for e in &roots {
@@ -1583,22 +1812,23 @@ fn killcam_card(
     let found = match (snap, local.as_deref()) {
         (Some(snap), Some(l)) if crate::hud_modern::modern_hud_enabled() => {
             let dvars = snap.meta.script_dvars(l.0);
-            let me = snap.meta.for_client(l.0).map(|m| String::from_utf8_lossy(&m.name).trim_end_matches(char::from(0)).to_owned()).unwrap_or_default();
             // (Not "3|": that is the Killed By card at his death.)
-            let killer = dvars
-                .string("bo2mp_killcam")
-                .and_then(|k| k.strip_prefix("1|").or_else(|| k.strip_prefix("2|")))
-                .and_then(|k| k.trim().parse::<i32>().ok())
-                .filter(|k| *k >= 0);
-            killer.map(|k| (k, me))
+            let raw = dvars.string("bo2mp_killcam").unwrap_or_default();
+            let kind: u8 = if raw.starts_with("2|") { 2 } else { 1 };
+            let killer = raw.strip_prefix("1|").or_else(|| raw.strip_prefix("2|")).and_then(|k| k.trim().parse::<i32>().ok()).filter(|k| *k >= 0);
+            let round_end = dvars.string("bo2mp_round_killcam") == Some("1");
+            let perks = dvars.string("bo2mp_killcam_perks").unwrap_or_default().to_owned();
+            killer.map(|k| (k, kind, round_end, perks))
         }
         _ => None,
     };
-    let Some((killer, me)) = found else {
+    let (Some((killer, kind, round_end, perk_rows)), Some(snap), Some(l)) = (found, snap, local.as_deref()) else {
         clear(&mut commands);
         *st = None;
         return;
     };
+    let seen = presented.as_deref().and_then(|p| read_seen(p, l, None));
+    let me = snap.meta.for_client(l.0).map(|m| String::from_utf8_lossy(&m.name).trim_end_matches(char::from(0)).to_owned()).unwrap_or_default();
     let now = now_secs(&time);
     let mut model = match st.take() {
         Some((k, m, built)) if k == killer => {
@@ -1607,35 +1837,74 @@ fn killcam_card(
         }
         _ => {
             let name = snap
-                .and_then(|s| s.meta.clients.iter().find(|(c, _)| c.0 as i32 == killer))
+                .meta
+                .clients
+                .iter()
+                .find(|(c, _)| c.0 as i32 == killer)
                 .map(|(_, m)| String::from_utf8_lossy(&m.name).trim_end_matches(char::from(0)).to_owned())
                 .unwrap_or_default();
             if name.is_empty() {
                 clear(&mut commands);
                 return;
             }
-            diag::info!(Ui, "bo2mp hud: killcam card: {name} (client {killer})");
+            diag::info!(Ui, "bo2mp hud: killcam card: {name} (client {killer}), perks {perk_rows:?}");
             let mut m = BannerModel::new(name, 1, now);
             m.hold = KILLCAM_CARD_HOLD;
-            *st = Some((killer, m.clone(), u32::MAX));
+            m.scale = KILLCAM_CARD_SCALE;
+            *st = Some((killer, m.clone(), u64::MAX));
             m
         }
     };
     let cat = catalog();
-    let pictures = dress_card(&mut model, &me, snap, &slot, cat.as_ref(), &mut cache, pics.as_deref_mut(), icons.as_deref(), &mut images);
+    let pictures = dress_card(&mut model, &me, Some(snap), &slot, cat.as_ref(), &mut cache, pics.as_deref_mut(), icons.as_deref(), &mut images);
+    let mine = !me.is_empty() && model.name == me;
+    let (_, prestige) = rank_of(&model.name, meta_named(Some(snap), &model.name).as_ref(), mine, Some(&slot));
+    model.subtitle = Some(rank_title(model.level, prestige));
+    // His perks' icons (BO2's `perk_*` pictures).
+    let perks: Vec<Option<Handle<Image>>> = perk_rows
+        .split(';')
+        .filter(|r| !r.is_empty())
+        .take(3)
+        .map(|row| {
+            let icon = row.split_once('|').map_or(row, |(i, _)| i);
+            hud_picture(&mut cache, icons.as_deref(), &mut images, icon).map(|(h, _)| h)
+        })
+        .collect();
+    // The weapon of his last kill (the one shown: his own death in a
+    // killcam, the match's last kill in the final one).
+    let weapon = seen.as_ref().and_then(|seen| {
+        let k = seen
+            .kills
+            .iter()
+            .filter(|k| k.attacker == model.name && !k.suicide && (kind == 2 || k.victim == me))
+            .max_by_key(|k| k.n)?;
+        let (name, ratio) = kill_icon_name(icons.as_deref()?, &k.weapon, &k.means)?;
+        hud_picture(&mut cache, icons.as_deref(), &mut images, &name).map(|(h, _)| (h, ratio))
+    });
+    let frame = KillcamModel { title: killcam_title(kind, round_end).to_owned(), perks, weapon };
     let size = window_size(&window);
-    let key = pictures | (size.y as u32) << 3 | (size.x as u32) << 16;
+    let found_perks = frame.perks.iter().enumerate().fold(0u64, |a, (i, p)| a | u64::from(p.is_some()) << i);
+    let key = u64::from(pictures)
+        | (size.y as u64) << 3
+        | (size.x as u64) << 16
+        | u64::from(kind) << 32
+        | u64::from(round_end) << 34
+        | (frame.perks.len() as u64) << 35
+        | found_perks << 38
+        | u64::from(frame.weapon.is_some()) << 41;
     if st.as_ref().is_some_and(|(_, _, b)| *b == key) && !roots.is_empty() {
         return;
     }
     let Some(faces) = Faces::of(shell_fonts.as_deref(), game_font.as_deref()) else { return };
     clear(&mut commands);
+    let slant = slant.get_or_insert_with(|| images.add(slant_image())).clone();
+    spawn_killcam_frame(&mut commands, &faces, &frame, &slant, size);
     let e = spawn_banner(&mut commands, &faces, &model, size);
-    // (Lower than the kill card's place: where BO2's plate was.)
-    let h = (CARD_H * card_scale(size)).round();
+    // (Its middle over the bottom bar's edge, as BO2's NamePlate.)
+    let h = (CARD_H * card_scale(size) * KILLCAM_CARD_SCALE).round();
     commands.entity(e).insert((KillcamCardRoot, Node {
         position_type: PositionType::Absolute,
-        top: Val::Px((size.y * KILLCAM_CARD_CENTRE - h * 0.5).round()),
+        top: Val::Px((size.y - KILLCAM_FOOT_MIDDLE * card_scale(size) - h * 0.5).round()),
         width: Val::Percent(100.0),
         flex_direction: FlexDirection::Column,
         align_items: AlignItems::Center,
@@ -1744,18 +2013,35 @@ fn streak_callout(
 }
 
 // --- Scoreboard ---------------------------------------------------------------
+//
+// One dark translucent panel: a header strip (GAMETYPE over the mode's
+// name on the left, TIME over the clock on the right); in a team game the
+// two sides side by side, each under its banner (his side on the left in
+// blue, theirs on the right in red, mirrored: emblem, name, the big score
+// and TIED / WINNING / LOSING under it), a column header row and the
+// players by score; in a free-for-all one table ranked with places (1ST,
+// 2ND, ...) under a banner with his place and the leader. Columns: SCORE,
+// KILLS, ASSISTS, DEATHS, RATIO, then the game type's own BO2 columns
+// (`setscoreboardcolumns`: S&D's plants and defuses, Domination's captures
+// and defends, CTF's captures and returns, ...). His row gold, a player out
+// of play (dead, watching his killcam) dimmed.
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct BoardRow {
     pub name: String,
     pub level: i32,
     pub rank: Option<Handle<Image>>,
+    /// His place, 1 first (a free-for-all's list shows it).
+    pub place: usize,
     pub score: i32,
     pub kills: i32,
     pub assists: i32,
     pub deaths: i32,
-    pub ping: i32,
+    /// The game type's own columns' values (`BoardModel::columns`' order).
+    pub extra: Vec<i32>,
     pub me: bool,
+    /// Out of play (dead, or watching his killcam): drawn dimmed.
+    pub out: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1764,34 +2050,232 @@ pub(crate) struct BoardGroup {
     pub title: Option<(String, i32)>,
     pub side: Side,
     pub emblem: Option<Handle<Image>>,
+    /// TIED / WINNING / LOSING.
+    pub status: String,
     pub rows: Vec<BoardRow>,
+}
+
+/// A free-for-all's banner: his place and score, the leader's.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FfaHead {
+    pub place: usize,
+    /// What the places are by (SCORE, or the game type's points to win).
+    pub label: String,
+    pub score: i32,
+    pub leader: String,
+    pub leader_score: i32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct BoardModel {
     pub mode: String,
     pub clock: Option<String>,
+    /// The game type's own columns' headers, after the five every board has.
+    pub columns: Vec<String>,
     pub groups: Vec<BoardGroup>,
+    pub ffa: Option<FfaHead>,
 }
 
 #[derive(Component)]
 struct BoardRoot;
 
-const COLUMNS: [(&str, f32); 6] = [("SCORE", 96.0), ("KILLS", 84.0), ("ASSISTS", 90.0), ("DEATHS", 84.0), ("K/D RATIO", 96.0), ("PING", 78.0)];
+/// The five columns every board has.
+const BASE_COLUMNS: [&str; 5] = ["SCORE", "KILLS", "ASSISTS", "DEATHS", "RATIO"];
 
-/// The scoreboard in the screen's middle.
-pub(crate) fn spawn_board(commands: &mut Commands, faces: &Faces, m: &BoardModel, height: f32) -> Entity {
-    let k = (height / 1080.0).max(0.4);
-    let width = 1000.0 * k;
-    let row_h = 34.0 * k;
-    let cells = |r: &mut ChildSpawnerCommands, values: [String; 6], color: Color, f: &Handle<Font>, px: f32| {
-        for ((_, w), v) in COLUMNS.iter().zip(values) {
-            r.spawn(Node { width: Val::Px(w * k), justify_content: JustifyContent::Center, ..default() })
-                .with_children(|c| {
-                    c.spawn((Text::new(v), font(f, px), TextColor(color)));
-                });
-        }
+const BOARD_PANEL: Color = Color::srgba(0.015, 0.02, 0.03, 0.80);
+const BOARD_HEAD: Color = Color::srgba(0.0, 0.0, 0.0, 0.50);
+const BOARD_EDGE: Color = Color::srgba(1.0, 1.0, 1.0, 0.10);
+const BOARD_BLUE: Color = Color::srgb(0.14, 0.40, 0.74);
+const BOARD_RED: Color = Color::srgb(0.66, 0.11, 0.10);
+const BOARD_GOLD: Color = Color::srgb(0.70, 0.52, 0.12);
+const ME_ROW: Color = Color::srgba(0.80, 0.60, 0.12, 0.45);
+const ME_TEXT: Color = Color::srgb(1.0, 0.84, 0.40);
+const OUT_ALPHA: f32 = 0.42;
+
+/// The board's scale on a `size` screen (by its height, no wider than the
+/// screen allows).
+fn board_scale(size: Vec2) -> f32 {
+    (size.y / 1080.0).min(size.x / 1720.0).max(0.4)
+}
+
+/// "1ST", "2ND", "11TH", "23RD".
+fn place_name(n: usize) -> String {
+    let suffix = match (n % 10, n % 100) {
+        (_, 11..=13) => "TH",
+        (1, _) => "ST",
+        (2, _) => "ND",
+        (3, _) => "RD",
+        _ => "TH",
     };
+    format!("{n}{suffix}")
+}
+
+/// A text in a cell `w` wide, centred (or left).
+fn board_cell(r: &mut ChildSpawnerCommands, text: String, w: f32, color: Color, f: &Handle<Font>, px: f32, left: bool) {
+    r.spawn(Node {
+        width: Val::Px(w),
+        flex_shrink: 0.0,
+        justify_content: if left { JustifyContent::FlexStart } else { JustifyContent::Center },
+        overflow: Overflow::clip(),
+        ..default()
+    })
+    .with_children(|c| {
+        c.spawn((Text::new(text), font(f, px), TextColor(color), TextLayout::linebreak(bevy::text::LineBreak::NoWrap)));
+    });
+}
+
+/// The column header row and the players' rows of one table, `rows` long
+/// (a shorter side is padded with empty rows, so the two line up).
+#[allow(clippy::too_many_arguments)]
+fn board_table(p: &mut ChildSpawnerCommands, faces: &Faces, m: &BoardModel, g: &BoardGroup, k: f32, col_w: f32, rows: usize, places: bool) {
+    let row_h = (31.0 * k).round();
+    let place_w = 50.0 * k;
+    let (tint, tint_alt) = match g.side {
+        Side::Mine => (Color::srgba(0.10, 0.24, 0.45, 0.42), Color::srgba(0.10, 0.24, 0.45, 0.26)),
+        Side::Enemy => (Color::srgba(0.42, 0.08, 0.07, 0.42), Color::srgba(0.42, 0.08, 0.07, 0.26)),
+        _ => (Color::srgba(0.30, 0.33, 0.38, 0.30), Color::srgba(0.30, 0.33, 0.38, 0.16)),
+    };
+    // Column headers.
+    p.spawn((
+        Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            height: Val::Px((25.0 * k).round()),
+            padding: UiRect::horizontal(Val::Px(10.0 * k)),
+            border: UiRect::bottom(Val::Px(1.0)),
+            ..default()
+        },
+        BackgroundColor(BOARD_HEAD),
+        BorderColor::all(BOARD_EDGE),
+    ))
+    .with_children(|r| {
+        r.spawn(Node { flex_grow: 1.0, flex_basis: Val::Px(0.0), min_width: Val::Px(0.0), overflow: Overflow::clip(), ..default() })
+            .with_children(|c| {
+                if places {
+                    c.spawn(Node { width: Val::Px(place_w), flex_shrink: 0.0, ..default() });
+                }
+                c.spawn((Text::new("PLAYER"), font(&faces.bold, 14.0 * k), TextColor(DIM), TextLayout::linebreak(bevy::text::LineBreak::NoWrap)));
+            });
+        for h in BASE_COLUMNS.iter().map(|s| (*s).to_owned()).chain(m.columns.iter().cloned()) {
+            board_cell(r, h, col_w, DIM, &faces.bold, 14.0 * k, false);
+        }
+    });
+    let n_cols = BASE_COLUMNS.len() + m.columns.len();
+    for i in 0..rows {
+        let row = g.rows.get(i);
+        let back = match row {
+            Some(r) if r.me => ME_ROW,
+            _ if i % 2 == 0 => tint,
+            _ => tint_alt,
+        };
+        let back = if row.is_none() { back.with_alpha(back.alpha() * 0.35) } else { back };
+        p.spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                height: Val::Px(row_h),
+                padding: UiRect::horizontal(Val::Px(10.0 * k)),
+                margin: UiRect::top(Val::Px((2.0 * k).max(1.0))),
+                ..default()
+            },
+            BackgroundColor(back),
+        ))
+        .with_children(|r| {
+            let Some(row) = row else { return };
+            let a = if row.out { OUT_ALPHA } else { 1.0 };
+            let name_color = if row.me { ME_TEXT } else { WHITE }.with_alpha(a);
+            let text_color = if row.me { ME_TEXT } else { TEXT }.with_alpha(a * if row.me { 1.0 } else { TEXT.alpha() });
+            r.spawn(Node {
+                flex_grow: 1.0,
+                flex_basis: Val::Px(0.0),
+                min_width: Val::Px(0.0),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(6.0 * k),
+                overflow: Overflow::clip(),
+                ..default()
+            })
+            .with_children(|n| {
+                if places {
+                    board_cell(n, place_name(row.place), place_w - 6.0 * k, name_color, &faces.bold, 18.0 * k, true);
+                }
+                let icon = 23.0 * k;
+                match &row.rank {
+                    Some(h) => {
+                        n.spawn((
+                            ImageNode::new(h.clone()).with_color(Color::WHITE.with_alpha(a)),
+                            Node { width: Val::Px(icon), height: Val::Px(icon), flex_shrink: 0.0, ..default() },
+                        ));
+                    }
+                    None => {
+                        n.spawn((BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.12 * a)), Node { width: Val::Px(icon), height: Val::Px(icon), flex_shrink: 0.0, ..default() }));
+                    }
+                }
+                board_cell(n, row.level.to_string(), 34.0 * k, DIM.with_alpha(DIM.alpha() * a), &faces.regular, 16.0 * k, true);
+                n.spawn((Text::new(row.name.clone()), font(&faces.bold, 19.0 * k), TextColor(name_color), TextLayout::linebreak(bevy::text::LineBreak::NoWrap)));
+            });
+            let ratio = if row.deaths > 0 { row.kills as f32 / row.deaths as f32 } else { row.kills as f32 };
+            let mut values = vec![row.score.to_string(), row.kills.to_string(), row.assists.to_string(), row.deaths.to_string(), format!("{ratio:.2}")];
+            values.extend(row.extra.iter().map(i32::to_string));
+            values.resize(n_cols, "0".to_owned());
+            for v in values {
+                board_cell(r, v, col_w, text_color, &faces.regular, 18.0 * k, false);
+            }
+        });
+    }
+}
+
+/// A side's banner: its emblem, its name, its score big with TIED /
+/// WINNING / LOSING under it; `mirrored` (theirs, on the right) puts the
+/// score on the inside (left) and the emblem on the outside.
+fn board_banner(p: &mut ChildSpawnerCommands, faces: &Faces, g: &BoardGroup, k: f32, mirrored: bool) {
+    let Some((title, score)) = &g.title else { return };
+    let color = if g.side == Side::Enemy { BOARD_RED } else { BOARD_BLUE };
+    let dark = Color::srgba(0.03, 0.04, 0.06, 0.55);
+    // (Bright toward the middle, where the two scores meet.)
+    let gradient = if mirrored { crate::shell::theme::fade_right(color.with_alpha(0.92), dark) } else { crate::shell::theme::fade_right(dark, color.with_alpha(0.92)) };
+    p.spawn((
+        Node {
+            flex_direction: if mirrored { FlexDirection::RowReverse } else { FlexDirection::Row },
+            align_items: AlignItems::Center,
+            height: Val::Px((80.0 * k).round()),
+            padding: UiRect::horizontal(Val::Px(14.0 * k)),
+            column_gap: Val::Px(14.0 * k),
+            border: if mirrored { UiRect::left(Val::Px((3.0 * k).max(2.0))) } else { UiRect::right(Val::Px((3.0 * k).max(2.0))) },
+            margin: UiRect::bottom(Val::Px(4.0 * k)),
+            ..default()
+        },
+        gradient,
+        BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.55)),
+    ))
+    .with_children(|b| {
+        let side = 64.0 * k;
+        match &g.emblem {
+            Some(e) => {
+                b.spawn((ImageNode::new(e.clone()), Node { width: Val::Px(side), height: Val::Px(side), flex_shrink: 0.0, ..default() }));
+            }
+            None => {
+                b.spawn(Node { width: Val::Px(side), height: Val::Px(side), flex_shrink: 0.0, ..default() });
+            }
+        }
+        b.spawn((Text::new(title.to_uppercase()), font(&faces.bold, 33.0 * k), TextColor(WHITE), shadow(33.0 * k), TextLayout::linebreak(bevy::text::LineBreak::NoWrap)));
+        b.spawn(Node { flex_grow: 1.0, ..default() });
+        b.spawn(Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, min_width: Val::Px(70.0 * k), ..default() }).with_children(|c| {
+            c.spawn((Text::new(score.to_string()), font(&faces.bold, 54.0 * k), TextColor(WHITE), shadow(54.0 * k), Node { margin: UiRect::bottom(Val::Px(-8.0 * k)), ..default() }));
+            c.spawn((Text::new(g.status.clone()), font(&faces.bold, 15.0 * k), TextColor(Color::srgba(1.0, 1.0, 1.0, 0.82))));
+        });
+    });
+}
+
+/// The board in the screen's middle.
+pub(crate) fn spawn_board(commands: &mut Commands, faces: &Faces, m: &BoardModel, size: Vec2) -> Entity {
+    let k = board_scale(size);
+    let teams = m.ffa.is_none() && m.groups.len() >= 2;
+    let n_cols = (BASE_COLUMNS.len() + m.columns.len()) as f32;
+    let col_w = (if n_cols > 6.0 { 64.0 } else { 70.0 }) * k;
+    let width = if teams { 1640.0 * k } else { (640.0 + n_cols * 74.0) * k };
+    let col_w = if teams { col_w } else { 74.0 * k };
+    let rows = m.groups.iter().map(|g| g.rows.len()).max().unwrap_or(0).max(if teams { 4 } else { 1 });
     commands
         .spawn((
             BoardRoot,
@@ -1801,7 +2285,7 @@ pub(crate) fn spawn_board(commands: &mut Commands, faces: &Faces, m: &BoardModel
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
-                top: Val::Percent(14.0),
+                top: Val::Percent(if rows > 9 { 9.0 } else { 15.0 }),
                 justify_content: JustifyContent::Center,
                 ..default()
             },
@@ -1809,155 +2293,106 @@ pub(crate) fn spawn_board(commands: &mut Commands, faces: &Faces, m: &BoardModel
         .with_children(|screen| {
             screen
                 .spawn((
-                    Node {
-                        width: Val::Px(width),
-                        flex_direction: FlexDirection::Column,
-                        border: UiRect::all(Val::Px(1.0)),
-                        ..default()
-                    },
-                    BackgroundColor(PANEL),
-                    BorderColor::all(LINE),
+                    Node { width: Val::Px(width), flex_direction: FlexDirection::Column, border: UiRect::all(Val::Px(1.0)), ..default() },
+                    BackgroundColor(BOARD_PANEL),
+                    BorderColor::all(BOARD_EDGE),
                 ))
                 .with_children(|panel| {
-                    // The accent along the top.
-                    panel.spawn((BackgroundColor(ACCENT), Node { width: Val::Percent(100.0), height: Val::Px(3.0 * k), ..default() }));
                     // Header: the game type, the clock.
-                    panel
-                        .spawn(Node {
-                            flex_direction: FlexDirection::Row,
-                            justify_content: JustifyContent::SpaceBetween,
-                            align_items: AlignItems::FlexEnd,
-                            padding: UiRect::new(Val::Px(18.0 * k), Val::Px(18.0 * k), Val::Px(10.0 * k), Val::Px(10.0 * k)),
-                            ..default()
-                        })
-                        .with_children(|h| {
-                            h.spawn(Node { flex_direction: FlexDirection::Column, ..default() }).with_children(|c| {
-                                c.spawn((Text::new("GAMETYPE"), font(&faces.regular, 16.0 * k), TextColor(FAINT)));
-                                c.spawn((Text::new(m.mode.clone()), font(&faces.bold, 40.0 * k), TextColor(WHITE)));
-                            });
-                            h.spawn(Node { flex_direction: FlexDirection::Column, align_items: AlignItems::FlexEnd, ..default() })
-                                .with_children(|c| {
-                                    c.spawn((Text::new("TIME"), font(&faces.regular, 16.0 * k), TextColor(FAINT)));
-                                    c.spawn((Text::new(m.clock.clone().unwrap_or_else(|| "--:--".to_owned())), font(&faces.bold, 40.0 * k), TextColor(WHITE)));
-                                });
-                        });
-                    // Column headers.
                     panel
                         .spawn((
                             Node {
                                 flex_direction: FlexDirection::Row,
-                                align_items: AlignItems::Center,
-                                height: Val::Px(26.0 * k),
-                                padding: UiRect::horizontal(Val::Px(14.0 * k)),
-                                border: UiRect::vertical(Val::Px(1.0)),
+                                justify_content: JustifyContent::SpaceBetween,
+                                align_items: AlignItems::FlexEnd,
+                                padding: UiRect::new(Val::Px(16.0 * k), Val::Px(16.0 * k), Val::Px(8.0 * k), Val::Px(8.0 * k)),
+                                border: UiRect::bottom(Val::Px((2.0 * k).max(1.0))),
                                 ..default()
                             },
-                            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
-                            BorderColor::all(LINE),
+                            BackgroundColor(Color::srgba(0.12, 0.13, 0.15, 0.55)),
+                            BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.16)),
                         ))
-                        .with_children(|r| {
-                            r.spawn(Node { flex_grow: 1.0, ..default() }).with_children(|c| {
-                                c.spawn((Text::new("PLAYER"), font(&faces.bold, 15.0 * k), TextColor(DIM)));
+                        .with_children(|h| {
+                            h.spawn(Node { flex_direction: FlexDirection::Column, ..default() }).with_children(|c| {
+                                c.spawn((Text::new("GAMETYPE"), font(&faces.regular, 14.0 * k), TextColor(FAINT)));
+                                c.spawn((Text::new(m.mode.clone()), font(&faces.bold, 40.0 * k), TextColor(WHITE), shadow(40.0 * k), Node { margin: UiRect::top(Val::Px(-6.0 * k)), ..default() }));
                             });
-                            cells(r, COLUMNS.map(|(n, _)| n.to_owned()), DIM, &faces.bold, 15.0 * k);
+                            h.spawn(Node { flex_direction: FlexDirection::Column, align_items: AlignItems::FlexEnd, ..default() }).with_children(|c| {
+                                c.spawn((Text::new("TIME"), font(&faces.regular, 14.0 * k), TextColor(FAINT)));
+                                c.spawn((
+                                    Text::new(m.clock.clone().unwrap_or_else(|| "--:--".to_owned())),
+                                    font(&faces.bold, 40.0 * k),
+                                    TextColor(WHITE),
+                                    shadow(40.0 * k),
+                                    Node { margin: UiRect::top(Val::Px(-6.0 * k)), ..default() },
+                                ));
+                            });
                         });
-                    for g in &m.groups {
-                        if let Some((title, score)) = &g.title {
-                            let tint = match g.side {
-                                Side::Mine => ACCENT,
-                                Side::Enemy => ENEMY,
-                                _ => DIM,
-                            };
-                            panel
-                                .spawn((
-                                    Node {
-                                        flex_direction: FlexDirection::Row,
-                                        align_items: AlignItems::Center,
-                                        column_gap: Val::Px(10.0 * k),
-                                        height: Val::Px(32.0 * k),
-                                        padding: UiRect::horizontal(Val::Px(14.0 * k)),
-                                        margin: UiRect::top(Val::Px(6.0 * k)),
-                                        border: UiRect::left(Val::Px(3.0 * k)),
-                                        ..default()
-                                    },
-                                    crate::shell::theme::fade_right(tint.with_alpha(0.30), tint.with_alpha(0.0)),
-                                    BorderColor::all(tint),
-                                ))
-                                .with_children(|r| {
-                                    if let Some(e) = &g.emblem {
-                                        r.spawn((ImageNode::new(e.clone()), Node { width: Val::Px(26.0 * k), height: Val::Px(26.0 * k), ..default() }));
-                                    }
-                                    r.spawn((Text::new(title.clone()), font(&faces.bold, 22.0 * k), TextColor(WHITE)));
-                                    r.spawn(Node { flex_grow: 1.0, ..default() });
-                                    r.spawn((Text::new(score.to_string()), font(&faces.bold, 24.0 * k), TextColor(WHITE)));
-                                });
-                        }
-                        for (i, row) in g.rows.iter().enumerate() {
-                            let back = match g.side {
-                                Side::Mine => MINE_ROW,
-                                Side::Enemy => ENEMY_ROW,
-                                _ if row.me => MINE_ROW,
-                                _ if i % 2 == 0 => PLAIN_ROW,
-                                _ => Color::NONE,
-                            };
-                            let name_color = if row.me { GOLD } else { WHITE };
-                            let text_color = if row.me { GOLD } else { TEXT };
-                            panel
-                                .spawn((
-                                    Node {
-                                        flex_direction: FlexDirection::Row,
-                                        align_items: AlignItems::Center,
-                                        height: Val::Px(row_h),
-                                        padding: UiRect::horizontal(Val::Px(14.0 * k)),
-                                        margin: UiRect::top(Val::Px(2.0 * k)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(back),
-                                ))
-                                .with_children(|r| {
-                                    r.spawn(Node {
-                                        flex_grow: 1.0,
-                                        flex_direction: FlexDirection::Row,
-                                        align_items: AlignItems::Center,
-                                        column_gap: Val::Px(8.0 * k),
-                                        ..default()
-                                    })
-                                    .with_children(|p| {
-                                        match &row.rank {
-                                            Some(icon) => {
-                                                p.spawn((ImageNode::new(icon.clone()), Node { width: Val::Px(26.0 * k), height: Val::Px(26.0 * k), ..default() }));
-                                            }
-                                            None => {
-                                                p.spawn((BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.12)), Node { width: Val::Px(22.0 * k), height: Val::Px(22.0 * k), margin: UiRect::horizontal(Val::Px(2.0 * k)), ..default() }));
-                                            }
-                                        }
-                                        p.spawn(Node { width: Val::Px(40.0 * k), ..default() }).with_children(|c| {
-                                            c.spawn((Text::new(row.level.to_string()), font(&faces.regular, 19.0 * k), TextColor(DIM)));
+                    if teams {
+                        // The two sides side by side, his on the left.
+                        panel
+                            .spawn(Node {
+                                flex_direction: FlexDirection::Row,
+                                column_gap: Val::Px(6.0 * k),
+                                padding: UiRect::all(Val::Px(6.0 * k)),
+                                ..default()
+                            })
+                            .with_children(|row| {
+                                for (i, g) in m.groups.iter().take(2).enumerate() {
+                                    row.spawn(Node { flex_grow: 1.0, flex_basis: Val::Px(0.0), min_width: Val::Px(0.0), flex_direction: FlexDirection::Column, ..default() })
+                                        .with_children(|col| {
+                                            board_banner(col, faces, g, k, i == 1);
+                                            board_table(col, faces, m, g, k, col_w, rows, false);
                                         });
-                                        p.spawn((Text::new(row.name.clone()), font(&faces.bold, 21.0 * k), TextColor(name_color)));
-                                    });
-                                    let ratio = if row.deaths > 0 { row.kills as f32 / row.deaths as f32 } else { row.kills as f32 };
-                                    cells(
-                                        r,
-                                        [
-                                            row.score.to_string(),
-                                            row.kills.to_string(),
-                                            row.assists.to_string(),
-                                            row.deaths.to_string(),
-                                            format!("{ratio:.2}"),
-                                            row.ping.to_string(),
-                                        ],
-                                        text_color,
-                                        &faces.regular,
-                                        20.0 * k,
-                                    );
-                                });
-                        }
+                                }
+                            });
+                    } else {
+                        panel
+                            .spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::all(Val::Px(6.0 * k)), ..default() })
+                            .with_children(|col| {
+                                if let Some(f) = &m.ffa {
+                                    ffa_banner(col, faces, f, k);
+                                }
+                                if let Some(g) = m.groups.first() {
+                                    board_table(col, faces, m, g, k, col_w, g.rows.len().max(1), true);
+                                }
+                            });
                     }
-                    panel.spawn(Node { height: Val::Px(10.0 * k), ..default() });
+                    panel.spawn(Node { height: Val::Px(6.0 * k), ..default() });
                 });
         })
         .id()
+}
+
+/// A free-for-all's banner: his place big and his score on the left, the
+/// leader and his score on the right.
+fn ffa_banner(p: &mut ChildSpawnerCommands, faces: &Faces, f: &FfaHead, k: f32) {
+    let dark = Color::srgba(0.03, 0.04, 0.06, 0.55);
+    p.spawn((
+        Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            height: Val::Px((80.0 * k).round()),
+            padding: UiRect::horizontal(Val::Px(18.0 * k)),
+            column_gap: Val::Px(16.0 * k),
+            margin: UiRect::bottom(Val::Px(4.0 * k)),
+            ..default()
+        },
+        crate::shell::theme::fade_right(BOARD_GOLD.with_alpha(0.85), dark),
+    ))
+    .with_children(|b| {
+        b.spawn((Text::new(place_name(f.place)), font(&faces.bold, 54.0 * k), TextColor(WHITE), shadow(54.0 * k)));
+        b.spawn(Node { flex_direction: FlexDirection::Column, ..default() }).with_children(|c| {
+            c.spawn((Text::new("YOUR PLACE"), font(&faces.bold, 15.0 * k), TextColor(Color::srgba(1.0, 1.0, 1.0, 0.82))));
+            c.spawn((Text::new(format!("{}  {}", f.label, f.score)), font(&faces.bold, 22.0 * k), TextColor(WHITE)));
+        });
+        b.spawn(Node { flex_grow: 1.0, ..default() });
+        b.spawn(Node { flex_direction: FlexDirection::Column, align_items: AlignItems::FlexEnd, ..default() }).with_children(|c| {
+            c.spawn((Text::new("LEADER"), font(&faces.bold, 15.0 * k), TextColor(Color::srgba(1.0, 1.0, 1.0, 0.70))));
+            c.spawn((Text::new(f.leader.clone()), font(&faces.bold, 26.0 * k), TextColor(WHITE), TextLayout::linebreak(bevy::text::LineBreak::NoWrap)));
+        });
+        b.spawn((Text::new(f.leader_score.to_string()), font(&faces.bold, 54.0 * k), TextColor(WHITE), shadow(54.0 * k)));
+    });
 }
 
 /// The game type's name when BO2's tables do not give it.
@@ -1966,7 +2401,7 @@ fn mode_name(gametype: &str) -> String {
         "tdm" => "TEAM DEATHMATCH",
         "dm" => "FREE-FOR-ALL",
         "dom" => "DOMINATION",
-        "sd" => "SEARCH & DESTROY",
+        "sd" => "SEARCH AND DESTROY",
         "ctf" => "CAPTURE THE FLAG",
         "koth" => "HARDPOINT",
         "hq" => "HEADQUARTERS",
@@ -1976,9 +2411,87 @@ fn mode_name(gametype: &str) -> String {
         "oic" => "ONE IN THE CHAMBER",
         "sas" => "STICKS AND STONES",
         "shrp" => "SHARPSHOOTER",
+        "oneflag" => "ONE FLAG CTF",
         other => return other.to_ascii_uppercase(),
     }
     .to_owned()
+}
+
+/// The game type's own columns (`setscoreboardcolumns`, from `bo2mp_cols`)
+/// past the five every board has: BO2's column names in its order (a
+/// free-for-all's `pointstowin` too, except Free-for-all's own, which is
+/// its kills).
+fn extra_columns(cols: &str, gametype: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for c in cols.split(',').map(str::trim) {
+        if c.is_empty() || matches!(c, "score" | "kills" | "deaths" | "kdratio" | "assists") || (c == "pointstowin" && gametype == "dm") {
+            continue;
+        }
+        if !out.iter().any(|o| o == c) {
+            out.push(c.to_owned());
+        }
+    }
+    out
+}
+
+/// A column's header: a short name of ours, else BO2's own
+/// (`CGAME_SB_<NAME>`), else the column's name.
+fn column_header(col: &str, gametype: &str, slot: Option<&crate::lui_hud::LuiHudSlot>) -> String {
+    let ours = match col {
+        "plants" => "PLANTS",
+        "defuses" => "DEFUSES",
+        "captures" => "CAPTURES",
+        "defends" => "DEFENDS",
+        "returns" => "RETURNS",
+        "killsconfirmed" => "CONFIRMS",
+        "killsdenied" => "DENIES",
+        "headshots" => "HEADSHOTS",
+        "stabs" => "STABS",
+        "tomahawks" => "TOMAHAWKS",
+        "humiliated" => "BANKRUPTS",
+        "survived" => "SURVIVED",
+        "destructions" => "DESTROYS",
+        "x2score" => "BONUS",
+        "pointstowin" if gametype == "gun" => "GUN",
+        "pointstowin" => "POINTS",
+        _ => "",
+    };
+    if !ours.is_empty() {
+        return ours.to_owned();
+    }
+    slot.and_then(|s| s.localize(&format!("CGAME_SB_{}", col.to_ascii_uppercase())))
+        .filter(|t| !t.trim().is_empty())
+        .map_or_else(|| col.to_ascii_uppercase(), |t| t.to_uppercase())
+}
+
+/// `bo2mp_board`: each player's "out of play" and his column values by name.
+fn parse_board(raw: &str) -> HashMap<u32, (bool, HashMap<String, i32>)> {
+    raw.split(';')
+        .filter_map(|row| {
+            let mut f = row.splitn(3, '|');
+            let c = f.next()?.trim().parse::<u32>().ok()?;
+            let out = f.next()? == "1";
+            let values = f
+                .next()
+                .unwrap_or("")
+                .split(',')
+                .filter_map(|kv| {
+                    let (k, v) = kv.split_once('=')?;
+                    Some((k.trim().to_owned(), v.trim().parse::<i32>().ok()?))
+                })
+                .collect();
+            Some((c, (out, values)))
+        })
+        .collect()
+}
+
+/// TIED / WINNING / LOSING for a side with `mine` against `theirs`.
+fn standing(mine: i32, theirs: i32) -> &'static str {
+    match mine.cmp(&theirs) {
+        std::cmp::Ordering::Greater => "WINNING",
+        std::cmp::Ordering::Less => "LOSING",
+        std::cmp::Ordering::Equal => "TIED",
+    }
 }
 
 #[derive(Default)]
@@ -2019,18 +2532,31 @@ fn scoreboard(
         return;
     };
     let Some(snap) = p.snapshot() else { return };
+    let dvars = snap.meta.script_dvars(l.0);
+    let cols = dvars.string("bo2mp_cols").unwrap_or_default().to_owned();
+    let board = parse_board(dvars.string("bo2mp_board").unwrap_or_default());
+    let extra = extra_columns(&cols, &seen.gametype);
     let cat = catalog();
     let me = l.0.0;
-    let mut groups: Vec<BoardGroup> = Vec::new();
+    let value = |c: u32, k: &str| board.get(&c).and_then(|(_, v)| v.get(k).copied()).unwrap_or(0);
     let row_of = |c: u32, m: &sim::ClientSnapshotMeta, cache: &mut HashMap<String, Option<(Handle<Image>, Vec2)>>, images: &mut Assets<Image>, pics: Option<&mut crate::shell::pics::ShellPics>| {
         let name = String::from_utf8_lossy(&m.name).trim_end_matches(char::from(0)).to_owned();
         let mine = c == me;
         let (level, prestige) = rank_of(&name, Some(m), mine, Some(&*slot));
         let rank = rank_picture(level, prestige, cat.as_ref(), cache, pics, icons.as_deref(), images);
-        // (Ping as BO2's own board: the listen server's client 12-16 ms,
-        // bots 0.)
-        let ping = if mine { 12 + (name.bytes().map(u32::from).sum::<u32>() % 5) as i32 } else { 0 };
-        BoardRow { name, level, rank, score: m.score, kills: m.kills, assists: 0, deaths: m.deaths, ping, me: mine }
+        BoardRow {
+            name,
+            level,
+            rank,
+            place: 0,
+            score: m.score,
+            kills: m.kills,
+            assists: value(c, "assists"),
+            deaths: m.deaths,
+            extra: extra.iter().map(|k| value(c, k)).collect(),
+            me: mine,
+            out: board.get(&c).is_some_and(|(o, _)| *o),
+        }
     };
     let mut players: Vec<(u32, &sim::ClientSnapshotMeta, String)> = snap
         .meta
@@ -2039,29 +2565,58 @@ fn scoreboard(
         .map(|(c, m)| (c.0, m, seen.teams.get(&c.0).cloned().unwrap_or_default()))
         .filter(|(_, _, t)| !matches!(t.as_str(), "spectator" | ""))
         .collect();
-    players.sort_by(|a, b| b.1.score.cmp(&a.1.score).then(b.1.kills.cmp(&a.1.kills)).then(a.1.deaths.cmp(&b.1.deaths)));
+    // (A free-for-all ranks by its points to win where it has them, as
+    // BO2's board sorts by its first column.)
+    let points = |c: u32, m: &sim::ClientSnapshotMeta| if cols.split(',').next().map(str::trim) == Some("pointstowin") { value(c, "pointstowin") } else { m.score };
+    players.sort_by(|a, b| {
+        points(b.0, b.1)
+            .cmp(&points(a.0, a.1))
+            .then(b.1.score.cmp(&a.1.score))
+            .then(b.1.kills.cmp(&a.1.kills))
+            .then(a.1.deaths.cmp(&b.1.deaths))
+    });
+    let mut groups: Vec<BoardGroup> = Vec::new();
+    let mut ffa = None;
+    // Our team logos: Black Ops' faction emblems (the HUD's score bar's).
     let mut emblem = |name: &str| game_picture(&mut cache, &mut images, "t5", name).map(|(h, _)| h);
     let emblems = (emblem("faction_128_specops"), emblem("faction_128_spetsnaz"));
     if seen.ffa {
-        let rows = players.iter().map(|(c, m, _)| row_of(*c, m, &mut cache, &mut images, pics.as_deref_mut())).collect();
-        groups.push(BoardGroup { title: None, side: Side::Neutral, emblem: None, rows });
+        let mut rows: Vec<BoardRow> = players.iter().map(|(c, m, _)| row_of(*c, m, &mut cache, &mut images, pics.as_deref_mut())).collect();
+        // (Equal points share a place.)
+        let keys: Vec<i32> = players.iter().map(|(c, m, _)| points(*c, m)).collect();
+        for i in 0..rows.len() {
+            rows[i].place = if i > 0 && keys[i] == keys[i - 1] { rows[i - 1].place } else { i + 1 };
+        }
+        let mine = rows.iter().zip(&keys).find(|(r, _)| r.me);
+        let leader = rows.first().zip(keys.first());
+        let by_points = cols.split(',').next().map(str::trim) == Some("pointstowin");
+        ffa = Some(FfaHead {
+            place: mine.map_or(0, |(r, _)| r.place),
+            label: if by_points { column_header("pointstowin", &seen.gametype, None) } else { "SCORE".to_owned() },
+            score: mine.map_or(0, |(_, k)| *k),
+            leader: leader.map_or_else(String::new, |(r, _)| r.name.clone()),
+            leader_score: leader.map_or(0, |(_, k)| *k),
+        });
+        groups.push(BoardGroup { title: None, side: Side::Neutral, emblem: None, status: String::new(), rows });
     } else {
         let mine = if seen.my_team == "axis" { "axis" } else { "allies" };
+        let score_of = |team: &str| if team == "axis" { seen.scores.1 } else { seen.scores.0 };
         for team in [mine, if mine == "axis" { "allies" } else { "axis" }] {
-            let rows: Vec<BoardRow> = players
+            let mut rows: Vec<BoardRow> = players
                 .iter()
                 .filter(|(_, _, t)| t == team)
                 .map(|(c, m, _)| row_of(*c, m, &mut cache, &mut images, pics.as_deref_mut()))
                 .collect();
-            let (title, score, em) = if team == "axis" {
-                ("SPETSNAZ", seen.scores.1, emblems.1.clone())
-            } else {
-                ("BLACK OPS", seen.scores.0, emblems.0.clone())
-            };
+            for (i, r) in rows.iter_mut().enumerate() {
+                r.place = i + 1;
+            }
+            let other = if team == "axis" { "allies" } else { "axis" };
+            let (title, em) = if team == "axis" { ("SPETSNAZ", emblems.1.clone()) } else { ("BLACK OPS", emblems.0.clone()) };
             groups.push(BoardGroup {
-                title: Some((title.to_owned(), score)),
+                title: Some((title.to_owned(), score_of(team))),
                 side: if team == mine { Side::Mine } else { Side::Enemy },
                 emblem: em,
+                status: standing(score_of(team), score_of(other)).to_owned(),
                 rows,
             });
         }
@@ -2069,16 +2624,18 @@ fn scoreboard(
     let model = BoardModel {
         mode: slot.gametype_title(&seen.gametype).unwrap_or_else(|| mode_name(&seen.gametype)),
         clock: seen.timeleft.map(|t| format!("{}:{:02}", t / 60, t % 60)),
+        columns: extra.iter().map(|c| column_header(c, &seen.gametype, Some(&*slot))).collect(),
         groups,
+        ffa,
     };
-    let height = window.single().map_or(1080.0, Window::height);
-    let key = (model.clone(), height as u32);
+    let size = window_size(&window);
+    let key = (model.clone(), (size.y as u32) << 16 | size.x as u32);
     if st.shown.as_ref() == Some(&key) && !roots.is_empty() {
         return;
     }
     let Some(faces) = Faces::of(shell_fonts.as_deref(), game_font.as_deref()) else { return };
     clear(&mut commands);
-    spawn_board(&mut commands, &faces, &model, height);
+    spawn_board(&mut commands, &faces, &model, size);
     // (The gate's proof the end scoreboard drew its rows, as BO2's board
     // logged it.)
     if seen.ended && !st.end_logged {
@@ -2186,7 +2743,7 @@ pub mod preview {
         }
         plan.frames = 0;
         let i = plan.step / 2;
-        let names = ["01_feed_banner_hit", "02_kill_hitmarker", "03_scoreboard_teams", "04_scoreboard_ffa"];
+        let names = ["01_feed_banner_hit", "02_kill_hitmarker", "03_scoreboard_teams", "04_scoreboard_ffa", "05_killcam_final", "06_scoreboard_sd"];
         if i >= names.len() {
             exit.write(AppExit::Success);
             return;
@@ -2245,56 +2802,98 @@ pub mod preview {
                 let e = commands.spawn((BackgroundColor(Color::srgb(0.30, 0.31, 0.29)), Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, GlobalZIndex(-1))).id();
                 mark(&mut commands, e);
             }
+            4 => {
+                // The final killcam: bars, title, the killer's card, his
+                // perks (two in, one empty) and his weapon.
+                let mut cache = HashMap::new();
+                let bo1_rank = game_picture(&mut cache, &mut images, "t5", "rank_pvt1_128").map(|(h, _)| h);
+                let mut model = BannerModel::new("RezTech".into(), 100, now);
+                model.rank = bo1_rank.or_else(|| Some(images.add(stand_in(4, 128, 128))));
+                model.card = Some((images.add(stand_in(0, 512, 128)), Vec2::new(512.0, 128.0)));
+                model.emblem = Some(images.add(stand_in(3, 64, 64)));
+                model.subtitle = Some(rank_title(100, 0));
+                model.scale = KILLCAM_CARD_SCALE;
+                model.hold = KILLCAM_CARD_HOLD;
+                let perk = images.add(stand_in(3, 64, 64));
+                let frame = KillcamModel { title: killcam_title(2, true).into(), perks: vec![Some(perk.clone()), Some(perk)], weapon: Some((wide_gun.clone(), 4.0)) };
+                let slant = images.add(slant_image());
+                let e = spawn_killcam_frame(&mut commands, &faces, &frame, &slant, size);
+                mark(&mut commands, e);
+                let e = spawn_banner(&mut commands, &faces, &model, size);
+                let h = (CARD_H * card_scale(size) * KILLCAM_CARD_SCALE).round();
+                commands.entity(e).insert(Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px((size.y - KILLCAM_FOOT_MIDDLE * card_scale(size) - h * 0.5).round()),
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    ..default()
+                });
+                mark(&mut commands, e);
+                let e = commands.spawn((BackgroundColor(Color::srgb(0.42, 0.40, 0.36)), Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, GlobalZIndex(-1))).id();
+                mark(&mut commands, e);
+            }
             _ => {
-                let row = |name: &str, level: i32, score: i32, kills: i32, deaths: i32, me: bool| BoardRow {
+                let row = |name: &str, level: i32, score: i32, kills: i32, deaths: i32, me: bool, out: bool| BoardRow {
                     name: name.into(),
                     level,
                     rank: Some(rank.clone()),
+                    place: 0,
                     score,
                     kills,
                     assists: kills / 4,
                     deaths,
-                    ping: if me { 14 } else { 0 },
+                    extra: if i == 5 { vec![kills % 2, kills % 3] } else { Vec::new() },
                     me,
+                    out,
                 };
-                let groups = if i == 2 {
-                    vec![
-                        BoardGroup {
-                            title: Some(("BLACK OPS".into(), 4200)),
-                            side: Side::Mine,
-                            emblem: Some(emblem.clone()),
-                            rows: vec![row("eden", 31, 1100, 12, 5, false), row("simon", 47, 700, 10, 7, true), row("Jebus", 12, 600, 8, 7, false)],
-                        },
-                        BoardGroup {
-                            title: Some(("SPETSNAZ".into(), 3800)),
-                            side: Side::Enemy,
-                            emblem: Some(emblem.clone()),
-                            rows: vec![row("BlueGhost", 50, 700, 10, 6, false), row("MjrDeathAdder", 9, 300, 4, 7, false), row("JTAG", 55, 100, 5, 7, false)],
-                        },
-                    ]
-                } else {
-                    vec![BoardGroup {
-                        title: None,
-                        side: Side::Neutral,
-                        emblem: None,
-                        rows: vec![
-                            row("eden", 31, 1100, 12, 5, false),
-                            row("BlueGhost", 50, 700, 10, 6, false),
-                            row("simon", 47, 700, 10, 7, true),
-                            row("Jebus", 12, 600, 8, 7, false),
-                            row("MjrDeathAdder", 9, 300, 4, 7, false),
-                            row("JTAG", 55, 100, 5, 7, false),
-                            row("Fish_Sdicks", 22, 0, 3, 7, false),
-                            row("Sass", 3, 0, 1, 7, false),
+                let (groups, ffa, columns, mode) = if i == 2 || i == 5 {
+                    let (a, b) = if i == 5 { (2, 2) } else { (4200, 3800) };
+                    (
+                        vec![
+                            BoardGroup {
+                                title: Some(("BLACK OPS".into(), a)),
+                                side: Side::Mine,
+                                emblem: Some(emblem.clone()),
+                                status: standing(a, b).into(),
+                                rows: vec![row("eden", 31, 1100, 12, 5, false, false), row("simon", 47, 700, 10, 7, true, false), row("Jebus", 12, 600, 8, 7, false, true)],
+                            },
+                            BoardGroup {
+                                title: Some(("SPETSNAZ".into(), b)),
+                                side: Side::Enemy,
+                                emblem: Some(emblem.clone()),
+                                status: standing(b, a).into(),
+                                rows: vec![row("BlueGhost", 50, 700, 10, 6, false, false), row("MjrDeathAdder", 9, 300, 4, 7, false, true), row("JTAG", 55, 100, 5, 7, false, false), row("Sass", 3, 0, 1, 7, false, false)],
+                            },
                         ],
-                    }]
+                        None,
+                        if i == 5 { vec!["PLANTS".to_owned(), "DEFUSES".to_owned()] } else { Vec::new() },
+                        if i == 5 { "SEARCH AND DESTROY" } else { "TEAM DEATHMATCH" },
+                    )
+                } else {
+                    let mut rows = vec![
+                        row("eden", 31, 1100, 12, 5, false, false),
+                        row("BlueGhost", 50, 700, 10, 6, false, false),
+                        row("simon", 47, 700, 10, 7, true, false),
+                        row("Jebus", 12, 600, 8, 7, false, true),
+                        row("MjrDeathAdder", 9, 300, 4, 7, false, false),
+                        row("JTAG", 55, 100, 5, 7, false, false),
+                        row("Fish_Sdicks", 22, 0, 3, 7, false, false),
+                        row("Sass", 3, 0, 1, 7, false, false),
+                    ];
+                    for (n, r) in rows.iter_mut().enumerate() {
+                        r.place = n + 1;
+                    }
+                    rows[2].place = 2;
+                    (
+                        vec![BoardGroup { title: None, side: Side::Neutral, emblem: None, status: String::new(), rows }],
+                        Some(FfaHead { place: 2, label: "SCORE".into(), score: 700, leader: "eden".into(), leader_score: 1100 }),
+                        Vec::new(),
+                        "FREE-FOR-ALL",
+                    )
                 };
-                let model = BoardModel {
-                    mode: if i == 2 { "TEAM DEATHMATCH".into() } else { "GUN GAME".into() },
-                    clock: Some("9:15".into()),
-                    groups,
-                };
-                let e = spawn_board(&mut commands, &faces, &model, 1080.0);
+                let model = BoardModel { mode: mode.into(), clock: Some("9:15".into()), columns, groups, ffa };
+                let e = spawn_board(&mut commands, &faces, &model, size);
                 mark(&mut commands, e);
                 let e = commands.spawn((BackgroundColor(Color::srgb(0.30, 0.31, 0.29)), Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, GlobalZIndex(-1))).id();
                 mark(&mut commands, e);
@@ -2370,6 +2969,39 @@ mod tests {
         assert!(y0 > 20.0 && s0 > 1.0);
         assert_eq!(card_motion(CARD_SETTLE), (0.0, 1.0));
         const { assert!(KILL_CARD_SOUND.is_none()) };
+    }
+
+    #[test]
+    fn board_columns_and_values() {
+        // S&D's own columns past the five; Free-for-all's points are its kills.
+        assert_eq!(extra_columns("score,kills,deaths,plants,defuses", "sd"), vec!["plants", "defuses"]);
+        assert_eq!(extra_columns("score,kills,deaths,kdratio,assists", "tdm"), Vec::<String>::new());
+        assert_eq!(extra_columns("pointstowin,kills,deaths,headshots,score", "dm"), vec!["headshots"]);
+        assert_eq!(extra_columns("pointstowin,kills,deaths,stabs,humiliated", "gun"), vec!["pointstowin", "stabs", "humiliated"]);
+        assert_eq!(column_header("pointstowin", "gun", None), "GUN");
+        assert_eq!(column_header("killsconfirmed", "conf", None), "CONFIRMS");
+        let b = parse_board("0|0|assists=3,plants=1;5|1|assists=0,defuses=2;junk");
+        assert_eq!(b.len(), 2);
+        assert_eq!(b[&0].1["plants"], 1);
+        assert!(b[&5].0 && !b[&0].0);
+        assert_eq!(standing(3, 2), "WINNING");
+        assert_eq!(standing(2, 2), "TIED");
+        assert_eq!(place_name(1), "1ST");
+        assert_eq!(place_name(12), "12TH");
+        assert_eq!(place_name(22), "22ND");
+    }
+
+    #[test]
+    fn killcam_titles_and_ranks() {
+        assert_eq!(killcam_title(1, false), "KILLCAM");
+        assert_eq!(killcam_title(2, false), "FINAL KILLCAM");
+        assert_eq!(killcam_title(2, true), "ROUND WINNING KILLCAM");
+        assert_eq!(BO1_RANK_TITLES.len(), BO1_RANKS.len());
+        assert_eq!(rank_title(1, 0), "Private");
+        assert_eq!(rank_title(55, 0), "Commander");
+        assert_eq!(rank_title(10, 2), "Prestige 2");
+        let img = slant_image();
+        assert_eq!(img.size(), UVec2::new(160, 124));
     }
 
     #[test]

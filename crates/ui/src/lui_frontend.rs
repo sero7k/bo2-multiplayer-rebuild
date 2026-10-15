@@ -1127,8 +1127,9 @@ pub(crate) fn match_load(host: &mut Host, mp: &Mp, gametype: &str, map: &str) {
 }
 
 /// bo2mp: with the modern HUD, BO2's Killcam widget is made without its
-/// killer's NamePlate (`hud_match::killcam_card` draws our card there); its
-/// KILLCAM title, its bands and the prompts stay. killcam.lua's
+/// killer's NamePlate and is then marked `bo1Hidden` (`hud_match::killcam_card`
+/// draws the bars, title, card and perks); the scripts' skip / respawn
+/// prompt is a script element and stays. killcam.lua's
 /// `LUI.createMenu.Killcam` reads `CoD.NamePlate.New` as it builds (HUD
 /// StartKillcamHud calls it as BIT_IN_KILLCAM goes on), adds the plate to
 /// its bottom band and keeps nothing of it; so ours wraps it and, for that
@@ -1167,6 +1168,14 @@ fn modern_killcam_card(host: &mut Host) {
         let made = vm.call(original.clone(), args);
         // (Back even if the widget failed: the other plates need it.)
         plate.borrow_mut().set_str("New", new);
+        // Its title and bands go too: `hud_match`'s killcam draws its own
+        // (bars, title, the killer's card and perks); the widget is still
+        // built and gets its events.
+        if let Ok(out) = &made
+            && let Some(id) = out.first().and_then(hks_t6::lui::hide_element)
+        {
+            diag::info!(Ui, "bo2mp lui: BO2's Killcam widget hidden for the modern killcam (element #{id})");
+        }
         made
     });
     menus.borrow_mut().set_str("Killcam", wrapped);

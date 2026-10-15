@@ -636,6 +636,9 @@ pub(crate) struct ScreenFeed {
     /// Whoever last killed each client (victim -> killer), until he is back
     /// in play: the card BO2 shows at his death, before the killcam.
     killers: std::collections::HashMap<u32, (i32, bool)>,
+    /// Each client's killcam ("<kind>|<killer>") and its killer's perks
+    /// (`perk_rows`), worked out once a killcam.
+    killcam_perks: std::collections::HashMap<u32, (String, String)>,
 }
 
 impl ScreenFeed {
@@ -685,6 +688,27 @@ fn player_name(vm: &mut Vm<World>, world: &mut World, v: &Value) -> String {
     .replace(['|', ';'], " ")
 }
 
+/// A player's perks 1 to 3 of his class as the HUD draws them:
+/// `icon|localized name` by `;` (the killcam's perk list, `setperks`, and
+/// the modern HUD's killcam, `bo2mp_killcam_perks`).
+fn perk_rows(vm: &mut Vm<World>, world: &mut World, who: &Value) -> String {
+    let class = match who {
+        Value::Object(p) => {
+            let f = vm.intern("class_num");
+            vm.raw_field(*p, f).as_int().unwrap_or(0)
+        }
+        _ => 0,
+    };
+    let card = super::loadout::perk_card(vm, world, who, class);
+    let mut rows = Vec::new();
+    for row in card.split(';').filter(|r| !r.is_empty()) {
+        let (icon, name) = row.split_once('|').unwrap_or(("", row));
+        let key = vm.string(name);
+        rows.push(format!("{icon}|{}", super::localize(vm, world, &key, &[]).replace(['|', ';'], " ")));
+    }
+    rows.join(";")
+}
+
 fn bind_screen(vm: &mut Vm<World>) {
     // The text effects (decode, pulse, typewriter):
     // elem setpulsefx(ms per letter, decay start ms, decay ms). The letters
@@ -711,26 +735,24 @@ fn bind_screen(vm: &mut Vm<World>) {
     vm.bind("setperks", true, |vm, world, s, a| {
         // The list rides in the element's text as `#perks:icon|name;...`
         // (the names localized here), drawn by the client.
-        let who = arg(a, 0);
-        let class = match &who {
-            Value::Object(p) => {
-                let f = vm.intern("class_num");
-                vm.raw_field(*p, f).as_int().unwrap_or(0)
+        // (BO2's engine draws the perks of the player his view follows: in
+        // a killcam (`showperks` as it starts) the killer's, not his own.)
+        let mut who = arg(a, 0).clone();
+        if let Value::Object(p) = &who {
+            let (kc, sc) = (vm.intern("killcam"), vm.intern("spectatorclient"));
+            let watched = vm.raw_field(*p, sc).as_float().filter(|c| *c >= 0.0).map(|c| c as u32);
+            if gsc_t6::truthy(&vm.raw_field(*p, kc))
+                && let Some(obj) = watched.and_then(|c| world.resource::<Zm>().players.get(&c).map(|q| q.obj))
+            {
+                who = Value::Object(obj);
             }
-            _ => 0,
-        };
-        let card = super::loadout::perk_card(vm, world, &who, class);
-        let mut rows = Vec::new();
-        for row in card.split(';').filter(|r| !r.is_empty()) {
-            let (icon, name) = row.split_once('|').unwrap_or(("", row));
-            let key = vm.string(name);
-            rows.push(format!("{icon}|{}", super::localize(vm, world, &key, &[])));
         }
+        let rows = perk_rows(vm, world, &who);
         if let Value::Object(o) = s
             && let Some(e) = world.resource_mut::<Zm>().huds.elems.get_mut(&o.index)
         {
             e.shader = None;
-            e.text = if rows.is_empty() { String::new() } else { format!("#perks:{}", rows.join(";")) };
+            e.text = if rows.is_empty() { String::new() } else { format!("#perks:{rows}") };
         }
         Ok(Value::Undefined)
     });
@@ -940,6 +962,69 @@ pub(super) fn publish_screen(world: &mut World) {
         }
         f.killers.retain(|c, (_, seen)| killcams.contains_key(c) || !*seen);
     }
+    // bo2mp: the killer's perks for the modern HUD's killcam (BO2 draws
+    // them bottom right, `showperks`): `bo2mp_killcam_perks`, "icon|name"
+    // by `;`, "" with no killcam.
+    let mut killcam_perks: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
+    for (c, kc) in &killcams {
+        let Some(killer) = kc
+            .strip_prefix("1|")
+            .or_else(|| kc.strip_prefix("2|"))
+            .and_then(|k| k.parse::<i32>().ok())
+            .filter(|k| *k >= 0)
+        else {
+            continue;
+        };
+        if let Some((seen, rows)) = feed(world).killcam_perks.get(c)
+            && seen == kc
+        {
+            killcam_perks.insert(*c, rows.clone());
+            continue;
+        }
+        let obj = world.resource::<Zm>().players.get(&(killer as u32)).map(|p| p.obj);
+        let rows = obj.and_then(|o| super::with_vm(world, |vm, world| perk_rows(vm, world, &Value::Object(o)))).unwrap_or_default();
+        diag::info!(Sim, "bo2mp killcam perks: client {c} watches {killer}: {rows:?}");
+        feed(world).killcam_perks.insert(*c, (kc.clone(), rows.clone()));
+        killcam_perks.insert(*c, rows);
+    }
+    feed(world).killcam_perks.retain(|c, _| killcams.contains_key(c));
+    // bo2mp: every player's scoreboard values past the snapshot's score,
+    // kills and deaths: out of play (dead, or watching a killcam), his
+    // assists and the game type's own columns (`setscoreboardcolumns`:
+    // plants, defuses, captures, defends, ...), the engine's counts or else
+    // the scripts' fields: `bo2mp_board`, "<client>|<out>|<col>=<n>,..." by `;`.
+    let board = {
+        let mut names: Vec<String> = vec!["assists".to_owned()];
+        for col in cols.split(',').map(str::trim) {
+            if !col.is_empty() && !matches!(col, "score" | "kills" | "deaths" | "kdratio") && !names.iter().any(|n| n == col) {
+                names.push(col.to_owned());
+            }
+        }
+        super::with_vm(world, |vm, world| {
+            let zm = world.resource::<Zm>();
+            clients
+                .iter()
+                .map(|(c, o)| {
+                    let p = zm.players.get(c);
+                    let out = p.is_some_and(|p| matches!(p.sessionstate.as_str(), "dead" | "spectator"));
+                    let values = names
+                        .iter()
+                        .map(|k| {
+                            let v = p.and_then(|p| p.stats.get(k.as_str()).copied()).or_else(|| {
+                                let f = vm.intern(k);
+                                vm.raw_field(*o, f).as_float().map(|v| v as i32)
+                            });
+                            format!("{k}={}", v.unwrap_or(0))
+                        })
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    format!("{c}|{}|{values}", u8::from(out))
+                })
+                .collect::<Vec<_>>()
+                .join(";")
+        })
+        .unwrap_or_default()
+    };
     // The objectives each player's HUD marks (bots have no HUD).
     let views: Vec<(u32, String)> =
         teams.iter().filter(|(c, _, _)| !super::is_bot(world, *c)).map(|(c, t, _)| (*c, t.clone())).collect();
@@ -963,6 +1048,8 @@ pub(super) fn publish_screen(world: &mut World) {
             ("bo2mp_settings", settings.clone()),
             ("bo2mp_minimap", minimap.clone()),
             ("bo2mp_killcam", killcams.get(&c).cloned().unwrap_or_default()),
+            ("bo2mp_killcam_perks", killcam_perks.get(&c).cloned().unwrap_or_default()),
+            ("bo2mp_board", board.clone()),
             ("bo2mp_prematch", prematch.clone()),
             ("bo2mp_outcome", outcome.clone()),
         ] {

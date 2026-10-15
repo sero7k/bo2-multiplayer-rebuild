@@ -1054,6 +1054,16 @@ pub(super) fn bind(vm: &mut Vm<World>) {
     // bo2mp: `setmatchflag("game_ended", 1)`: every client's `bo2mp_game_ended`
     // dvar, which opens the scoreboard once his HUD is back (the intermission).
     f!("setmatchflag", |vm, world, _, a| {
+        // bo2mp: `round_end_killcam` (the final killcam of a round that is
+        // not the match's last, `_killcam::finalkillcam`): the modern HUD's
+        // killcam is titled ROUND WINNING KILLCAM then (`bo2mp_round_killcam`).
+        if text(vm, a, 0) == "round_end_killcam" {
+            let on = if int(a, 1).unwrap_or(0) != 0 { "1" } else { "" };
+            let ids: Vec<u32> = world.resource::<Zm>().players.keys().copied().collect();
+            for n in ids {
+                super::set_client_dvar(world, n, "bo2mp_round_killcam", on);
+            }
+        }
         if text(vm, a, 0) == "game_ended" {
             let on = if int(a, 1).unwrap_or(0) != 0 { "1" } else { "" };
             let ids: Vec<u32> = world.resource::<Zm>().players.keys().copied().collect();

@@ -352,6 +352,17 @@ pub fn element(v: &Value) -> Option<Rc<UserData>> {
     }
 }
 
+/// bo2mp: marks an element `bo1Hidden` (built and fed, never drawn: the
+/// game draws its own in its place); its engine id when it was not yet.
+pub fn hide_element(v: &Value) -> Option<usize> {
+    let u = element(v)?;
+    with(&u, |e| {
+        let was = e.fields.borrow().get_str("bo1Hidden").truthy();
+        e.fields.borrow_mut().set_str("bo1Hidden", Value::Bool(true));
+        (!was).then_some(e.id)
+    })
+}
+
 pub(crate) fn with<R>(u: &UserData, f: impl FnOnce(&mut Element) -> R) -> R {
     let mut data = u.data.borrow_mut();
     let e = data.downcast_mut::<Element>().expect("LUIElement userdata holds an Element");

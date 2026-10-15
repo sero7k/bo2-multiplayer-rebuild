@@ -808,6 +808,15 @@ fn zm_script_hud(
     // bo2mp: with the modern HUD the hit marker is `hud_match`'s own (it
     // reads BO2's `damage_feedback` element from the same value); BO2's
     // picture is left out here.
+    // (And the killcam's perk list, `showperks`: the modern killcam draws the
+    // killer's perks in its own slots, `hud_match::killcam_card`.)
+    let value = value.map(|v| {
+        if crate::hud_modern::modern_hud_enabled() && v.contains("#perks:") {
+            v.split('\u{1e}').filter(|row| !row.contains("#perks:")).collect::<Vec<_>>().join("\u{1e}")
+        } else {
+            v
+        }
+    });
     let value = value.map(|v| {
         if crate::hud_modern::modern_hud_enabled() && v.contains("#shader:damage_feedback") {
             v.split('\u{1e}').filter(|row| !row.contains("#shader:damage_feedback")).collect::<Vec<_>>().join("\u{1e}")
