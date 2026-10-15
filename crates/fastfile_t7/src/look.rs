@@ -25,6 +25,18 @@
 //!   detailScaleHeight`, and its variance;
 //! * occlusion: `aoMap.r`, Black Ops III's ambient light and reflections'.
 //!
+//! Micro tile blends (`gbuffer_micro_tile_blend`: most walls, floors and
+//! props) build their surface from two tiled layers over a macro map:
+//! layer 1 `colorMap` at `uv * detailScale1.xy` (turned `rotateUVs1`
+//! radians about the middle), tinted by `colorTint` through its alpha;
+//! layer 2 `colorMapDetail2` at `uv * detailScale2.xy` (`rotateUVs2`),
+//! tinted by `colorTint1`; mixed by `mixMap.r` at `uv * mixScale`. The
+//! normal is the macro `normalMap` (at uv) plus the layer's detail normal
+//! map (`detailMap1`, `detailMap2`) times `detailScaleHeight1`/`2`; gloss
+//! the layer's gloss map (`glossMap`, `glossMapDetail2`) over `glossRange`
+//! / `glossRange2`; `aoMap` at uv. Here the layers are baked into one
+//! picture over uv (each tile shrunk to the texels it covers).
+//!
 //! Black Ops II's lit draw reads a colour map (sRGB, squared), a normal map
 //! (BC5: the slope x / z, y / z over -1..1, as Ghosts' are) and a specular
 //! map (sRGB colour whose square is the reflectance, gloss in alpha: power
@@ -172,6 +184,9 @@ impl T7Map {
     /// and the caller draws what it drew before); the normal and specular
     /// maps when the material is lit.
     pub fn look(&self, m: &MapMaterial, max_dim: u32, spec_max: u32, cover: Cover) -> Result<Look, String> {
+        if m.texture("mixMap").is_some() && m.constant::<2>("detailScale1").is_some() {
+            return self.micro_tile_blend(m, max_dim, spec_max);
+        }
         let mut out = Look::default();
         let binds = |s: &str| m.bound.iter().any(|b| b == s);
         let known = !m.bound.is_empty();
@@ -307,6 +322,174 @@ impl T7Map {
             out.used[3] = matches!(ao, Slot::Image(_));
             out.colour = encode(w, h, rgba, if any_alpha { Format::Bc3 } else { Format::Bc1 });
         }
+        Ok(out)
+    }
+}
+
+/// One tiled layer of a micro tile blend.
+struct Layer {
+    colour: Option<Rgba>,
+    tint: [f32; 3],
+    normal: Option<Rgba>,
+    height: f32,
+    gloss: Slot,
+    gloss_range: [f32; 2],
+    scale: [f32; 2],
+    /// cos, sin of the turn.
+    turn: [f32; 2],
+}
+
+impl Layer {
+    fn uv(&self, u: f32, v: f32) -> (f32, f32) {
+        let (du, dv) = (u - 0.5, v - 0.5);
+        let (c, s) = (self.turn[0], self.turn[1]);
+        ((du * c - dv * s + 0.5) * self.scale[0], (du * s + dv * c + 0.5) * self.scale[1])
+    }
+}
+
+impl T7Map {
+    /// A tile picture shrunk to the texels a tile covers in a `w`-wide
+    /// picture repeating it `scale` times.
+    fn tile(&self, m: &MapMaterial, slot: &str, w: u32, scale: f32, max_dim: u32) -> Result<Slot, String> {
+        let cover = ((w as f32 / scale.abs().max(1.0)).ceil() as u32).next_power_of_two().clamp(4, max_dim);
+        Ok(match self.slot(m, slot, max_dim)? {
+            Slot::Image(i) => Slot::Image(i.at_most(cover)),
+            // (A placeholder is that colour all over: `$white_diffuse` is a
+            // layer drawn by its tint alone.)
+            Slot::Solid(c) => Slot::Image(Rgba { w: 4, h: 4, px: c.repeat(16) }),
+            Slot::None => Slot::None,
+        })
+    }
+
+    fn micro_tile_blend(&self, m: &MapMaterial, max_dim: u32, spec_max: u32) -> Result<Look, String> {
+        let mut out = Look::default();
+        let c = |name: &str| m.constants.get(name).cloned().unwrap_or_default();
+        let at = |v: &Vec<f32>, k: usize, d: f32| v.get(k).copied().unwrap_or(d);
+        let (s1, s2, mix_scale) = (c("detailScale1"), c("detailScale2"), c("mixScale"));
+        let (t0, t1) = (c("colorTint"), c("colorTint1"));
+        let (g1, g2) = (c("glossRange"), c("glossRange2"));
+        let (r1, r2) = (c("rotateUVs1"), c("rotateUVs2"));
+        let heights = [at(&c("detailScaleHeight1"), 0, 1.0), at(&c("detailScaleHeight2"), 0, 1.0)];
+        let base_height = at(&c("baseNormalHeight"), 0, 1.0);
+        // The picture: the macro maps' size, at least 512 (the tiles need
+        // room), at most `max_dim`.
+        let normal = match self.slot(m, "normalMap", max_dim)? {
+            Slot::Image(i) => Some(i),
+            _ => None,
+        };
+        let mix = match self.slot(m, "mixMap", max_dim)? {
+            Slot::Image(i) => Some(i),
+            _ => None,
+        };
+        let (mut w, mut h) = normal.as_ref().or(mix.as_ref()).map_or((max_dim, max_dim), |i| (i.w, i.h));
+        while w.max(h) < 512.min(max_dim) {
+            (w, h) = (w * 2, h * 2);
+        }
+        while w.max(h) > max_dim && w > 4 && h > 4 {
+            (w, h) = (w / 2, h / 2);
+        }
+        let layer = |k: usize| -> Result<Layer, String> {
+            let (scale, tint, gr, rot) = if k == 0 { (&s1, &t0, &g1, &r1) } else { (&s2, &t1, &g2, &r2) };
+            let scale = [at(scale, 0, 1.0), at(scale, 1, 1.0)];
+            let (cs, ns, gs) = if k == 0 { ("colorMap", "detailMap1", "glossMap") } else { ("colorMapDetail2", "detailMap2", "glossMapDetail2") };
+            let img = |s: Slot| match s {
+                Slot::Image(i) => Some(i),
+                _ => None,
+            };
+            let a = at(rot, 0, 0.0);
+            Ok(Layer {
+                colour: img(self.tile(m, cs, w, scale[0], max_dim)?),
+                tint: [at(tint, 0, 1.0), at(tint, 1, 1.0), at(tint, 2, 1.0)],
+                normal: img(self.tile(m, ns, w, scale[0], max_dim)?),
+                height: heights[k],
+                gloss: self.tile(m, gs, w, scale[0], max_dim)?,
+                gloss_range: [at(gr, 0, 4.0), at(gr, 1, 10.0)],
+                scale,
+                turn: [a.cos(), a.sin()],
+            })
+        };
+        let layers = [layer(0)?, layer(1)?];
+        if layers.iter().all(|l| l.colour.is_none()) {
+            return Err(format!("{}: no tile colour maps", m.name));
+        }
+        let ao = self.slot(m, "aoMap", max_dim)?;
+        let mix_scale = [at(&mix_scale, 0, 1.0), at(&mix_scale, 1, 1.0)];
+        let (mut colour, mut nrm, mut gloss) = (vec![0u8; (w * h * 4) as usize], vec![0u8; (w * h * 4) as usize], vec![0f32; (w * h) as usize]);
+        for y in 0..h {
+            for x in 0..w {
+                let (u, v) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+                let t = mix.as_ref().map_or(0.0, |i| i.sample(u * mix_scale[0], v * mix_scale[1], 0));
+                let mut rgb = [[0f32; 3]; 2];
+                let mut n = [[0f32; 2]; 2];
+                let mut g = [0f32; 2];
+                for (k, l) in layers.iter().enumerate() {
+                    let (lu, lv) = l.uv(u, v);
+                    if let Some(ci) = &l.colour {
+                        let a = ci.sample(lu, lv, 3);
+                        for ch in 0..3 {
+                            let lin = to_linear((ci.sample(lu, lv, ch) * 255.0).round() as u8);
+                            rgb[k][ch] = lin * (1.0 + a * (l.tint[ch] - 1.0));
+                        }
+                    }
+                    if let Some(ni) = &l.normal {
+                        n[k] = [(ni.sample(lu, lv, 0) * 1.992_188 - 1.0) * l.height, (ni.sample(lu, lv, 1) * 1.992_188 - 1.0) * l.height];
+                    }
+                    let gm = match &l.gloss {
+                        Slot::Image(i) => i.sample(lu, lv, 0),
+                        Slot::Solid(c) => f32::from(c[0]) / 255.0,
+                        Slot::None => 1.0,
+                    };
+                    g[k] = (l.gloss_range[0] + (l.gloss_range[1] - l.gloss_range[0]) * gm) / 17.0;
+                }
+                // (A layer with no picture of its own takes the other's.)
+                if layers[0].colour.is_none() {
+                    rgb[0] = rgb[1];
+                }
+                if layers[1].colour.is_none() {
+                    rgb[1] = rgb[0];
+                }
+                let occ = match &ao {
+                    Slot::Image(i) => i.sample(u, v, 0),
+                    _ => 1.0,
+                };
+                let i = (y * w + x) as usize;
+                for ch in 0..3 {
+                    colour[i * 4 + ch] = to_srgb((rgb[0][ch] + t * (rgb[1][ch] - rgb[0][ch])) * occ);
+                }
+                colour[i * 4 + 3] = 255;
+                let (mut bx, mut by) = (0.0, 0.0);
+                if let Some(ni) = &normal {
+                    let s = |c: usize| ((ni.sample(u, v, c) - 0.5) * base_height + 0.5) * 1.992_188 - 1.0;
+                    (bx, by) = (s(0), s(1));
+                }
+                let nx = bx + n[0][0] + t * (n[1][0] - n[0][0]);
+                let ny = by + n[0][1] + t * (n[1][1] - n[0][1]);
+                let z = (1.0 - nx * nx - ny * ny).max(0.0).sqrt().max(0.25);
+                let q = |s: f32| (((s / z).clamp(-1.0, 1.0) * 0.5 + 0.5) * 255.0).round() as u8;
+                nrm[i * 4..i * 4 + 4].copy_from_slice(&[q(nx), q(ny), 0, 255]);
+                gloss[i] = (g[0] + t * (g[1] - g[0])).clamp(0.0, 1.0);
+            }
+        }
+        out.colour = encode(w, h, colour, Format::Bc1);
+        out.normal = encode(w, h, nrm, Format::Bc5);
+        // The specular map: a dielectric's 0.04, the gloss.
+        let mut sw = w;
+        let mut sh = h;
+        let mut step = 1;
+        while sw.max(sh) > spec_max && sw > 4 && sh > 4 {
+            (sw, sh, step) = (sw / 2, sh / 2, step * 2);
+        }
+        let mut spec = vec![0u8; (sw * sh * 4) as usize];
+        let f0 = (0.04f32.sqrt() * 255.0).round() as u8;
+        for y in 0..sh {
+            for x in 0..sw {
+                let o = ((y * sw + x) * 4) as usize;
+                spec[o..o + 3].fill(f0);
+                spec[o + 3] = (bo2_gloss(gloss[((y * step) * w + x * step) as usize]) * 255.0).round() as u8;
+            }
+        }
+        out.specular = encode(sw, sh, spec, Format::Bc3);
+        out.used = [layers.iter().any(|l| l.tint.iter().any(|t| (t - 1.0).abs() > 0.004)), false, layers.iter().any(|l| matches!(l.gloss, Slot::Image(_))), matches!(ao, Slot::Image(_)), layers.iter().any(|l| l.normal.is_some())];
         Ok(out)
     }
 }
