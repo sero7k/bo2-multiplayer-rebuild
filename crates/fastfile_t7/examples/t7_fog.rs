@@ -72,7 +72,16 @@ fn main() {
                     let mut rows: Vec<u8> = Vec::new();
                     for d in 0..depth {
                         let one = fastfile_t7::texture::ImageLevels { data: l.data[d * slice..((d + 1) * slice).min(l.data.len())].to_vec(), levels: 1, ..l.clone() };
-                        if let Some((_, _, px)) = fastfile_t7::texture::level_rgba(&one, 0) {
+                        if one.format == 24 {
+                            // R10G10B10A2: ten bits a channel, red lowest.
+                            for w in one.data.chunks_exact(4).take(w0 * h0) {
+                                let v = u32::from_le_bytes([w[0], w[1], w[2], w[3]]);
+                                for k in 0..3 {
+                                    rows.push(((((v >> (10 * k)) & 1023) as f32) * 255.0 / 1023.0).round() as u8);
+                                }
+                                rows.push(255);
+                            }
+                        } else if let Some((_, _, px)) = fastfile_t7::texture::level_rgba(&one, 0) {
                             rows.extend_from_slice(&px);
                         }
                     }
