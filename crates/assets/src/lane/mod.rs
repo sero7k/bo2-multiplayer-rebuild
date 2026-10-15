@@ -4,6 +4,7 @@ pub use iw4::check_iw4_map;
 mod iw5;
 // bo2mp: Call of Duty 4 maps (no ZoneGame of their own).
 mod bo2_look;
+mod bo3_look;
 mod cod4;
 // bo2mp: World at War maps, through the CoD4 lane's builders.
 mod waw;

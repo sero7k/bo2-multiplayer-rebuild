@@ -577,6 +577,44 @@ fn t7_row(i: u32) -> vec4<f32> {
     return t6_lights.v[T7_ROW * 4u + i];
 }
 
+// bo2mp: Black Ops III's look on a Black Ops II map (`assets::lane::
+// bo3_look`, `BO2MP_BO3_LOOK=1`): the same branch, but the surface keeps
+// Black Ops II's own albedo (vertex tint, layers) and takes its ambient
+// light from Black Ops II's lightmap (ambient and directional pages: the
+// light without the sun), its probes as Black Ops II stores them (rgb / a)
+// and its fog as Black Ops II's.
+fn t7_bo2() -> bool {
+    return t6_lights.v[(T7_ROW + 1u) * 4u + 1u].z > 0.5;
+}
+
+// The variants Black Ops III's light does not draw on a Black Ops II map
+// (their own shaders: water, lava flow, tiles, flags).
+#ifdef WATER
+const T7_SPECIAL: bool = true;
+#else
+#ifdef FLOW
+const T7_SPECIAL: bool = true;
+#else
+#ifdef TILE
+const T7_SPECIAL: bool = true;
+#else
+#ifdef TILE_BLEND
+const T7_SPECIAL: bool = true;
+#else
+#ifdef FLAG
+const T7_SPECIAL: bool = true;
+#else
+const T7_SPECIAL: bool = false;
+#endif
+#endif
+#endif
+#endif
+#endif
+
+fn t7_drawn() -> bool {
+    return t7_on() && !(T7_SPECIAL && t7_bo2());
+}
+
 fn t7_sun_height(x: i32, y: i32, size: i32) -> f32 {
     if (x < 0 || y < 0 || x >= size || y >= size) {
         return -1e30;
@@ -647,7 +685,14 @@ fn t7_tone(c: vec3<f32>, exposure: f32) -> vec3<f32> {
 }
 
 fn t7_out(c: vec3<f32>) -> vec3<f32> {
-    return bo2_final(t7_tone(c, t7_row(0u).x));
+    return bo2_final(t7_tone(c, t7_exposure()));
+}
+
+// The tone curve's exposure: Black Ops III's map's (row 254 x); on a Black
+// Ops II map (`t7_bo2`) that times Black Ops II's own, which moves between
+// its exposure volumes.
+fn t7_exposure() -> f32 {
+    return t7_row(0u).x * select(1.0, t6.sun_dir_exposure.w, t7_bo2());
 }
 
 // bo2mp: Black Ops III's atmospheric fog (its forward `lit` and sky
@@ -709,7 +754,9 @@ fn t7_lit_at(q: vec3<f32>, g: T7Fog, map: texture_2d<f32>) -> f32 {
 // end at the sky's distance). `jitter` (0..1) offsets the shaft march.
 fn t7_fog_core(c: vec3<f32>, p: vec3<f32>, eye: vec3<f32>, sky: bool, jitter: f32, g: T7Fog, map: texture_2d<f32>) -> vec3<f32> {
     let f4 = g.f[4];
-    if (f4.w < 0.5) {
+    let f7 = g.f[7];
+    let atmos = f4.w > 0.5;
+    if (!atmos && f7.z < 0.5) {
         return c;
     }
     let v = p - eye;
@@ -727,7 +774,7 @@ fn t7_fog_core(c: vec3<f32>, p: vec3<f32>, eye: vec3<f32>, sky: bool, jitter: f3
         optical *= (1.0 - exp(-h)) / h;
     }
     let ext = f4.x;
-    let tr = saturate(exp2(optical * g.f[2].xyz) * ext + vec3(1.0 - ext));
+    let tr = select(vec3(1.0), saturate(exp2(optical * g.f[2].xyz) * ext + vec3(1.0 - ext)), atmos);
     // Phases: Schlick's Mie toward the sun, faded in past the haze
     // distance; Rayleigh (normalised) blended in by the sun strength.
     let mu = dot(g.f[3].xyz, dir);
@@ -740,7 +787,6 @@ fn t7_fog_core(c: vec3<f32>, p: vec3<f32>, eye: vec3<f32>, sky: bool, jitter: f3
     // The shafts: the share of the ray's first stretch the sun reaches,
     // on the Mie term (and, by the shaft density, an in-scatter of its own
     // nearer the eye, where the fog is thin).
-    let f7 = g.f[7];
     var lit = 1.0;
     var shaft = 0.0;
     if (f7.z > 0.5) {
@@ -777,6 +823,14 @@ fn t7_fog(c: vec3<f32>, p: vec3<f32>) -> vec3<f32> {
 // by gloss (5 (1 - gloss)), weighted by the split-sum fit and darkened
 // where the ambient is. Gloss: Black Ops II's specular alpha back to Black
 // Ops III's (power 2^(17 g)).
+#ifdef SHINE
+// A probe's light toward `d` (Black Ops II's: rgb / a).
+fn t7_probe(d: vec3<f32>, pi: u32, mip: f32) -> vec3<f32> {
+    let t = textureSampleLevel(probe_cubes, probe_sampler, d, i32(pi), mip);
+    return select(t.rgb, t.rgb / (t.a + 0.000001), t7_bo2());
+}
+#endif
+
 fn t7_shade(base: vec3<f32>, amb_in: vec3<f32>, vn: vec3<f32>, n: vec3<f32>, st: vec4<f32>, probe: u32, p: vec3<f32>) -> vec3<f32> {
     let sun_dir = t6.sun_dir_exposure.xyz;
     let sun = t6.sun_color.rgb * t7_row(0u).y;
@@ -790,9 +844,9 @@ fn t7_shade(base: vec3<f32>, amb_in: vec3<f32>, vn: vec3<f32>, n: vec3<f32>, st:
 #ifdef SHINE
     let lum = vec3(0.2126, 0.7152, 0.0722);
     let pi = min(probe, 31u);
-    let gain = probes.v[pi * 3u].x;
-    let l6v = textureSampleLevel(probe_cubes, probe_sampler, vn, i32(pi), 6.0).rgb;
-    let l6n = textureSampleLevel(probe_cubes, probe_sampler, n, i32(pi), 6.0).rgb;
+    let gain = select(probes.v[pi * 3u].x, 1.0, t7_bo2());
+    let l6v = t7_probe(vn, pi, 6.0);
+    let l6n = t7_probe(n, pi, 6.0);
     amb *= clamp(dot(l6n, lum) / max(dot(l6v, lum), 0.0001), 0.5, 2.0);
     let sraw = raw_texel(st.rgb);
     let f0 = sraw * sraw;
@@ -810,7 +864,7 @@ fn t7_shade(base: vec3<f32>, amb_in: vec3<f32>, vn: vec3<f32>, n: vec3<f32>, st:
     colour += sun * (vis * ndl * d / max(4.0 * ldh * ldh, 0.05)) * fr;
     let r = reflect(-v, n);
     let mip = clamp(5.0 * (1.0 - g) - 0.35, 0.0, 6.0);
-    let env = textureSampleLevel(probe_cubes, probe_sampler, r, i32(pi), mip).rgb * gain;
+    let env = t7_probe(r, pi, mip) * gain;
     let rough = sqrt(sqrt(a2));
     let rr = rough * vec4(-1.0, -0.0275, -0.572, 0.022) + vec4(1.0, 0.0425, 1.04, -0.04);
     let a004 = min(rr.x * rr.x, exp2(-9.28 * ndv)) * rr.x + rr.y;
@@ -822,11 +876,11 @@ fn t7_shade(base: vec3<f32>, amb_in: vec3<f32>, vn: vec3<f32>, n: vec3<f32>, st:
     // A test view (`BO2MP_T7_VIEW`).
     let test = u32(t6_lights.v[(T7_ROW + 1u) * 4u + 1u].x + 0.5);
     if (test == 1u) {
-        return vec3(vis) / max(t7_row(0u).x, 0.0001);
+        return vec3(vis) / max(t7_exposure(), 0.0001);
     } else if (test == 2u) {
         return amb;
     } else if (test == 3u) {
-        return base / max(t7_row(0u).x, 0.0001);
+        return base / max(t7_exposure(), 0.0001);
     } else if (test == 4u) {
         return amb + sun * (vis * ndl);
     }
@@ -851,7 +905,7 @@ fn fragment_textured(in: VertexOut) -> @location(0) vec4<f32> {
 #ifdef UNLIT
     // (bo2mp: on a world lit by Black Ops III's own light the vertex
     // colour is its baked light, not a tint.)
-    let tint = select(in.color.rgb, vec3(1.0), t7_on());
+    let tint = select(in.color.rgb, vec3(1.0), t7_on() && !t7_bo2());
 #ifdef MULTIPLY
     let a = albedo.a * in.color.a;
     return vec4(mix(vec3(1.0), texel * tint, a), a);
@@ -1008,8 +1062,9 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
     let base = tinted * tinted;
 #endif
     // bo2mp: Black Ops III's own light (`t7_shade`): the vertex colour is
-    // the baked ambient light, not a tint.
-    if (t7_on()) {
+    // the baked ambient light, not a tint (on a Black Ops II map, `t7_bo2`:
+    // the tint stays, the ambient is its lightmap's).
+    if (t7_drawn()) {
         let vn7 = normalize(in.normal);
         var n7 = vn7;
         var st7 = vec4(0.0);
@@ -1018,7 +1073,20 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
         n7 = normalize(nm7.x * in.tangent + nm7.y * in.binormal + vn7);
         st7 = textureSample(specular_map, colour_sampler, in.uv);
 #endif
-        return vec4(t7_out(t7_fog(t7_shade(texel * texel, in.color.rgb, vn7, n7, st7, in.probe, in.world_position), in.world_position)), t7_reveal(albedo.a, in.color.a));
+        var base7 = texel * texel;
+        var amb7 = in.color.rgb;
+        var alpha7 = t7_reveal(albedo.a, in.color.a);
+        if (t7_bo2()) {
+            let v7 = in.lightmap_uv.y / 3.0;
+            let q0 = textureSample(lightmap, lightmap_sampler, vec2(in.lightmap_uv.x, v7));
+            let q1 = textureSample(lightmap, lightmap_sampler, vec2(in.lightmap_uv.x, v7 + 1.0 / 3.0));
+            let q2 = textureSample(lightmap, lightmap_sampler, vec2(in.lightmap_uv.x, v7 + 2.0 / 3.0));
+            amb7 = q0.rgb / (q0.a + 0.000001) + q1.rgb / (q1.a + 0.000001) * saturate(dot(q2.rgb * 2.0 - 1.0, n7));
+            base7 = base;
+            alpha7 = albedo.a * in.color.a;
+        }
+        let lit7 = t7_fog(t7_shade(base7, amb7, vn7, n7, st7, in.probe, in.world_position), in.world_position);
+        return vec4(t7_out(bo2_fog(lit7, in.world_position)), alpha7);
     }
     let v = in.lightmap_uv.y / 3.0;
     let page0 = textureSample(lightmap, lightmap_sampler, vec2(in.lightmap_uv.x, v));
@@ -1672,12 +1740,14 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
     let bt = dp2perp * duv1.y + dp1perp * duv2.y;
     let frame = inverseSqrt(max(max(dot(tg, tg), dot(bt, bt)), 1e-20));
     // bo2mp: Black Ops III's own light (`t7_shade`).
-    if (t7_on()) {
+    if (t7_drawn()) {
         let nm7 = textureSample(normal_map, colour_sampler, in.uv).xy * 4.015748 - 2.015748;
         let n7 = normalize(nm7.x * tg * frame + nm7.y * bt * frame + vn);
-        let st7 = textureSample(specular_map, colour_sampler, in.uv);
+        // (A camo's pattern rides in the specular map's place.)
+        let st7 = select(textureSample(specular_map, colour_sampler, in.uv), vec4(0.24, 0.24, 0.24, 0.45), camo_on);
         let pr7 = u32(max(in.primary.w - 0.5, 0.0));
-        return vec4(t7_out(t7_fog(t7_shade(base, light, vn, n7, st7, pr7, in.world_position), in.world_position)), albedo.a * in.color.a);
+        let lit7 = t7_fog(t7_shade(base, light, vn, n7, st7, pr7, in.world_position), in.world_position);
+        return vec4(t7_out(bo2_fog(lit7, in.world_position)), albedo.a * in.color.a);
     }
 #ifdef FLOW
     // bo2mp: a lava prop (`mc_cod7emissiveflow`), as the world's.
@@ -1813,9 +1883,10 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
     );
 #else
     // bo2mp: Black Ops III's own light (`t7_shade`).
-    if (t7_on()) {
+    if (t7_drawn()) {
         let vn7 = normalize(in.normal);
-        return vec4(t7_out(t7_fog(t7_shade(base, light, vn7, vn7, vec4(0.0), 0u, in.world_position), in.world_position)), albedo.a * in.color.a);
+        let lit7 = t7_fog(t7_shade(base, light, vn7, vn7, vec4(0.0), 0u, in.world_position), in.world_position);
+        return vec4(t7_out(bo2_fog(lit7, in.world_position)), albedo.a * in.color.a);
     }
     let n = normalize(in.normal);
     let pray = primary_light_ray(u32(in.primary.x + 0.5), in.world_position);
@@ -1906,8 +1977,10 @@ fn fragment_sky(in: SkyOut) -> @location(0) vec4<f32> {
         g7.m[3] = sky_lights.v[(T7_ROW + 1u) * 4u];
         let j7 = fract(52.982918 * fract(dot(in.clip_position.xy, vec2(0.06711056, 0.00583715))));
         let far7 = view.world_position + dir * max(g7.f[2].w, 1.0);
-        let sky7 = t7_fog_core(sky, far7, view.world_position, true, j7, g7, sky_lut);
-        let t7_x = bo2_rolloff(t7_tone(sky7, sky_lights.v[T7_ROW * 4u].x));
+        let sky7 = t7_fog_core(fogged, far7, view.world_position, true, j7, g7, sky_lut);
+        let bo2_7 = sky_lights.v[(T7_ROW + 1u) * 4u + 1u].z > 0.5;
+        let e7 = sky_lights.v[T7_ROW * 4u].x * select(1.0, sky_t6.sun_dir_exposure.w, bo2_7);
+        let t7_x = bo2_rolloff(t7_tone(sky7, e7));
         return vec4(bo2_finish(t7_x, sky_t6, sky_lut, sky_lut_sampler), 1.0);
     }
     let sky_x = bo2_rolloff(sqrt(max(fogged * sky_t6.sun_dir_exposure.w, vec3(0.0))));
