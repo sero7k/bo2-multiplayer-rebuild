@@ -946,6 +946,12 @@ pub(super) fn build_t7_world(
                 draw.t6_probes = lit.probe_rows();
                 let mut rows = vec![[0.0f32; 16]; asset_world::T7_LIGHT_ROW + 2];
                 rows[asset_world::T7_LIGHT_ROW..].copy_from_slice(&lit.light_rows(sun.2));
+                if let Some(fog) = lit.fog.as_ref() {
+                    for (i, r) in fog.iter().enumerate() {
+                        let row = super::t7_light::T7_FOG_ROW + i / 4;
+                        rows[row][4 * (i % 4)..4 * (i % 4) + 4].copy_from_slice(r);
+                    }
+                }
                 draw.t6_lights = rows;
                 draw.t7_light = true;
                 asset_world::install_t6_probe_origins(lit.keep.iter().map(|&i| lit.bake.probes[i].origin).collect());

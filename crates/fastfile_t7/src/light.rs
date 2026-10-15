@@ -38,6 +38,63 @@ pub struct LightRefs {
     pub probes: Option<ProbeRef>,
     /// The `GfxWorld` header's LUT material's picture, when it has one.
     pub lut_image: Option<String>,
+    /// bo2mp: the fog volumes (`GfxWorld` 0x148: 624 bytes each).
+    pub fog: Vec<FogVolume>,
+}
+
+/// bo2mp: a fog volume: its planes, its priority and its settings banks.
+/// Layout read off the maps (mp_redwood, mp_nuketown_x, mp_waterpark,
+/// mp_apartments; the field names are ours): words 0 and 1 the first plane
+/// and the plane count, word 8 a priority (0.001 for the map-wide one, 0.1
+/// or 0.01 for local ones), word 10 a mask of the lighting states it holds;
+/// then at 0x40, 0xd0 and 0x160 one bank of settings per lighting state
+/// (36 words). The volume holds a point when every plane has it on its
+/// back (`n . p <= d`).
+#[derive(Clone, Debug)]
+pub struct FogVolume {
+    pub planes: Vec<[f32; 4]>,
+    pub priority: f32,
+    pub banks: Vec<[f32; 36]>,
+}
+
+/// The size of a fog volume and where its banks are.
+pub const FOG_VOLUME: usize = 624;
+const FOG_BANKS: [usize; 3] = [0x40, 0xd0, 0x160];
+
+impl FogVolume {
+    /// How far outside the volume `p` is (0 inside).
+    pub fn outside(&self, p: [f32; 3]) -> f32 {
+        self.planes.iter().map(|q| q[0] * p[0] + q[1] * p[1] + q[2] * p[2] - q[3]).fold(0.0, f32::max)
+    }
+
+    /// The bank of lighting state `state`, when it reads as atmospheric
+    /// fog settings (word 0 is 1, a half distance and the sky's size set).
+    pub fn bank(&self, state: usize) -> Option<&[f32; 36]> {
+        self.banks.get(state).filter(|b| (b[0] - 1.0).abs() < 1e-3 && b[2] > 0.0 && b[31] > 1000.0)
+    }
+}
+
+/// bo2mp: a map's fog volumes (none when its sun volume was not read).
+pub fn fog(map: &T7Map) -> &[FogVolume] {
+    map.light_refs.as_ref().map_or(&[], |r| r.fog.as_slice())
+}
+
+fn fog_volumes(g: &crate::walk::gfxworld::GfxWorldRec, image: &[u8]) -> Vec<FogVolume> {
+    let (Some((at, n)), planes) = (g.fog_volumes, g.fog_planes) else { return Vec::new() };
+    let plane = |i: usize| -> Option<[f32; 4]> {
+        let (pa, pn) = planes?;
+        (i < pn).then(|| std::array::from_fn(|k| f32_at(image, pa + 16 * i + 4 * k)))
+    };
+    (0..n)
+        .filter_map(|v| {
+            let r = at + FOG_VOLUME * v;
+            image.get(r..r + FOG_VOLUME)?;
+            let u = |o: usize| u32::from_le_bytes(image[r + o..r + o + 4].try_into().unwrap()) as usize;
+            let planes = (u(0)..u(0) + u(4).min(32)).filter_map(plane).collect();
+            let banks = FOG_BANKS.iter().map(|&b| std::array::from_fn(|k| f32_at(image, r + b + 4 * k))).collect();
+            Some(FogVolume { planes, priority: f32_at(image, r + 0x20), banks })
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug)]
@@ -119,6 +176,7 @@ impl LightRefs {
             .flatten()
             .find_map(|m| cap.material(bare(m)).or_else(|| cap.material(m)))
             .and_then(|m| m.textures.first().map(|(_, n)| bare(n).to_owned()));
+        out.fog = fog_volumes(g, image);
         Some(out)
     }
 }

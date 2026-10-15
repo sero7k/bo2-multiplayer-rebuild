@@ -76,8 +76,14 @@ pub(super) struct Lit {
     /// The sun's brightness in the probes' unit (its colour's peak one).
     pub sun_light: f32,
     pub exposure: f32,
+    /// The fog's rows (`T7_FOG_ROW`), when the map has fog.
+    pub fog: Option<[[f32; 4]; 8]>,
     pub report: Vec<String>,
 }
+
+/// bo2mp: the first of the two light rows the fog's eight vec4s sit in
+/// (`T7_FOG` in the shader).
+pub(super) const T7_FOG_ROW: usize = 252;
 
 impl Lit {
     /// Reads the light and bakes the sun map and the occluders round the
@@ -144,7 +150,12 @@ impl Lit {
             casters.iter().filter(|c| c.partial).count(),
             started.elapsed().as_secs_f32()
         ));
-        Ok(Lit { bake, keep, sun_map, tracer, sun, sun_light, exposure: exposure(), report })
+        let fog = Fog::read(map, &bake, sun, spawns);
+        match fog.as_ref() {
+            Some(f) => report.push(f.report.clone()),
+            None => report.push("t7 fog: none (no fog volume with atmospheric settings, or BO2MP_T7_FOG=0)".to_owned()),
+        }
+        Ok(Lit { bake, keep, sun_map, tracer, sun, sun_light, exposure: exposure(), fog: fog.map(|f| f.rows), report })
     }
 
     /// The drawn probe a point reflects (an index into `keep`): the
@@ -296,6 +307,113 @@ impl Lit {
             Err(e) => report.push(format!("t7 light: probes: {e}")),
         }
         report
+    }
+}
+
+/// bo2mp: Black Ops III's atmospheric fog for the shader (`t7_fog_core` in
+/// `geometry_diagnostic.wgsl`), from the map's fog volume: the one holding
+/// most spawn points (else the map-wide one), lighting state 0. Its bank's
+/// words as we read them (BO3 turns them into its shader constants in code
+/// we cannot read; names ours, checked against how the maps look): 1 start
+/// distance, 2 half distance (the transmittance halves every this many
+/// units), 3 base height, 4 half height (the density halves every this many
+/// units up), 16..18 the fog's (Rayleigh) colour, 19 extinction strength,
+/// 20..22 the haze's (Mie) colour, 23 haze start, 24 haze spread, 25 the
+/// haze's Schlick k (forward scattering), 26 its density, 27 its light in
+/// stops (2^x, the sun's unit), 28 in-scatter strength, 30 sun strength
+/// (the Rayleigh phase's share), 31 the sky's distance.
+///
+/// The fog's in-scatter colour is the bank's colour at the brightness of
+/// the sky's horizon (a far wall fogs into the sky behind it); the haze's
+/// is its colour at its light times its density. `BO2MP_T7_FOG` scales the
+/// density (0: no fog), `BO2MP_T7_HAZE` the haze, `BO2MP_T7_SHAFTS` the sun
+/// shafts (0: none).
+pub(super) struct Fog {
+    pub rows: [[f32; 4]; 8],
+    pub report: String,
+}
+
+fn env_scale(name: &str, default: f32) -> f32 {
+    std::env::var(name).ok().and_then(|v| v.trim().parse().ok()).filter(|v: &f32| v.is_finite() && *v >= 0.0).unwrap_or(default)
+}
+
+impl Fog {
+    pub fn read(map: &T7Map, bake: &Bake, toward_sun: [f32; 3], spawns: &[[f32; 3]]) -> Option<Fog> {
+        let density = env_scale("BO2MP_T7_FOG", 1.0);
+        if density <= 0.0 {
+            return None;
+        }
+        let vols = fastfile_t7::light::fog(map);
+        // The volume most spawn points are in (ties: the higher priority).
+        let mut best: Option<(usize, f32, usize)> = None;
+        for (i, v) in vols.iter().enumerate() {
+            if v.bank(0).is_none() {
+                continue;
+            }
+            let n = spawns.iter().filter(|p| v.outside(**p) <= 0.0).count();
+            if best.is_none_or(|(bn, bp, _)| (n, v.priority) > (bn, bp)) {
+                best = Some((n, v.priority, i));
+            }
+        }
+        let (inside, _, vi) = best?;
+        let b = vols[vi].bank(0)?;
+        let lum = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        let norm = |c: [f32; 3]| {
+            let l = lum(c).max(1e-4);
+            c.map(|x| x.max(0.0) / l)
+        };
+        // The sky's horizon, in the probes' unit.
+        let horizon = match bake.sky.as_ref() {
+            Some(sky) => {
+                let g = bake.sky_gain();
+                let mut sum = [0f32; 3];
+                for k in 0..64 {
+                    let a = k as f32 / 64.0 * std::f32::consts::TAU;
+                    let c = sky.at([a.cos(), a.sin(), 0.08]);
+                    for j in 0..3 {
+                        sum[j] += c[j] * g / 64.0;
+                    }
+                }
+                lum(sum)
+            }
+            None => 1.0,
+        };
+        let units = bake.units();
+        let fog_c = norm([b[16], b[17], b[18]]).map(|x| x * horizon);
+        let haze_light = 2f32.powf(b[27].clamp(0.0, 24.0)) / units;
+        let haze_c = norm([b[20], b[21], b[22]]).map(|x| x * haze_light * b[26].max(0.0) * env_scale("BO2MP_T7_HAZE", 1.0));
+        let half = (b[2] / density).max(1.0);
+        let ext = if b[19] > 0.0 { b[19].min(2.0) } else { 1.0 };
+        let k = b[25].clamp(0.0, 0.95);
+        let half_height = if b[4] > 1.0 { 1.0 / b[4] } else { 0.0 };
+        let shafts = env_scale("BO2MP_T7_SHAFTS", 1.0);
+        let rows = [
+            [fog_c[0], fog_c[1], fog_c[2], b[23].max(0.0)],
+            [haze_c[0], haze_c[1], haze_c[2], 1.0 / b[24].max(1.0)],
+            [-1.0 / half, -1.0 / half, -1.0 / half, b[31].clamp(2000.0, 200000.0)],
+            [toward_sun[0], toward_sun[1], toward_sun[2], k],
+            [ext, b[28].max(0.0), b[30].clamp(0.0, 1.0), 1.0],
+            [b[1].max(0.0), b[3], half_height, 0.0],
+            [b[1].max(0.0), b[3], half_height, 0.0],
+            [1.0 / 2000.0, 2500.0, if shafts > 0.0 { 16.0 } else { 0.0 }, shafts],
+        ];
+        let report = format!(
+            "t7 fog: volume {vi} of {} ({inside} of {} spawns in it): start {:.0}, half {:.0}, base {:.0}, half height {:.0}, fog {:.3?} (horizon {horizon:.3}), haze {:.3?} from {:.0} over {:.0}, k {k:.2}, extinction {ext:.2}, in-scatter {:.2}, sun strength {:.2}, sky at {:.0}",
+            vols.len(),
+            spawns.len(),
+            b[1],
+            half,
+            b[3],
+            b[4],
+            fog_c,
+            haze_c,
+            b[23],
+            b[24],
+            b[28],
+            b[30],
+            b[31]
+        );
+        Some(Fog { rows, report })
     }
 }
 
