@@ -216,6 +216,15 @@ pub fn sync_fpv_status_to_probe(
 pub(crate) fn register_held_sync_systems(app: &mut App) {
     app.add_message::<LifeStarted>()
         .add_message::<LifeEnded>()
-        .add_systems(Update, sync_fpv_to_held_weapon.in_set(LifeFrontPublished))
+        .add_systems(
+            Update,
+            // bo2mp: the new gun's view is queued before the spawn runs, so
+            // it is built, and its raise started, on the frame the sim
+            // starts raising it (unordered, a swap could show a frame or two
+            // of nothing first).
+            sync_fpv_to_held_weapon
+                .in_set(LifeFrontPublished)
+                .before(crate::occupancy::fpv_present::spawn_pending_fpv),
+        )
         .add_systems(Update, sync_fpv_status_to_probe.in_set(ClientSet::Diag));
 }

@@ -696,6 +696,7 @@ pub fn tick_fpv_viewmodel(
                     sprinting,
                     ads_frac,
                     weap_anim,
+                    weapon_time: ps.map(|p| p.weapon_time).unwrap_or(0),
                     weap_anim_secondary: ps.map(|p| p.weap_anim_secondary).unwrap_or(0),
                     last_weapon_hand: ps.map(|p| p.last_weapon_hand).unwrap_or(0),
                     perks0: ps.map(|p| p.perks[0]).unwrap_or(0),

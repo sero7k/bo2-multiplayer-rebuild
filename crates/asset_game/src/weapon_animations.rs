@@ -191,6 +191,12 @@ pub struct WeaponAnimations {
     pub alternate_drop_time_ms: i32,
 
     pub drop_time_ms: i32,
+    /// bo2mp: Black Ops II's first raise of a life (`iFirstRaiseTime`) and
+    /// its empty-clip raise and drop (`iEmptyRaiseTime`, `iEmptyDropTime`);
+    /// 0: the gun has none.
+    pub first_raise_time_ms: i32,
+    pub empty_raise_time_ms: i32,
+    pub empty_drop_time_ms: i32,
 
     pub quick_drop_time_ms: i32,
 
@@ -260,6 +266,9 @@ impl WeaponAnimations {
             alternate_raise_time_ms: 0,
             alternate_drop_time_ms: 0,
             drop_time_ms: 0,
+            first_raise_time_ms: 0,
+            empty_raise_time_ms: 0,
+            empty_drop_time_ms: 0,
             quick_drop_time_ms: 0,
             quick_raise_time_ms: 0,
             sprint_raise_time_ms: 0,
@@ -361,6 +370,9 @@ impl WeaponAnimations {
             alternate_raise_time_ms: 0,
             alternate_drop_time_ms: 0,
             drop_time_ms: 0,
+            first_raise_time_ms: 0,
+            empty_raise_time_ms: 0,
+            empty_drop_time_ms: 0,
             quick_drop_time_ms: 0,
             quick_raise_time_ms: 0,
             sprint_raise_time_ms: 0,
@@ -393,6 +405,9 @@ impl WeaponAnimations {
             self.melee_charge_time_ms = facts.melee_charge_time_ms;
             self.hold_fire_time_ms = facts.hold_fire_time_ms;
             self.intro_fire_time_ms = facts.intro_fire_time_ms;
+            self.first_raise_time_ms = facts.first_raise_time_ms;
+            self.empty_raise_time_ms = facts.empty_raise_time_ms;
+            self.empty_drop_time_ms = facts.empty_drop_time_ms;
         }
         let (fire_time_ms, raise_time_ms) = registry.timers_of(index);
         let (drop_time_ms, quick_drop_time_ms, quick_raise_time_ms) =

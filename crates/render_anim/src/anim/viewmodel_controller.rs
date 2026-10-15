@@ -95,6 +95,18 @@ fn full_magazine_slot(slot: WeaponAnimSlot) -> Option<WeaponAnimSlot> {
     }
 }
 
+/// bo2mp: the plain drop or raise that plays for a drop or raise the gun
+/// has no animation of its own for (over that one's timer).
+fn switch_fallback_slot(slot: WeaponAnimSlot) -> Option<WeaponAnimSlot> {
+    match slot {
+        WeaponAnimSlot::EmptyDrop | WeaponAnimSlot::QuickDrop => Some(WeaponAnimSlot::Drop),
+        WeaponAnimSlot::EmptyRaise | WeaponAnimSlot::QuickRaise | WeaponAnimSlot::FirstRaise => {
+            Some(WeaponAnimSlot::Raise)
+        }
+        _ => None,
+    }
+}
+
 /// A dive slot's (empty magazine, part: 0 take-off, 1 in the air, 2 touch-down).
 fn dive_part(slot: WeaponAnimSlot) -> Option<(bool, usize)> {
     DIVE_SLOTS.iter().enumerate().find_map(|(empty, parts)| {
@@ -115,6 +127,12 @@ pub enum ViewmodelEvent {
     ReloadEnd,
     Rechamber,
     Drop,
+    /// The quick drop (an offhand, a swap to nothing).
+    QuickDrop,
+    /// bo2mp: Black Ops II's drop and raise of a gun with an empty clip
+    /// (`iEmptyDropTime`, `iEmptyRaiseTime`).
+    EmptyDrop,
+    EmptyRaise,
     SprintIn,
     SprintLoop,
     SprintOut,
@@ -257,20 +275,12 @@ impl ViewmodelController {
                     if timer > 0 { Some(timer) } else { None },
                 )
             }
-            ViewmodelEvent::Raise { first, quick } => {
-                let slot = match (first, quick) {
-                    (true, _) => WeaponAnimSlot::FirstRaise,
-                    (false, true) => WeaponAnimSlot::QuickRaise,
-                    (false, false) => WeaponAnimSlot::Raise,
-                };
-
-                let timer = match (first, quick) {
-                    (false, false) => Some(self.weapon.raise_time_ms),
-                    (false, true) => positive_ms(self.weapon.quick_raise_time_ms),
-                    (true, _) => None,
-                };
-                self.start_action(slot, WeaponState::Raising { first, quick }, timer)
-            }
+            ViewmodelEvent::Raise { first, quick } => self.start_switch(match (first, quick) {
+                (true, _) => WeaponAnimSlot::FirstRaise,
+                (false, true) => WeaponAnimSlot::QuickRaise,
+                (false, false) => WeaponAnimSlot::Raise,
+            }),
+            ViewmodelEvent::EmptyRaise => self.start_switch(WeaponAnimSlot::EmptyRaise),
             ViewmodelEvent::Reload { empty } => {
                 let slot = if empty {
                     WeaponAnimSlot::ReloadEmpty
@@ -297,11 +307,9 @@ impl ViewmodelController {
             ViewmodelEvent::Rechamber => {
                 self.start_action(WeaponAnimSlot::Rechamber, WeaponState::Rechambering, None)
             }
-            ViewmodelEvent::Drop => self.start_action(
-                WeaponAnimSlot::Drop,
-                WeaponState::Dropping,
-                positive_ms(self.weapon.drop_time_ms),
-            ),
+            ViewmodelEvent::Drop => self.start_switch(WeaponAnimSlot::Drop),
+            ViewmodelEvent::QuickDrop => self.start_switch(WeaponAnimSlot::QuickDrop),
+            ViewmodelEvent::EmptyDrop => self.start_switch(WeaponAnimSlot::EmptyDrop),
             ViewmodelEvent::SprintIn => self.start_action(
                 WeaponAnimSlot::SprintIn,
                 WeaponState::SprintIn,
@@ -344,9 +352,61 @@ impl ViewmodelController {
         if let Some((empty, part)) = crawl_part(slot) {
             return self.dispatch_crawl(self.clip_or_full(slot), empty, part);
         }
+        if switch_fallback_slot(slot).is_some() {
+            return self.start_switch(slot);
+        }
         let slot = self.clip_or_full(slot);
         let (state, timer) = self.state_and_timer_for_slot(slot);
         self.start_action(slot, state, timer)
+    }
+
+    /// bo2mp: a drop or raise. It plays over the sim's timer for that drop
+    /// or raise (the empty one's, the first raise's, ...) even when the gun
+    /// has no animation of its own for it and the plain drop or raise stands
+    /// in, so the gun is down exactly when the sim's drop ends and comes up
+    /// over the sim's raise.
+    fn start_switch(&mut self, slot: WeaponAnimSlot) -> EventResult {
+        let (state, timer) = self.state_and_timer_for_slot(slot);
+        let clip_slot = match switch_fallback_slot(slot) {
+            Some(fallback) if self.weapon.clip(slot).is_none() => fallback,
+            _ => slot,
+        };
+        self.start_action(clip_slot, state, timer)
+    }
+
+    /// bo2mp: the drop or raise the controller plays, if one.
+    pub fn switch_in_progress(&self) -> Option<WeaponState> {
+        matches!(
+            self.state,
+            WeaponState::Dropping | WeaponState::Raising { .. }
+        )
+        .then_some(self.state)
+    }
+
+    /// bo2mp: the sim has this long (ms) left on the drop or raise the
+    /// controller plays: the rest of the clip plays over exactly that, so
+    /// it ends on the sim's tick however late the edge was seen (a
+    /// viewmodel rebuilt for the new gun, a perk, a timer the controller
+    /// does not know).
+    pub fn sync_switch_to_sim(&mut self, remaining_ms: i32) {
+        if self.switch_in_progress().is_none() || remaining_ms <= 0 {
+            return;
+        }
+        let Some(slot) = self.action else {
+            return;
+        };
+        let Some(clip) = self.weapon.clip(slot) else {
+            return;
+        };
+        if clip.looping {
+            return;
+        }
+        let remaining_secs = remaining_ms as f32 / 1000.0;
+        let left = (clip.duration() - self.animation_time(slot)).max(0.0);
+        self.tree
+            .set_rate(slot.index(), left / remaining_secs)
+            .expect("action index is within tree");
+        self.action_remaining = Some(remaining_secs);
     }
 
     /// bo2zm: this slot, or its full-magazine one when the gun has no
@@ -437,14 +497,16 @@ impl ViewmodelController {
                     first: true,
                     quick: false,
                 },
-                None,
+                positive_ms(self.weapon.first_raise_time_ms)
+                    .or(positive_ms(self.weapon.raise_time_ms)),
             ),
             WeaponAnimSlot::QuickRaise => (
                 WeaponState::Raising {
                     first: false,
                     quick: true,
                 },
-                positive_ms(self.weapon.quick_raise_time_ms),
+                positive_ms(self.weapon.quick_raise_time_ms)
+                    .or(positive_ms(self.weapon.raise_time_ms)),
             ),
 
             WeaponAnimSlot::AltRaise => (
@@ -459,14 +521,15 @@ impl ViewmodelController {
                     first: false,
                     quick: false,
                 },
-                None,
+                positive_ms(self.weapon.empty_raise_time_ms)
+                    .or(positive_ms(self.weapon.raise_time_ms)),
             ),
             WeaponAnimSlot::Raise => (
                 WeaponState::Raising {
                     first: false,
                     quick: false,
                 },
-                Some(self.weapon.raise_time_ms),
+                positive_ms(self.weapon.raise_time_ms),
             ),
             WeaponAnimSlot::Reload => (
                 WeaponState::Reloading { empty: false },
@@ -505,7 +568,11 @@ impl ViewmodelController {
                 WeaponState::Dropping,
                 positive_ms(self.weapon.alternate_drop_time_ms),
             ),
-            WeaponAnimSlot::EmptyDrop => (WeaponState::Dropping, None),
+            WeaponAnimSlot::EmptyDrop => (
+                WeaponState::Dropping,
+                positive_ms(self.weapon.empty_drop_time_ms)
+                    .or(positive_ms(self.weapon.drop_time_ms)),
+            ),
             WeaponAnimSlot::SprintIn => (
                 WeaponState::SprintIn,
                 positive_ms(self.weapon.sprint_raise_time_ms),
@@ -654,6 +721,13 @@ impl ViewmodelController {
             self.start_idle_family(empty_mag, true);
             return true;
         }
+        // bo2mp: the sim is ready: a swap back to the gun while it went down
+        // readies it at once (idle, no raise), and the end of a raise is the
+        // end of its timer. Neither waits for the clip.
+        if self.switch_in_progress().is_some() {
+            self.start_idle_family(empty_mag, false);
+            return true;
+        }
         if self.dispatch_range_unfinished() {
             return false;
         }
@@ -725,6 +799,9 @@ impl ViewmodelController {
             | ViewmodelEvent::ReloadEnd
             | ViewmodelEvent::Rechamber
             | ViewmodelEvent::Drop
+            | ViewmodelEvent::QuickDrop
+            | ViewmodelEvent::EmptyDrop
+            | ViewmodelEvent::EmptyRaise
             | ViewmodelEvent::SprintOut => true,
         }
     }
@@ -858,23 +935,28 @@ impl ViewmodelController {
     ) -> EventResult {
         self.crawl_next = None;
         let Some(clip) = self.weapon.clip(slot).cloned() else {
-            self.zero_dispatch_slots(goal_time);
-            // bo2mp: a gun without sprint animations (World at War's) keeps
-            // idling through the sprint (its pose is moved by its sprint
-            // offsets, `fpv_present`); with nothing playing it snapped to its
-            // bind pose, the gun jumping out of his hands.
-            if matches!(
+            // bo2mp: a pump or bolt gun whose fire animation works the
+            // action itself has no rechamber animation (the 870 MCS): the
+            // fire animation plays on through the sim's rechamber.
+            let keep_playing = matches!(
                 slot,
-                WeaponAnimSlot::SprintIn
-                    | WeaponAnimSlot::SprintLoop
-                    | WeaponAnimSlot::SprintOut
-                    | WeaponAnimSlot::SprintInEmpty
-                    | WeaponAnimSlot::SprintLoopEmpty
-                    | WeaponAnimSlot::SprintOutEmpty
-            ) {
+                WeaponAnimSlot::Rechamber | WeaponAnimSlot::AdsRechamber
+            ) && self.dispatch_range_unfinished();
+            if !keep_playing {
+                self.zero_dispatch_slots(goal_time);
+                // bo2mp: a gun without the animation keeps idling (a World
+                // at War gun's sprint is moved by its sprint offsets,
+                // `fpv_present`). With nothing playing it snapped to its bind
+                // pose: the gun jumped out of his hands, the hands held
+                // whatever the bind pose puts in them, or (no clip at all)
+                // nothing was drawn, until the sim's next animation.
                 let empty = matches!(
                     slot,
-                    WeaponAnimSlot::SprintInEmpty | WeaponAnimSlot::SprintLoopEmpty | WeaponAnimSlot::SprintOutEmpty
+                    WeaponAnimSlot::SprintInEmpty
+                        | WeaponAnimSlot::SprintLoopEmpty
+                        | WeaponAnimSlot::SprintOutEmpty
+                        | WeaponAnimSlot::EmptyDrop
+                        | WeaponAnimSlot::EmptyRaise
                 );
                 let idle = if empty && self.weapon.clip(WeaponAnimSlot::EmptyIdle).is_some() {
                     WeaponAnimSlot::EmptyIdle
@@ -1268,6 +1350,157 @@ mod tests {
         );
         c.advance(0.01);
         assert!(playing(&c, WeaponAnimSlot::Fire));
+    }
+
+    /// A DSR-50-like gun: 15-frame drop and raise (0.5 s at 30 fps), its
+    /// drop over 600 ms and raise over 800 ms, empty over 300 and 400 ms.
+    fn dsr(empty_clips: bool) -> ViewmodelController {
+        let mut gun = WeaponAnimations::empty("dsr50_mp")
+            .with_clip(WeaponAnimSlot::Idle, clip("idle", 30, true))
+            .with_clip(WeaponAnimSlot::Fire, clip("fire", 10, false))
+            .with_clip(WeaponAnimSlot::Drop, clip("drop", 15, false))
+            .with_clip(WeaponAnimSlot::Raise, clip("raise", 15, false))
+            .with_switch_timers(600, 0, 0);
+        if empty_clips {
+            gun = gun
+                .with_clip(WeaponAnimSlot::EmptyDrop, clip("drop_empty", 15, false))
+                .with_clip(WeaponAnimSlot::EmptyRaise, clip("raise_empty", 15, false));
+        }
+        gun.raise_time_ms = 800;
+        gun.empty_drop_time_ms = 300;
+        gun.empty_raise_time_ms = 400;
+        ViewmodelController::new(gun)
+    }
+
+    fn finished(c: &ViewmodelController, slot: WeaponAnimSlot) -> bool {
+        c.animation_time(slot) >= 0.5 - 1e-4
+    }
+
+    #[test]
+    fn an_empty_drop_and_raise_play_over_the_empty_times() {
+        let mut c = dsr(true);
+        assert_eq!(
+            c.dispatch_sz_xanim_index(WeaponAnimSlot::EmptyDrop.index()),
+            EventResult::Started(WeaponState::Dropping)
+        );
+        c.advance(0.29);
+        assert!(playing(&c, WeaponAnimSlot::EmptyDrop));
+        assert!(!finished(&c, WeaponAnimSlot::EmptyDrop), "not down before 300 ms");
+        c.advance(0.011);
+        assert!(finished(&c, WeaponAnimSlot::EmptyDrop), "down at 300 ms");
+
+        assert!(matches!(
+            c.handle(ViewmodelEvent::EmptyRaise),
+            EventResult::Started(WeaponState::Raising { .. })
+        ));
+        c.advance(0.39);
+        assert!(playing(&c, WeaponAnimSlot::EmptyRaise));
+        assert!(!finished(&c, WeaponAnimSlot::EmptyRaise));
+        c.advance(0.011);
+        assert!(finished(&c, WeaponAnimSlot::EmptyRaise), "up at 400 ms");
+    }
+
+    #[test]
+    fn a_gun_without_empty_switch_animations_plays_the_plain_ones_over_the_empty_times() {
+        let mut c = dsr(false);
+        assert_eq!(
+            c.handle(ViewmodelEvent::EmptyDrop),
+            EventResult::Started(WeaponState::Dropping)
+        );
+        assert!(playing(&c, WeaponAnimSlot::Drop), "the drop stands in");
+        c.advance(0.29);
+        assert!(!finished(&c, WeaponAnimSlot::Drop));
+        c.advance(0.011);
+        assert!(finished(&c, WeaponAnimSlot::Drop), "over the empty drop time, not 600 ms");
+
+        c.dispatch_sz_xanim_index(WeaponAnimSlot::EmptyRaise.index());
+        assert!(playing(&c, WeaponAnimSlot::Raise), "the raise stands in");
+        assert_eq!(c.animation_time(WeaponAnimSlot::Raise), 0.0);
+        c.advance(0.39);
+        assert!(!finished(&c, WeaponAnimSlot::Raise));
+        c.advance(0.011);
+        assert!(finished(&c, WeaponAnimSlot::Raise), "over the empty raise time");
+    }
+
+    #[test]
+    fn the_plain_drop_ends_with_the_drop_time() {
+        let mut c = dsr(true);
+        c.handle(ViewmodelEvent::Drop);
+        c.advance(0.59);
+        assert!(!finished(&c, WeaponAnimSlot::Drop));
+        c.advance(0.011);
+        assert!(finished(&c, WeaponAnimSlot::Drop));
+    }
+
+    #[test]
+    fn a_swap_back_mid_drop_snaps_to_idle() {
+        let mut c = dsr(false);
+        c.handle(ViewmodelEvent::Drop);
+        c.advance(0.2);
+        assert!(!finished(&c, WeaponAnimSlot::Drop));
+        // The sim readies the gun (idle, timers 0): no waiting for the drop.
+        assert!(c.apply_idle_weap_anim(false));
+        assert_eq!(c.state(), WeaponState::Ready);
+        assert!(playing(&c, WeaponAnimSlot::Idle));
+        assert_eq!(c.animation_weight(WeaponAnimSlot::Drop), 0.0);
+        assert_eq!(c.animation_weight(WeaponAnimSlot::Raise), 0.0, "no raise");
+        c.advance(0.016);
+        assert!(playing(&c, WeaponAnimSlot::Idle));
+    }
+
+    #[test]
+    fn a_swap_mid_raise_starts_a_fresh_full_drop() {
+        let mut c = dsr(false);
+        c.handle(ViewmodelEvent::Raise {
+            first: false,
+            quick: false,
+        });
+        c.advance(0.3);
+        c.handle(ViewmodelEvent::Drop);
+        assert_eq!(c.animation_time(WeaponAnimSlot::Drop), 0.0);
+        assert_eq!(c.animation_weight(WeaponAnimSlot::Raise), 0.0);
+        c.advance(0.59);
+        assert!(!finished(&c, WeaponAnimSlot::Drop), "the whole drop time");
+        c.advance(0.011);
+        assert!(finished(&c, WeaponAnimSlot::Drop));
+    }
+
+    #[test]
+    fn a_drop_seen_late_still_ends_with_the_sim_timer() {
+        let mut c = dsr(false);
+        c.handle(ViewmodelEvent::Drop);
+        c.advance(0.1);
+        // The sim has 200 ms left: the rest of the clip plays over that.
+        c.sync_switch_to_sim(200);
+        c.advance(0.19);
+        assert!(!finished(&c, WeaponAnimSlot::Drop));
+        c.advance(0.011);
+        assert!(finished(&c, WeaponAnimSlot::Drop));
+    }
+
+    #[test]
+    fn a_missing_rechamber_lets_the_fire_play_on_and_never_leaves_nothing_posed() {
+        let mut c = dsr(false);
+        c.handle(ViewmodelEvent::Fire);
+        c.advance(0.1);
+        assert_eq!(
+            c.dispatch_sz_xanim_index(WeaponAnimSlot::Rechamber.index()),
+            EventResult::IgnoredMissingClip(WeaponAnimSlot::Rechamber)
+        );
+        assert_eq!(c.state(), WeaponState::Rechambering);
+        assert!(playing(&c, WeaponAnimSlot::Fire), "the pump is in the fire animation");
+        c.advance(0.5);
+        assert!(c.active_anims().next().is_some());
+        // The sim's rechamber ends: idle.
+        assert!(c.apply_idle_weap_anim(false));
+        assert!(playing(&c, WeaponAnimSlot::Idle));
+
+        // Nothing playing: the gun idles through it instead of its bind pose.
+        let mut c = dsr(false);
+        c.dispatch_sz_xanim_index(WeaponAnimSlot::Rechamber.index());
+        assert!(playing(&c, WeaponAnimSlot::Idle));
+        c.dispatch_sz_xanim_index(WeaponAnimSlot::Melee.index());
+        assert!(playing(&c, WeaponAnimSlot::Idle));
     }
 
     #[test]
