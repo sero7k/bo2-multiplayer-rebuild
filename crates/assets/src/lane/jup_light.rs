@@ -55,117 +55,183 @@ fn normalize(a: [f32; 3]) -> [f32; 3] {
 const LEAF: usize = 4;
 const BINS: usize = 12;
 
-impl Bvh {
-    fn build(tris: Vec<[[f32; 3]; 3]>) -> Self {
-        let n = tris.len();
-        let mut centre: Vec<[f32; 3]> = Vec::with_capacity(n);
-        let mut lo_of: Vec<[f32; 3]> = Vec::with_capacity(n);
-        let mut hi_of: Vec<[f32; 3]> = Vec::with_capacity(n);
-        for t in &tris {
-            let lo = std::array::from_fn(|k| t[0][k].min(t[1][k]).min(t[2][k]));
-            let hi = std::array::from_fn(|k| t[0][k].max(t[1][k]).max(t[2][k]));
-            centre.push(std::array::from_fn(|k| (t[0][k] + t[1][k] + t[2][k]) / 3.0));
-            lo_of.push(lo);
-            hi_of.push(hi);
+/// The triangles' boxes and middles, which the splits read.
+struct Boxes {
+    centre: Vec<[f32; 3]>,
+    lo_of: Vec<[f32; 3]>,
+    hi_of: Vec<[f32; 3]>,
+}
+
+/// A range of triangles this many or more is split on threads of its own
+/// (both halves at once), down to this many levels.
+const PARALLEL_MIN: usize = 1 << 16;
+const PARALLEL_LEVELS: usize = 6;
+
+impl Boxes {
+    /// A node over `order`'s triangles: its bounds, and where its
+    /// triangles split in two (`order` put in that order), or `None` for
+    /// a leaf. The split: binned surface area heuristic on the widest axis
+    /// of the centres.
+    fn split(&self, order: &mut [u32]) -> (Node, Option<usize>) {
+        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+        let (mut clo, mut chi) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for &i in order.iter() {
+            let i = i as usize;
+            for k in 0..3 {
+                lo[k] = lo[k].min(self.lo_of[i][k]);
+                hi[k] = hi[k].max(self.hi_of[i][k]);
+                clo[k] = clo[k].min(self.centre[i][k]);
+                chi[k] = chi[k].max(self.centre[i][k]);
+            }
         }
-        let mut order: Vec<u32> = (0..n as u32).collect();
-        let mut nodes: Vec<Node> = Vec::with_capacity(2 * n / LEAF + 1);
-        // (node index, first, end) still to split.
-        let mut todo = vec![(0usize, 0usize, n)];
-        nodes.push(Node { lo: [0.0; 3], hi: [0.0; 3], first: 0, count: 0 });
-        while let Some((ni, first, end)) = todo.pop() {
-            let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
-            let (mut clo, mut chi) = ([f32::MAX; 3], [f32::MIN; 3]);
-            for &i in &order[first..end] {
+        let node = Node { lo, hi, first: 0, count: 0 };
+        let count = order.len();
+        if count <= LEAF {
+            return (node, None);
+        }
+        let axis = (0..3)
+            .max_by(|&a, &b| (chi[a] - clo[a]).total_cmp(&(chi[b] - clo[b])))
+            .unwrap_or(0);
+        let span = chi[axis] - clo[axis];
+        let mid = if span <= 1e-6 {
+            count / 2
+        } else {
+            let bin_of = |i: usize| {
+                (((self.centre[i][axis] - clo[axis]) / span * BINS as f32) as usize).min(BINS - 1)
+            };
+            let mut bcount = [0usize; BINS];
+            let mut blo = [[f32::MAX; 3]; BINS];
+            let mut bhi = [[f32::MIN; 3]; BINS];
+            for &i in order.iter() {
                 let i = i as usize;
+                let b = bin_of(i);
+                bcount[b] += 1;
                 for k in 0..3 {
-                    lo[k] = lo[k].min(lo_of[i][k]);
-                    hi[k] = hi[k].max(hi_of[i][k]);
-                    clo[k] = clo[k].min(centre[i][k]);
-                    chi[k] = chi[k].max(centre[i][k]);
+                    blo[b][k] = blo[b][k].min(self.lo_of[i][k]);
+                    bhi[b][k] = bhi[b][k].max(self.hi_of[i][k]);
                 }
             }
-            nodes[ni].lo = lo;
-            nodes[ni].hi = hi;
-            let count = end - first;
-            if count <= LEAF {
-                nodes[ni].first = first as u32;
-                nodes[ni].count = count as u32;
-                continue;
-            }
-            // The split: binned surface area heuristic on the widest
-            // axis of the centres.
-            let axis = (0..3)
-                .max_by(|&a, &b| (chi[a] - clo[a]).total_cmp(&(chi[b] - clo[b])))
-                .unwrap_or(0);
-            let span = chi[axis] - clo[axis];
-            let mid = if span <= 1e-6 {
-                first + count / 2
-            } else {
-                let bin_of = |i: usize| {
-                    (((centre[i][axis] - clo[axis]) / span * BINS as f32) as usize).min(BINS - 1)
-                };
-                let mut bcount = [0usize; BINS];
-                let mut blo = [[f32::MAX; 3]; BINS];
-                let mut bhi = [[f32::MIN; 3]; BINS];
-                for &i in &order[first..end] {
-                    let i = i as usize;
-                    let b = bin_of(i);
-                    bcount[b] += 1;
+            let area = |lo: [f32; 3], hi: [f32; 3]| {
+                let d = sub(hi, lo);
+                if d[0] < 0.0 { 0.0 } else { d[0] * d[1] + d[1] * d[2] + d[2] * d[0] }
+            };
+            let mut best = (f32::MAX, BINS / 2);
+            for split in 1..BINS {
+                let (mut l_lo, mut l_hi, mut lc) = ([f32::MAX; 3], [f32::MIN; 3], 0usize);
+                for b in 0..split {
+                    lc += bcount[b];
                     for k in 0..3 {
-                        blo[b][k] = blo[b][k].min(lo_of[i][k]);
-                        bhi[b][k] = bhi[b][k].max(hi_of[i][k]);
+                        l_lo[k] = l_lo[k].min(blo[b][k]);
+                        l_hi[k] = l_hi[k].max(bhi[b][k]);
                     }
                 }
-                let area = |lo: [f32; 3], hi: [f32; 3]| {
-                    let d = sub(hi, lo);
-                    if d[0] < 0.0 { 0.0 } else { d[0] * d[1] + d[1] * d[2] + d[2] * d[0] }
-                };
-                let mut best = (f32::MAX, BINS / 2);
-                for split in 1..BINS {
-                    let (mut l_lo, mut l_hi, mut lc) = ([f32::MAX; 3], [f32::MIN; 3], 0usize);
-                    for b in 0..split {
-                        lc += bcount[b];
-                        for k in 0..3 {
-                            l_lo[k] = l_lo[k].min(blo[b][k]);
-                            l_hi[k] = l_hi[k].max(bhi[b][k]);
-                        }
-                    }
-                    let (mut r_lo, mut r_hi, mut rc) = ([f32::MAX; 3], [f32::MIN; 3], 0usize);
-                    for b in split..BINS {
-                        rc += bcount[b];
-                        for k in 0..3 {
-                            r_lo[k] = r_lo[k].min(blo[b][k]);
-                            r_hi[k] = r_hi[k].max(bhi[b][k]);
-                        }
-                    }
-                    if lc == 0 || rc == 0 {
-                        continue;
-                    }
-                    let cost = area(l_lo, l_hi) * lc as f32 + area(r_lo, r_hi) * rc as f32;
-                    if cost < best.0 {
-                        best = (cost, split);
+                let (mut r_lo, mut r_hi, mut rc) = ([f32::MAX; 3], [f32::MIN; 3], 0usize);
+                for b in split..BINS {
+                    rc += bcount[b];
+                    for k in 0..3 {
+                        r_lo[k] = r_lo[k].min(blo[b][k]);
+                        r_hi[k] = r_hi[k].max(bhi[b][k]);
                     }
                 }
-                let split = best.1;
-                let slice = &mut order[first..end];
-                let mut l = 0usize;
-                for j in 0..slice.len() {
-                    if bin_of(slice[j] as usize) < split {
-                        slice.swap(l, j);
-                        l += 1;
-                    }
+                if lc == 0 || rc == 0 {
+                    continue;
                 }
-                if l == 0 || l == count { first + count / 2 } else { first + l }
+                let cost = area(l_lo, l_hi) * lc as f32 + area(r_lo, r_hi) * rc as f32;
+                if cost < best.0 {
+                    best = (cost, split);
+                }
+            }
+            let split = best.1;
+            let mut l = 0usize;
+            for j in 0..order.len() {
+                if bin_of(order[j] as usize) < split {
+                    order.swap(l, j);
+                    l += 1;
+                }
+            }
+            if l == 0 || l == count { count / 2 } else { l }
+        };
+        (node, Some(mid))
+    }
+
+    /// The subtree over `order` (whose first triangle is `offset` in the
+    /// whole order), root first, each inner node's two children side by
+    /// side.
+    fn subtree(&self, order: &mut [u32], offset: usize) -> Vec<Node> {
+        let mut nodes: Vec<Node> = Vec::with_capacity(2 * order.len() / LEAF + 1);
+        nodes.push(Node { lo: [0.0; 3], hi: [0.0; 3], first: 0, count: 0 });
+        // (node index, first, end) still to split.
+        let mut todo = vec![(0usize, 0usize, order.len())];
+        while let Some((ni, first, end)) = todo.pop() {
+            let (node, mid) = self.split(&mut order[first..end]);
+            nodes[ni] = node;
+            let Some(mid) = mid else {
+                nodes[ni].first = (offset + first) as u32;
+                nodes[ni].count = (end - first) as u32;
+                continue;
             };
             let left = nodes.len();
             nodes.push(Node { lo: [0.0; 3], hi: [0.0; 3], first: 0, count: 0 });
             nodes.push(Node { lo: [0.0; 3], hi: [0.0; 3], first: 0, count: 0 });
             nodes[ni].first = left as u32;
-            nodes[ni].count = 0;
-            todo.push((left + 1, mid, end));
-            todo.push((left, first, mid));
+            todo.push((left + 1, first + mid, end));
+            todo.push((left, first, first + mid));
         }
+        nodes
+    }
+
+    /// [`Self::subtree`], the two halves of a big range built at once.
+    fn subtree_parallel(&self, order: &mut [u32], offset: usize, levels: usize) -> Vec<Node> {
+        if levels == 0 || order.len() < PARALLEL_MIN {
+            return self.subtree(order, offset);
+        }
+        let (mut root, mid) = self.split(order);
+        let Some(mid) = mid else {
+            root.first = offset as u32;
+            root.count = order.len() as u32;
+            return vec![root];
+        };
+        let (left_order, right_order) = order.split_at_mut(mid);
+        let (left, right) = std::thread::scope(|s| {
+            let right = s.spawn(|| self.subtree_parallel(right_order, offset + mid, levels - 1));
+            let left = self.subtree_parallel(left_order, offset, levels - 1);
+            (left, right.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+        });
+        // Root, its two children, then the left subtree's other nodes,
+        // then the right's (their child links moved along).
+        let mut nodes = Vec::with_capacity(1 + left.len() + right.len());
+        let (left_at, right_at) = (3usize, 3 + left.len() - 1);
+        let moved = |n: Node, at: usize| {
+            if n.count == 0 { Node { first: (n.first as usize - 1 + at) as u32, ..n } } else { n }
+        };
+        root.first = 1;
+        root.count = 0;
+        nodes.push(root);
+        nodes.push(moved(left[0], left_at));
+        nodes.push(moved(right[0], right_at));
+        nodes.extend(left[1..].iter().map(|&n| moved(n, left_at)));
+        nodes.extend(right[1..].iter().map(|&n| moved(n, right_at)));
+        nodes
+    }
+}
+
+impl Bvh {
+    fn build(tris: Vec<[[f32; 3]; 3]>) -> Self {
+        let n = tris.len();
+        let mut boxes = Boxes {
+            centre: Vec::with_capacity(n),
+            lo_of: Vec::with_capacity(n),
+            hi_of: Vec::with_capacity(n),
+        };
+        for t in &tris {
+            let lo = std::array::from_fn(|k| t[0][k].min(t[1][k]).min(t[2][k]));
+            let hi = std::array::from_fn(|k| t[0][k].max(t[1][k]).max(t[2][k]));
+            boxes.centre.push(std::array::from_fn(|k| (t[0][k] + t[1][k] + t[2][k]) / 3.0));
+            boxes.lo_of.push(lo);
+            boxes.hi_of.push(hi);
+        }
+        let mut order: Vec<u32> = (0..n as u32).collect();
+        let nodes = boxes.subtree_parallel(&mut order, 0, PARALLEL_LEVELS);
         let tris = order
             .iter()
             .map(|&i| {
@@ -448,6 +514,53 @@ pub(crate) fn bake(t7: &mut T7Map, light: &BakeLight, skip: &[bool], report: &mu
 
 #[cfg(test)]
 mod tests {
+    /// The tree built on threads is the one-thread tree with its nodes in
+    /// another order: the same leaves, so every ray answers the same.
+    #[test]
+    fn the_threaded_tree_answers_as_the_serial_one() {
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 40) as f32 / (1u64 << 24) as f32
+        };
+        let tris: Vec<[[f32; 3]; 3]> = (0..super::PARALLEL_MIN * 3)
+            .map(|_| {
+                let c = [rnd() * 4000.0, rnd() * 4000.0, rnd() * 400.0];
+                std::array::from_fn(|_| [c[0] + rnd() * 30.0, c[1] + rnd() * 30.0, c[2] + rnd() * 30.0])
+            })
+            .collect();
+        let threaded = super::Bvh::build(tris.clone());
+        let mut serial = super::Bvh::build(Vec::new());
+        {
+            let boxes = super::Boxes {
+                centre: tris.iter().map(|t| std::array::from_fn(|k| (t[0][k] + t[1][k] + t[2][k]) / 3.0)).collect(),
+                lo_of: tris.iter().map(|t| std::array::from_fn(|k| t[0][k].min(t[1][k]).min(t[2][k]))).collect(),
+                hi_of: tris.iter().map(|t| std::array::from_fn(|k| t[0][k].max(t[1][k]).max(t[2][k]))).collect(),
+            };
+            let mut order: Vec<u32> = (0..tris.len() as u32).collect();
+            serial.nodes = boxes.subtree(&mut order, 0);
+            serial.tris = order
+                .iter()
+                .map(|&i| {
+                    let t = tris[i as usize];
+                    super::Tri { a: t[0], e1: super::sub(t[1], t[0]), e2: super::sub(t[2], t[0]) }
+                })
+                .collect();
+        }
+        assert_eq!(threaded.nodes.len(), serial.nodes.len());
+        let mut hits = 0;
+        for _ in 0..4000 {
+            let o = [rnd() * 4000.0, rnd() * 4000.0, rnd() * 400.0];
+            let d = super::normalize([rnd() - 0.5, rnd() - 0.5, rnd() - 0.5]);
+            let a = threaded.occluded(o, d, 3000.0);
+            assert_eq!(a, serial.occluded(o, d, 3000.0));
+            hits += usize::from(a);
+        }
+        assert!(hits > 100 && hits < 3900);
+    }
+
     #[test]
     fn a_floor_under_a_roof_is_shadowed() {
         let quad = |z: f32, s: f32| {
