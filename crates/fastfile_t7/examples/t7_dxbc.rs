@@ -12,6 +12,7 @@ fn main() {
     let img = &zone.image;
     let mut i = 0;
     let mut n = 0;
+    let mut prev = String::new();
     while i + 32 <= img.len() {
         if &img[i..i + 4] != b"DXBC" {
             i += 1;
@@ -41,6 +42,14 @@ fn main() {
                 break;
             }
             j = k;
+        }
+        // (A technique's pixel shader follows its vertex shader and its
+        // vertex declaration, no readable name between: it takes the
+        // vertex shader's, marked `~ps`.)
+        if name.is_empty() {
+            name = format!("{}~ps", prev.trim_end_matches("~ps"));
+        } else {
+            prev.clone_from(&name);
         }
         if want.is_empty() {
             println!("{i:#x} {size} {name}");
