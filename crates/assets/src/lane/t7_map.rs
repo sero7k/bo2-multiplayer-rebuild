@@ -941,6 +941,9 @@ pub(super) fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, 
                 draw.t6_lights = rows;
                 draw.t7_light = true;
                 asset_world::install_t6_probe_origins(lit.keep.iter().map(|&i| lit.bake.probes[i].origin).collect());
+                // Its colour table and bloom in the final pass (taken up by
+                // `t6::attach_t6_rules`).
+                super::bo2_look::set_pending_grade(super::t7_light::grade(map, &mut report));
                 report.push(format!("t7 light: world vertices lit in {:.1}s; exposure {}", t.elapsed().as_secs_f32(), lit.exposure));
             } else if map.baked_ambient.is_none() && map.sky_cube.is_none() {
                 asset_world::install_t6_probe_origins(Vec::new());
