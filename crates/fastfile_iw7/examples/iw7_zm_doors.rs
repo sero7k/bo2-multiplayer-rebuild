@@ -30,8 +30,21 @@ fn main() {
                 .map(|s| format!("{}@{:.0},{:.0},{:.0}", map.models[s.model].name, s.origin[0], s.origin[1], s.origin[2]))
                 .collect();
             println!("      placed models inside: {near:?}");
+            for e in &ents {
+                let Some(o) = e.get("origin").map(|o| o.split_whitespace().filter_map(|x| x.parse::<f32>().ok()).collect::<Vec<_>>()) else { continue };
+                if o.len() != 3 || !(0..3).all(|k| o[k] >= lo[k] - 48.0 && o[k] <= hi[k] + 48.0) { continue; }
+                if e.get("targetname") == Some(&b.group) || e.get("target") == Some(&b.group) { continue; }
+                let mut kv: Vec<String> = e.iter().map(|(k, v)| format!("{k}={v}")).collect();
+                kv.sort();
+                println!("      ent nearby: {}", kv.join(" "));
+            }
         }
     }
+    let mut classes = std::collections::BTreeMap::new();
+    for e in &ents {
+        *classes.entry(e.get("classname").cloned().unwrap_or_default()).or_insert(0usize) += 1;
+    }
+    println!("classnames: {classes:?}");
     // Every brush model the entities name, and those that name none.
     let mut named = std::collections::BTreeMap::new();
     for e in &ents {
