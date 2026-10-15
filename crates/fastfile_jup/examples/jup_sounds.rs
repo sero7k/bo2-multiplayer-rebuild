@@ -129,6 +129,24 @@ fn main() {
             let v = if first_only { &v[..1] } else { v };
             for (i, &si) in v.iter().enumerate() {
                 let s = &bank.sounds[si];
+                // JUP_RAW=1: the stream's bytes beside the WAV, and the record.
+                if std::env::var_os("JUP_RAW").is_some()
+                    && let Ok((bytes, table)) = bank.stream(s, oodle.as_ref())
+                {
+                    std::fs::write(dir.join(format!("{label}_{i}.bin")), &bytes).ok();
+                    println!(
+                        "{label}[{i}] raw: {} bytes, table {table}, data {}, stream {}, flags {:#x}, format {}, frames {}, {} Hz, {} ch, inline {}",
+                        bytes.len(),
+                        s.asset.data_len,
+                        s.asset.stream_len,
+                        s.asset.flags,
+                        s.asset.format,
+                        s.asset.frames,
+                        s.asset.rate,
+                        s.asset.channels,
+                        s.inline.is_some()
+                    );
+                }
                 match bank.decode(s, oodle.as_ref()) {
                     Ok(pcm) => {
                         let peak = pcm
