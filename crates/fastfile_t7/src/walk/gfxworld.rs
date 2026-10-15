@@ -108,6 +108,9 @@ pub struct GfxWorldRec {
     pub lut_volumes: Span,
     pub exposure_volumes: Span,
     pub lit_fog_volumes: Span,
+    /// bo2mp: the fog volumes' planes (vec4 each) and the lit fog volumes'.
+    pub fog_planes: Span,
+    pub lit_fog_planes: Span,
     /// bo2mp: the LUT material's name (0x520..0x538: the four materials).
     pub header_materials: Vec<Option<String>>,
 }
@@ -295,7 +298,8 @@ pub fn gfx_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
     planes(s, h, 0x138)?;
     let n = count(s, h + 0x148)?;
     rec.fog_volumes = span(s, h + 0x150, n, FOG_VOLUME, 15)?;
-    planes(s, h, 0x158)?;
+    let n = count(s, h + 0x158)?;
+    rec.fog_planes = span(s, h + 0x160, n, 16, 3)?;
     let n = count(s, h + 0x168)?;
     s.records(h + 0x170, n, 44, 15)?;
     planes(s, h, 0x178)?;
@@ -429,7 +433,9 @@ pub fn gfx_world(s: &mut Stream, h: usize) -> Result<Option<String>> {
     let n = count(s, h + 0x5a8)?;
     let lit_fog = span(s, h + 0x5b0, n, 360, 15)?;
     s.capture.world.gfx_worlds[at].lit_fog_volumes = lit_fog;
-    planes(s, h, 0x5b8)?;
+    let n = count(s, h + 0x5b8)?;
+    let lit_fog_planes = span(s, h + 0x5c0, n, 16, 3)?;
+    s.capture.world.gfx_worlds[at].lit_fog_planes = lit_fog_planes;
     // Volume decals (`GfxVolumeDecal`, 184, the material at 152:
     // `mp_nuketown_x`'s twelve).
     let n = count(s, h + 0x5c8)?;
