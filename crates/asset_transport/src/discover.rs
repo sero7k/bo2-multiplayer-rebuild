@@ -250,55 +250,14 @@ const T7_MAGIC: &[u8; 8] = b"TAff0000";
 /// (`assets::lane::jup_map`).
 pub const JUP_ZONE_VERSION: u32 = 0x18;
 
-/// bo2mp: Modern Warfare III's (2023) multiplayer maps, by zone name: every
-/// `mp_jup_*` map but the big Battle Royale map (`mp_jup_bigmap*`), Ashika
-/// Island (`mp_jup_sm_island_2`) and the benchmark, caster and skydiving
-/// zones; Rebirth Island is `mp_jup_escape5`.
-pub const JUP_MAPS: [&str; 43] = [
-    "mp_jup_arcade",
-    "mp_jup_bait",
-    "mp_jup_blackheart",
-    "mp_jup_delayed",
-    "mp_jup_delta",
-    "mp_jup_derail",
-    "mp_jup_drivethru",
-    "mp_jup_dubai",
-    "mp_jup_elevated",
-    "mp_jup_emergency",
-    "mp_jup_escape5",
-    "mp_jup_estate",
-    "mp_jup_favela",
-    "mp_jup_fort",
-    "mp_jup_greece",
-    "mp_jup_growhouse",
-    "mp_jup_highrise",
-    "mp_jup_hydro",
-    "mp_jup_incline",
-    "mp_jup_invasion",
-    "mp_jup_karachi",
-    "mp_jup_launchfacility",
-    "mp_jup_luxury",
-    "mp_jup_observatory",
-    "mp_jup_paris",
-    "mp_jup_quarry",
-    "mp_jup_rundown",
-    "mp_jup_rust",
-    "mp_jup_scrapyard",
-    "mp_jup_shoothouse2",
-    "mp_jup_sira",
-    "mp_jup_skidrow",
-    "mp_jup_slaughterhouse",
-    "mp_jup_subbase",
-    "mp_jup_terminal",
-    "mp_jup_tower",
-    "mp_jup_trainingfacility",
-    "mp_jup_underpass",
-    "mp_jup_urca",
-    "mp_jup_vertigo",
-    "mp_jup_wasteland",
-    "mp_jup_waterfront",
-    "mp_jup_zooquarium",
-];
+/// bo2mp: the Modern Warfare III (2023) maps this rebuild plays, by zone
+/// name: Rebirth Island (`mp_jup_escape5`, Resurgence's map) and Tokyo
+/// (`mp_jup_elevated`, Season 4: its zone is the one dressed as Japan —
+/// `jup_appliance_vending_machine_food_japan_01`, `jup_sign_arcade_japan_*`,
+/// `jup_sign_convenience_japan_*`, pachinko and ramen props; no other map
+/// zone has more than one such name). The install's other maps (`mp_jup_*`)
+/// are left out on purpose.
+pub const JUP_MAPS: [&str; 2] = ["mp_jup_escape5", "mp_jup_elevated"];
 
 /// bo2mp: a Modern Warfare III zone is a map this rebuild plays.
 pub fn is_jup_map(stem: &str) -> bool {
