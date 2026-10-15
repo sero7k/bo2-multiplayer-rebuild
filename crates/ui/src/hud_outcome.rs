@@ -11,6 +11,12 @@
 //! The scripts publish `bo2mp_outcome` as the match ends (mp_globallogic.gsc
 //! `bo2mp_ffaoutcome`); the screen shows until the final killcam starts and
 //! does not come back after it (the scoreboard follows).
+//!
+//! Resurgence (`br`, each row's score its squad's place) has Warzone's own
+//! (Modern Warfare III's, in WARZONE's colours and words,
+//! `shell::wz_theme`): VICTORY, or ELIMINATED and the squad's place, under
+//! its picture from the install, "SQUAD PLACED #n OF m", then the squads in
+//! place order, each its place and its players' names, his own lit.
 
 use bevy::prelude::*;
 use net::{LocalPresentClient, PresentedSnapshot};
@@ -185,6 +191,7 @@ fn outcome_screen(
     mut lines: Query<(&mut Text, &Decode)>,
     time: Res<Time<Real>>,
     mut state: Local<State>,
+    (mut cache, mut images): (Local<std::collections::HashMap<String, Option<Handle<Image>>>>, ResMut<Assets<Image>>),
 ) {
     let now = time.elapsed_secs_f64();
     let seen = match (presented.as_deref().and_then(PresentedSnapshot::snapshot), local.as_deref()) {
@@ -242,7 +249,183 @@ fn outcome_screen(
     let Some(faces) = crate::hud_match::Faces::of(shell_fonts.as_deref(), game_font.as_deref()) else { return };
     let title_face = shell_fonts.as_deref().map_or_else(|| faces.bold.clone(), |s| s.black.clone());
     let h = window.single().map_or(1080.0, Window::height);
+    if outcome.gametype == "br" {
+        let won = br_won(&outcome, me);
+        let pic = crate::hud_warzone::picture(&mut cache, &mut images, if won { "squad" } else { "eliminated" });
+        spawn_br_screen(&mut commands, &faces, &title_face, (h / 1080.0).max(0.4), &outcome, me, start, pic);
+        return;
+    }
     spawn_screen(&mut commands, &faces, &title_face, (h / 1080.0).max(0.4), &outcome, me, start);
+}
+
+/// Resurgence: his squad won (it placed first).
+pub(crate) fn br_won(o: &Outcome, me: i32) -> bool {
+    o.winner == me || o.placed.iter().any(|p| p.num == me && p.score == 1)
+}
+
+/// Resurgence's squads in place order: (place, its players' rows).
+pub(crate) fn br_squads(o: &Outcome) -> Vec<(i32, Vec<Placed>)> {
+    let mut out: Vec<(i32, Vec<Placed>)> = Vec::new();
+    for p in &o.placed {
+        match out.iter_mut().find(|(place, _)| *place == p.score) {
+            Some((_, rows)) => rows.push(p.clone()),
+            None => out.push((p.score, vec![p.clone()])),
+        }
+    }
+    out.sort_by_key(|(place, _)| *place);
+    out
+}
+
+/// The squads shown: the top three, then his own when it placed lower.
+pub(crate) fn br_shown(o: &Outcome, me: i32) -> Vec<(i32, Vec<Placed>)> {
+    let all = br_squads(o);
+    let mine = all.iter().position(|(_, rows)| rows.iter().any(|p| p.num == me));
+    let mut out: Vec<_> = all.iter().take(3).cloned().collect();
+    if let Some(at) = mine
+        && at >= 3
+    {
+        out.push(all[at].clone());
+    }
+    out
+}
+
+/// The title: VICTORY, or ELIMINATED and his squad's place.
+pub(crate) fn br_title(o: &Outcome, me: i32) -> String {
+    use crate::shell::wz_theme::HUD_WORDS;
+    if br_won(o, me) {
+        return HUD_WORDS.victory.to_owned();
+    }
+    match o.placed.iter().find(|p| p.num == me) {
+        Some(p) => format!("{} \u{2014} #{}", HUD_WORDS.eliminated, p.score),
+        None => HUD_WORDS.eliminated.to_owned(),
+    }
+}
+
+/// Resurgence's end screen (see the module's notes).
+#[allow(clippy::too_many_arguments)]
+fn spawn_br_screen(
+    commands: &mut Commands,
+    faces: &crate::hud_match::Faces,
+    title_face: &Handle<Font>,
+    k: f32,
+    outcome: &Outcome,
+    me: i32,
+    start: f64,
+    pic: Option<Handle<Image>>,
+) {
+    use crate::shell::wz_theme::{HUD, HUD_WORDS};
+    let px = |v: f32| Val::Px(v * k);
+    let font = |f: &Handle<Font>, size: f32| crate::shell::theme::font(f, size * k);
+    let shade = |size: f32| TextShadow { offset: Vec2::splat((size * k / 16.0).max(1.0)), color: Color::srgba(0.0, 0.0, 0.0, 0.8), ..default() };
+    let nowrap = || TextLayout::linebreak(bevy::text::LineBreak::NoWrap);
+    let won = br_won(outcome, me);
+    let colour = if won { HUD.accent } else { HUD.down };
+    let squads = br_squads(outcome);
+    let placed_line = match outcome.placed.iter().find(|p| p.num == me) {
+        Some(p) => format!("{} #{} {} {}", HUD_WORDS.squad_placed, p.score, HUD_WORDS.of, squads.len().max(p.score.max(0) as usize)),
+        None => String::new(),
+    };
+    let reason = reason_text(&outcome.reason);
+    let shown = br_shown(outcome, me);
+    commands
+        .spawn((
+            OutcomeRoot,
+            Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.66)),
+            GlobalZIndex(40),
+            Pickable::IGNORE,
+        ))
+        .with_children(|root| {
+            root.spawn(Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                top: Val::Percent(13.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|col| {
+                // The picture (a plain diamond when the install lacks it).
+                match pic {
+                    Some(image) => {
+                        col.spawn((ImageNode { image, color: colour, ..default() }, Node { width: px(96.0), height: px(96.0), ..default() }));
+                    }
+                    None => {
+                        col.spawn((
+                            Node { width: px(56.0), height: px(56.0), margin: UiRect::all(px(20.0)), border: UiRect::all(px(3.0)), ..default() },
+                            BorderColor::all(colour),
+                            UiTransform { rotation: Rot2::degrees(45.0), ..UiTransform::IDENTITY },
+                        ));
+                    }
+                }
+                col.spawn((
+                    Text::new(br_title(outcome, me)),
+                    font(title_face, 66.0),
+                    TextColor(colour),
+                    shade(66.0),
+                    nowrap(),
+                    Node { margin: UiRect::top(px(6.0)), ..default() },
+                ));
+                col.spawn((Node { width: px(520.0), height: px(3.0), margin: UiRect::vertical(px(8.0)), ..default() }, BackgroundColor(colour.with_alpha(0.85))));
+                if !placed_line.is_empty() {
+                    col.spawn((Text::new(placed_line), font(&faces.bold, 25.0), TextColor(HUD.text), shade(25.0), nowrap()));
+                }
+                col.spawn((
+                    Text::new(reason),
+                    font(&faces.regular, 19.0),
+                    TextColor(HUD.dim),
+                    shade(19.0),
+                    nowrap(),
+                    Node { margin: UiRect::top(px(4.0)), ..default() },
+                ));
+                col.spawn(Node { height: px(26.0), ..default() });
+                for (i, (place, rows)) in shown.iter().enumerate() {
+                    let is_mine = rows.iter().any(|p| p.num == me);
+                    let first = *place == 1;
+                    let row_start = start + 0.25 + i as f64 * 0.18;
+                    let names = rows.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join("   ");
+                    col.spawn((
+                        Node {
+                            width: px(720.0),
+                            height: px(52.0),
+                            // (His own squad after the three, a gap before it.)
+                            margin: UiRect::top(px(if i == 3 { 16.0 } else { 4.0 })),
+                            align_items: AlignItems::Center,
+                            border: UiRect::left(px(4.0)),
+                            ..default()
+                        },
+                        BorderColor::all(if is_mine { HUD.accent } else { HUD.track }),
+                        BackgroundColor(if is_mine { HUD.accent.with_alpha(0.16) } else { HUD.panel }),
+                    ))
+                    .with_children(|r| {
+                        // The place in its box.
+                        r.spawn((
+                            Node {
+                                width: px(64.0),
+                                height: Val::Percent(100.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                margin: UiRect::right(px(14.0)),
+                                ..default()
+                            },
+                            BackgroundColor(if first { HUD.accent } else { HUD.track }),
+                        ))
+                        .with_children(|b| {
+                            b.spawn((Text::new(format!("#{place}")), font(&faces.bold, 22.0), TextColor(if first { Color::BLACK } else { HUD.text }), nowrap()));
+                        });
+                        r.spawn((
+                            Text::new(""),
+                            Decode { target: names, start: row_start, full: 0.55, seed: i as u32 * 7919 + 1 },
+                            font(&faces.regular, if first { 24.0 } else { 21.0 }),
+                            TextColor(if is_mine { HUD.text } else { HUD.text.with_alpha(0.85) }),
+                            shade(22.0),
+                            nowrap(),
+                            Node { flex_grow: 1.0, ..default() },
+                        ));
+                    });
+                }
+            });
+        });
 }
 
 /// The screen, drawn for `outcome` as player `me` sees it (its lines start
@@ -375,6 +558,12 @@ pub mod preview {
             1 => ("02_ffa_victory", "3|dm|MP_SCORE_LIMIT_REACHED|3,1500,simon;1,1450,egs;0,1200,reaaL;2,900,Jimbo;", 3),
             2 => ("03_gun_game_fifth", "4|gun|MP_SCORE_LIMIT_REACHED|4,20,Sass;1,18,egs;0,17,reaaL;2,15,Jimbo;3,12,simon;", 3),
             3 => ("04_oic_time", "1|oic|MP_TIME_LIMIT_REACHED|1,9,egs;3,7,simon;0,4,JTAG;", 3),
+            4 => ("05_br_victory", "0|br|SQUAD 1 WINS|0,1,smart elegant;1,1,EricTheTrigger;4,2,xXSharkXx;5,2,iiChiefii;8,3,Kevin;9,3,Pamer;", 0),
+            5 => (
+                "06_br_eliminated",
+                "4|br|SQUAD 2 WINS|4,1,xXSharkXx;5,1,iiChiefii;8,2,Kevin;9,2,Pamer;2,3,Crazy;3,3,Frosty;0,4,smart elegant;1,4,EricTheTrigger;",
+                0,
+            ),
             _ => return None,
         })
     }
@@ -430,7 +619,11 @@ pub mod preview {
         }
         let faces = crate::hud_match::Faces { regular: fonts.regular.clone(), bold: fonts.bold.clone() };
         let outcome = parse_outcome(raw).expect("case");
-        spawn_screen(&mut commands, &faces, &fonts.black, (height / 1080.0).max(0.4), &outcome, me, now);
+        if outcome.gametype == "br" {
+            spawn_br_screen(&mut commands, &faces, &fonts.black, (height / 1080.0).max(0.4), &outcome, me, now, None);
+        } else {
+            spawn_screen(&mut commands, &faces, &fonts.black, (height / 1080.0).max(0.4), &outcome, me, now);
+        }
         plan.at = now;
         plan.step += 1;
     }
@@ -476,6 +669,18 @@ mod tests {
         let rows = shown_rows(&o, 5);
         assert_eq!(rows.iter().map(|(p, r)| (*p, r.num)).collect::<Vec<_>>(), vec![(1, 1), (2, 2), (3, 3), (5, 5)]);
         assert_eq!(shown_rows(&o, 2).len(), 3);
+    }
+
+    #[test]
+    fn resurgence_reads_by_squad() {
+        let o = parse_outcome("4|br|SQUAD 2 WINS|4,1,a;5,1,b;8,2,c;9,2,d;2,3,e;3,3,f;0,4,me;1,4,g;").unwrap();
+        assert!(!br_won(&o, 0));
+        assert!(br_won(&o, 5));
+        assert_eq!(br_title(&o, 0), "ELIMINATED \u{2014} #4");
+        assert_eq!(br_title(&o, 5), "VICTORY");
+        let shown = br_shown(&o, 0);
+        assert_eq!(shown.iter().map(|(p, r)| (*p, r.len())).collect::<Vec<_>>(), vec![(1, 2), (2, 2), (3, 2), (4, 2)]);
+        assert_eq!(br_shown(&o, 8).len(), 3);
     }
 
     #[test]

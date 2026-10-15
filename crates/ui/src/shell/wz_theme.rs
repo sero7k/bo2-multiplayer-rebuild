@@ -105,6 +105,9 @@ pub(crate) const HUD_WORDS: HudWords = HudWords {
     kills: "KILLS",
     plates: "PLATES",
     eliminated: "ELIMINATED",
+    victory: "VICTORY",
+    squad_placed: "SQUAD PLACED",
+    of: "OF",
 };
 
 pub(crate) struct HudWords {
@@ -122,6 +125,10 @@ pub(crate) struct HudWords {
     pub kills: &'static str,
     pub plates: &'static str,
     pub eliminated: &'static str,
+    /// The end screen (`hud_outcome`): his squad won; its place.
+    pub victory: &'static str,
+    pub squad_placed: &'static str,
+    pub of: &'static str,
 }
 
 /// The other squads' colour in the lobby's squad list.
