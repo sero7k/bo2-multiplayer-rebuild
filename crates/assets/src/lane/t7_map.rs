@@ -361,6 +361,7 @@ fn iw3_world(map: &T7Map, sun: ([f32; 3], [f32; 3], f32)) -> iw3::zone::GfxWorld
         emissive_surfs: 0..0,
         models: Vec::new(),
         light_grid: Default::default(),
+        dpvs: None,
     }
 }
 

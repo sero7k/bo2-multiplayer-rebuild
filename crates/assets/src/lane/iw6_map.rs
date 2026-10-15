@@ -346,6 +346,7 @@ fn iw3_world(w: &fastfile_iw6::map::World, sun: Option<fastfile_iw6::map::Sun>, 
             })
             .collect(),
         light_grid: Default::default(),
+        dpvs: None,
     }
 }
 

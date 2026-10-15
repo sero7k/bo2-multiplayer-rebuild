@@ -522,6 +522,57 @@ pub struct GfxWorld {
     pub models: Vec<GfxBrushModel>,
     /// Baked light at points through the map, for lighting models.
     pub light_grid: LightGrid,
+    /// bo2mp: the world's visibility (cells, portals, surface trees), when
+    /// the zone carries it whole.
+    pub dpvs: Option<GfxDpvs>,
+}
+
+/// bo2mp: a world's visibility data: the BSP that finds the eye's cell, the
+/// cells with their portals and surface trees, and the surface order the
+/// trees index.
+#[derive(Debug, Default, Clone)]
+pub struct GfxDpvs {
+    /// `cplane_s`: normal, dist, type.
+    pub planes: Vec<([f32; 3], f32, u8)>,
+    pub nodes: Vec<u16>,
+    pub cells: Vec<GfxCell>,
+    /// Surface indices in tree order (`GfxWorldDpvsStatic::sortedSurfIndex`).
+    pub sorted_surf_index: Vec<u16>,
+    pub static_surface_count: u32,
+    pub static_surface_count_no_decal: u32,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct GfxCell {
+    pub mins: [f32; 3],
+    pub maxs: [f32; 3],
+    pub aabb_tree: Vec<GfxAabbNode>,
+    pub portals: Vec<GfxPortal>,
+}
+
+/// One node of a cell's surface tree. `children_offset` is in bytes from
+/// this node, in the zone's own node size (`node_size`).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct GfxAabbNode {
+    pub mins: [f32; 3],
+    pub maxs: [f32; 3],
+    pub child_count: u16,
+    pub surface_count: u16,
+    pub start_surf_index: u16,
+    pub surface_count_no_decal: u16,
+    pub start_surf_index_no_decal: u16,
+    pub children_offset: i32,
+    pub node_size: u16,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct GfxPortal {
+    /// `DpvsPlane::coeffs`.
+    pub plane: [f32; 4],
+    /// The cell it leads to.
+    pub cell: u16,
+    pub vertices: Vec<[f32; 3]>,
+    pub hull_axis: [[f32; 3]; 2],
 }
 
 /// IW3's light grid: baked light at points 32 units apart horizontally and

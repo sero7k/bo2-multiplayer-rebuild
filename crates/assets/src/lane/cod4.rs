@@ -957,6 +957,18 @@ pub(crate) fn build_legacy_world(
                 draw.stats.vertices, draw.stats.triangles, draw.stats.surfaces,
                 if draw.iw3_lightmaps { " and its lightmaps" } else { "" }
             ));
+            // bo2mp: what the world's culling has to work with.
+            report.push(match &world.dpvs {
+                Some(d) if draw.dpvs.cell_count > 1 => format!(
+                    "visibility: cells={} portals={} aabbNodes={} sorted={} ({title}'s own cells and portals)",
+                    draw.dpvs.cell_count,
+                    draw.dpvs.portals_per_cell.iter().map(Vec::len).sum::<usize>(),
+                    draw.dpvs.aabb_trees.iter().map(Vec::len).sum::<usize>(),
+                    d.sorted_surf_index.len(),
+                ),
+                Some(_) => "visibility: one cell (the zone's cells did not convert; every surface is frustum-tested)".to_owned(),
+                None => "visibility: one cell (the zone carries no whole cell data; every surface is frustum-tested)".to_owned(),
+            });
             let (min, max) = (draw.stats.min, draw.stats.max);
             LoadedWorld {
                 scripts,
