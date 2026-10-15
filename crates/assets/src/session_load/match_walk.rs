@@ -455,6 +455,9 @@ pub(super) async fn walk_prepared_match(
     report.push(format!(
         "weapon notetrack actions linked: {note_actions} ({inline_note_actions} T5 inline)"
     ));
+    for line in weapons.notetrack_remap_report() {
+        report.push(format!("guest gun notetrack sounds: {line}"));
+    }
     let sz_xanims = weapons.sz_xanim_edge_census();
     report.push(format!(
         "XAnim generation: common={common_xanim_count} t5={t5_xanim_n} t5_keys={t5_xanim_added} collide={} map={map_xanim_count} merged={}",

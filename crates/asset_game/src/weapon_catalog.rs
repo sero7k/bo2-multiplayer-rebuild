@@ -7255,6 +7255,26 @@ impl WeaponRegistry {
             .map(|(note, action)| (note.as_str(), action))
     }
 
+    /// bo2mp: each guest gun's notetrack sounds after its remap (see
+    /// [`WeaponSoundAliases::notetrack_remap`]), one line a gun.
+    pub fn notetrack_remap_report(&self) -> Vec<String> {
+        self.rows
+            .iter()
+            .filter(|row| !row.sounds.notetrack_remap.is_empty())
+            .map(|row| {
+                let mut notes: Vec<String> = row
+                    .notetrack_actions
+                    .iter()
+                    .filter_map(|(note, a)| {
+                        Some(format!("{note} -> {}", a.sound_alias.as_deref()?))
+                    })
+                    .collect();
+                notes.sort();
+                format!("{}: {}", row.name, notes.join(", "))
+            })
+            .collect()
+    }
+
     pub fn notetrack_sound_aliases_of(&self, index: u32) -> impl Iterator<Item = &str> {
         self.rows
             .get(index as usize)
