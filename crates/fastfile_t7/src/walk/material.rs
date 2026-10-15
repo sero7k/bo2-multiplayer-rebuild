@@ -69,23 +69,37 @@ const CONSTANT_DEF: usize = 32;
 
 /// A shader stage: struct, name, extraDef, program (aligned 4). bo2mp:
 /// where its program is (file offset, bytes) when it loaded here.
+/// (A reference to a shader or technique loaded earlier finds it by where
+/// that one's struct was read: `Capture::programs_at`.)
 fn shader(s: &mut Stream, field: usize) -> Result<Option<(usize, usize)>> {
+    let p = s.ptr_at(field)?;
     if let Some(sh) = s.array(field, SHADER, 7)? {
         s.no_loads(sh, SHADER, &[0, 8, 0x18])?;
         s.string(sh)?;
         s.string(sh + 8)?;
         let size = s.u32_at(sh + 0x20)? as usize;
-        return Ok(s.array(sh + 0x18, size, 3)?.map(|at| (at, size)));
+        let program = s.array(sh + 0x18, size, 3)?.map(|at| (at, size));
+        if let Some(pr) = program {
+            s.capture.shader_programs.insert(sh, pr);
+        }
+        return Ok(program);
     }
-    Ok(None)
+    Ok(earlier(s, p).and_then(|at| s.capture.shader_programs.get(&at).copied()))
+}
+
+/// The file offset of the struct a reference names.
+fn earlier(s: &Stream, p: crate::ptr::Ptr) -> Option<usize> {
+    p.virtual_offset().and_then(|v| s.vmap.file_pos(v))
 }
 
 /// bo2mp: a technique's first draw method's vertex and pixel programs.
 type Programs = Option<[Option<(usize, usize)>; 2]>;
 
 fn technique(s: &mut Stream, field: usize) -> Result<Programs> {
-    if !s.ptr_at(field)?.is_inline() {
-        return s.array(field, 0, 0).map(|_| None);
+    let p = s.ptr_at(field)?;
+    if !p.is_inline() {
+        s.array(field, 0, 0)?;
+        return Ok(earlier(s, p).and_then(|at| s.capture.technique_programs.get(&at).copied()));
     }
     let Some(t) = s.array(field, TECHNIQUE, 7)? else { return Ok(None) };
     let mut programs: Programs = None;
@@ -114,6 +128,9 @@ fn technique(s: &mut Stream, field: usize) -> Result<Programs> {
     }
     s.string(t)?;
     s.array(t + 0x2c8, STATE_MAP, 3)?;
+    if let Some(pr) = programs {
+        s.capture.technique_programs.insert(t, pr);
+    }
     Ok(programs)
 }
 

@@ -220,6 +220,10 @@ pub struct Capture {
     pub images: Vec<ImageRec>,
     /// bo2mp: technique sets.
     pub techsets: Vec<TechsetRec>,
+    /// bo2mp: where each shader struct and technique struct loaded (file
+    /// offset) -> its program(s), for later references to it.
+    pub shader_programs: HashMap<usize, (usize, usize)>,
+    pub technique_programs: HashMap<usize, [Option<(usize, usize)>; 2]>,
     pub meshes: Vec<MeshRec>,
     /// bo2mp: animations (`walk::anim`), kept only when `keep_anims` is on.
     pub anims: Vec<AnimRec>,
