@@ -216,6 +216,7 @@ pub fn dxgi(format: u8) -> Option<u32> {
         0x2a => Some(71), // BC1_UNORM
         0x2f => Some(83), // BC5_UNORM
         0x30 => Some(98), // BC7_UNORM
+        0x25 => Some(71), // BC1 (the colour maps' form)
         _ => None,
     }
 }
@@ -240,52 +241,40 @@ pub fn level_bytes(dxgi: u32, w: u32, h: u32) -> Option<usize> {
 /// The levels a group holds, largest first: (level, width, height, offset
 /// in the group's bytes). Levels whose sizes do not add up to the group's
 /// span give `None`.
+///
+/// The groups' ends count from the smallest streamed level, and how far
+/// down the chain is streamed differs by format (a BC7 1024x1024 image's
+/// first group is its 8x8 and 4x4 levels, a BC1 one's goes on to 2x2), so
+/// the levels are placed from the top: the last group ends with the top
+/// level, and each level lies where the levels above it end.
 #[must_use]
 pub fn group_levels(img: &ImageRec, group: usize, dxgi: u32) -> Option<Vec<(u32, u32, u32, usize)>> {
     let start = if group == 0 { 0 } else { img.groups.get(group - 1)?.end };
     let end = img.groups.get(group)?.end;
-    // Levels from the smallest: the cumulative size from the smallest
-    // level finds which levels fall in [start, end).
+    let total = img.groups.last()?.end;
+    // The group's span counted from the top level down.
+    let (top_from, top_to) = (total.checked_sub(end)?, total.checked_sub(start)?);
     let (w0, h0) = (u32::from(img.width), u32::from(img.height));
-    // (Levels below 4x4 are not streamed: a 1024x1024 image's first
-    // group is its 8x8 and 4x4 levels, 80 bytes of BC7.)
-    let mut levels = Vec::new();
+    let mut inside = Vec::new();
+    let mut at = 0u32;
     let mut l = 0u32;
     loop {
         let (w, h) = ((w0 >> l).max(1), (h0 >> l).max(1));
-        levels.push((l, w, h, level_bytes(dxgi, w, h)?));
-        if w <= 4 || h <= 4 {
+        let n = level_bytes(dxgi, w, h)? as u32;
+        if at >= top_from && at + n <= top_to {
+            inside.push((l, w, h, (at - top_from) as usize));
+        }
+        at += n;
+        if at >= top_to || (w == 1 && h == 1) {
             break;
         }
         l += 1;
     }
-    // Sum from the smallest level up.
-    let mut acc = 0u32;
-    let mut inside = Vec::new();
-    for &(l, w, h, n) in levels.iter().rev() {
-        let (a, b) = (acc, acc + n as u32);
-        acc = b;
-        if a >= start && b <= end {
-            inside.push((l, w, h, n));
-        }
-    }
-    let total: usize = inside.iter().map(|x| x.3).sum();
-    if total as u32 != end - start || inside.is_empty() {
+    let covered: u32 = inside.iter().map(|x| level_bytes(dxgi, x.1, x.2).unwrap_or(0) as u32).sum();
+    if inside.is_empty() || covered != end - start || at < top_to {
         return None;
     }
-    // Largest first, offsets assuming that order in the group.
-    inside.sort_by_key(|x| x.0);
-    let mut off = 0usize;
-    Some(
-        inside
-            .into_iter()
-            .map(|(l, w, h, n)| {
-                let o = off;
-                off += n;
-                (l, w, h, o)
-            })
-            .collect(),
-    )
+    Some(inside)
 }
 
 #[cfg(test)]

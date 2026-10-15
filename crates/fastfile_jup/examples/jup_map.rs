@@ -109,6 +109,16 @@ fn pictures(
             println!(" no colour");
             continue;
         };
+        let img = &m.images[c];
+        let groups: Vec<String> = img
+            .groups
+            .iter()
+            .map(|g| format!("{}{}", g.end, if paks.has(g.key) { "+" } else { "-" }))
+            .collect();
+        print!(
+            " colour groups {groups:?} inline {:?}",
+            img.inline.as_ref().map(Vec::len)
+        );
         match paks.level(&m.images[c], 512, oodle) {
             Ok(l) => {
                 let (w, h) = (l.width as usize, l.height as usize);

@@ -57,7 +57,8 @@ pub struct MapImage {
 pub struct MapMaterial {
     pub hash: u64,
     pub images: Vec<usize>,
-    /// The picture it is coloured by (its first BC1, else first BC7).
+    /// The picture it is coloured by: its first of format 0x25 (BC1, the
+    /// form colour maps take), else its first 0x2a (BC1).
     pub colour: Option<usize>,
 }
 
@@ -85,7 +86,7 @@ fn pointer_like(v: u64) -> bool {
 /// the asset list; (where, count, the list base that makes them so).
 fn material_table(zone: &ZoneImage) -> Option<(usize, usize, usize)> {
     let z = &zone.bytes;
-    let mut best: Option<(usize, usize)> = None;
+    let mut runs: Vec<(usize, usize)> = Vec::new();
     let mut at = 0usize;
     while at + 8 <= z.len() {
         if z[at + 4..at + 8] != [0x0f, 0, 0, 0] || z[at] & 1 == 0 {
@@ -96,27 +97,29 @@ fn material_table(zone: &ZoneImage) -> Option<(usize, usize, usize)> {
         while at + 8 * (n + 1) <= z.len() && is_back(u64_at(z, at + 8 * n)) {
             n += 1;
         }
-        if n > best.map_or(0, |b| b.1) {
-            best = Some((at, n));
+        if n >= 8 {
+            runs.push((at, n));
         }
         at += 8 * n.max(1);
     }
-    let (at, n) = best?;
-    if n < 2 {
-        return None;
-    }
-    // The list base: entry i's pointer is base + 16 i (+1).
-    let offs: Vec<usize> = (0..n)
-        .map(|k| (u64_at(z, at + 8 * k) & 0xffff_ffff) as usize - 1)
-        .collect();
+    runs.sort_by_key(|r| std::cmp::Reverse(r.1));
     let lo = zone.list_at.saturating_sub(0x40);
-    (lo..zone.list_at + 0x40)
-        .find(|&base| {
-            offs.iter().all(|&o| {
-                o >= base && (o - base) % 16 == 0 && zone.types.get((o - base) / 16) == Some(&11)
+    // The entry i's pointer is base + 16 i (+1): the base that makes every
+    // pointer of the run a material's.
+    runs.into_iter().find_map(|(at, n)| {
+        let offs: Vec<usize> = (0..n)
+            .map(|k| (u64_at(z, at + 8 * k) & 0xffff_ffff) as usize - 1)
+            .collect();
+        (lo..zone.list_at + 0x40)
+            .find(|&base| {
+                offs.iter().all(|&o| {
+                    o >= base
+                        && (o - base) % 16 == 0
+                        && zone.types.get((o - base) / 16) == Some(&11)
+                })
             })
-        })
-        .map(|base| (at, n, base))
+            .map(|base| (at, n, base))
+    })
 }
 
 /// The 40-byte record per surface record: where the run starts.
@@ -272,7 +275,7 @@ pub fn read(zone: &ZoneImage, zones: &[u32], report: &mut Vec<String>) -> Found 
                 .copied()
                 .find(|&i| out.images[i].format == f)
         };
-        mat.colour = pick(0x2a).or_else(|| pick(0x30));
+        mat.colour = pick(0x25).or_else(|| pick(0x2a));
         out.materials.push(mat);
         by_ordinal.insert(ordinal, out.materials.len() - 1);
         *slot = Some(out.materials.len() - 1);
@@ -362,6 +365,11 @@ impl Packages {
 
     pub fn is_empty(&self) -> bool {
         self.paks.is_empty()
+    }
+
+    /// Whether a package of the install has the entry.
+    pub fn has(&self, key: u64) -> bool {
+        self.paks.iter().any(|p| p.find(key).is_some())
     }
 
     fn fetch(&self, key: u64, oodle: &dyn Decompressor) -> Option<Vec<u8>> {
