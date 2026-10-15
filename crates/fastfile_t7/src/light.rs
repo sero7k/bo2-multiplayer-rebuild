@@ -209,6 +209,8 @@ pub struct Probe {
     pub half: [f32; 3],
     /// The mean colour the config stores.
     pub mean: [f32; 3],
+    /// Config word 0 (the scale its texels are stored at, it seems).
+    pub scale: f32,
     /// +X, -X, +Y, -Y, +Z, -Z (world axes) of the smallest level.
     pub faces: [[f32; 3]; 6],
 }
@@ -357,6 +359,7 @@ impl Bake {
                             axes: [[w(14), w(15), w(16)], [w(17), w(18), w(19)], [w(20), w(21), w(22)]],
                             half: [w(23), w(24), w(25)].map(|v| if v.is_finite() { v.abs() } else { 0.0 }),
                             mean: [w(1), w(2), w(3)],
+                            scale: w(0),
                             faces: world,
                         });
                     }
@@ -391,7 +394,7 @@ impl Bake {
             if sky_up > 0.0 && probe_up > 1e-4 {
                 probe_units = sky_up / probe_up;
             }
-            report.push(format!("sky over probe (up face): {sky_up:.2} / {probe_up:.3} = {probe_units:.1}"));
+            report.push(format!("sky over probe (up face): {sky_up:.2} / {probe_up:.3} = {probe_units:.1}; probe 0 word 0 {:.1}; ratio over it {:.3}", g.scale, probe_units / g.scale.max(1e-3)));
             // Which way the sun volume's angles point: the sky round both
             // readings of them.
             if let Some(s) = map.sun {
