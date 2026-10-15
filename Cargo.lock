@@ -2835,6 +2835,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastfile_jup"
+version = "0.1.0"
+dependencies = [
+ "libloading",
+]
+
+[[package]]
 name = "fastfile_s1"
 version = "0.1.0"
 dependencies = [
