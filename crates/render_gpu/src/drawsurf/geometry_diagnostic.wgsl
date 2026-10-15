@@ -619,6 +619,24 @@ fn t7_sun_visibility(p: vec3<f32>, n: vec3<f32>) -> f32 {
     return lit / 9.0;
 }
 
+// A reveal decal's coverage (Black Ops III's `gbuffer_decal` programs):
+// its reveal map's value against a band the vertex alpha x sets, from
+// saturate((1 - x) - soft x^0.5) to saturate((1 - x) + soft (1 - x)^0.5)
+// (ramp 0.5: every map's). The vertex alpha arrives packed with the soft
+// edge (`t7_light::reveal_alpha`); any other alpha is the texel's own.
+fn t7_reveal(texel_a: f32, vertex_a: f32) -> f32 {
+    if (vertex_a > -1.5) {
+        return texel_a;
+    }
+    let t = -vertex_a - 2.0;
+    let q = floor(t * 0.5);
+    let x = saturate(saturate((t - 2.0 * q) / 0.999) * 0.998 + 0.001);
+    let soft = q / 64.0;
+    let lo = saturate((1.0 - x) - soft * sqrt(x));
+    let hi = saturate((1.0 - x) + soft * sqrt(1.0 - x));
+    return saturate((texel_a - lo) / max(hi - lo, 0.0001));
+}
+
 // The tone curve (a filmic fit) of light times the exposure, gamma-encoded
 // for the frame (which then takes Black Ops II's roll-off, bloom and grade).
 fn t7_tone(c: vec3<f32>, exposure: f32) -> vec3<f32> {
@@ -881,7 +899,7 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
         n7 = normalize(nm7.x * in.tangent + nm7.y * in.binormal + vn7);
         st7 = textureSample(specular_map, colour_sampler, in.uv);
 #endif
-        return vec4(t7_out(t7_shade(texel * texel, in.color.rgb, vn7, n7, st7, in.probe, in.world_position)), albedo.a);
+        return vec4(t7_out(t7_shade(texel * texel, in.color.rgb, vn7, n7, st7, in.probe, in.world_position)), t7_reveal(albedo.a, in.color.a));
     }
     let v = in.lightmap_uv.y / 3.0;
     let page0 = textureSample(lightmap, lightmap_sampler, vec2(in.lightmap_uv.x, v));

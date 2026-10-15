@@ -666,24 +666,6 @@ fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, progress: &
         facts.compass.image.as_deref().unwrap_or("missing")
     ));
 
-    // Materials: world surfaces, then the placed models'.
-    let stage = progress.begin_scoped(StageId::MapAssets, "black ops iii materials", None);
-    let mut catalog = material_seed;
-    catalog.set_capture_ns(AssetNamespace::T6);
-    let mut b = Materials {
-        map,
-        catalog,
-        owner: ZoneOwner::from_zone_path(path),
-        max: texture_max(),
-        linked: HashMap::new(),
-        images: HashMap::new(),
-        decoded: 0,
-        failures: Vec::new(),
-        looks: super::t7_look::on().then(|| super::t7_look::Looks::new(texture_max())),
-    };
-    let surface_materials: Vec<Option<usize>> =
-        map.surfaces.iter().enumerate().map(|(i, s)| if hidden[i] { None } else { s.material.and_then(|m| b.material(m, false)) }).collect();
-
     // bo2mp: Black Ops III's own light (`super::t7_light`), when on.
     let stage_light = progress.begin_scoped(StageId::MapAssets, "black ops iii light", None);
     let lit = if super::t7_light::on() {
@@ -717,6 +699,24 @@ fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, progress: &
         None
     };
     stage_light.done();
+
+    // Materials: world surfaces, then the placed models'.
+    let stage = progress.begin_scoped(StageId::MapAssets, "black ops iii materials", None);
+    let mut catalog = material_seed;
+    catalog.set_capture_ns(AssetNamespace::T6);
+    let mut b = Materials {
+        map,
+        catalog,
+        owner: ZoneOwner::from_zone_path(path),
+        max: texture_max(),
+        linked: HashMap::new(),
+        images: HashMap::new(),
+        decoded: 0,
+        failures: Vec::new(),
+        looks: super::t7_look::on().then(|| super::t7_look::Looks::new(texture_max(), lit.is_some())),
+    };
+    let surface_materials: Vec<Option<usize>> =
+        map.surfaces.iter().enumerate().map(|(i, s)| if hidden[i] { None } else { s.material.and_then(|m| b.material(m, false)) }).collect();
 
     // The placed models.
     let (prop_meshes, prop_placements) = {
@@ -821,6 +821,7 @@ fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, progress: &
     report.push(b.looks.as_ref().map_or_else(|| "t7 look: off (BO2MP_T7_MATERIALS=0): colour maps only".to_owned(), super::t7_look::Looks::report));
     let mut materials = std::mem::take(&mut b.catalog);
     let owner = b.owner;
+    let reveals = b.looks.as_ref().map(|l| l.reveals.clone()).unwrap_or_default();
     drop(b);
     if let Some(lit) = lit.as_ref() {
         report.extend(lit.link(map, &map_name, &mut materials, owner));
@@ -861,7 +862,7 @@ fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, progress: &
                 // Black Ops III's own light: the vertices' ambient light,
                 // the sun map, the probes and the branch's numbers.
                 let t = std::time::Instant::now();
-                draw.colors = lit.world_colours(map, &draw.colors);
+                draw.colors = lit.world_colours(map, &draw.colors, &reveals);
                 draw.t6_lut = Some(Arc::new(lit.sun_map_lut()));
                 draw.t6_probes = lit.probe_rows();
                 let mut rows = vec![[0.0f32; 16]; asset_world::T7_LIGHT_ROW + 2];

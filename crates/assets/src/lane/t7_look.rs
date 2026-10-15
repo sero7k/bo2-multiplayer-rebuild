@@ -55,11 +55,16 @@ pub(super) struct Looks {
     max: u32,
     done: HashMap<usize, Linked>,
     pub stats: Stats,
+    /// bo2mp: reveal decals keep their raw reveal map (for Black Ops III's
+    /// own light, whose draw covers them by the vertex alpha,
+    /// `super::t7_light`); those made so, with their soft edge and ramp.
+    raw_reveal: bool,
+    pub reveals: HashMap<usize, [f32; 2]>,
 }
 
 impl Looks {
-    pub fn new(max: u32) -> Self {
-        Self { max, done: HashMap::new(), stats: Stats::default() }
+    pub fn new(max: u32, raw_reveal: bool) -> Self {
+        Self { max, done: HashMap::new(), stats: Stats::default(), raw_reveal, reveals: HashMap::new() }
     }
 
     /// Whether a material drawn as `draw` gets a look, and how it covers.
@@ -80,8 +85,16 @@ impl Looks {
             return *l;
         }
         let m = &map.materials[index];
-        let linked = match map.look(m, self.max, SPECULAR_MAX.min(self.max), cover) {
+        let made = if self.raw_reveal {
+            map.look_raw_reveal(m, self.max, SPECULAR_MAX.min(self.max), cover)
+        } else {
+            map.look(m, self.max, SPECULAR_MAX.min(self.max), cover)
+        };
+        let linked = match made {
             Ok(look) => {
+                if let Some(r) = look.reveal {
+                    self.reveals.insert(index, r);
+                }
                 self.stats.materials += 1;
                 for (k, u) in look.used.iter().enumerate() {
                     self.stats.used[k] += usize::from(*u);

@@ -493,6 +493,7 @@ impl T7Map {
                 out.images.entry(im.name.clone()).or_insert_with(|| im.clone());
             }
         }
+        out.name_unread_textures();
         // bo2mp: the sun volume's light (sky, probes) and the sky material's
         // constants (`skyScale`).
         out.light_refs = crate::light::LightRefs::read(&cap, &zone.image, &common);
@@ -502,6 +503,41 @@ impl T7Map {
             Err(e) => out.report.push(format!("packages: {e} (streamed pictures not drawn)")),
         }
         Ok(out)
+    }
+
+    /// bo2mp: a material's texture whose image the walk could only see as a
+    /// reference (`<ref ...>`: an image an earlier asset loaded, at a slot
+    /// the walk did not name; the reveal decals' colour and normal maps on
+    /// mp_redwood's forest floor) is named by its siblings: Black Ops III
+    /// names a material's pictures `<stem>_<letter>` by slot (colour `_c`,
+    /// normal `_n`, gloss `_g`, occlusion `_o`, reveal `_r`), so a sibling's
+    /// stem and the slot's letter name it, kept only when that picture is
+    /// in the zone.
+    fn name_unread_textures(&mut self) {
+        const LETTERS: [(u32, &str); 5] = [(0xa0ab_1041, "c"), (0x59d3_0d0f, "n"), (0x6d0a_6c98, "g"), (0x0717_6bf2, "o"), (0x34d8_49d5, "r")];
+        let mut named = 0;
+        for i in 0..self.materials.len() {
+            let stems: Vec<String> = self.materials[i]
+                .textures
+                .iter()
+                .filter(|(_, n)| !n.starts_with('<') && !n.starts_with('$'))
+                .filter_map(|(_, n)| n.rsplit_once('_').filter(|(_, l)| l.len() == 1).map(|(s, _)| s.to_owned()))
+                .collect();
+            for t in 0..self.materials[i].textures.len() {
+                let (hash, name) = self.materials[i].textures[t].clone();
+                if !name.starts_with("<ref") {
+                    continue;
+                }
+                let Some((_, letter)) = LETTERS.iter().find(|(h, _)| *h == hash) else { continue };
+                if let Some(found) = stems.iter().map(|s| format!("{s}_{letter}")).find(|n| self.image_info(n).is_some()) {
+                    self.materials[i].textures[t].1 = found;
+                    named += 1;
+                }
+            }
+        }
+        if named > 0 {
+            self.report.push(format!("materials: {named} textures the walk saw only as references named by their siblings"));
+        }
     }
 
     fn material_index(&mut self, cap: &Capture, index: &mut HashMap<String, Option<usize>>, name: &str) -> Option<usize> {

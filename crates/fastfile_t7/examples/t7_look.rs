@@ -41,7 +41,7 @@ fn main() {
         let e = by_ts.entry(ts).or_default();
         e[0] += 1;
         match r {
-            Ok(Look { colour, normal, specular, used }) => {
+            Ok(Look { colour, normal, specular, used, .. }) => {
                 e[1] += usize::from(colour.is_some());
                 e[2] += usize::from(normal.is_some());
                 e[3] += usize::from(specular.is_some());

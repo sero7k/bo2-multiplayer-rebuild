@@ -173,15 +173,27 @@ impl Lit {
     }
 
     /// Each world vertex's ambient light (probes' unit, occlusion in), as
-    /// the vertex colour (alpha kept from `colours`).
-    pub fn world_colours(&self, map: &T7Map, colours: &[[f32; 4]]) -> Vec<[f32; 4]> {
+    /// the vertex colour, its alpha kept from `colours`; on a reveal decal
+    /// (`reveals`: map material, its soft edge and ramp) the alpha carries
+    /// the soft edge too (`reveal_alpha`).
+    pub fn world_colours(&self, map: &T7Map, colours: &[[f32; 4]], reveals: &std::collections::HashMap<usize, [f32; 2]>) -> Vec<[f32; 4]> {
+        let mut soft = vec![0f32; map.vertices.len()];
+        for s in &map.surfaces {
+            if let Some(r) = s.material.and_then(|m| reveals.get(&m)) {
+                let a = s.first_vertex as usize;
+                let b = (a + s.vertex_count as usize).min(soft.len());
+                if a < b {
+                    soft[a..b].fill(r[0]);
+                }
+            }
+        }
         fastfile_t7::bake::parallel_map(map.vertices.len(), |i| {
             let v = &map.vertices[i];
             let n = v.normal;
             let a = self.bake.ambient_lit(v.xyz, n);
             let o = self.occlusion(v.xyz, n, i as u32, 128.0);
             let alpha = colours.get(i).map_or(1.0, |c| c[3]);
-            [a[0] * o, a[1] * o, a[2] * o, alpha]
+            [a[0] * o, a[1] * o, a[2] * o, if soft[i] > 0.0 { reveal_alpha(alpha, soft[i]) } else { alpha }]
         })
     }
 
@@ -285,6 +297,13 @@ impl Lit {
         }
         report
     }
+}
+
+/// A reveal decal vertex's alpha with its material's soft edge, for the
+/// shader (`t7_reveal`): -(2 + 2 q + 0.999 a), q the soft edge in 64ths.
+fn reveal_alpha(a: f32, soft: f32) -> f32 {
+    let q = (soft * 64.0).round().clamp(1.0, 64.0);
+    -(2.0 + 2.0 * q + 0.999 * a.clamp(0.0, 1.0))
 }
 
 fn clamped() -> ImageSampler {
