@@ -403,6 +403,64 @@ const GAMES: &[Game] = &[
             ("mp_city", "Rupture"),
         ],
     },
+    // bo2mp: Call of Duty: Modern Warfare III (2023) (its maps through
+    // `assets::lane::jup_map`). Its English text is not readable from the
+    // zones, so the titles are the maps' public names; a map whose name is
+    // not known here keeps its zone's word. Rebirth Island is Resurgence's
+    // map (WARZONE). Not listed: the big Battle Royale map and Ashika
+    // Island (`asset_transport::JUP_MAPS`).
+    Game {
+        prefix: "jup",
+        key: "MWIII",
+        title: "Modern Warfare III (2023)",
+        base: &[
+            ("mp_jup_derail", "Derail"),
+            ("mp_jup_estate", "Estate"),
+            ("mp_jup_favela", "Favela"),
+            ("mp_jup_highrise", "Highrise"),
+            ("mp_jup_invasion", "Invasion"),
+            ("mp_jup_karachi", "Karachi"),
+            ("mp_jup_quarry", "Quarry"),
+            ("mp_jup_rundown", "Rundown"),
+            ("mp_jup_rust", "Rust"),
+            ("mp_jup_scrapyard", "Scrapyard"),
+            ("mp_jup_skidrow", "Skidrow"),
+            ("mp_jup_subbase", "Sub Base"),
+            ("mp_jup_terminal", "Terminal"),
+            ("mp_jup_underpass", "Underpass"),
+            ("mp_jup_wasteland", "Wasteland"),
+        ],
+        dlc: &[
+            ("mp_jup_delayed", "Departures"),
+            ("mp_jup_slaughterhouse", "Meat"),
+            ("mp_jup_growhouse", "Stash House"),
+            ("mp_jup_luxury", "Luxury"),
+            ("mp_jup_urca", "Rio"),
+            ("mp_jup_shoothouse2", "Shoot House"),
+            ("mp_jup_emergency", "Emergency"),
+            ("mp_jup_escape5", "Rebirth Island"),
+            ("mp_jup_arcade", "Arcade"),
+            ("mp_jup_bait", "Bait"),
+            ("mp_jup_blackheart", "Blackheart"),
+            ("mp_jup_delta", "Delta"),
+            ("mp_jup_drivethru", "Drivethru"),
+            ("mp_jup_dubai", "Dubai"),
+            ("mp_jup_elevated", "Elevated"),
+            ("mp_jup_fort", "Fort"),
+            ("mp_jup_greece", "Greece"),
+            ("mp_jup_hydro", "Hydro"),
+            ("mp_jup_incline", "Incline"),
+            ("mp_jup_launchfacility", "Launchfacility"),
+            ("mp_jup_observatory", "Observatory"),
+            ("mp_jup_paris", "Paris"),
+            ("mp_jup_sira", "Sira"),
+            ("mp_jup_tower", "Tower"),
+            ("mp_jup_trainingfacility", "Trainingfacility"),
+            ("mp_jup_vertigo", "Vertigo"),
+            ("mp_jup_waterfront", "Waterfront"),
+            ("mp_jup_zooquarium", "Zooquarium"),
+        ],
+    },
 ];
 
 /// A map from another game, as the menus list it.
@@ -542,7 +600,7 @@ fn discover() -> Vec<Category> {
     installed.extend(
         asset_transport::list_legacy_mp_maps(&root)
             .into_iter()
-            .filter(|(game, _)| game == "iw3" || game == "t4" || game == "iw6" || game == "iw7" || game == "t7"),
+            .filter(|(game, _)| game == "iw3" || game == "t4" || game == "iw6" || game == "iw7" || game == "t7" || game == "jup"),
     );
     installed.sort();
     installed.dedup();

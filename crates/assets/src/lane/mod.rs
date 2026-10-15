@@ -18,6 +18,10 @@ pub(crate) use iw7::load_iw7_world;
 // bo2mp: Black Ops III's maps (no ZoneGame of their own).
 mod t7_map;
 pub(crate) use t7_map::load_t7_world;
+// bo2mp: Modern Warfare III's (2023) maps, through the Black Ops III
+// builder.
+mod jup_map;
+pub(crate) use jup_map::load_jup_world;
 // bo2mp: Infinite Warfare's Zombies maps as Black Ops II Zombies.
 mod iw7_zombies;
 #[allow(unused_imports)] // (register_foreign_zm_map: for the Black Ops III lane)

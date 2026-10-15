@@ -570,7 +570,9 @@ fn walk_soup(map: &T7Map, hidden: &[bool]) -> Vec<asset_world::world_iw7::SoupTr
     tris
 }
 
-fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, progress: &LoadProgress, material_seed: MaterialCatalog) -> LoadedWorld {
+/// (bo2mp: also Modern Warfare III's maps, read into a `T7Map` by
+/// `super::jup_map`.)
+pub(super) fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, progress: &LoadProgress, material_seed: MaterialCatalog) -> LoadedWorld {
     super::bo2_look::set_pending_grade(None);
     let map_name = path.file_stem().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
 

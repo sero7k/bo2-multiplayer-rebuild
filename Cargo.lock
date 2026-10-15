@@ -474,6 +474,7 @@ dependencies = [
  "fastfile_iw5",
  "fastfile_iw6",
  "fastfile_iw7",
+ "fastfile_jup",
  "fastfile_s1",
  "fastfile_t5",
  "fastfile_t6",

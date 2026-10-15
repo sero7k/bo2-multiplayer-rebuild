@@ -245,6 +245,73 @@ pub const IW7_ZONE_VERSION: u32 = 0x653;
 pub const T7_ZONE_VERSION: u32 = 0x251;
 /// bo2mp: Black Ops III's envelope magic.
 const T7_MAGIC: &[u8; 8] = b"TAff0000";
+/// bo2mp: Call of Duty: Modern Warfare III's (2023) fast file version
+/// (`IWffa100`, 0x18): its maps load through `fastfile_jup`
+/// (`assets::lane::jup_map`).
+pub const JUP_ZONE_VERSION: u32 = 0x18;
+
+/// bo2mp: Modern Warfare III's (2023) multiplayer maps, by zone name: every
+/// `mp_jup_*` map but the big Battle Royale map (`mp_jup_bigmap*`), Ashika
+/// Island (`mp_jup_sm_island_2`) and the benchmark, caster and skydiving
+/// zones; Rebirth Island is `mp_jup_escape5`.
+pub const JUP_MAPS: [&str; 43] = [
+    "mp_jup_arcade",
+    "mp_jup_bait",
+    "mp_jup_blackheart",
+    "mp_jup_delayed",
+    "mp_jup_delta",
+    "mp_jup_derail",
+    "mp_jup_drivethru",
+    "mp_jup_dubai",
+    "mp_jup_elevated",
+    "mp_jup_emergency",
+    "mp_jup_escape5",
+    "mp_jup_estate",
+    "mp_jup_favela",
+    "mp_jup_fort",
+    "mp_jup_greece",
+    "mp_jup_growhouse",
+    "mp_jup_highrise",
+    "mp_jup_hydro",
+    "mp_jup_incline",
+    "mp_jup_invasion",
+    "mp_jup_karachi",
+    "mp_jup_launchfacility",
+    "mp_jup_luxury",
+    "mp_jup_observatory",
+    "mp_jup_paris",
+    "mp_jup_quarry",
+    "mp_jup_rundown",
+    "mp_jup_rust",
+    "mp_jup_scrapyard",
+    "mp_jup_shoothouse2",
+    "mp_jup_sira",
+    "mp_jup_skidrow",
+    "mp_jup_slaughterhouse",
+    "mp_jup_subbase",
+    "mp_jup_terminal",
+    "mp_jup_tower",
+    "mp_jup_trainingfacility",
+    "mp_jup_underpass",
+    "mp_jup_urca",
+    "mp_jup_vertigo",
+    "mp_jup_wasteland",
+    "mp_jup_waterfront",
+    "mp_jup_zooquarium",
+];
+
+/// bo2mp: a Modern Warfare III zone is a map this rebuild plays.
+pub fn is_jup_map(stem: &str) -> bool {
+    JUP_MAPS.contains(&stem)
+}
+
+/// bo2mp: zone names no map has (Modern Warfare III's gun and character
+/// parts, streamed world tiles: thousands of `mp_*` zones in its folder),
+/// left out before their headers are read.
+fn is_part_zone(stem: &str) -> bool {
+    stem.ends_with("_tr")
+        || ["mp_av_", "mp_aw_", "mp_vm_", "mp_wm_", "mp_hd_", "mp_bd_", "mp_vh_"].iter().any(|p| stem.starts_with(p))
+}
 
 /// bo2mp: the version of a legacy game's zones by its prefix.
 pub fn legacy_version(prefix: &str) -> Option<u32> {
@@ -254,6 +321,7 @@ pub fn legacy_version(prefix: &str) -> Option<u32> {
         "iw6" => Some(IW6_ZONE_VERSION),
         "iw7" => Some(IW7_ZONE_VERSION),
         "t7" => Some(T7_ZONE_VERSION),
+        "jup" => Some(JUP_ZONE_VERSION),
         _ => None,
     }
 }
@@ -267,6 +335,7 @@ pub fn legacy_game_for_path(path: &Path) -> Option<&'static str> {
         IW6_ZONE_VERSION => Some("iw6"),
         IW7_ZONE_VERSION => Some("iw7"),
         T7_ZONE_VERSION => Some("t7"),
+        JUP_ZONE_VERSION => Some("jup"),
         _ => None,
     }
 }
@@ -289,7 +358,7 @@ pub fn list_legacy_mp_map_files(root: &GamesRoot) -> Vec<(String, String, PathBu
             continue;
         };
         let is_ff = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ff"));
-        if !is_ff || !stem.starts_with("mp_") || stem.ends_with("_load") {
+        if !is_ff || !stem.starts_with("mp_") || stem.ends_with("_load") || is_part_zone(&stem) {
             continue;
         }
         if let Some(game) = legacy_game_for_path(&path)
@@ -297,6 +366,7 @@ pub fn list_legacy_mp_map_files(root: &GamesRoot) -> Vec<(String, String, PathBu
             && (game != "iw6" || is_ghosts_mp_map(&path, &stem))
             && (game != "iw7" || is_iw7_map(&path, &stem))
             && (game != "t7" || is_t7_map(&stem))
+            && (game != "jup" || is_jup_map(&stem))
         {
             out.push((game.to_owned(), stem, path));
         }
