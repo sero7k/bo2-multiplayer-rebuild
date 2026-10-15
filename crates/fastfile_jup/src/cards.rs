@@ -9,17 +9,19 @@
 //! zone), its pixels in one streamed group: every level, largest first,
 //! in a `.xsub` entry under the group's key.
 //!
-//! Animated ones are a flipbook: the frames side by side in rows, an
-//! emblem's 256x256 each, a calling card's 512x128 (a 768x1024 emblem is 3
-//! by 4 frames, a 1024x1024 one 4 by 4, a 1536x512 card 3 by 4, a
-//! 1024x1024 card 2 by 8). Neither the bundle nor the name tells a
-//! flipbook from a still picture of the same size (`ui_emblem_143` and
-//! `ui_emblem_286` are both 1024x1024 with the same cells; most `_atlas`
-//! names are flipbooks, some are 256x256 stills), so the size decides
-//! where it can ([`Item::grid_by_size`]) and for a square emblem
-//! [`detect_grid`] looks at the pixels: a flipbook's neighbouring frames
-//! are nearly the same picture, a still picture's neighbouring tiles are
-//! not. Every picture of build 1.21 has one level, in one group.
+//! Animated ones are a flipbook: the frames side by side in rows. An
+//! emblem's is 4 by 4 square frames (1024x1024, 4096x4096) or 3 by 4
+//! (768x1024, 1536x2048); a calling card's frames are 4:1 like a still
+//! card, 2 by 8 in a 1024x1024 picture, 3 by 4 in a 1536x512 one. Neither
+//! the bundle nor the name tells a flipbook from a still picture of the
+//! same shape (`ui_emblem_143` and `ui_emblem_rankedplay_02` have the same
+//! cells; some `_atlas` names are 256x256 stills), so the shape decides
+//! where it can ([`Item::grid_by_size`]: a card that is not itself 4:1, an
+//! emblem of 3:4) and for a square emblem [`detect_grid`] looks at the
+//! pixels: a flipbook's neighbouring frames are nearly the same picture, or
+//! its frames stand apart with clear gutters between them, where a still
+//! picture's tiles are parts of one picture. Every picture of build 1.21
+//! has one level, in one group.
 //!
 //! The names are found as they are stored in a bundle's string cells:
 //! `-2`, a 32-bit hash, 4 zero bytes, the name and its NUL.
@@ -41,17 +43,6 @@ pub const ZONE: &str = "global";
 pub enum Kind {
     Emblem,
     Card,
-}
-
-impl Kind {
-    /// A frame of a flipbook (width, height).
-    #[must_use]
-    pub fn frame(self) -> (u32, u32) {
-        match self {
-            Kind::Emblem => (256, 256),
-            Kind::Card => (512, 128),
-        }
-    }
 }
 
 /// What a name is, by its words; `None` for the other pictures that share
@@ -127,35 +118,37 @@ impl Item {
         is_animated(&self.name)
     }
 
-    /// The (columns, rows) its picture would have as a flipbook of its
-    /// kind's frames, `None` when its size is not a whole number of two or
-    /// more frames.
+    /// The (columns, rows) its picture would have as a flipbook, `None`
+    /// when its shape is not one: a square emblem of 512 or more is 4 by 4,
+    /// a 3:4 one 3 by 4; a calling card that is not itself 4:1 is the grid
+    /// of 16, 12 or 8 frames of 4:1 that tiles it (2 by 8 for 1024x1024, 3
+    /// by 4 for 1536x512, 2 by 6 for 1024x768).
     #[must_use]
     pub fn candidate_grid(&self) -> Option<(u32, u32)> {
-        let (fw, fh) = self.kind.frame();
         let (w, h) = (u32::from(self.image.width), u32::from(self.image.height));
-        if w < fw || h < fh || w % fw != 0 || h % fh != 0 || (w / fw) * (h / fh) < 2 {
-            return None;
+        match self.kind {
+            Kind::Emblem if w == h && w >= 512 && w % 4 == 0 => Some((4, 4)),
+            Kind::Emblem if w * 4 == h * 3 && w % 3 == 0 && h % 4 == 0 => Some((3, 4)),
+            Kind::Emblem => None,
+            Kind::Card if w == 4 * h => None,
+            Kind::Card => [16u32, 12, 8].into_iter().find_map(|n| {
+                (1..=n).filter(|c| n % c == 0).find_map(|c| {
+                    let r = n / c;
+                    (w % c == 0 && h % r == 0 && w / c == 4 * (h / r)).then_some((c, r))
+                })
+            }),
         }
-        Some((w / fw, h / fh))
     }
 
-    /// What its size alone says: `Some(grid)` (1 by 1 for a still), or
-    /// `None` when only the pixels can tell. A calling card's frame is 4:1,
-    /// so a card of a whole number of frames that is not itself 4:1
-    /// (1024x1024, 1536x512) is a flipbook, a bigger 4:1 one (2048x512) a
-    /// still; an emblem's frame is square, so a whole number of frames that
-    /// is not square (768x1024) is a flipbook, a square one (1024x1024)
-    /// either.
+    /// What its shape alone says: `Some(grid)` (1 by 1 for a still), or
+    /// `None` when only the pixels can tell (a square emblem of several
+    /// frames).
     #[must_use]
     pub fn grid_by_size(&self) -> Option<(u32, u32)> {
         let Some(grid) = self.candidate_grid() else { return Some((1, 1)) };
-        let (w, h) = (u32::from(self.image.width), u32::from(self.image.height));
         match self.kind {
-            Kind::Card if w == 4 * h => Some((1, 1)),
-            Kind::Card => Some(grid),
-            Kind::Emblem if w != h => Some(grid),
-            Kind::Emblem => None,
+            Kind::Emblem if self.image.width == self.image.height => None,
+            _ => Some(grid),
         }
     }
 }
@@ -343,10 +336,16 @@ pub fn picture(zone: Option<&[u8]>, item: &Item, fetch: &mut dyn FnMut(u64) -> O
 /// in itself, for the picture to be a flipbook.
 pub const FLIPBOOK_LIKENESS: f32 = 0.5;
 
-/// Its picture's flipbook layout, (1, 1) for a still picture: as its size
+/// How clear a flipbook's gutters are at most: the alpha along the
+/// frames' inner borders against their middles' (a still picture's tiles
+/// run on across them).
+pub const FLIPBOOK_GUTTER: f32 = 0.3;
+
+/// Its picture's flipbook layout, (1, 1) for a still picture: as its shape
 /// says ([`Item::grid_by_size`]), else (a square emblem of several frames)
-/// the candidate grid kept when neighbouring frames (0 and 1, 1 and 2) are
-/// nearly the same picture against how much frame 0 varies in itself.
+/// its candidate grid when neighbouring frames are nearly the same picture
+/// against how much a frame varies in itself, or when the frames stand
+/// apart with clear gutters between them.
 #[must_use]
 pub fn detect_grid(item: &Item, pic: &Rgba) -> (u32, u32) {
     if let Some(grid) = item.grid_by_size() {
@@ -354,11 +353,10 @@ pub fn detect_grid(item: &Item, pic: &Rgba) -> (u32, u32) {
     }
     let Some(grid) = item.candidate_grid() else { return (1, 1) };
     let (near, spread) = likeness(pic, grid);
-    // (A blank picture, or one that hardly varies: a still.)
-    if spread < 2.0 {
-        return (1, 1);
+    if spread >= 2.0 && near < FLIPBOOK_LIKENESS * spread {
+        return grid;
     }
-    if near < FLIPBOOK_LIKENESS * spread { grid } else { (1, 1) }
+    if gutters(pic, grid) < FLIPBOOK_GUTTER { grid } else { (1, 1) }
 }
 
 /// (The larger mean difference of frames 0-1 and 1-2, frame 0's spread.)
@@ -368,6 +366,60 @@ pub fn likeness(pic: &Rgba, grid: (u32, u32)) -> (f32, f32) {
     let f: Vec<Rgba> = [0, 1.min(n - 1), 2.min(n - 1)].iter().map(|&i| frame(pic, grid, i)).collect();
     let near = mean_diff(&f[0], &f[1]).max(mean_diff(&f[1], &f[2]));
     (near, spread(&f[0]))
+}
+
+/// The mean alpha on the frames' inner borders (the pixel each side of
+/// every line between two frames) against the mean alpha of the frames'
+/// middles (their middle half each way); 0 for a blank picture.
+#[must_use]
+pub fn gutters(pic: &Rgba, grid: (u32, u32)) -> f32 {
+    let (cols, rows) = (grid.0.max(1), grid.1.max(1));
+    let (fw, fh) = (pic.width / cols, pic.height / rows);
+    if fw < 4 || fh < 4 {
+        return 0.0;
+    }
+    let alpha = |x: u32, y: u32| f64::from(pic.pixels[((y * pic.width + x) * 4 + 3) as usize]);
+    let (mut line, mut nl) = (0f64, 0f64);
+    for k in 1..cols {
+        for x in [k * fw - 1, k * fw] {
+            for y in 0..pic.height {
+                line += alpha(x, y);
+                nl += 1.0;
+            }
+        }
+    }
+    for k in 1..rows {
+        for y in [k * fh - 1, k * fh] {
+            for x in 0..pic.width {
+                line += alpha(x, y);
+                nl += 1.0;
+            }
+        }
+    }
+    let (mut mid, mut nm) = (0f64, 0f64);
+    for r in 0..rows {
+        for c in 0..cols {
+            for y in r * fh + fh / 4..r * fh + fh * 3 / 4 {
+                for x in c * fw + fw / 4..c * fw + fw * 3 / 4 {
+                    mid += alpha(x, y);
+                    nm += 1.0;
+                }
+            }
+        }
+    }
+    let mid = mid / nm.max(1.0);
+    if mid < 1.0 {
+        return 0.0;
+    }
+    ((line / nl.max(1.0)) / mid) as f32
+}
+
+/// The frame to show where a flipbook stands still: the one with the most
+/// in it (some books fade in from blank frames).
+#[must_use]
+pub fn poster_frame(pic: &Rgba, grid: (u32, u32)) -> u32 {
+    let n = grid.0.max(1) * grid.1.max(1);
+    (0..n).map(|i| (i, spread(&frame(pic, grid, i)))).fold((0, -1.0f32), |best, (i, s)| if s > best.1 { (i, s) } else { best }).0
 }
 
 /// Premultiplied colour and alpha of a pixel.
@@ -565,14 +617,23 @@ mod tests {
 
     #[test]
     fn flipbook_grids() {
-        let e = Item { name: "jup_emblem_animated_x_atlas".into(), kind: Kind::Emblem, image: rec(768, 1024) };
-        assert_eq!(e.candidate_grid(), Some((3, 4)));
-        let c = Item { name: "ui_playercard_1".into(), kind: Kind::Card, image: rec(1024, 1024) };
-        assert_eq!(c.candidate_grid(), Some((2, 8)));
-        let still = Item { name: "ui_emblem_001".into(), kind: Kind::Emblem, image: rec(256, 256) };
-        assert_eq!(still.candidate_grid(), None);
-        let ranked = Item { name: "ui_emblem_rankedplay_01".into(), kind: Kind::Emblem, image: rec(1920, 1920) };
-        assert_eq!(ranked.candidate_grid(), None);
+        let e = |w, h| Item { name: "ui_emblem_x".into(), kind: Kind::Emblem, image: rec(w, h) };
+        let c = |w, h| Item { name: "ui_playercard_x".into(), kind: Kind::Card, image: rec(w, h) };
+        assert_eq!(e(768, 1024).candidate_grid(), Some((3, 4)));
+        assert_eq!(e(768, 1024).grid_by_size(), Some((3, 4)));
+        assert_eq!(e(1024, 1024).candidate_grid(), Some((4, 4)));
+        assert_eq!(e(4096, 4096).grid_by_size(), None);
+        assert_eq!(e(256, 256).grid_by_size(), Some((1, 1)));
+        assert_eq!(e(1920, 1920).candidate_grid(), Some((4, 4)));
+        assert_eq!(e(848, 1144).grid_by_size(), Some((1, 1)));
+        assert_eq!(c(1024, 1024).grid_by_size(), Some((2, 8)));
+        assert_eq!(c(1536, 512).grid_by_size(), Some((3, 4)));
+        assert_eq!(c(768, 256).grid_by_size(), Some((3, 4)));
+        assert_eq!(c(1024, 768).grid_by_size(), Some((2, 6)));
+        assert_eq!(c(1024, 512).grid_by_size(), Some((2, 4)));
+        assert_eq!(c(512, 128).grid_by_size(), Some((1, 1)));
+        assert_eq!(c(2048, 512).grid_by_size(), Some((1, 1)));
+        assert_eq!(c(1024, 640).grid_by_size(), Some((1, 1)));
     }
 
     #[test]
@@ -588,35 +649,54 @@ mod tests {
         assert_eq!(&s.pixels[..4], &[3, 0, 0, 255]);
     }
 
-    /// A 2x2 book of 8x8 frames: `same` makes every frame the same
-    /// pattern, else the tiles are parts of one picture.
-    fn book(same: bool) -> Rgba {
+    /// A 4x4 book of 8x8 frames. `same`: every frame the same pattern;
+    /// else the tiles are parts of one picture, opaque across the frame
+    /// lines. `gutter`: each frame's outer pixel clear.
+    fn book(same: bool, gutter: bool) -> Rgba {
         let mut pixels = Vec::new();
-        for y in 0..16u32 {
-            for x in 0..16u32 {
-                let v = if same { ((x % 8) * 31 + (y % 8) * 17) % 255 } else { (x * 16 + y * 3) % 255 } as u8;
-                let a = if !same && x >= 8 && y < 8 { 0 } else { 255 };
+        for y in 0..32u32 {
+            for x in 0..32u32 {
+                let v = if same { ((x % 8) * 31 + (y % 8) * 17) % 255 } else { (x * 13 + y * 29 + (x * y) % 7 * 40) % 255 } as u8;
+                let edge = matches!(x % 8, 0 | 7) || matches!(y % 8, 0 | 7);
+                let a = if gutter && edge { 0 } else { 255 };
                 pixels.extend_from_slice(&[v, 255 - v, v / 2, a]);
             }
         }
-        Rgba { width: 16, height: 16, pixels }
+        Rgba { width: 32, height: 32, pixels }
     }
 
     #[test]
     fn a_flipbook_is_told_from_a_still() {
-        let mut it = Item { name: "ui_emblem_x".into(), kind: Kind::Emblem, image: rec(512, 512) };
+        let mut it = Item { name: "ui_emblem_x".into(), kind: Kind::Emblem, image: rec(1024, 1024) };
         assert_eq!(it.grid_by_size(), None);
-        assert_eq!(detect_grid(&it, &book(true)), (2, 2));
-        assert_eq!(detect_grid(&it, &book(false)), (1, 1));
+        assert_eq!(detect_grid(&it, &book(true, false)), (4, 4));
+        assert_eq!(detect_grid(&it, &book(false, false)), (1, 1));
+        // (Frames that change a lot but stand apart.)
+        assert_eq!(detect_grid(&it, &book(false, true)), (4, 4));
+        assert!(gutters(&book(false, true), (4, 4)) < 0.01);
+        assert!(gutters(&book(false, false), (4, 4)) > 0.9);
         it.image = rec(256, 256);
-        assert_eq!(detect_grid(&it, &book(true)), (1, 1));
-        // (By size alone.)
+        assert_eq!(detect_grid(&it, &book(true, false)), (1, 1));
+        // (By shape alone.)
         it.image = rec(768, 1024);
-        assert_eq!(detect_grid(&it, &book(false)), (3, 4));
-        let card = |w, h| Item { name: "ui_playercard_x".into(), kind: Kind::Card, image: rec(w, h) };
-        assert_eq!(card(1024, 1024).grid_by_size(), Some((2, 8)));
-        assert_eq!(card(1536, 512).grid_by_size(), Some((3, 4)));
-        assert_eq!(card(2048, 512).grid_by_size(), Some((1, 1)));
-        assert_eq!(card(512, 128).grid_by_size(), Some((1, 1)));
+        assert_eq!(detect_grid(&it, &book(false, false)), (3, 4));
+    }
+
+    #[test]
+    fn the_poster_is_the_fullest_frame() {
+        // Frame 0 blank, frame 2 the busiest.
+        let mut pixels = Vec::new();
+        for _y in 0..2u32 {
+            for x in 0..6u32 {
+                let (v, a) = match x / 2 {
+                    0 => (0, 0),
+                    1 => (if x % 2 == 0 { 10 } else { 20 }, 255),
+                    _ => (if x % 2 == 0 { 0 } else { 250 }, 255),
+                };
+                pixels.extend_from_slice(&[v, v, v, a]);
+            }
+        }
+        let pic = Rgba { width: 6, height: 2, pixels };
+        assert_eq!(poster_frame(&pic, (3, 1)), 2);
     }
 }

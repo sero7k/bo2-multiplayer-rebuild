@@ -5,9 +5,10 @@
 //! cargo run -p fastfile_jup --example jup_cards -- <install> <out dir> [options]
 //!   --sample n     pictures per class on the sheet (default 16)
 //!   --list         every item to cards.tsv
-//!   --detect-all   decode every picture that could be a flipbook and count them
+//!   --detect-all   count the flipbooks (decoding the square emblems the size cannot tell)
 //!   --raw name     that item's largest group as stored (<name>.bin)
 //!   --where k..    which packages hold these keys (hex)
+//!   --show a,b,..  only these items' whole pictures (cards_show.png)
 //! ```
 //! Writes only into `<out dir>`: `cards_sheet.png` (the sample: emblems,
 //! then calling cards, then the first frames of the flipbooks found among
@@ -30,6 +31,7 @@ fn main() {
     let out = PathBuf::from(&a[2]);
     std::fs::create_dir_all(&out).expect("out dir");
     let (mut sample, mut raw, mut list, mut detect_all) = (16usize, None, false, false);
+    let mut show: Vec<String> = Vec::new();
     let mut i = 3;
     while i < a.len() {
         match a[i].as_str() {
@@ -42,6 +44,10 @@ fn main() {
                 i += 1;
             }
             "--list" => list = true,
+            "--show" => {
+                show = a[i + 1].split(',').map(str::to_owned).collect();
+                i += 1;
+            }
             "--detect-all" => detect_all = true,
             "--where" => {
                 where_keys(&install, &a[i + 1..]);
@@ -107,20 +113,55 @@ fn main() {
     if detect_all {
         let t = Instant::now();
         let (mut books, mut stills, mut failed) = (BTreeMap::<Kind, usize>::new(), BTreeMap::<Kind, usize>::new(), 0usize);
+        // (Those the size decides need no pixels.)
+        for it in &items {
+            match it.grid_by_size() {
+                Some((1, 1)) => *stills.entry(it.kind).or_default() += 1,
+                Some(_) => *books.entry(it.kind).or_default() += 1,
+                None => {}
+            }
+        }
         let mut s = String::new();
-        for it in items.iter().filter(|i| i.candidate_grid().is_some()) {
+        for it in items.iter().filter(|i| i.grid_by_size().is_none()) {
             match cards::picture(Some(&zone), it, &mut fetch, 64) {
                 Some(p) => {
                     let g = cards::detect_grid(it, &p);
-                    let (near, spread) = cards::likeness(&p, it.candidate_grid().unwrap_or((1, 1)));
-                    s.push_str(&format!("{}\t{}x{}\t{:?}\t{near:.1}\t{spread:.1}\n", it.name, it.image.width, it.image.height, g));
+                    let c = it.candidate_grid().unwrap_or((1, 1));
+                    let (near, spread) = cards::likeness(&p, c);
+                    let gut = cards::gutters(&p, c);
+                    s.push_str(&format!("{}\t{}x{}\t{:?}\t{near:.1}\t{spread:.1}\t{gut:.3}\n", it.name, it.image.width, it.image.height, g));
                     *if g == (1, 1) { stills.entry(it.kind).or_default() } else { books.entry(it.kind).or_default() } += 1;
                 }
                 None => failed += 1,
             }
         }
         std::fs::write(out.join("cards_detect.tsv"), s).expect("tsv");
-        println!("flipbooks {books:?}, stills of a flipbook's size {stills:?}, not decoded {failed} ({:?})", t.elapsed());
+        // (Whose pixels the packages the game reads have, and which are in
+        // no installed package at all.)
+        let (mut likely, mut all) = (Packages::new(&zone_dir, false), Packages::new(&zone_dir, true));
+        let mut missing = Vec::new();
+        let mut elsewhere = 0usize;
+        for it in &items {
+            let Some(g) = it.image.groups.last() else { continue };
+            if likely.find(g.key).is_none() {
+                if all.find(g.key).is_some() {
+                    elsewhere += 1;
+                } else {
+                    missing.push(it.name.as_str());
+                }
+            }
+        }
+        println!("pixels: {} in the likely packages, {elsewhere} only in others, {} in none: {:?}", items.len() - elsewhere - missing.len(), missing.len(), &missing[..missing.len().min(20)]);
+        println!("flipbooks {books:?}, stills {stills:?}, square emblems not decoded {failed} ({:?})", t.elapsed());
+    }
+    if !show.is_empty() {
+        let tiles: Vec<(String, Rgba)> = show
+            .iter()
+            .filter_map(|n| items.iter().find(|i| &i.name == n))
+            .filter_map(|it| cards::picture(Some(&zone), it, &mut fetch, 1024).map(|p| (it.name.clone(), p)))
+            .collect();
+        sheet(&tiles, &out.join("cards_show.png"), 4);
+        return;
     }
     // The sample: evenly spaced over each kind.
     let mut tiles: Vec<(String, Rgba)> = Vec::new();
@@ -136,9 +177,10 @@ fn main() {
                 Some(p) => {
                     ok += 1;
                     let g = cards::detect_grid(it, &p);
-                    let (near, spread) = cards::likeness(&p, it.candidate_grid().unwrap_or((1, 1)));
-                    println!("  {} {}x{} grid {g:?} (near {near:.1} spread {spread:.1})", it.name, p.width, p.height);
-                    tiles.push((it.name.clone(), cards::frame(&p, g, 0)));
+                    let c = it.candidate_grid().unwrap_or((1, 1));
+                    let (near, spread) = cards::likeness(&p, c);
+                    println!("  {} {}x{} grid {g:?} (near {near:.1} spread {spread:.1} gutters {:.3})", it.name, p.width, p.height, cards::gutters(&p, c));
+                    tiles.push((it.name.clone(), cards::frame(&p, g, cards::poster_frame(&p, g))));
                     if g != (1, 1) {
                         books.push((it.name.clone(), p, g));
                     }
