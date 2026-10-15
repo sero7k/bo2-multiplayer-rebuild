@@ -33,6 +33,30 @@ pub fn resurgence_on() -> bool {
     rules().is_some()
 }
 
+/// Resurgence's opening sounds (pre-lobby, the drop, the first lines): the
+/// MW3 aliases the audio side decodes ahead.
+pub fn resurgence_opening_aliases() -> impl Iterator<Item = &'static str> {
+    const OPENING: &[&str] = &[
+        "music_prelobby",
+        "music_infil",
+        "music_infil_main",
+        "music_infil_exit",
+        "infil_flyby",
+        "infil_jump",
+        "infil_strike",
+        "vo_mode_name",
+        "vo_prelobby",
+        "vo_prelobby_over",
+        "vo_infil",
+        "vo_landed",
+        "vo_rules",
+    ];
+    OPENING
+        .iter()
+        .filter_map(|k| resurgence::sound(k))
+        .flat_map(|r| r.jup.iter().copied())
+}
+
 /// bo2mp: how to ask Modern Warfare III's sounds whether an alias is there.
 pub fn set_jup_sound_lookup(lookup: Option<fn(&str) -> bool>) {
     if let Ok(mut s) = JUP_SOUND.lock() {
