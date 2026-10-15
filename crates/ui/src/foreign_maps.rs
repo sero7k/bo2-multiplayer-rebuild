@@ -413,8 +413,8 @@ const GAMES: &[Game] = &[
         prefix: "jup",
         key: "MWIII",
         title: "Modern Warfare III (2023)",
-        base: &[],
-        dlc: &[("mp_jup_elevated", "Tokyo"), ("mp_jup_escape5", "Rebirth Island")],
+        base: &[("mp_jup_elevated", "Tokyo"), ("mp_jup_escape5", "Rebirth Island")],
+        dlc: &[],
     },
 ];
 
@@ -954,6 +954,10 @@ pub(crate) fn read_game_image(prefix: &str, names: &[String]) -> Option<(u32, u3
     // bo2mp: Modern Warfare III's (2023) emblems and calling cards: its
     // `global` zone's names, their pictures in its packages.
     if prefix == crate::jup_cards::PREFIX {
+        // (A map's pictures: its loading screen's, else the menus' key art.)
+        if names.iter().any(|n| n.starts_with("loadscreen_mp_jup_") || n.starts_with("preview_mp_jup_")) {
+            return crate::jup_hud::map_picture(names);
+        }
         return crate::jup_cards::read_picture(names);
     }
     // bo2mp: Ghosts' pictures are in its zones (ui_mp), not in IWDs.

@@ -156,6 +156,75 @@ fn read_all() -> Option<HashMap<&'static str, (u32, u32, Vec<u8>)>> {
     Some(out)
 }
 
+/// The first of `names` (pictures' names, hashed as the game hashes them)
+/// that `zone_name` holds, as RGBA at most `max_side` on a side: the map
+/// pictures (`loading_mp_jup_<map>_bg`, the menus' key art). Reads the
+/// zone: call it off the main thread.
+pub(crate) fn read_named(zone_name: &str, names: &[&str], max_side: u32) -> Option<(u32, u32, Vec<u8>)> {
+    let install = crate::jup_cards::install()?;
+    let oodle = fastfile_jup::oodle::load(&install).ok()?;
+    let path = install.join("zone").join(format!("{zone_name}.ff"));
+    let zone = match fastfile_jup::read_zone(&path, oodle.as_ref()) {
+        Ok((_, z)) => z,
+        Err(e) => {
+            diag::warn!(Ui, "bo2mp: Modern Warfare III's {zone_name}.ff not read: {e}");
+            return None;
+        }
+    };
+    let hashes: Vec<u64> = names.iter().map(|n| fastfile_jup::hash::name(n)).collect();
+    let index = fastfile_jup::zone::HashIndex::build(&zone, hashes.iter().copied(), 8);
+    let packages = Packages::open(&install);
+    for (name, &hash) in names.iter().zip(&hashes) {
+        let Some(rec) = index.plain(hash).iter().find_map(|&at| match fastfile_jup::image::parse(&zone, at) {
+            Ok(Some(r)) if r.hash == hash && r.depth == 1 && r.array == 1 => Some(r),
+            _ => None,
+        }) else {
+            continue;
+        };
+        let img = MapImage {
+            hash: rec.hash,
+            width: rec.width,
+            height: rec.height,
+            format: rec.format,
+            groups: rec.groups.clone(),
+            inline: rec.inline.map(|(o, n)| zone[o..o + n].to_vec()),
+        };
+        let pic = packages.level(&img, max_side, oodle.as_ref()).ok().and_then(|l| {
+            let px = fastfile_jup::cards::decode_bcn(l.dxgi, l.width, l.height, &l.data)?;
+            Some((l.width, l.height, px))
+        });
+        match pic {
+            Some(p) => {
+                diag::info!(Ui, "bo2mp: Modern Warfare III picture `{name}` from {zone_name} ({}x{})", p.0, p.1);
+                return Some(p);
+            }
+            None => diag::warn!(Ui, "bo2mp: Modern Warfare III picture `{name}`: its pixels are not in the install"),
+        }
+    }
+    None
+}
+
+/// A map's picture (`loadscreen_`/`preview_` + the zone name, as the menus
+/// ask): its loading screen's background, else the menus' key art.
+pub(crate) fn map_picture(names: &[String]) -> Option<(u32, u32, Vec<u8>)> {
+    let stem = names.iter().find_map(|n| {
+        n.strip_prefix("loadscreen_").or_else(|| n.strip_prefix("preview_")).or_else(|| n.strip_suffix("_load"))
+    })?;
+    let map = stem.strip_prefix("mp_jup_")?;
+    let loading = format!("loading_mp_jup_{map}_bg");
+    let art: &[&str] = match map {
+        "escape5" => &[
+            "jup_menu_keyart_rebirth_resurgence_quads",
+            "jup_menu_keyart_rebirth_resurgence_trios",
+            "jup_menu_keyart_rebirth_resurgence_duos",
+            "jup_menu_keyart_rebirth_resurgence_solos",
+        ],
+        "elevated" => &["jup_ui_menu_keyart_elevated_00", "jup_menu_backplate_elevated", "jup_ui_menu_keyart_elevated_button"],
+        _ => &[],
+    };
+    read_named("code_post_gfx", &[loading.as_str()], 2048).or_else(|| read_named("global", art, 2048))
+}
+
 /// A picture by our name, as RGBA. Reads the install the first time: call
 /// it off the main thread.
 pub(crate) fn read_picture(name: &str) -> Option<(u32, u32, Vec<u8>)> {

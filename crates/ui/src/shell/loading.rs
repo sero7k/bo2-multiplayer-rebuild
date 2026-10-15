@@ -155,6 +155,10 @@ pub(crate) fn shell_loading(
         .as_ref()
         .and_then(|c| c.mode(&setup.gametype).map(|m| m.title.clone()))
         .unwrap_or_else(|| setup.gametype.to_uppercase());
+    // (Resurgence rides on the free-for-all: its own name, not dm's.)
+    if sim::resurgence_on() {
+        mode_title = "RESURGENCE".to_owned();
+    }
     let mut origin = entry.as_ref().map(|m| m.origin.to_uppercase()).unwrap_or_default();
     // The map's loading picture first, then its menu pictures.
     let mut names = vec![format!("loadscreen_{}", setup.map)];
