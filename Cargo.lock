@@ -2838,7 +2838,9 @@ dependencies = [
 name = "fastfile_jup"
 version = "0.1.0"
 dependencies = [
+ "bcdec_rs",
  "libloading",
+ "png",
 ]
 
 [[package]]
