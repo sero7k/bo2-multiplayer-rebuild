@@ -92,6 +92,8 @@ fn main() {
                 }
                 if hex.contains("sun") {
                     dump(&z.image, *v, 1056);
+                    println!("    ... 1056..1504 (shadow tree settings):");
+                    dump(&z.image, v + 1056, 448);
                     println!("    ... 2096..");
                     dump(&z.image, v + 2160, 4536 - 2160);
                 }
