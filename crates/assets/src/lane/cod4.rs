@@ -571,7 +571,12 @@ fn link_own_probes(tag: &str, zone: &iw3::zone::Zone, world: &iw3::zone::GfxWorl
     let face: usize = (0..LEVELS).map(|l| ((SIZE >> l).max(1) as usize).pow(2) * 4).sum();
     let mut data = Vec::with_capacity(face * 6 * world.reflection_probes.len());
     let mut real = 0usize;
-    for probe in &world.reflection_probes {
+    for (i, probe) in world.reflection_probes.iter().enumerate() {
+        // (Probe 0 is the compiler's stand-in, a flat red cube: black.)
+        if i == 0 && world.reflection_probes.len() > 1 {
+            data.resize(data.len() + face * 6, 0);
+            continue;
+        }
         let faces = probe
             .image
             .and_then(|i| zone.image(i))
@@ -874,8 +879,13 @@ pub(super) fn legacy_fog_table(fog: &LegacyFog) -> Vec<[f32; 16]> {
         }
         None => (colour, [0.0, 0.0, 1.0], [0.0, 0.0]),
     };
-    let mut table = vec![[0.0f32; 16]; 32];
-    table[31] = [
+    // bo2mp: the fog rows follow the table's 256 lights (`t6::FOG_SLOT`);
+    // in rows 30 and 31, where they sat before the table grew, the pass
+    // never read them (no fog on any CoD4 / World at War map) and row 31
+    // drew as a stray sun.
+    let (sun_slot, fog_slot) = (super::t6::SUN_FOG_SLOT, super::t6::FOG_SLOT);
+    let mut table = vec![[0.0f32; 16]; fog_slot + 1];
+    table[fog_slot] = [
         fog.start,
         fog.half,
         fog.opacity,
@@ -893,8 +903,8 @@ pub(super) fn legacy_fog_table(fog: &LegacyFog) -> Vec<[f32; 16]> {
         sun_dir[2],
         fog.half_height,
     ];
-    table[30][0] = blend[0];
-    table[30][1] = blend[1];
+    table[sun_slot][0] = blend[0];
+    table[sun_slot][1] = blend[1];
     table
 }
 
@@ -1203,9 +1213,10 @@ pub(crate) fn build_legacy_world(
                     for k in (4..7).chain(8..11) {
                         rows[1][k] *= scale;
                     }
-                    draw.t6_lights.resize(32, [0.0; 16]);
-                    draw.t6_lights[30] = rows[0];
-                    draw.t6_lights[31] = rows[1];
+                    let (sun_slot, fog_slot) = (super::t6::SUN_FOG_SLOT, super::t6::FOG_SLOT);
+                    draw.t6_lights.resize(draw.t6_lights.len().max(fog_slot + 1), [0.0; 16]);
+                    draw.t6_lights[sun_slot] = rows[0];
+                    draw.t6_lights[fog_slot] = rows[1];
                     report.push("bo2 look: fog from the model map".to_owned());
                 }
                 if let Some(line) =
@@ -1303,11 +1314,14 @@ mod fog_tests {
     fn exp_fog_fills_the_fog_slots() {
         let fog = super::legacy_fog("setExpFog(800, 6000, 0.5, 0.6, 0.7, 0);").expect("parses");
         let t = super::legacy_fog_table(&fog);
-        assert_eq!(t.len(), 32);
-        assert_eq!(&t[31][0..4], &[800.0, 6000.0, 1.0, 1.0]);
-        assert!((t[31][4] - 0.25).abs() < 1e-6);
-        assert_eq!(t[30][1], 0.0);
-        assert!(t[..30].iter().all(|r| r[3] == 0.0));
+        // (The fog rows after the 256 lights, where the pass reads them.)
+        let (sun, row) = (super::super::t6::SUN_FOG_SLOT, super::super::t6::FOG_SLOT);
+        assert_eq!((sun, row), (256, 257));
+        assert_eq!(t.len(), row + 1);
+        assert_eq!(&t[row][0..4], &[800.0, 6000.0, 1.0, 1.0]);
+        assert!((t[row][4] - 0.25).abs() < 1e-6);
+        assert_eq!(t[sun][1], 0.0);
+        assert!(t[..sun].iter().all(|r| r[3] == 0.0));
         // WaW's height fog, past the usage comment's own mention.
         let waw = "setVolFog(0, 4400, 1400, 0, 0.552, 0.682, 0.71, 0);\n// setVolFog(<startDist>, <halfwayDist>, ...)";
         let f = super::legacy_fog(waw).expect("parses");

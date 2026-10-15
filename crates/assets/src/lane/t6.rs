@@ -1768,7 +1768,9 @@ pub(super) fn foreign_t6_lighting(loaded: &mut LoadedWorld, map: &str) {
     // grid's colour plus the sun by N.L times its visibility, in gamma
     // space; the pass's `add_light`): the grid's sun row in the light table
     // is the sun, and the models' sun term is on.
-    let legacy = loaded.world.draw.as_ref().is_some_and(|d| d.iw3_lightmaps);
+    // (Ghosts and Infinite Warfare draw by that branch too, without a grid:
+    // theirs stay as they were.)
+    let legacy = grid.is_some() && loaded.world.draw.as_ref().is_some_and(|d| d.iw3_lightmaps);
     if legacy
         && sun_primary != 0
         && usize::from(sun_primary) < SUN_FOG_SLOT

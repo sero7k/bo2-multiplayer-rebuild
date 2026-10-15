@@ -964,7 +964,8 @@ fn build_iw7_world(
                 _ => report.push("iw7 fog: none (no vision in the zone)".to_owned()),
             }
             draw.t6_lights = fog.as_ref().map_or_else(|| vec![[0.0f32; 16]; 32], super::cod4::legacy_fog_table);
-            draw.t6_lights.resize(32, [0.0; 16]);
+            // (bo2mp: never shorter: the fog rows sit after the 256 lights.)
+            draw.t6_lights.resize(draw.t6_lights.len().max(32), [0.0; 16]);
             draw.t6_lights[SUN_LIGHT_ROW][3] = 1.0;
             report.push(format!(
                 "world mesh: {} vertices, {} triangles, {} surfaces (Infinite Warfare, fallback draw with colour maps{})",

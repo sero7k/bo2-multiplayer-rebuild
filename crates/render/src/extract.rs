@@ -972,12 +972,19 @@ pub fn extract_geometry(
     );
     // bo2mp: a CoD4 / World at War world's lightmaps are read by the
     // fallback pass's IW3 branch: the sun colour's alpha says so (2).
-    // bo2mp: 3 when it reflects the map's own probes (CoD4's, gamma, no
-    // lighting table) rather than a Black Ops II model map's.
+    // bo2mp: on a CoD4 / World at War map (one with its own light grid;
+    // Ghosts and Infinite Warfare have none) 3, whose models add the sun
+    // in gamma space as those games do; 4 when it also reflects the map's
+    // own probes (gamma, no lighting table) rather than a Black Ops II model
+    // map's (`bo2_look`).
     if let Some(scene) = lighting.2.as_ref().filter(|scene| scene.iw3_lightmaps)
         && let Some(l) = full_lighting.as_mut()
     {
-        l[1][3] = if scene.t6_probes.is_empty() { 3.0 } else { 2.0 };
+        l[1][3] = match (scene.light_grid.is_some(), scene.t6_probes.is_empty()) {
+            (false, _) => 2.0,
+            (true, false) => 3.0,
+            (true, true) => 4.0,
+        };
     }
     // bo2mp: BO2's bloom and final colour only where the map has its full
     // lighting (not over a MW2 world drawn by its own path).
