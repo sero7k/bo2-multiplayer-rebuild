@@ -112,12 +112,16 @@ pub(super) fn sound_alias(route: &resurgence::SoundRoute) -> String {
 
 /// The game type settings Resurgence holds whatever the free-for-all's
 /// files say: no clock or score to end it, one life (the script grants the
-/// redeploys), no final killcam.
+/// redeploys), no killcam. It is its own mode: Black Ops II's announcer
+/// (every leader dialog line: the game type's intro, the lead, the streaks,
+/// the time, the result) stays quiet; Resurgence's own lines play.
 pub(super) const SETTINGS: &[(&str, &str)] = &[
     ("timelimit", "0"),
     ("scorelimit", "0"),
     ("playernumlives", "1"),
     ("allowfinalkillcam", "0"),
+    ("allowkillcam", "0"),
+    ("allowannouncer", "0"),
     ("playerrespawndelay", "0"),
     ("waverespawndelay", "0"),
 ];
@@ -246,6 +250,8 @@ pub(super) fn dvars(rules: &Rules) -> Vec<(String, String)> {
         "bo2mp resurgence: {} sounds: {mw3} from Modern Warfare III, {stand_in} Black Ops II stand-ins, {none} silent",
         resurgence::SOUNDS.len()
     );
+    // (Black Ops II's medals and their score popups: none in Resurgence.)
+    out.push(("scr_game_medalsenabled".to_owned(), "0".to_owned()));
     out
 }
 

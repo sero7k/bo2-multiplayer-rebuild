@@ -34,6 +34,8 @@ main()
     level.br_bounty_hit = [];
     level.br_scav_open = [];
     level.killstreaksenabled = 0;
+    // (Black Ops II's first-spawn game type hint and its line: none here.)
+    level.disableprematchmessages = 1;
 
     precachemodel( "t6_wpn_supply_drop_ally" );
     precachemodel( "t6_wpn_supply_drop_axis" );

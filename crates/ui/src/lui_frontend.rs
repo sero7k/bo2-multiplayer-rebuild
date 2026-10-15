@@ -211,7 +211,8 @@ pub(crate) fn open_loading(host: &mut Host, setup: &session::Bo2mpMatchSetup) {
             .map(|k| text(k))
             .find(|t| !t.is_empty())
             .unwrap_or_default();
-        let gametype = text(&type_key);
+        // bo2mp: Resurgence is its own mode, not the free-for-all it runs on.
+        let gametype = if sim::resurgence_on() { gamemode_iw4::resurgence::DISPLAY_NAME.to_owned() } else { text(&type_key) };
         diag::info!(Ui, "bo2mp loading: `{}` {name:?} at {place:?}, {gametype:?} (keys {map_key} {type_key})", setup.map);
         if let Ok(probe) = std::env::var("BO2MP_LOC_GREP") {
             let probe = probe.to_ascii_uppercase();

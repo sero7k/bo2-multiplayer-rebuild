@@ -836,7 +836,7 @@ fn medal_notify(
 pub(crate) fn register_medal_systems(app: &mut App) {
     app.add_systems(
         Update,
-        (medal_notify, medal_animate).chain().in_set(ClientSet::Ui),
+        (medal_notify, medal_animate).chain().in_set(ClientSet::Ui).run_if(crate::hud_modern::not_warzone_match),
     );
 }
 

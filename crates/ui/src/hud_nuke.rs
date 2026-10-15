@@ -418,7 +418,7 @@ pub(crate) fn spawn_at(
 }
 
 pub(crate) fn register(app: &mut App) {
-    app.add_systems(Update, nuke_banner.in_set(ClientSet::Ui));
+    app.add_systems(Update, nuke_banner.in_set(ClientSet::Ui).run_if(crate::hud_modern::not_warzone_match));
 }
 
 #[cfg(test)]

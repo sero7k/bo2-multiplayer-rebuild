@@ -231,6 +231,19 @@ pub(crate) fn modern_hud_enabled() -> bool {
     hks_t6::host::bo1_hud_on() && crate::lui_hud::lui_enabled()
 }
 
+/// bo2mp: this match is Resurgence (Warzone), its own mode: Black Ops II's
+/// multiplayer pieces stay off (the scoreboard, medals and score popups, the
+/// kill and Killed By cards, the killcam card, streak callouts, the prematch
+/// countdown, the M.O.A.B. banner); only the Warzone HUD and its kill feed
+/// and hit markers draw.
+pub fn warzone_match() -> bool {
+    sim::resurgence_on()
+}
+
+pub(crate) fn not_warzone_match() -> bool {
+    !warzone_match()
+}
+
 /// bo2mp: the Warzone HUD is drawn: the modern HUD is on and Resurgence
 /// publishes his values (`bo2mp_br`, the dvar's text). The menu-drawn HUD
 /// (the `hud` crate: the score corner and the weapon bar with its ammo

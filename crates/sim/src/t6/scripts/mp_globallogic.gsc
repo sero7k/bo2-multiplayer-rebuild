@@ -403,7 +403,10 @@ callback_startgametype()
     level.roundenddelay = 5;
     level.halftimeroundenddelay = 3;
     maps/mp/gametypes/_globallogic_score::updateallteamscores();
+    // bo2mp: Resurgence (scr_br) has no scorestreaks.
     level.killstreaksenabled = 1;
+    if ( getdvarint( "scr_br" ) != 0 )
+        level.killstreaksenabled = 0;
     if ( getdvar( "scr_game_rankenabled" ) == "" )
         setdvar( "scr_game_rankenabled", 1 );
     level.rankenabled = getdvarint( "scr_game_rankenabled" );
@@ -426,7 +429,9 @@ startgame()
     thread timelimitclock();
     thread graceperiod();
     thread watchmatchendingsoon();
-    thread maps/mp/gametypes/_globallogic_audio::musiccontroller();
+    // bo2mp: Resurgence (scr_br) plays its own music.
+    if ( getdvarint( "scr_br" ) == 0 )
+        thread maps/mp/gametypes/_globallogic_audio::musiccontroller();
 }
 
 waitforplayers()
@@ -512,8 +517,11 @@ matchstarttimer()
             if ( left == 2 )
                 visionsetnaked( getdvar( "mapname" ), 3.0 );
             left--;
-            foreach ( player in level.players )
-                player playlocalsound( "uin_start_count_down" );
+            if ( getdvarint( "scr_br" ) == 0 )
+            {
+                foreach ( player in level.players )
+                    player playlocalsound( "uin_start_count_down" );
+            }
             wait 1.0;
         }
     }
@@ -912,10 +920,14 @@ displaygameend( winner, endreasontext )
                 bo2mp_ffaoutcome( winner, endreasontext );
             else
                 player thread [[ level.onoutcomenotify ]]( winner, 0, endreasontext );
-            if ( isdefined( winner ) && player == winner )
-                player maps/mp/gametypes/_globallogic_audio::set_music_on_player( game["music"]["victory_" + player.team] );
-            else
-                player maps/mp/gametypes/_globallogic_audio::set_music_on_player( "LOSE" );
+            // (Resurgence, scr_br, plays its own victory and loss music.)
+            if ( getdvarint( "scr_br" ) == 0 )
+            {
+                if ( isdefined( winner ) && player == winner )
+                    player maps/mp/gametypes/_globallogic_audio::set_music_on_player( game["music"]["victory_" + player.team] );
+                else
+                    player maps/mp/gametypes/_globallogic_audio::set_music_on_player( "LOSE" );
+            }
         }
         player setclientuivisibilityflag( "hud_visible", 0 );
         player setclientuivisibilityflag( "g_compassShowEnemies", 0 );

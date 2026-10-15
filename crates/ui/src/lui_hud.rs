@@ -756,6 +756,38 @@ struct MatchSpec {
     stats: std::path::PathBuf,
 }
 
+/// Frames of the loading screen before the match's HUD is built behind it
+/// (the screen is up and drawn first).
+const PREBUILD_AFTER_FRAMES: u32 = 30;
+
+thread_local! {
+    /// The match's HUD built during its loading screen, for that match.
+    static PREBUILT: std::cell::RefCell<Option<(MatchSpec, LuiHud)>> = const { std::cell::RefCell::new(None) };
+    static LOADING_FRAMES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// The HUD built during the loading screen when it is this match's (the
+/// same game type, map, stats file and scripts).
+fn take_prebuilt(spec: &MatchSpec, scripts: usize) -> Option<LuiHud> {
+    let (built, hud) = PREBUILT.with(|p| p.borrow_mut().take())?;
+    let same = built.gametype.eq_ignore_ascii_case(&spec.gametype)
+        && built.map.eq_ignore_ascii_case(&spec.map)
+        && built.stats == spec.stats
+        && hud.built_from == scripts;
+    if !same {
+        diag::info!(
+            Ui,
+            "bo2mp lui: the HUD built during loading ({} on {}) is not this match's ({} on {}); building it now",
+            built.gametype,
+            built.map,
+            spec.gametype,
+            spec.map
+        );
+        return None;
+    }
+    Some(hud)
+}
+
 fn build(ui: &assets::T6Ui, front: Option<&crate::lui_frontend::Bo2mpFrontend>, mp_match: Option<&MatchSpec>) -> LuiHud {
     let metrics: Metrics = Rc::default();
     let m = metrics.clone();
@@ -1351,6 +1383,39 @@ fn lui_hud(
         && io.loading.is_some()
         && io.setup.is_some()
         && slot.0.as_ref().is_some_and(|h| h.mp.is_some() && !h.match_mp);
+    // bo2mp: the match's HUD is built while the loading screen is up (its
+    // scripts take seconds: built when play starts, they stalled the first
+    // seconds of the match), then taken when the match's values arrive.
+    if let Some(ui) = ui.as_deref().filter(|u| front.is_none() && io.loading.is_some() && !u.scripts.is_empty()) {
+        let frames = LOADING_FRAMES.with(|f| {
+            f.set(f.get().saturating_add(1));
+            f.get()
+        });
+        if frames == PREBUILD_AFTER_FRAMES
+            && let Some(setup) = io.setup.as_deref()
+        {
+            let spec = MatchSpec {
+                gametype: setup.gametype.clone(),
+                map: setup.map.clone(),
+                stats: crate::lui_frontend::stats_path(io.identity.as_deref()),
+            };
+            let t = std::time::Instant::now();
+            let hud = build(ui, None, Some(&spec));
+            diag::info!(
+                Ui,
+                "bo2mp lui: the match HUD ({} on {}) built during the loading screen in {:.0} ms",
+                spec.gametype,
+                spec.map,
+                t.elapsed().as_secs_f64() * 1000.0
+            );
+            PREBUILT.with(|p| *p.borrow_mut() = Some((spec, hud)));
+        }
+    } else {
+        LOADING_FRAMES.with(|f| f.set(0));
+        if front.is_some() {
+            PREBUILT.with(|p| p.borrow_mut().take());
+        }
+    }
     let values = match (presented.as_deref(), local.as_deref()) {
         _ if front.is_some() || bo2_loading => Some(Values::default()),
         (Some(p), Some(l)) => read_values(p, l),
@@ -1437,7 +1502,14 @@ fn lui_hud(
     }) && !ui.scripts.is_empty()
     {
         let t = std::time::Instant::now();
-        let hud = build(&ui, front.as_ref(), match_spec.as_ref());
+        let ready = match (&front, match_spec.as_ref()) {
+            (None, Some(m)) => take_prebuilt(m, ui.scripts.len()),
+            _ => None,
+        };
+        let hud = match ready {
+            Some(hud) => hud,
+            None => build(&ui, front.as_ref(), match_spec.as_ref()),
+        };
         diag::info!(
             Ui,
             "bo2zm lui: {} scripts, base + T6.HUD in {:.0} ms; {} script errors; missing modules {:?}",

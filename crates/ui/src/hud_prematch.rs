@@ -176,7 +176,7 @@ fn prematch_countdown(
 }
 
 pub(crate) fn register_prematch_hud(app: &mut App) {
-    app.add_systems(Update, prematch_countdown.in_set(frame::ClientSet::Ui));
+    app.add_systems(Update, prematch_countdown.in_set(frame::ClientSet::Ui).run_if(crate::hud_modern::not_warzone_match));
 }
 
 #[cfg(test)]

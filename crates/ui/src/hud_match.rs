@@ -2653,7 +2653,15 @@ pub(crate) fn register_match_hud_systems(app: &mut App) {
     app.init_resource::<KilledByUntil>();
     app.add_systems(
         Update,
-        (kill_feed, hit_marker, killed_by_card, killcam_card, kill_banner.after(killed_by_card), scoreboard, streak_callout).in_set(ClientSet::Ui),
+        (kill_feed, hit_marker).in_set(ClientSet::Ui),
+    )
+    // bo2mp: Resurgence (Warzone) has none of Black Ops II's multiplayer
+    // cards, killcam card, scoreboard or streak callouts.
+    .add_systems(
+        Update,
+        (killed_by_card, killcam_card, kill_banner.after(killed_by_card), scoreboard, streak_callout)
+            .in_set(ClientSet::Ui)
+            .run_if(crate::hud_modern::not_warzone_match),
     )
     .add_systems(Update, (banner_pop, apply_fades).in_set(ClientSet::Ui).after(kill_banner).after(killed_by_card).after(killcam_card).after(kill_feed));
 }
