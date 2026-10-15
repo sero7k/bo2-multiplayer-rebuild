@@ -170,19 +170,37 @@ names, no other map zone more than one). Start one with `map jup:<zone>`.
   the colour maps' form; 0x2a (BC1) holds masks and terrain blend maps, 0x2f
   BC5, 0x30 BC7. Pixels: the largest streamed group within 1024 px from the
   zone `.xpak` indexes (levels placed from the top: BC1 streams to 2x2).
-  Terrain (virtual textures) and materials whose pictures are shared tables
-  draw without a picture.
-- Sheets wider than 16384 units (Rebirth's sea, sea bed and far vista
-  ground: 15 surfaces) are not drawn: they stretched the world's bounds to
-  ±144k (the far plane with them) and lay over the island. Bounds are those
-  of what is drawn (Rebirth about -26k..11k by -17k..21k).
-- Collision: the drawn world inside the play area (not the far backdrop
-  tiles); the zone's `col_map` is not read. Spawns: made over the map's path
+  A material whose picture table is another material's points into a block
+  whose offsets drift from the zone image: the shift is voted from the
+  materials' own tables (Rebirth: 655 tables, about 62 MB). Terrain (virtual
+  textures, 256x256 tiles of formats 0x28/0x29) still draws without a
+  picture (Rebirth's largest grey: 0x2a mask only, and tables of none).
+- Placed models (`map/models.rs`): the `gfx_map`'s model table (16 bytes,
+  back-pointer to the xmodel's entry), collections (16 bytes: first, count,
+  model) and instances (24 bytes: u16 quaternion as v/65535*2-1, f16 scale,
+  i32 origin in 1/4096 units). XModel headers (0xE8 bytes, name inline,
+  `jhash(name)` at +0) stand in asset order; LODs (0x48 bytes) name their
+  `xmodelsurfs`, whose meshes stream from the `.xpak` by the key at +0x10.
+  Headers pair with surfs entries by aligning surface counts. Positions span
+  `(2v-1)` times the half extents. Shadow casters, `tm7/` stand-ins and
+  destructibles' other states are left out. Rebirth: 3580 models, 130,785
+  placements, 4-6 s. LOD0 is drawn out to the last LOD's distance (at least
+  1500); a coarse LOD collides inside the play area, not foliage, decals or
+  effects' models.
+- Sheets (flat, wider than 16384 units): the sea (Rebirth: 14 at z=64) is
+  drawn cut to the play area and 16384 units around, not collided; the sea
+  bed and vista sheets are not drawn (they stretched the bounds to ±144k).
+- Sky: not found in the zone (the only cube is 128x141 format 0x12); a
+  procedural daylight cube stands in.
+- Collision: the drawn world and placed models inside the play area; the
+  zone's `col_map` is not read. Spawns: made over the map's path
   nodes when the install has its entity text
   (`jupiter/Assets/MapEnts/SpawnVars/<map>.d3dbsp`: Tokyo), else over the
   walkable floor of the play area (Rebirth).
-- Not read yet: placed static models, the sky (it clears black), the sea,
-  lightmaps, `col_map`, the zone's `map_ents`.
+- World surfaces' extra stream (record +0x34, 4 bytes a vertex) holds blend
+  weights, not colours.
+- Not read yet: lightmaps / light grid, terrain virtual textures, `col_map`,
+  the zone's `map_ents`, the real sky.
 - A hidden test run spawns with `BO2MP_AUTOCLASS=class_smg` (the console's
   `spawn 0` waits for a class menu nobody answers):
   `iw4l map jup:mp_jup_escape5 --cmds "wait world; wait 50s; force_match_start &; …"`.

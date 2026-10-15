@@ -17,8 +17,8 @@
 //!   0x78 ptr shared blob ({ptr -2, u32 bytes, u32 ?} then the bytes;
 //!        the later surfaces point back at the first's)
 //!   0x80 ptr rigid ranges (-2: `range count` 12-byte records)
-//!   0xb0 f32 centre[3], extents[3]: positions are 21-bit fractions of
-//!        the largest extent about the centre
+//!   0xb0 f32 centre[3], extents[3] (half sizes): positions are 21-bit
+//!        fractions of twice the largest extent about the centre
 //!   0xc8 ptr 12 bytes (not read)
 //! then: blob struct and bytes; per surface its rigid ranges and its
 //! 12 bytes.
@@ -94,8 +94,11 @@ pub struct SurfsRec {
     pub hash: u64,
     pub flags: u32,
     pub surfaces: Vec<SurfaceRec>,
-    /// The blob in the zone: (offset, length).
+    /// The blob in the zone: (offset, length); (0, 0) when streamed.
     pub blob: (usize, usize),
+    /// A streamed blob (a map model's mesh): the package key (header
+    /// +0x10) and its length.
+    pub streamed: Option<(u64, usize)>,
     /// Where the next asset starts.
     pub end: usize,
 }
@@ -150,18 +153,31 @@ pub fn parse(zone: &[u8], at: usize) -> Result<SurfsRec, SurfsError> {
     }
     let mut cur = at + HEADER_LEN + SURFACE_LEN * count;
     let mut blob = None;
+    let mut streamed = None;
     for i in 0..count {
         if blob_follows[i] {
-            if !b.ptr(cur)?.follows() {
-                return Err(SurfsError::Layout("blob struct"));
-            }
             let len = b.u32(cur + 8)? as usize;
-            cur += 16;
-            b.get(cur, len)?;
-            if blob.is_none() {
-                blob = Some((cur, len));
+            match b.ptr(cur)? {
+                // A map model's mesh: streamed from the packages.
+                Ptr::Null if blob.is_none() && streamed.is_none() => {
+                    streamed = Some((b.u64(at + 0x10)?, len));
+                    cur += 16;
+                }
+                p if p.follows() => {
+                    cur += 16;
+                    b.get(cur, len)?;
+                    if blob.is_none() {
+                        blob = Some((cur, len));
+                    }
+                    cur += len;
+                }
+                // Elsewhere (another zone's): its length known, no bytes.
+                _ if blob.is_none() && streamed.is_none() => {
+                    streamed = Some((b.u64(at + 0x10)?, len));
+                    cur += 16;
+                }
+                _ => return Err(SurfsError::Layout("blob struct")),
             }
-            cur += len;
         }
         let (ranges_follow, tail_follows) = range_counts[i];
         if ranges_follow {
@@ -189,8 +205,10 @@ pub fn parse(zone: &[u8], at: usize) -> Result<SurfsRec, SurfsError> {
             cur += 12;
         }
     }
-    let blob = blob.ok_or(SurfsError::Layout("no blob"))?;
-    Ok(SurfsRec { at, hash, flags, surfaces, blob, end: cur })
+    if blob.is_none() && streamed.is_none() {
+        return Err(SurfsError::Layout("no blob"));
+    }
+    Ok(SurfsRec { at, hash, flags, surfaces, blob: blob.unwrap_or((0, 0)), streamed, end: cur })
 }
 
 /// A surface's decoded geometry.
@@ -217,23 +235,31 @@ pub fn f16(h: u16) -> f32 {
     }
 }
 
-/// One packed position.
+/// One packed position: the extents are half sizes, a 21-bit fraction
+/// runs from the centre minus the largest of them to the centre plus it
+/// (a 96-unit door model measures 96, not 48).
 #[must_use]
 pub fn position(raw: u64, centre: [f32; 3], extents: [f32; 3]) -> [f32; 3] {
     let scale = extents[0].max(extents[1]).max(extents[2]);
     let mut p = [0.0; 3];
     for (k, c) in p.iter_mut().enumerate() {
         let v = ((raw >> (21 * k)) & 0x1f_ffff) as f32 / 2_097_151.0;
-        *c = centre[k] + (v - 0.5) * scale;
+        *c = centre[k] + (2.0 * v - 1.0) * scale;
     }
     p
 }
 
 /// Decode a surface of `rec` from the zone.
 pub fn geometry(zone: &[u8], rec: &SurfsRec, surface: usize) -> Result<Geometry, SurfsError> {
-    let s = rec.surfaces.get(surface).ok_or(SurfsError::Layout("no such surface"))?;
     let (blob_at, blob_len) = rec.blob;
-    let blob = Bytes(zone.get(blob_at..blob_at + blob_len).ok_or(SurfsError::Layout("blob"))?);
+    geometry_in(zone.get(blob_at..blob_at + blob_len).ok_or(SurfsError::Layout("blob"))?, rec, surface)
+}
+
+/// Decode a surface of `rec` from its blob (the zone's, or a streamed
+/// one fetched by [`SurfsRec::streamed`]).
+pub fn geometry_in(blob: &[u8], rec: &SurfsRec, surface: usize) -> Result<Geometry, SurfsError> {
+    let s = rec.surfaces.get(surface).ok_or(SurfsError::Layout("no such surface"))?;
+    let blob = Bytes(blob);
     let n = s.vert_count as usize;
     let at = |k: usize| s.streams[k].map(|v| v as usize);
     let pos = at(stream::POSITION).ok_or(SurfsError::Layout("no positions"))?;
@@ -308,9 +334,9 @@ mod tests {
         // x at the top of its range, y in the middle, z at the bottom.
         let raw = 0x1f_ffffu64 | (0x10_0000 << 21);
         let p = position(raw, c, e);
-        assert!((p[0] - 3.0).abs() < 1e-5);
+        assert!((p[0] - 4.0).abs() < 1e-5);
         assert!(p[1].abs() < 1e-5);
-        assert!((p[2] - -3.0).abs() < 1e-5);
+        assert!((p[2] - -4.0).abs() < 1e-5);
     }
 
     /// A one-surface mesh: 3 vertices, one packet of one triangle with
@@ -356,6 +382,6 @@ mod tests {
         let g = geometry(&z, &rec, 0).unwrap();
         assert_eq!(g.indices, vec![1, 2, 0]);
         assert_eq!(g.positions.len(), 3);
-        assert!((g.positions[1][0] - 0.5).abs() < 1e-5);
+        assert!((g.positions[1][0] - 1.0).abs() < 1e-5);
     }
 }

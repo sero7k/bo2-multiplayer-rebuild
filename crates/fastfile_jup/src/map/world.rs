@@ -40,6 +40,9 @@ pub struct WorldSurface {
     pub positions: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
     pub lightmap_uvs: Vec<[f32; 2]>,
+    /// The extra stream, a word a vertex, where it has one (not read yet:
+    /// kept to be looked at).
+    pub extra: Vec<u32>,
     pub tris: Vec<[u16; 3]>,
     /// Its index in the map's surface list.
     pub index: usize,
@@ -120,6 +123,7 @@ pub struct SurfaceRec {
     pos: usize,
     uv: usize,
     lmap: usize,
+    extra: usize,
     packed_at: usize,
 }
 
@@ -134,6 +138,7 @@ fn surface_rec(z: &[u8], at: usize) -> SurfaceRec {
         pos: u32_at(z, at + 0x28) as usize,
         lmap: u32_at(z, at + 0x30) as usize,
         uv: u32_at(z, at + 0x38) as usize,
+        extra: u32_at(z, at + 0x34) as usize,
         packed_at: u32_at(z, at + 0x40) as usize,
     }
 }
@@ -329,6 +334,11 @@ pub fn read_surfaces(
                 ]
             })
             .collect();
+        // The extra stream: 4 bytes a vertex where it is that long (the
+        // next stream, the texture UVs, starts 4 a vertex after it).
+        if r.extra != 0 && r.uv == r.extra + 4 * r.verts {
+            s.extra = (0..r.verts).map(|k| u32_at(z, b.vertices + r.extra + 4 * k)).collect();
+        }
         tris.retain(|t| t.iter().all(|&v| usize::from(v) < r.verts));
         s.tris = tris;
         out.push(s);

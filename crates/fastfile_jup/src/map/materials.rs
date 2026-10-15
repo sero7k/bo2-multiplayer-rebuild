@@ -68,6 +68,8 @@ pub struct MapMaterial {
 #[derive(Default)]
 pub struct Found {
     pub surface_material: Vec<Option<usize>>,
+    /// A material's asset-list entry -> its index in `materials`.
+    pub by_entry: std::collections::HashMap<usize, usize>,
     pub materials: Vec<MapMaterial>,
     pub images: Vec<MapImage>,
 }
@@ -185,9 +187,73 @@ fn material_headers(z: &[u8], count: usize) -> Option<Vec<usize>> {
     Some(found[i..i + count].iter().map(|f| f.0).collect())
 }
 
+/// Picture tables a material shares with an earlier one: its header holds
+/// a back-pointer (a block offset) to the table that follows the earlier
+/// material's header. Block offsets run a fixed shift from image places
+/// over long stretches; the shifts are the ones most often found between
+/// the shared tables' offsets and the places of the tables that follow
+/// their headers.
+struct SharedTables {
+    /// (shift, votes), most voted first.
+    shifts: Vec<(i64, usize)>,
+    wanted: usize,
+}
+
+impl SharedTables {
+    fn new(z: &[u8], headers: &[usize]) -> Self {
+        let mut own: Vec<i64> = Vec::new();
+        let mut back: Vec<i64> = Vec::new();
+        for &h in headers {
+            match u64_at(z, h + 0x30) {
+                FOLLOW | INSERT => own.push((h + MATERIAL_HEADER) as i64),
+                v if is_back(v) => back.push((v & 0xffff_ffff) as i64 - 1),
+                _ => {}
+            }
+        }
+        own.sort_unstable();
+        back.sort_unstable();
+        back.dedup();
+        // Votes for each shift within 64 MiB, every pair of a shared
+        // offset and an own table's place.
+        let mut votes: std::collections::HashMap<i64, usize> = Default::default();
+        let span = 64i64 << 20;
+        for &x in &back {
+            let lo = own.partition_point(|&p| p < x - span);
+            for &p in own[lo..].iter().take_while(|&&p| p <= x + span) {
+                *votes.entry(p - x).or_default() += 1;
+            }
+        }
+        let mut shifts: Vec<(i64, usize)> = votes.into_iter().filter(|v| v.1 >= 3).collect();
+        shifts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        shifts.truncate(64);
+        Self {
+            shifts,
+            wanted: back.len(),
+        }
+    }
+
+    /// The image place of the table a back-pointer names: the first shift
+    /// that lands on `pics` entries all of which are pictures.
+    fn at(&self, z: &[u8], v: u64, pics: usize, is_picture: &dyn Fn(u64) -> bool) -> Option<usize> {
+        let x = (v & 0xffff_ffff) as i64 - 1;
+        self.shifts.iter().find_map(|&(d, _)| {
+            let t = usize::try_from(x + d).ok()?;
+            // (A picture of a shared zone's is its hash, the top bit set.)
+            let fits = pics > 0
+                && t + 8 * pics <= z.len()
+                && (0..pics).all(|k| {
+                    let p = u64_at(z, t + 8 * k);
+                    is_picture(p) || p >> 63 == 1
+                })
+                && (0..pics).any(|k| is_picture(u64_at(z, t + 8 * k)));
+            fits.then_some(t)
+        })
+    }
+}
+
 /// Reads which material every surface record draws with and the pictures
 /// of those materials. `zones`: each surface record's world zone.
-pub fn read(zone: &ZoneImage, zones: &[u32], report: &mut Vec<String>) -> Found {
+pub fn read(zone: &ZoneImage, zones: &[u32], extra: &[usize], report: &mut Vec<String>) -> Found {
     let mut out = Found {
         surface_material: vec![None; zones.len()],
         ..Default::default()
@@ -222,6 +288,12 @@ pub fn read(zone: &ZoneImage, zones: &[u32], report: &mut Vec<String>) -> Found 
     }
     let headers = material_headers(z, mats);
     let run = image::ImageRun::find(z, imgs);
+    let shared = SharedTables::new(z, headers.as_deref().unwrap_or(&[]));
+    report.push(format!(
+        "materials: {} picture tables of another material's, shifts {:?}",
+        shared.wanted,
+        &shared.shifts[..shared.shifts.len().min(4)]
+    ));
     report.push(format!(
         "materials: {table_len} drawn of {mats} ({}), {imgs} images ({})",
         if headers.is_some() {
@@ -239,21 +311,40 @@ pub fn read(zone: &ZoneImage, zones: &[u32], report: &mut Vec<String>) -> Found 
     let mut by_ordinal: std::collections::HashMap<usize, usize> = Default::default();
     let mut image_of: std::collections::HashMap<usize, usize> = Default::default();
     let mut material_of_entry = vec![None; table_len];
-    for (e, slot) in material_of_entry.iter_mut().enumerate() {
-        let Some(ordinal) = asset_of(u64_at(z, table + 8 * e)).map(|a| nth[a]) else {
+    // The table's entries, then the other materials asked for (the placed
+    // models'), by asset index.
+    let wanted: Vec<Option<usize>> = (0..table_len)
+        .map(|e| asset_of(u64_at(z, table + 8 * e)))
+        .chain(extra.iter().map(|&a| (zone.types.get(a) == Some(&11)).then_some(a)))
+        .collect();
+    for (e, &asset) in wanted.iter().enumerate() {
+        let Some(ordinal) = asset.map(|a| nth[a]) else {
             continue;
         };
         if let Some(&m) = by_ordinal.get(&ordinal) {
-            *slot = Some(m);
+            if let Some(slot) = material_of_entry.get_mut(e) {
+                *slot = Some(m);
+            }
+            if let Some(a) = asset {
+                out.by_entry.insert(a, m);
+            }
             continue;
         }
         let mut mat = MapMaterial::default();
         if let Some(h) = headers.as_ref().and_then(|hs| hs.get(ordinal).copied()) {
             mat.hash = u64_at(z, h);
             let pics = usize::from(z[h + 0x1b]);
-            if matches!(u64_at(z, h + 0x30), FOLLOW | INSERT) {
+            // Its picture table: following the header, or another
+            // material's (a back-pointer, found by the shift a nearby
+            // table's block offset has to its place in the image).
+            let table_at = match u64_at(z, h + 0x30) {
+                FOLLOW | INSERT => Some(h + MATERIAL_HEADER),
+                v if is_back(v) => shared.at(z, v, pics, &|p| asset_of(p).is_some_and(|a| zone.types[a] == 21)),
+                _ => None,
+            };
+            if let Some(t) = table_at {
                 for k in 0..pics {
-                    let Some(a) = asset_of(u64_at(z, h + MATERIAL_HEADER + 8 * k)) else {
+                    let Some(a) = asset_of(u64_at(z, t + 8 * k)) else {
                         continue;
                     };
                     if zone.types[a] != 21 {
@@ -278,8 +369,14 @@ pub fn read(zone: &ZoneImage, zones: &[u32], report: &mut Vec<String>) -> Found 
         };
         mat.colour = pick(0x25);
         out.materials.push(mat);
-        by_ordinal.insert(ordinal, out.materials.len() - 1);
-        *slot = Some(out.materials.len() - 1);
+        let m = out.materials.len() - 1;
+        by_ordinal.insert(ordinal, m);
+        if let Some(slot) = material_of_entry.get_mut(e) {
+            *slot = Some(m);
+        }
+        if let Some(a) = asset {
+            out.by_entry.insert(a, m);
+        }
     }
     for k in 0..zones.len() {
         let r = infos + SURFACE_INFO * k;
@@ -377,7 +474,8 @@ impl Packages {
         self.paks.iter().any(|p| p.find(key).is_some())
     }
 
-    fn fetch(&self, key: u64, oodle: &dyn Decompressor) -> Option<Vec<u8>> {
+    /// An entry's bytes (a picture's mip group, a model's mesh).
+    pub fn fetch(&self, key: u64, oodle: &dyn Decompressor) -> Option<Vec<u8>> {
         self.paks
             .iter()
             .find_map(|p| p.find(key).map(|e| (p, *e)))

@@ -524,9 +524,13 @@ fn collision_of(map: &T7Map, hidden: &[bool], report: &mut Vec<String>) -> asset
                 extra.push(SoupTri { p: [v(0), v(1), v(2)], surface_flags: 0, contents: IW7_SOLID });
             }
         }
-        for sm in &map.static_models {
+        let radius: Vec<f32> = map.models.iter().map(|m| model_bounds(m).2).collect();
+        for (i, sm) in map.static_models.iter().enumerate() {
+            if map.static_no_collision.get(i).copied().unwrap_or(false) {
+                continue;
+            }
             let m = &map.models[sm.model];
-            if model_bounds(m).2 * sm.scale >= COLLIDE_MIN_RADIUS {
+            if radius[sm.model] * sm.scale >= COLLIDE_MIN_RADIUS {
                 add_model(m, sm.origin, sm.axis, sm.scale, &mut extra);
             }
         }
@@ -758,7 +762,7 @@ pub(super) fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, 
                 origin: sm.origin,
                 axis: sm.axis,
                 scale: sm.scale,
-                cull_dist: 0,
+                cull_dist: sm.cull_dist.clamp(0.0, f32::from(u16::MAX)) as u16,
                 reflection_probe_index: 0,
                 primary_light_index: 0,
                 flags: 0,
@@ -784,6 +788,20 @@ pub(super) fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, 
         if b.failures.is_empty() { String::new() } else { format!(" (first: {})", b.failures.iter().take(4).cloned().collect::<Vec<_>>().join("; ")) },
     ));
     report.push(b.looks.as_ref().map_or_else(|| "t7 look: off (BO2MP_T7_MATERIALS=0): colour maps only".to_owned(), super::t7_look::Looks::report));
+    // bo2mp: a sky cube another game's reader made, for the sky pass.
+    if let Some(sky) = &map.sky_cube {
+        let px = fastfile_iw6::image::ImagePixels {
+            width: sky.width,
+            height: sky.height,
+            levels: sky.levels,
+            dxgi_format: sky.format,
+            data: sky.data.clone(),
+        };
+        report.push(match super::iw6::link_sky(&mut b.catalog, &format!("t7:sky:{}", map.name), &px, b.owner) {
+            Ok(_) => format!("t7 sky: {}x{} cube", sky.width, sky.height),
+            Err(e) => format!("t7 sky: {e}"),
+        });
+    }
     let mut materials = std::mem::take(&mut b.catalog);
     drop(b);
     stage.done();

@@ -243,6 +243,8 @@ pub struct StaticModel {
     /// Rows: the model's forward, left and up axes in the world.
     pub axis: [[f32; 3]; 3],
     pub scale: f32,
+    /// bo2mp: past this distance it is not drawn (0: always drawn).
+    pub cull_dist: f32,
 }
 
 /// A static model the collision lists (`cStaticModel_t`): its model's name
@@ -389,6 +391,12 @@ pub struct T7Map {
     /// drawn world, by index; empty: none. Set by the Modern Warfare III
     /// lane for a big map's sea sheets and far backdrop.)
     pub no_collision: Vec<bool>,
+    /// (bo2mp: placed models left out of the collision built from the
+    /// drawn world, by index into `static_models`; empty: none.)
+    pub static_no_collision: Vec<bool>,
+    /// (bo2mp: a sky cube another game's reader made (six faces, +x -x
+    /// +y -y +z -z, z up), drawn behind the world.)
+    pub sky_cube: Option<ImageLevels>,
     images: HashMap<String, ImageRec>,
     /// (bo2mp: pictures another game's reader decoded for its materials,
     /// by name: [`Self::add_image`].)
@@ -659,6 +667,7 @@ impl T7Map {
                 origin: v3(image, d),
                 axis: [v3(image, d + 12), v3(image, d + 24), v3(image, d + 36)],
                 scale: f32_at(image, d + 48),
+                cull_dist: 0.0,
             });
         }
         self.report.push(format!(
