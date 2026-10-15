@@ -469,6 +469,8 @@ pub(crate) fn lui_side(host: &mut Host, mp: Option<&Mp>) {
             Request::Start(spec) => {
                 PUBLIC_START.store(spec.public, Ordering::Relaxed);
                 sim::set_resurgence(spec.br);
+                // (The Warzone HUD draws what the script's text lines would.)
+                sim::set_warzone_hud(crate::hud_modern::modern_hud_enabled());
                 {
                     let mut v = host.values.borrow_mut();
                     for (k, x) in [

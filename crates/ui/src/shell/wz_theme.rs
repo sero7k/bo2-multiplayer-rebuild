@@ -26,6 +26,104 @@ pub(crate) const PALETTE: Palette = Palette {
     tint: Color::srgba(0.16, 0.11, 0.02, 0.22),
 };
 
+/// The Warzone HUD's colours (`hud_warzone`: Resurgence in a match). Its
+/// pictures are Modern Warfare III's own, white glyphs drawn in these.
+pub(crate) struct WzHud {
+    /// Headings, the circle panel's edge, the contract, the focus.
+    pub accent: Color,
+    /// Values (cash, counts, names, the clip).
+    pub text: Color,
+    /// Labels and secondary values.
+    pub dim: Color,
+    /// Panels behind the circle, contract, counters and squad rows.
+    pub panel: Color,
+    /// Empty bar tracks.
+    pub track: Color,
+    /// Armor: the plate segments and the plate icons (Modern Warfare III's
+    /// blue).
+    pub armor: Color,
+    pub health: Color,
+    /// Health at a third or less, the gas warning's skull.
+    pub low: Color,
+    pub cash: Color,
+    /// The gas: its warning and its time while the circle closes.
+    pub gas: Color,
+    /// The safe zone's ring on the minimap, and the next one's.
+    pub circle: Color,
+    pub next_circle: Color,
+    /// A squadmate down (dead, waiting) and one redeploying.
+    pub down: Color,
+    pub redeploy: Color,
+    /// Enemies: kill splashes, danger pings, the kill hit marker.
+    pub enemy: Color,
+    /// Hit markers on armor, and a plate breaking.
+    pub armor_hit: Color,
+    pub armor_break: Color,
+    /// Each squad slot's colour (him first), as Warzone numbers them.
+    pub squad: [Color; 4],
+}
+
+pub(crate) const HUD: WzHud = WzHud {
+    accent: Color::srgb(0.98, 0.66, 0.10),
+    text: Color::srgb(0.96, 0.94, 0.88),
+    dim: Color::srgba(0.92, 0.86, 0.70, 0.66),
+    panel: Color::srgba(0.035, 0.037, 0.032, 0.70),
+    track: Color::srgba(0.0, 0.0, 0.0, 0.50),
+    armor: Color::srgb(0.98, 0.74, 0.26),
+    health: Color::srgb(0.95, 0.94, 0.90),
+    low: Color::srgb(0.92, 0.28, 0.18),
+    cash: Color::srgb(0.66, 0.88, 0.42),
+    gas: Color::srgb(0.96, 0.40, 0.14),
+    circle: Color::srgba(0.98, 0.66, 0.10, 0.95),
+    next_circle: Color::srgba(0.96, 0.94, 0.88, 0.70),
+    down: Color::srgb(0.92, 0.28, 0.18),
+    redeploy: Color::srgb(0.98, 0.80, 0.40),
+    enemy: Color::srgb(0.92, 0.26, 0.20),
+    armor_hit: Color::srgb(0.98, 0.74, 0.26),
+    armor_break: Color::srgb(1.0, 0.86, 0.45),
+    squad: [
+        Color::srgb(0.98, 0.66, 0.10),
+        Color::srgb(0.40, 0.76, 0.82),
+        Color::srgb(0.58, 0.82, 0.38),
+        Color::srgb(0.88, 0.50, 0.72),
+    ],
+};
+
+/// The Warzone HUD's words.
+pub(crate) const HUD_WORDS: HudWords = HudWords {
+    infil: "INFIL",
+    circle_closes: "CIRCLE CLOSES",
+    circle_closing: "CIRCLE CLOSING",
+    final_circle: "FINAL CIRCLE",
+    in_gas: "YOU ARE IN THE GAS",
+    gas_mask: "GAS MASK",
+    redeploying: "REDEPLOYING IN",
+    redeploy_off: "REDEPLOY DISABLED",
+    buy_back: "A squadmate can buy you back",
+    squads_left: "SQUADS",
+    players_left: "PLAYERS",
+    kills: "KILLS",
+    plates: "PLATES",
+    eliminated: "ELIMINATED",
+};
+
+pub(crate) struct HudWords {
+    pub infil: &'static str,
+    pub circle_closes: &'static str,
+    pub circle_closing: &'static str,
+    pub final_circle: &'static str,
+    pub in_gas: &'static str,
+    pub gas_mask: &'static str,
+    pub redeploying: &'static str,
+    pub redeploy_off: &'static str,
+    pub buy_back: &'static str,
+    pub squads_left: &'static str,
+    pub players_left: &'static str,
+    pub kills: &'static str,
+    pub plates: &'static str,
+    pub eliminated: &'static str,
+}
+
 /// The other squads' colour in the lobby's squad list.
 pub(crate) const OTHER_SQUAD: Color = Color::srgb(0.52, 0.54, 0.50);
 

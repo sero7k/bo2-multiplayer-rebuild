@@ -45,7 +45,7 @@ pub mod preview;
 pub(crate) mod theme; // (hud_match reuses the colours and fonts)
 mod view;
 mod warzone;
-mod wz_theme; // bo2mp: WARZONE's colours and words
+pub(crate) mod wz_theme; // bo2mp: WARZONE's colours and words (the Warzone HUD reads them too)
 mod wz_view;
 pub(crate) mod zombies;
 mod zombies_view;

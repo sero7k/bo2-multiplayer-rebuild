@@ -19,6 +19,10 @@
 //! the kill feed, hit marker, kill banner and scoreboard are `hud_match`'s
 //! own; BO2's killcam and menus stay. `BO2_HUD=bo2` brings BO2's own HUD
 //! back.
+//!
+//! Resurgence (`bo2mp_br` published) draws the Warzone HUD
+//! (`hud_warzone`) instead of the score bar, the health line and the ammo
+//! corner; the minimap stays and rings the safe zone.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -283,6 +287,8 @@ struct HudValues {
     /// His three scorestreaks, dearest first.
     streaks: Vec<Streak>,
     height: u32,
+    /// Resurgence's values: the Warzone HUD is drawn instead.
+    br: Option<crate::hud_warzone::Br>,
 }
 
 /// His health as a share of his maximum, 0..=100 (0 when dead or not
@@ -308,7 +314,7 @@ fn clip_of(table: &[u8], weapon: i32, hand: usize) -> i32 {
 
 /// The match's values while the HUD shows: not in a killcam, at the match's
 /// end, or under a menu (BO2 hides its HUD then too).
-fn match_values(
+pub(crate) fn match_values(
     presented: &PresentedSnapshot,
     local: &LocalPresentClient,
     menus: Option<&frame::LuiMenus>,
@@ -433,6 +439,7 @@ fn read_values(
             dvars.string("bo2mp_momentum").and_then(|m| m.trim().parse().ok()).unwrap_or(0),
         ),
         height: 0,
+        br: crate::hud_warzone::parse(dvars.string("bo2mp_br").unwrap_or_default()),
     })
 }
 
@@ -441,7 +448,7 @@ fn clock(seconds: i32) -> String {
 }
 
 /// A line of text: in BO2's own font when it loaded, else the game font.
-fn text(
+pub(crate) fn text(
     c: &mut ChildSpawnerCommands,
     bo2: Option<&crate::bo2_font::Bo2Fonts>,
     font: &GameUiFont,
@@ -562,6 +569,13 @@ fn modern_hud(
             Some((*lethal, picture(&mut cache, icons, &mut images, name), *n))
         })
         .collect();
+    // The Warzone HUD's pictures (Modern Warfare III's, read off the main
+    // thread; a missing one is drawn as a plain shape).
+    let wz_pics: HashMap<&str, Option<Handle<Image>>> = if values.br.is_some() {
+        crate::jup_hud::PICTURES.iter().map(|(n, _, _)| (*n, crate::hud_warzone::picture(&mut cache, &mut images, n))).collect()
+    } else {
+        HashMap::new()
+    };
     let streak_pics: Vec<Option<StreakPic>> = values
         .streaks
         .iter()
@@ -625,6 +639,25 @@ fn modern_hud(
             },
         ))
         .with_children(|root| {
+            // --- Resurgence: the Warzone HUD instead of the rest. ---
+            if let Some(br) = &values.br {
+                let inputs = crate::hud_warzone::Inputs {
+                    br,
+                    name: &values.name,
+                    health: values.health,
+                    weapon: &values.weapon,
+                    weapon_label: &values.weapon_label,
+                    not_a_gun: values.not_a_gun,
+                    clip: values.clip,
+                    stock: values.stock,
+                    low_clip: values.low_clip,
+                    offhands: offhands.clone(),
+                    height,
+                };
+                let mut write = |c: &mut ChildSpawnerCommands, s: &str, px: f32, color: Color| text(c, bo2, &font, "Default", s, px, color);
+                crate::hud_warzone::spawn(root, &inputs, k, &mut |name| wz_pics.get(name).cloned().flatten(), &mut write);
+                return;
+            }
             // --- Top centre: the score bar. His side on the left, theirs on
             // the right: score, bar (filling from the middle out), team name
             // over it, the team's Black Ops emblem, and the clock between
@@ -1283,6 +1316,26 @@ fn minimap(
         place("compassping_friendly_mp", *p, *yaw, 1.0, &mut marks);
     }
     place("compassping_player", view.me.0, view.me.1, 1.0, &mut marks);
+    // Resurgence: the safe zone and the next one, as rings (centre on the
+    // map, radius, colour, width).
+    let rings: Vec<([f32; 2], f32, Color, f32)> = match (presented.as_deref(), local.as_deref()) {
+        (Some(p), Some(l)) => p
+            .snapshot()
+            .and_then(|s| crate::hud_warzone::parse(s.meta.script_dvars(l.0).string("bo2mp_br").unwrap_or_default()))
+            .map(|br| {
+                let theme = &crate::shell::wz_theme::HUD;
+                [(br.next_circle, theme.next_circle, 1.5), (br.circle, theme.circle, 2.5)]
+                    .into_iter()
+                    .filter_map(|(c, color, w)| {
+                        let [x, y, r] = c?;
+                        let o = view.screen_offset([x, y]);
+                        Some(([o[0] * per_unit, o[1] * per_unit], r * per_unit, color, w))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
 
     let node = Node {
         position_type: PositionType::Absolute,
@@ -1368,6 +1421,34 @@ fn minimap(
                 ..default()
             },
         ));
+        if !rings.is_empty() {
+            c.spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(tape),
+                width: Val::Px(size),
+                height: Val::Px(size),
+                overflow: Overflow::clip(),
+                ..default()
+            })
+            .with_children(|clip| {
+                for (at, r, color, w) in &rings {
+                    clip.spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(size * 0.5 + at[0] - r),
+                            top: Val::Px(size * 0.5 + at[1] - r),
+                            width: Val::Px(r * 2.0),
+                            height: Val::Px(r * 2.0),
+                            border: UiRect::all(Val::Px((w * k).max(1.0))),
+                            border_radius: BorderRadius::all(Val::Percent(50.0)),
+                            ..default()
+                        },
+                        BorderColor::all(*color),
+                    ));
+                }
+            });
+        }
         for (pic, at, turn, alpha) in marks {
             let node = Node {
                 position_type: PositionType::Absolute,
@@ -1397,6 +1478,7 @@ pub(crate) fn register_modern_hud_systems(app: &mut App) {
             .after(crate::bo2_font::load_bo2_fonts)
             .in_set(ClientSet::Ui),
     );
+    crate::hud_warzone::register(app);
 }
 
 pub mod preview {
