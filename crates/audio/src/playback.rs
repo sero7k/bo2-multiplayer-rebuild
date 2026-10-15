@@ -1457,7 +1457,15 @@ fn take_or_pending_clip(
                     layer,
                     class,
                     epoch,
-                    deadline: deadline_for(class),
+                    // bo2mp: a Modern Warfare III (2023) clip is read and
+                    // decoded from its package when first played (music
+                    // and island beds run a minute and more); Resurgence's
+                    // announcer, music and stings may start late, not never.
+                    deadline: if namespace == AssetNamespace::Jup {
+                        std::time::Instant::now() + std::time::Duration::from_secs(8)
+                    } else {
+                        deadline_for(class)
+                    },
                 });
                 ClipTake::Pending
             }
