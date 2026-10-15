@@ -68,6 +68,11 @@ pub fn content_required_by_map(map: &str) -> Result<ContentFlags> {
         "t6" => CONTENT_T6,
         "iw3" => CONTENT_IW3,
         "t4" => CONTENT_T4,
+        // bo2mp: Ghosts', Advanced Warfare's, Infinite Warfare's and Black
+        // Ops III's maps (the front end's guest maps) have no content flag
+        // of their own: they ask for none, so `iw4l map iw7:mp_proto` plays
+        // as the front end's START MATCH does instead of refusing to start.
+        "iw6" | "s1" | "iw7" | "t7" => 0,
         other => return Err(format!("unknown content namespace `{other}` in map `{map}`").into()),
     }))
 }
@@ -3409,6 +3414,7 @@ mod content_tests {
             assert_eq!(content_names(flags), name);
         }
         assert!(content_required_by_map("h1:mp_crash").is_err());
+        assert_eq!(content_required_by_map("iw7:mp_proto").unwrap().0, 0);
         assert_eq!(content_names(ContentFlags(1 << 7)), "unknown");
     }
 }

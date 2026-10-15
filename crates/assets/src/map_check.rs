@@ -46,8 +46,72 @@ fn summary(loaded: &LoadedWorld) -> Result<String, String> {
 /// zones (stock, IW4x's packs, usermaps) also get the picture census of
 /// [`crate::check_iw4_map`].
 pub fn check_map(game: &str, path: &Path) -> String {
+    let loaded = match load_for_check(game, path) {
+        Ok(loaded) => loaded,
+        Err(line) => return line,
+    };
+    check_loaded(game, path, &loaded)
+}
+
+/// bo2mp: the map's collision mesh traced the way a match traces it
+/// (`map_check_probe` with `BO2MP_CHECK_TRACES=1`): sight lines between
+/// spawn points at eye height, long bullet lines out of each spawn, and a
+/// player's box stepping and falling at each. Mesh only (brushes are not
+/// traced); a line per kind: time and work per trace.
+pub fn trace_bench(game: &str, path: &Path) -> String {
+    let loaded = match load_for_check(game, path) {
+        Ok(loaded) => loaded,
+        Err(line) => return line,
+    };
+    let Some(clip) = loaded.collision.as_ref() else {
+        return "no collision".to_owned();
+    };
+    let mesh = clip.mesh.as_ref().as_ref();
+    let spawns: Vec<[f32; 3]> = loaded.spawns.iter().map(|s| s.origin).collect();
+    if spawns.is_empty() || mesh.tri_indices.len() < 3 {
+        return format!("nothing to trace ({} spawns, {} triangles)", spawns.len(), mesh.tri_indices.len() / 3);
+    }
+    let n = spawns.len();
+    let eye = |p: [f32; 3]| [p[0], p[1], p[2] + 60.0];
+    let mut kinds: Vec<(&str, Vec<clipmap_iw4::TraceExtents>)> = vec![("sight", Vec::new()), ("bullet", Vec::new()), ("step", Vec::new()), ("fall", Vec::new())];
+    for i in 0..400usize {
+        let a = spawns[(i * 7) % n];
+        let b = spawns[(i * 13 + 5) % n];
+        kinds[0].1.push(clipmap_iw4::TraceExtents::new(eye(a), eye(b), [0.0; 3], [0.0; 3], 1));
+        let yaw = (i as f32) * 0.618_034 * std::f32::consts::TAU;
+        let pitch = ((i % 9) as f32 - 4.0) * 0.08;
+        let dir = [yaw.cos() * pitch.cos(), yaw.sin() * pitch.cos(), pitch.sin()];
+        let e = eye(a);
+        kinds[1].1.push(clipmap_iw4::TraceExtents::new(e, std::array::from_fn(|k| e[k] + dir[k] * 8192.0), [0.0; 3], [0.0; 3], 1));
+        let up = [a[0], a[1], a[2] + 18.0];
+        kinds[2].1.push(clipmap_iw4::TraceExtents::new(up, [up[0] + dir[0] * 24.0, up[1] + dir[1] * 24.0, up[2]], [-15.0, -15.0, 0.0], [15.0, 15.0, 52.0], 1));
+        kinds[3].1.push(clipmap_iw4::TraceExtents::new(up, [up[0], up[1], up[2] - 256.0], [-15.0, -15.0, 0.0], [15.0, 15.0, 52.0], 1));
+    }
+    let mut lines = vec![format!("{} triangles, {} nodes, {} spawns", mesh.tri_indices.len() / 3, mesh.aabb_trees.len(), n)];
+    for (name, list) in &kinds {
+        let started = std::time::Instant::now();
+        let (mut tris, mut nodes, mut hits) = (0u64, 0u64, 0u32);
+        for ext in list {
+            let (t, census) = clipmap_iw4::trace_through_mesh_with_census(&mesh, ext);
+            tris += u64::from(census.tris_tested);
+            nodes += u64::from(census.aabb_nodes_visited);
+            hits += u32::from(t.fraction < 1.0);
+        }
+        let k = list.len().max(1) as f64;
+        lines.push(format!(
+            "{name}: {:.1} us a trace, {:.0} triangles and {:.0} nodes tested, {hits}/{} hit",
+            started.elapsed().as_secs_f64() * 1e6 / k,
+            tris as f64 / k,
+            nodes as f64 / k,
+            list.len()
+        ));
+    }
+    lines.join("; ")
+}
+
+fn load_for_check(game: &str, path: &Path) -> Result<LoadedWorld, String> {
     let progress = LoadProgress::new(0);
-    let loaded = match game {
+    Ok(match game {
         "iw3" => crate::lane::load_iw3_world(path, &progress, Default::default()),
         "t4" => crate::lane::load_t4_world(path, &progress, Default::default()),
         // bo2mp: Ghosts' maps.
@@ -59,7 +123,7 @@ pub fn check_map(game: &str, path: &Path) -> String {
         "iw4" => {
             let image = match asset_transport::open_zone(path) {
                 Ok(image) => image,
-                Err(e) => return format!("FAIL zone does not open: {e}"),
+                Err(e) => return Err(format!("FAIL zone does not open: {e}")),
             };
             let mut visions = std::collections::BTreeMap::new();
             lane(image.game).load_world(
@@ -71,9 +135,12 @@ pub fn check_map(game: &str, path: &Path) -> String {
                 &mut visions,
             )
         }
-        other => return format!("FAIL no map check for `{other}` zones"),
-    };
-    let world = summary(&loaded);
+        other => return Err(format!("FAIL no map check for `{other}` zones")),
+    })
+}
+
+fn check_loaded(game: &str, path: &Path, loaded: &LoadedWorld) -> String {
+    let world = summary(loaded);
     match (game, world) {
         ("iw4", Ok(line)) => {
             let pictures = crate::check_iw4_map(path);

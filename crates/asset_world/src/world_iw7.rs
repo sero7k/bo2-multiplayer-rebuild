@@ -3,15 +3,15 @@
 //!
 //! IW7 collides through Havok shapes the engine does not read; the map's
 //! drawn triangles (its world surfaces and its placed models) stand in for
-//! them. They become one collision mesh: triangles sorted along a Morton
-//! curve, cut into partitions of at most `PART_TRIS`, each with its own
-//! vertices (the partition's segment, `ClipPartition::first_vert_segment`,
-//! addresses them), and an AABB tree over the partitions (eight children per
-//! node, children contiguous, the root first). The world has no brushes;
-//! each brush model (`*1`, `*2`, ...: a door, a debris pile) gets one box
-//! brush of its bounds, about its own origin, for the entity that names it
-//! (a one-leaf tree with no brushes in it keeps them out of the world's
-//! own trace, which reaches the mesh through its forest of trees).
+//! them. They become one collision mesh: an AABB tree split top down at
+//! the triangles' median (up to eight children a node, children
+//! contiguous, the root first) down to partitions of at most `PART_TRIS`,
+//! each with its own vertices (the partition's segment,
+//! `ClipPartition::first_vert_segment`, addresses them). The world has no
+//! brushes; each brush model (`*1`, `*2`, ...: a door, a debris pile) gets
+//! one box brush of its bounds, about its own origin, for the entity that
+//! names it (a one-leaf tree with no brushes in it keeps them out of the
+//! world's own trace, which reaches the mesh through its forest of trees).
 
 use crate::clip_collision::{ClipBrush, ClipBspLeaf, ClipBspNode, ClipCmodel, ClipCollision, ClipMapMaterial};
 
@@ -36,17 +36,6 @@ pub struct SoupTri {
 /// their place in the table (`*1`, `*2`, ...; the first, the world, is
 /// skipped): each gets a box brush of them.
 pub type SoupCmodel = ([f32; 3], [f32; 3], f32);
-
-fn morton(p: [f32; 3], lo: [f32; 3], scale: [f32; 3]) -> u64 {
-    let mut code = 0u64;
-    let q: [u64; 3] = std::array::from_fn(|k| (((p[k] - lo[k]) * scale[k]).clamp(0.0, 2_097_151.0)) as u64);
-    for bit in 0..21 {
-        for (k, v) in q.iter().enumerate() {
-            code |= ((v >> bit) & 1) << (3 * bit + k);
-        }
-    }
-    code
-}
 
 fn bounds_of(pts: impl Iterator<Item = [f32; 3]>) -> ([f32; 3], [f32; 3]) {
     let mut lo = [f32::MAX; 3];
@@ -124,28 +113,76 @@ pub fn build_soup_clip_collision(tris: &[SoupTri], cmodels: &[SoupCmodel]) -> Cl
     if keep.is_empty() {
         return out;
     }
-    let scale: [f32; 3] = std::array::from_fn(|k| 2_097_151.0 / (hi[k] - lo[k]).max(1.0));
-    let mut order: Vec<(u64, usize)> = keep
+    // The tree, built top down: a node's triangles (by their middles) are
+    // halved along the longest side of their middles' bounds three times
+    // over, up to eight children, until a node holds at most `PART_TRIS`
+    // (a partition). Nodes are laid out breadth first, root first, each
+    // node's children contiguous. (A Morton order cut into runs of 32 left
+    // runs that jump across the curve's seams, and nodes whose bounds
+    // spanned the map: a trace visited hundreds of nodes.)
+    let mids: Vec<[f32; 3]> = keep
         .iter()
         .map(|&i| {
             let [a, b, c] = tris[i].p;
-            let mid = std::array::from_fn(|k| (a[k] + b[k] + c[k]) / 3.0);
-            (morton(mid, lo, scale), i)
+            std::array::from_fn(|k| (a[k] + b[k] + c[k]) / 3.0)
         })
         .collect();
-    order.sort_unstable_by_key(|&(m, _)| m);
+    let mut order: Vec<usize> = (0..keep.len()).collect();
+    // Each node: its range of `order`, and (once its children are made)
+    // its first child and child count; leaves get a partition.
+    struct Build {
+        range: (usize, usize),
+        first_child: usize,
+        children: usize,
+        part: Option<usize>,
+    }
+    let mut nodes: Vec<Build> = vec![Build { range: (0, keep.len()), first_child: 0, children: 0, part: None }];
+    let longest = |order: &[usize]| -> usize {
+        let (l, h) = bounds_of(order.iter().map(|&o| mids[o]));
+        (0..3).max_by(|&a, &b| (h[a] - l[a]).total_cmp(&(h[b] - l[b]))).unwrap_or(0)
+    };
+    let mut at = 0usize;
+    while at < nodes.len() {
+        let (s0, s1) = nodes[at].range;
+        if s1 - s0 > PART_TRIS {
+            let mut pieces = vec![(s0, s1)];
+            for _ in 0..3 {
+                let mut next = Vec::with_capacity(pieces.len() * 2);
+                for &(a, b) in &pieces {
+                    if b - a <= PART_TRIS {
+                        next.push((a, b));
+                        continue;
+                    }
+                    let axis = longest(&order[a..b]);
+                    let half = (b - a) / 2;
+                    order[a..b].select_nth_unstable_by(half, |&x, &y| mids[x][axis].total_cmp(&mids[y][axis]));
+                    next.push((a, a + half));
+                    next.push((a + half, b));
+                }
+                pieces = next;
+            }
+            debug_assert!(pieces.len() <= FANOUT);
+            nodes[at].first_child = nodes.len();
+            nodes[at].children = pieces.len();
+            for range in pieces {
+                nodes.push(Build { range, first_child: 0, children: 0, part: None });
+            }
+        }
+        at += 1;
+    }
 
     let mesh = std::sync::Arc::make_mut(&mut out.mesh);
-    // Partitions, each with its own vertices (shared within it).
-    let mut level: Vec<clipmap_iw4::ClipAabbNode> = Vec::new();
-    for chunk in order.chunks(PART_TRIS) {
+    // Partitions (the leaves, in layout order), each with its own vertices
+    // (shared within it).
+    for n in nodes.iter_mut().filter(|n| n.children == 0) {
+        let chunk = &order[n.range.0..n.range.1];
         let start = mesh.verts.len();
         let seg = start / clipmap_iw4::VERTS_PER_SEGMENT;
         let base = seg * clipmap_iw4::VERTS_PER_SEGMENT;
         let first_tri = mesh.tri_indices.len() / 3;
         let mut local: Vec<[u32; 3]> = Vec::new();
-        for &(_, i) in chunk {
-            let t = &tris[i];
+        for &o in chunk {
+            let t = &tris[keep[o]];
             for p in t.p {
                 let bits = p.map(f32::to_bits);
                 let at = match local.iter().position(|q| *q == bits) {
@@ -162,7 +199,7 @@ pub fn build_soup_clip_collision(tris: &[SoupTri], cmodels: &[SoupCmodel]) -> Cl
             mesh.tri_content_flags.push(t.contents);
             out.tri_material_index.push(0);
         }
-        let part = mesh.partitions.len();
+        n.part = Some(mesh.partitions.len());
         mesh.partitions.push(clipmap_iw4::ClipPartition {
             tri_count: chunk.len() as u8,
             first_tri: first_tri as i32,
@@ -170,42 +207,28 @@ pub fn build_soup_clip_collision(tris: &[SoupTri], cmodels: &[SoupCmodel]) -> Cl
             border_count: 0,
             first_border: 0,
         });
-        let (plo, phi) = bounds_of(chunk.iter().flat_map(|&(_, i)| tris[i].p));
-        level.push(node(plo, phi, 0, part as i32));
     }
-    // The tree, built upward a level at a time, laid out root first.
-    let mut levels = vec![level];
-    while levels.last().is_some_and(|l| l.len() > 1) {
-        let below = levels.last().unwrap();
-        let mut up = Vec::with_capacity(below.len().div_ceil(FANOUT));
-        for (g, group) in below.chunks(FANOUT).enumerate() {
-            let pts = group.iter().flat_map(|n| {
-                let a: [f32; 3] = std::array::from_fn(|k| n.origin[k] - n.half_size[k]);
-                let b: [f32; 3] = std::array::from_fn(|k| n.origin[k] + n.half_size[k]);
-                [a, b]
-            });
-            let (glo, ghi) = bounds_of(pts);
-            // `u` is the first child's index within the level below for now.
-            up.push(node(glo, ghi, group.len() as u16, (g * FANOUT) as i32));
-        }
-        levels.push(up);
-    }
-    let mut offsets = vec![0usize; levels.len()];
-    let mut at = 0usize;
-    for (d, l) in levels.iter().enumerate().rev() {
-        offsets[d] = at;
-        at += l.len();
-    }
-    mesh.aabb_trees = Vec::with_capacity(at);
-    for d in (0..levels.len()).rev() {
-        for n in &levels[d] {
-            let mut n = *n;
-            if n.child_count != 0 {
-                n.u += offsets[d - 1] as i32;
+    // Bounds bottom up (children always come after their parent).
+    let mut tree = vec![clipmap_iw4::ClipAabbNode::default(); nodes.len()];
+    for i in (0..nodes.len()).rev() {
+        let n = &nodes[i];
+        tree[i] = match n.part {
+            Some(part) => {
+                let (plo, phi) = bounds_of(order[n.range.0..n.range.1].iter().flat_map(|&o| tris[keep[o]].p));
+                node(plo, phi, 0, part as i32)
             }
-            mesh.aabb_trees.push(n);
-        }
+            None => {
+                let kids = &tree[n.first_child..n.first_child + n.children];
+                let (glo, ghi) = bounds_of(kids.iter().flat_map(|c| {
+                    let a: [f32; 3] = std::array::from_fn(|k| c.origin[k] - c.half_size[k]);
+                    let b: [f32; 3] = std::array::from_fn(|k| c.origin[k] + c.half_size[k]);
+                    [a, b]
+                }));
+                node(glo, ghi, n.children as u16, n.first_child as i32)
+            }
+        };
     }
+    mesh.aabb_trees = tree;
     mesh.aabb_roots = vec![0];
     out
 }
@@ -216,12 +239,13 @@ mod tests {
 
     #[test]
     fn a_floor_stops_a_drop() {
+        // (Wound to face up: a trace hits a triangle's front only.)
         let mut tris = Vec::new();
         for x in -10..10 {
             for y in -10..10 {
                 let (x0, y0) = (x as f32 * 64.0, y as f32 * 64.0);
                 let (x1, y1) = (x0 + 64.0, y0 + 64.0);
-                for p in [[[x0, y0, 0.0], [x1, y0, 0.0], [x1, y1, 0.0]], [[x0, y0, 0.0], [x1, y1, 0.0], [x0, y1, 0.0]]] {
+                for p in [[[x0, y0, 0.0], [x1, y1, 0.0], [x1, y0, 0.0]], [[x0, y0, 0.0], [x0, y1, 0.0], [x1, y1, 0.0]]] {
                     tris.push(SoupTri { p, surface_flags: 0, contents: IW7_SOLID });
                 }
             }

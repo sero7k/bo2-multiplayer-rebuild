@@ -8,7 +8,7 @@ pub mod loading_screen;
 mod map_load_process;
 // bo2mp `iw4l check-maps`: every foreign map read as a match reads it.
 mod map_check;
-pub use map_check::check_map;
+pub use map_check::{check_map, trace_bench};
 mod map_scripts;
 mod match_load;
 pub mod plugin;

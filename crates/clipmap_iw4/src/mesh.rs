@@ -214,6 +214,18 @@ pub fn trace_through_mesh_into(
     best: &mut Trace,
     census: &mut MeshWalkCensus,
 ) {
+    trace_mesh(mesh, ext, best, census, true);
+}
+
+/// `line_walk`: the node walk follows a moving trace's line (false: its
+/// box only, every node it covers; the tests' reference).
+fn trace_mesh(
+    mesh: &ClipMeshRef<'_>,
+    ext: &TraceExtents,
+    best: &mut Trace,
+    census: &mut MeshWalkCensus,
+    line_walk: bool,
+) {
     census.aabb_roots = census
         .aabb_roots
         .saturating_add(mesh.aabb_roots.len() as u32);
@@ -255,6 +267,19 @@ pub fn trace_through_mesh_into(
 
     let position_test = delta == [0.0; 3];
     let trace_borders = (delta[0] != 0.0 || delta[1] != 0.0) && cap.offset_z != 0.0;
+    // bo2mp: a moving trace walks only the nodes (and tests only the
+    // triangles) its swept capsule's line enters, each box grown by the
+    // capsule's reach (`r`), and passes over those it would only enter
+    // beyond the hit it already has. The line's own box (a long diagonal
+    // bullet or sight line's covers much of a map) took in every node and
+    // triangle inside it: on Infinite Warfare's million-triangle meshes, tens
+    // of thousands of triangles a trace. Whatever is passed over could only
+    // have hit farther than the hit kept, so the result is the same. A
+    // position test, or a move short beside the capsule's reach (a player's
+    // step, whose box is hardly bigger than the capsule's path), keeps the
+    // box alone: the line test would only add work.
+    let long = len_sq(delta) > (SWEEP_LONG_REACHES * r) * (SWEEP_LONG_REACHES * r);
+    let sweep = (line_walk && !position_test && long).then(|| Sweep::new(start, delta, r + SWEEP_SLACK));
     let tri = |ti: usize, vert_base: usize, best: &mut Trace, census: &mut MeshWalkCensus| {
         if position_test {
             position_test_tri(
@@ -262,27 +287,28 @@ pub fn trace_through_mesh_into(
             );
         } else {
             test_tri(
-                mesh, cap, start, delta, cull_mins, cull_maxs, ti, vert_base, ext.mask, best,
-                census,
+                mesh, cap, start, delta, cull_mins, cull_maxs, sweep.as_ref(), ti, vert_base,
+                ext.mask, best, census,
             );
         }
     };
 
     if !mesh.aabb_trees.is_empty() {
-        walk_aabb_forest(mesh, cull_mins, cull_maxs, census, &mut |part, census| {
+        let limit = best.fraction;
+        walk_aabb_forest(mesh, cull_mins, cull_maxs, sweep.as_ref(), limit, census, &mut |part, census| {
             let start_ti = part.first_tri as usize;
             let end_ti = start_ti.saturating_add(part.tri_count as usize);
             let vert_base = part.first_vert_segment as usize * VERTS_PER_SEGMENT;
             for ti in start_ti..end_ti {
                 tri(ti, vert_base, best, census);
                 if best.allsolid != 0 {
-                    return true;
+                    return None;
                 }
             }
             if trace_borders {
                 border_through_partition(mesh, part, cap, start, delta, ext.mask, best);
             }
-            false
+            Some(best.fraction)
         });
     } else {
         let tri_count = mesh.tri_indices.len() / 3;
@@ -312,12 +338,90 @@ pub fn trace_through_mesh_into(
     }
 }
 
+/// Extra reach (units) on top of the capsule's when a node's box is grown
+/// for the line test: rounding never drops a node a hit could come from.
+const SWEEP_SLACK: f32 = 1.0;
+
+/// Extra travel (fraction) past the best hit before a node is passed over.
+const SWEEP_FRACTION_SLACK: f32 = 1.0e-3;
+
+/// A move this many times the capsule's reach or longer walks by its line.
+const SWEEP_LONG_REACHES: f32 = 4.0;
+
+/// A moving trace's centre line (`start` + t `delta`, t in 0..1) and its
+/// reach around it, for the node walk.
+struct Sweep {
+    start: [f32; 3],
+    delta: [f32; 3],
+    inv: [f32; 3],
+    reach: f32,
+}
+
+impl Sweep {
+    fn new(start: [f32; 3], delta: [f32; 3], reach: f32) -> Self {
+        Self {
+            start,
+            delta,
+            inv: delta.map(|d| if fabsf(d) > 1.0e-12 { 1.0 / d } else { 0.0 }),
+            reach,
+        }
+    }
+
+    /// Where along the line (0..1) it enters a node's box grown by the
+    /// reach, or None when it never does. (The slab test.)
+    fn entry(&self, origin: [f32; 3], half: [f32; 3]) -> Option<f32> {
+        let (mut t0, mut t1) = (0.0f32, 1.0f32);
+        for k in 0..3 {
+            let lo = origin[k] - half[k] - self.reach;
+            let hi = origin[k] + half[k] + self.reach;
+            if fabsf(self.delta[k]) <= 1.0e-12 {
+                if self.start[k] < lo || self.start[k] > hi {
+                    return None;
+                }
+                continue;
+            }
+            let a = (lo - self.start[k]) * self.inv[k];
+            let b = (hi - self.start[k]) * self.inv[k];
+            let (near, far) = if a <= b { (a, b) } else { (b, a) };
+            if near > t0 {
+                t0 = near;
+            }
+            if far < t1 {
+                t1 = far;
+            }
+            if t0 > t1 {
+                return None;
+            }
+        }
+        Some(t0)
+    }
+}
+
+/// The partitions under the roots a trace can touch, each handed to
+/// `on_partition` (None: stop the walk; Some: the trace's fraction so far):
+/// by its line with a `sweep`, by its box without.
 fn walk_aabb_forest(
     mesh: &ClipMeshRef<'_>,
     cull_mins: [f32; 3],
     cull_maxs: [f32; 3],
+    sweep: Option<&Sweep>,
+    limit: f32,
     census: &mut MeshWalkCensus,
-    on_partition: &mut dyn FnMut(&ClipPartition, &mut MeshWalkCensus) -> bool,
+    on_partition: &mut dyn FnMut(&ClipPartition, &mut MeshWalkCensus) -> Option<f32>,
+) {
+    match sweep {
+        Some(sweep) => walk_aabb_forest_line(mesh, cull_mins, cull_maxs, sweep, limit, census, on_partition),
+        None => walk_aabb_forest_box(mesh, cull_mins, cull_maxs, census, on_partition),
+    }
+}
+
+/// Every node the trace's box overlaps (a position test, a short move).
+fn walk_aabb_forest_box(
+    mesh: &ClipMeshRef<'_>,
+    cull_mins: [f32; 3],
+    cull_maxs: [f32; 3],
+    census: &mut MeshWalkCensus,
+    on_partition: &mut dyn FnMut(&ClipPartition, &mut MeshWalkCensus) -> Option<f32>,
 ) {
     let mut stack = Vec::new();
     for &root in mesh.aabb_roots {
@@ -350,8 +454,70 @@ fn walk_aabb_forest(
         if part.first_tri < 0 {
             continue;
         }
-        if on_partition(part, census) {
+        if on_partition(part, census).is_none() {
             return;
+        }
+    }
+}
+
+/// The nodes a long move's line enters (`walk_aabb_forest_box`'s order,
+/// less the nodes it misses or would enter only past `limit`, then past
+/// the best hit so far: a hit at the same fraction as another still keeps
+/// the one the box walk would have found first).
+fn walk_aabb_forest_line(
+    mesh: &ClipMeshRef<'_>,
+    cull_mins: [f32; 3],
+    cull_maxs: [f32; 3],
+    sweep: &Sweep,
+    mut limit: f32,
+    census: &mut MeshWalkCensus,
+    on_partition: &mut dyn FnMut(&ClipPartition, &mut MeshWalkCensus) -> Option<f32>,
+) {
+    let mut stack: Vec<(f32, usize)> = Vec::new();
+    for &root in mesh.aabb_roots {
+        stack.push((0.0, root as usize));
+    }
+    while let Some((entry, idx)) = stack.pop() {
+        if entry > limit + SWEEP_FRACTION_SLACK {
+            continue;
+        }
+        census.aabb_nodes_visited = census.aabb_nodes_visited.saturating_add(1);
+        let Some(node) = mesh.aabb_trees.get(idx) else {
+            continue;
+        };
+        if !node_overlaps_sweep(node.origin, node.half_size, cull_mins, cull_maxs) {
+            continue;
+        }
+        let entry = match sweep.entry(node.origin, node.half_size) {
+            Some(t) if t <= limit + SWEEP_FRACTION_SLACK => t,
+            _ => continue,
+        };
+        if node.child_count != 0 {
+            if node.u < 0 {
+                continue;
+            }
+            let first = node.u as usize;
+            for i in (0..node.child_count as usize).rev() {
+                stack.push((entry, first.saturating_add(i)));
+            }
+            continue;
+        }
+        if node.u < 0 {
+            continue;
+        }
+        let Some(part) = mesh.partitions.get(node.u as usize) else {
+            continue;
+        };
+        if part.first_tri < 0 {
+            continue;
+        }
+        match on_partition(part, census) {
+            None => return,
+            Some(fraction) => {
+                if fraction < limit {
+                    limit = fraction;
+                }
+            }
         }
     }
 }
@@ -387,6 +553,7 @@ fn test_tri(
     delta: [f32; 3],
     cull_mins: [f32; 3],
     cull_maxs: [f32; 3],
+    sweep: Option<&Sweep>,
     ti: usize,
 
     vert_base: usize,
@@ -412,6 +579,16 @@ fn test_tri(
     };
     if !tri_overlaps_aabb(v0, v1, v2, cull_mins, cull_maxs) {
         return;
+    }
+    if let Some(sweep) = sweep {
+        let lo: [f32; 3] = core::array::from_fn(|a| v0[a].min(v1[a]).min(v2[a]));
+        let hi: [f32; 3] = core::array::from_fn(|a| v0[a].max(v1[a]).max(v2[a]));
+        let mid = core::array::from_fn(|a| (lo[a] + hi[a]) * 0.5);
+        let half = core::array::from_fn(|a| (hi[a] - lo[a]) * 0.5);
+        match sweep.entry(mid, half) {
+            Some(t) if t <= best.fraction + SWEEP_FRACTION_SLACK => {}
+            _ => return,
+        }
     }
     let contents = if mesh.tri_content_flags.is_empty() {
         CONTENTS_SOLID
@@ -1246,4 +1423,191 @@ pub fn flatten_tri_material_index(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    /// A small deterministic generator (no dependency).
+    struct Lcg(u64);
+    impl Lcg {
+        fn f(&mut self) -> f32 {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((self.0 >> 40) as f32) / ((1u64 << 24) as f32)
+        }
+        fn range(&mut self, lo: f32, hi: f32) -> f32 {
+            lo + (hi - lo) * self.f()
+        }
+    }
+
+    /// A mesh of `n` random triangles (floors, walls, slopes and big ones),
+    /// eight to a partition, each partition in its own vertex segment, under
+    /// a four-way tree of their bounds.
+    fn soup(n: usize, seed: u64) -> ClipMeshTables {
+        let mut g = Lcg(seed);
+        let mut tris: Vec<[[f32; 3]; 3]> = Vec::new();
+        for i in 0..n {
+            let c = [g.range(-2000.0, 2000.0), g.range(-2000.0, 2000.0), g.range(-200.0, 400.0)];
+            let size = if i % 17 == 0 { 900.0 } else { g.range(8.0, 160.0) };
+            let t = core::array::from_fn(|_| [c[0] + g.range(-size, size), c[1] + g.range(-size, size), c[2] + g.range(-size, size) * 0.5]);
+            tris.push(t);
+        }
+        tris.sort_by(|a, b| (a[0][0] + a[0][1] * 0.001).total_cmp(&(b[0][0] + b[0][1] * 0.001)));
+        let mut m = ClipMeshTables::default();
+        let mut level: Vec<ClipAabbNode> = Vec::new();
+        let bounds = |pts: &mut dyn Iterator<Item = [f32; 3]>| {
+            let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+            for p in pts {
+                for k in 0..3 {
+                    lo[k] = lo[k].min(p[k]);
+                    hi[k] = hi[k].max(p[k]);
+                }
+            }
+            (lo, hi)
+        };
+        let node = |lo: [f32; 3], hi: [f32; 3], child_count: u16, u: i32| ClipAabbNode {
+            origin: core::array::from_fn(|k| (lo[k] + hi[k]) * 0.5),
+            half_size: core::array::from_fn(|k| (hi[k] - lo[k]) * 0.5),
+            material_index: 0,
+            child_count,
+            u,
+        };
+        for (pi, chunk) in tris.chunks(8).enumerate() {
+            let base = pi * VERTS_PER_SEGMENT;
+            m.verts.resize(base, [0.0; 3]);
+            let first_tri = m.tri_indices.len() / 3;
+            for t in chunk {
+                for p in t {
+                    m.tri_indices.push((m.verts.len() - base) as u16);
+                    m.verts.push(*p);
+                }
+            }
+            m.partitions.push(ClipPartition { tri_count: chunk.len() as u8, first_tri: first_tri as i32, first_vert_segment: pi as u16, border_count: 0, first_border: 0 });
+            let (lo, hi) = bounds(&mut chunk.iter().flat_map(|t| t.iter().copied()));
+            level.push(node(lo, hi, 0, pi as i32));
+        }
+        let mut levels = vec![level];
+        while levels.last().is_some_and(|l| l.len() > 1) {
+            let below = levels.last().unwrap();
+            let up: Vec<ClipAabbNode> = below
+                .chunks(4)
+                .enumerate()
+                .map(|(gi, group)| {
+                    let (lo, hi) = bounds(&mut group.iter().flat_map(|n| {
+                        [core::array::from_fn(|k| n.origin[k] - n.half_size[k]), core::array::from_fn(|k| n.origin[k] + n.half_size[k])]
+                    }));
+                    node(lo, hi, group.len() as u16, (gi * 4) as i32)
+                })
+                .collect();
+            levels.push(up);
+        }
+        let mut offsets = vec![0usize; levels.len()];
+        let mut at = 0usize;
+        for (d, l) in levels.iter().enumerate().rev() {
+            offsets[d] = at;
+            at += l.len();
+        }
+        for d in (0..levels.len()).rev() {
+            for n in &levels[d] {
+                let mut n = *n;
+                if n.child_count != 0 {
+                    n.u += offsets[d - 1] as i32;
+                }
+                m.aabb_trees.push(n);
+            }
+        }
+        m.aabb_roots = vec![0];
+        m
+    }
+
+    #[test]
+    fn a_box_falls_onto_a_flat_floor() {
+        let mut m = ClipMeshTables::default();
+        let mut tris = 0;
+        for x in -10..10 {
+            for y in -10..10 {
+                let (x0, y0) = (x as f32 * 64.0, y as f32 * 64.0);
+                let (x1, y1) = (x0 + 64.0, y0 + 64.0);
+                for t in [[[x0, y0, 0.0], [x1, y1, 0.0], [x1, y0, 0.0]], [[x0, y0, 0.0], [x0, y1, 0.0], [x1, y1, 0.0]]] {
+                    for p in t {
+                        m.tri_indices.push(m.verts.len() as u16);
+                        m.verts.push(p);
+                    }
+                    tris += 1;
+                }
+            }
+        }
+        let _ = tris;
+        let start = [10.0, 10.0, 168.0];
+        let end = [10.0, 10.0, -8152.0];
+        let ext = TraceExtents::new(start, end, [-15.0, -15.0, 0.0], [15.0, 15.0, 70.0], CONTENTS_SOLID);
+        // One leaf per triangle under a root.
+        let n = m.tri_indices.len() / 3;
+        let mut tables = ClipMeshTables { verts: m.verts.clone(), tri_indices: m.tri_indices.clone(), ..Default::default() };
+        tables.aabb_trees.push(ClipAabbNode { origin: [0.0; 3], half_size: [700.0, 700.0, 1.0], material_index: 0, child_count: n as u16, u: 1 });
+        for i in 0..n {
+            let v = |k: usize| tables.verts[tables.tri_indices[i * 3 + k] as usize];
+            let lo: [f32; 3] = core::array::from_fn(|a| v(0)[a].min(v(1)[a]).min(v(2)[a]));
+            let hi: [f32; 3] = core::array::from_fn(|a| v(0)[a].max(v(1)[a]).max(v(2)[a]));
+            tables.aabb_trees.push(ClipAabbNode {
+                origin: core::array::from_fn(|a| (lo[a] + hi[a]) * 0.5),
+                half_size: core::array::from_fn(|a| (hi[a] - lo[a]) * 0.5),
+                material_index: 0,
+                child_count: 0,
+                u: i as i32,
+            });
+            tables.partitions.push(ClipPartition { tri_count: 1, first_tri: i as i32, first_vert_segment: 0, border_count: 0, first_border: 0 });
+        }
+        tables.aabb_roots = vec![0];
+        let r = tables.as_ref();
+        let open = || Trace { fraction: 1.0, endpos: end, ..Trace::default() };
+        let (mut a, mut b) = (open(), open());
+        let (mut ca, mut cb) = (MeshWalkCensus::default(), MeshWalkCensus::default());
+        trace_mesh(&r, &ext, &mut a, &mut ca, true);
+        trace_mesh(&r, &ext, &mut b, &mut cb, false);
+        assert!(b.fraction < 1.0, "box walk: {b:?}");
+        assert_eq!(a.fraction, b.fraction, "line {a:?} {ca:?} box {b:?} {cb:?}");
+    }
+
+    #[test]
+    fn the_line_walk_finds_what_the_box_walk_finds() {
+        extern crate std;
+        let seed: u64 = std::env::var("SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(7);
+        let mut mesh = soup(3000, seed);
+        // A forest (as a map whose BSP leaves name several roots): the root's
+        // children, walked in their listed order.
+        let top = mesh.aabb_trees[0];
+        mesh.aabb_roots = (top.u..top.u + i32::from(top.child_count)).map(|i| i as u16).collect();
+        let r = mesh.as_ref();
+        let mut g = Lcg(seed ^ 99);
+        let (mut line_tris, mut box_tris, mut hits) = (0u64, 0u64, 0u32);
+        for i in 0..3000 {
+            let start = [g.range(-2200.0, 2200.0), g.range(-2200.0, 2200.0), g.range(-250.0, 450.0)];
+            let (end, mins, maxs) = match i % 4 {
+                // A long line (a bullet, a sight line).
+                0 | 1 => ([g.range(-2200.0, 2200.0), g.range(-2200.0, 2200.0), g.range(-250.0, 450.0)], [0.0; 3], [0.0; 3]),
+                // A player's box moving a step.
+                2 => ([start[0] + g.range(-40.0, 40.0), start[1] + g.range(-40.0, 40.0), start[2] + g.range(-30.0, 10.0)], [-15.0, -15.0, 0.0], [15.0, 15.0, 70.0]),
+                // A box falling, or not moving at all.
+                _ => ([start[0], start[1], start[2] - if i % 8 == 3 { 0.0 } else { 300.0 }], [-8.0, -8.0, -8.0], [8.0, 8.0, 8.0]),
+            };
+            let ext = TraceExtents::new(start, end, mins, maxs, CONTENTS_SOLID);
+            let open = || Trace { fraction: 1.0, endpos: end, ..Trace::default() };
+            let (mut a, mut b) = (open(), open());
+            let (mut ca, mut cb) = (MeshWalkCensus::default(), MeshWalkCensus::default());
+            trace_mesh(&r, &ext, &mut a, &mut ca, true);
+            trace_mesh(&r, &ext, &mut b, &mut cb, false);
+            line_tris += u64::from(ca.tris_tested);
+            box_tris += u64::from(cb.tris_tested);
+            hits += u32::from(b.fraction < 1.0);
+            assert_eq!(a.fraction, b.fraction, "trace {i}: fraction");
+            assert_eq!((a.startsolid, a.allsolid), (b.startsolid, b.allsolid), "trace {i}: solid");
+            assert_eq!(a.normal, b.normal, "trace {i}: normal (fraction {} startsolid {} ext {:?})", a.fraction, a.startsolid, (start, end, mins, maxs));
+            assert_eq!(a.endpos, b.endpos, "trace {i}: endpos");
+        }
+        assert!(hits > 500, "{hits} hits: the test should hit things");
+        assert!(line_tris * 2 < box_tris, "line walk tested {line_tris} triangles, box walk {box_tris}");
+    }
 }
