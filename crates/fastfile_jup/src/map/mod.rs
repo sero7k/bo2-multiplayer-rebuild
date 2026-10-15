@@ -6,11 +6,14 @@
 //!   `gfx_map_trzone` buffers).
 //! - [`tiles`]: the streamed world zones (`<map>_<x>_<y>_0_<lod>_tr`, the
 //!   swap zones) a big map keeps most of its world in.
+//! - [`materials`]: each surface's material, the materials' pictures and
+//!   their pixels from the install's packages.
 //! - [`ents`]: the entities (the install's entity text, else none) and the
 //!   spawn points a multiplayer match needs.
 
 pub mod ents;
 pub mod index;
+pub mod materials;
 pub mod tiles;
 pub mod world;
 
@@ -56,6 +59,9 @@ pub struct JupMap {
     pub entities: String,
     pub mins: [f32; 3],
     pub maxs: [f32; 3],
+    /// The materials the surfaces draw with, and their pictures.
+    pub materials: Vec<materials::MapMaterial>,
+    pub images: Vec<materials::MapImage>,
     /// What was read and what was missing, line by line.
     pub report: Vec<String>,
 }
@@ -112,6 +118,11 @@ impl JupMap {
             "surface list: {count} surfaces over {} world zone(s)",
             zones.len()
         ));
+        let found = materials::read(
+            &zone,
+            &recs.iter().map(|r| r.zone).collect::<Vec<_>>(),
+            &mut out.report,
+        );
         // The map's own world zone.
         if zones.contains(&0) {
             let buffers = world::find_buffers(z, name_hash(&src.name))
@@ -163,6 +174,10 @@ impl JupMap {
         if out.surfaces.is_empty() {
             return Err("no world surface read".into());
         }
+        for s in &mut out.surfaces {
+            s.material = found.surface_material.get(s.index).copied().flatten();
+        }
+        (out.materials, out.images) = (found.materials, found.images);
         let tris: usize = out.surfaces.iter().map(|s| s.tris.len()).sum();
         out.report.push(format!(
             "world: {} surfaces, {} vertices, {tris} triangles",

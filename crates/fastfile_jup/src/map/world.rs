@@ -47,6 +47,8 @@ pub struct WorldSurface {
     pub zone: u32,
     /// Its lightmap (510: none).
     pub lightmap: u32,
+    /// Its material (an index into the map's materials).
+    pub material: Option<usize>,
 }
 
 const SURFACE: usize = 0x80;
