@@ -940,6 +940,23 @@ fn prepare_streamed(
             sample_rate: pcm.rate(),
         }));
     }
+    // bo2mp: a Modern Warfare III (2023) clip names its package and row
+    // (an Opus stream).
+    if ns == AssetNamespace::Jup {
+        let pcm = asset_audio::read_jup_clip(dir, name).map_err(|e| {
+            diag::warn!(Audio, "audio: MW3 (2023) clip `{name}` in `{dir}`: {e}");
+            ClipError::Decode
+        })?;
+        let samples: Arc<[f32]> = pcm.samples.iter().map(|&s| f32::from(s) / 32768.0).collect();
+        if samples.is_empty() {
+            return Err(ClipError::Decode);
+        }
+        return Ok(Some(PreparedPcm {
+            samples,
+            channels: pcm.channels.max(1),
+            sample_rate: pcm.rate,
+        }));
+    }
     // bo2mp: an AW clip names its sound pak and range (FLAC, or raw PCM
     // read with its RIFF header).
     if ns == AssetNamespace::S1 {

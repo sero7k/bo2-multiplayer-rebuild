@@ -78,7 +78,7 @@ impl NamespaceTrees {
             AssetNamespace::T5 => self.t5.as_ref(),
             AssetNamespace::Iw5 => self.iw5.as_ref(),
             AssetNamespace::T6 => self.t6.as_ref(),
-            AssetNamespace::Iw6 | AssetNamespace::T4 | AssetNamespace::Iw3 | AssetNamespace::S1 | AssetNamespace::T7 => self.iw6.as_ref(),
+            AssetNamespace::Iw6 | AssetNamespace::T4 | AssetNamespace::Iw3 | AssetNamespace::S1 | AssetNamespace::T7 | AssetNamespace::Jup => self.iw6.as_ref(),
         }
     }
 
@@ -124,7 +124,7 @@ impl NamespaceTrees {
             AssetNamespace::T5 => &mut self.t5,
             AssetNamespace::Iw5 => &mut self.iw5,
             AssetNamespace::T6 => &mut self.t6,
-            AssetNamespace::Iw6 | AssetNamespace::T4 | AssetNamespace::Iw3 | AssetNamespace::S1 | AssetNamespace::T7 => &mut self.iw6,
+            AssetNamespace::Iw6 | AssetNamespace::T4 | AssetNamespace::Iw3 | AssetNamespace::S1 | AssetNamespace::T7 | AssetNamespace::Jup => &mut self.iw6,
         }
     }
 }
@@ -137,7 +137,7 @@ const fn zone_game_of(ns: AssetNamespace) -> ZoneGame {
         AssetNamespace::T6 => ZoneGame::T6,
         // (Never asked: Ghosts, World at War and CoD4 are not in
         // `NAMESPACES`; their slots stay empty.)
-        AssetNamespace::Iw6 | AssetNamespace::T4 | AssetNamespace::Iw3 | AssetNamespace::S1 | AssetNamespace::T7 => ZoneGame::Iw5,
+        AssetNamespace::Iw6 | AssetNamespace::T4 | AssetNamespace::Iw3 | AssetNamespace::S1 | AssetNamespace::T7 | AssetNamespace::Jup => ZoneGame::Iw5,
     }
 }
 
@@ -195,7 +195,7 @@ impl NamespaceSoundIwd {
             AssetNamespace::Iw5 => self.iw5.as_ref(),
             AssetNamespace::T6 => self.t6.as_ref(),
             AssetNamespace::T4 => self.t4.as_ref(),
-            AssetNamespace::Iw6 | AssetNamespace::Iw3 | AssetNamespace::S1 | AssetNamespace::T7 => self.iw6.as_ref(),
+            AssetNamespace::Iw6 | AssetNamespace::Iw3 | AssetNamespace::S1 | AssetNamespace::T7 | AssetNamespace::Jup => self.iw6.as_ref(),
         }
     }
 
@@ -235,7 +235,7 @@ impl NamespaceSoundIwd {
             AssetNamespace::Iw5 => &mut self.iw5,
             AssetNamespace::T6 => &mut self.t6,
             AssetNamespace::T4 => &mut self.t4,
-            AssetNamespace::Iw6 | AssetNamespace::Iw3 | AssetNamespace::S1 | AssetNamespace::T7 => &mut self.iw6,
+            AssetNamespace::Iw6 | AssetNamespace::Iw3 | AssetNamespace::S1 | AssetNamespace::T7 | AssetNamespace::Jup => &mut self.iw6,
         }
     }
 }

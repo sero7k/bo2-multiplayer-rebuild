@@ -14,5 +14,9 @@ impl Plugin for AudioPlugin {
         crate::entity_events::register_entity_event_audio(app);
         crate::rumble::register(app);
         crate::ghosts_countdown::register(app);
+        crate::resurgence_warm::register(app);
+        // bo2mp: Resurgence plays Modern Warfare III's (2023) sounds once
+        // its install's sounds are read.
+        sim::set_jup_sound_lookup(Some(asset_audio::jup_has));
     }
 }

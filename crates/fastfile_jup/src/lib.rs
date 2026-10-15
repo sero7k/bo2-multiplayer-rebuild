@@ -1,6 +1,6 @@
 //! Call of Duty: Modern Warfare III (2023, internal "jup", `cod23`), PC.
-//! The container layer only: getting zone bytes and package entries out of
-//! the owner's install.
+//! Getting zone bytes, package entries and sounds out of the owner's
+//! install.
 //!
 //! - [`container`]: the `.ff` envelope (`IWffa100`), its Oodle blocks and
 //!   master blocks, down to the decompressed zone image.
@@ -9,15 +9,18 @@
 //! - [`oodle`]: the [`Decompressor`] trait both go through. The game's own
 //!   `oo2core_8_win64.dll` is loaded at runtime on Windows (`oodle_dll`, the
 //!   only module with `unsafe`); nothing of Oodle is shipped.
+//! - [`sound`] / [`sound_bank`]: the sndasset records and alias links of
+//!   a zone, their streams in the packages, Opus decoded to PCM.
 //!
-//! What is inside a zone (asset list, layouts) is not this crate's business
-//! yet. See `docs/JUP.md`.
+//! See `docs/JUP.md`.
 #![deny(unsafe_code)]
 
 pub mod container;
 pub mod oodle;
 #[cfg(windows)]
 pub mod oodle_dll;
+pub mod sound;
+pub mod sound_bank;
 pub mod xsub;
 
 pub use container::{

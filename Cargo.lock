@@ -313,6 +313,7 @@ dependencies = [
  "fastfile_iw4",
  "fastfile_iw5",
  "fastfile_iw6",
+ "fastfile_jup",
  "fastfile_s1",
  "fastfile_t5",
  "fastfile_t7",
@@ -2840,6 +2841,7 @@ name = "fastfile_jup"
 version = "0.1.0"
 dependencies = [
  "libloading",
+ "rusty-opus",
 ]
 
 [[package]]
@@ -5605,6 +5607,12 @@ name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+
+[[package]]
+name = "rusty-opus"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70e241f0b809c02cf3a868ab7ad0568ac35eadcc6ba3997663eb920d9f425f75"
 
 [[package]]
 name = "sab_t6"

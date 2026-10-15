@@ -57,6 +57,7 @@ mod match_voices;
 pub mod music;
 mod ui_sounds;
 mod ghosts_countdown; // bo2mp
+mod resurgence_warm; // bo2mp
 
 mod ads_sounds;
 mod weapon_lock;

@@ -316,6 +316,9 @@ fn apply_svc_local_sound(
         // announcer's and interface sounds' routes as the event path does.
         let Some((namespace, alias)) = adopted.sound_alias_name(cmd.index).map(|alias| {
             match alias.split_once(':').and_then(|(ns, name)| AssetNamespace::parse(ns).map(|ns| (ns, name))) {
+                // bo2mp: Modern Warfare III's (2023) aliases are kept by
+                // their hash (`jup:<name>` or `jup:#<hash>`).
+                Some((AssetNamespace::Jup, name)) => (AssetNamespace::Jup, asset_audio::jup_alias_key(name)),
                 Some((ns, name)) => {
                     let (ns, name) = announcer.routed(ns, name).unwrap_or((ns, name));
                     match bank
@@ -1454,7 +1457,15 @@ fn take_or_pending_clip(
                     layer,
                     class,
                     epoch,
-                    deadline: deadline_for(class),
+                    // bo2mp: a Modern Warfare III (2023) clip is read and
+                    // decoded from its package when first played (music
+                    // and island beds run a minute and more); Resurgence's
+                    // announcer, music and stings may start late, not never.
+                    deadline: if namespace == AssetNamespace::Jup {
+                        std::time::Instant::now() + std::time::Duration::from_secs(8)
+                    } else {
+                        deadline_for(class)
+                    },
                 });
                 ClipTake::Pending
             }

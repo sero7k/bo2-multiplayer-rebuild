@@ -17,6 +17,7 @@ fastfile_t5.workspace = true
 fastfile_iw6.workspace = true # bo2mp: Ghosts' gun sounds
 fastfile_s1.workspace = true # bo2mp: Advanced Warfare's gun sounds
 fastfile_t7.workspace = true # bo2mp: Black Ops III's gun sounds
+fastfile_jup.workspace = true # bo2mp: Modern Warfare III's (2023) sounds
 t4 = { path = "../t4" } # bo2mp: World at War's gun sounds
 diag.workspace = true
 bevy.workspace = true
