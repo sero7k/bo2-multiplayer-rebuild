@@ -69,6 +69,10 @@ pub struct Look {
     pub specular: Option<ImageLevels>,
     /// What was used, for the report: tinted, metal, gloss map, ao, detail.
     pub used: [bool; 5],
+    /// A reveal decal made with its raw reveal map in the colour map's
+    /// alpha (`T7Map::look_raw_reveal`): its `alphaRevealSoftEdge` and
+    /// `alphaRevealRamp`, for the draw to cover by the vertex alpha.
+    pub reveal: Option<[f32; 2]>,
 }
 
 /// RGBA8 pixels.
@@ -209,17 +213,29 @@ impl T7Map {
     /// and the caller draws what it drew before); the normal and specular
     /// maps when the material is lit.
     pub fn look(&self, m: &MapMaterial, max_dim: u32, spec_max: u32, cover: Cover) -> Result<Look, String> {
+        self.look_opts(m, max_dim, spec_max, cover, false)
+    }
+
+    /// `look`, but a reveal decal keeps its raw reveal map in its colour
+    /// map's alpha (`Look::reveal` set): Black Ops III's decal programs
+    /// cover by it against a threshold the vertex alpha sets, which a draw
+    /// that reads both can follow.
+    pub fn look_raw_reveal(&self, m: &MapMaterial, max_dim: u32, spec_max: u32, cover: Cover) -> Result<Look, String> {
+        self.look_opts(m, max_dim, spec_max, cover, true)
+    }
+
+    fn look_opts(&self, m: &MapMaterial, max_dim: u32, spec_max: u32, cover: Cover, raw_reveal: bool) -> Result<Look, String> {
         if m.texture("mixMap").is_some() && m.constant::<2>("detailScale1").is_some() {
             return self.micro_tile_blend(m, max_dim, spec_max);
         }
         if m.technique_set.starts_with("mc/glass_nocolor") || m.technique_set.starts_with("wc/glass_nocolor") {
             return self.clear_glass(m, max_dim, spec_max);
         }
-        self.look_inner(m, max_dim, spec_max, cover)
+        self.look_inner(m, max_dim, spec_max, cover, raw_reveal)
     }
 
     /// `look` for a plain lit material.
-    fn look_inner(&self, m: &MapMaterial, max_dim: u32, spec_max: u32, cover: Cover) -> Result<Look, String> {
+    fn look_inner(&self, m: &MapMaterial, max_dim: u32, spec_max: u32, cover: Cover, raw_reveal: bool) -> Result<Look, String> {
         let mut out = Look::default();
         let binds = |s: &str| m.bound.iter().any(|b| b == s);
         let known = !m.bound.is_empty();
@@ -349,6 +365,10 @@ impl T7Map {
             };
             let reveal_scale = m.constant::<2>("revealScale").filter(|s| s.iter().all(|v| *v > 0.0)).unwrap_or([1.0; 2]);
             let soft = m.constant::<1>("alphaRevealSoftEdge").map_or(0.1, |v| v[0]).clamp(0.02, 1.0);
+            let ramp = m.constant::<1>("alphaRevealRamp").map_or(0.5, |v| v[0]).clamp(0.0, 1.0);
+            if raw_reveal && reveal.is_some() {
+                out.reveal = Some([soft, ramp]);
+            }
             for y in 0..h {
                 for x in 0..w {
                     let o = ((y * w + x) * 4) as usize;
@@ -363,7 +383,7 @@ impl T7Map {
                         rgba[o + 3] = 255;
                     } else if let Some(r) = &reveal {
                         let (u, v) = ((x as f32 + 0.5) / w as f32 * reveal_scale[0], (y as f32 + 0.5) / h as f32 * reveal_scale[1]);
-                        let a = ((r.sample(u, v, 0) - 0.5 + soft) / (2.0 * soft)).clamp(0.0, 1.0);
+                        let a = if raw_reveal { r.sample(u, v, 0) } else { ((r.sample(u, v, 0) - 0.5 + soft) / (2.0 * soft)).clamp(0.0, 1.0) };
                         rgba[o + 3] = (a * 255.0).round() as u8;
                     }
                     any_alpha |= rgba[o + 3] < 250;
@@ -386,7 +406,7 @@ impl T7Map {
     /// through, rough or dirty glass less so. Made here as a colour map with
     /// that coverage in alpha, and the specular map (glass reflects 0.04).
     fn clear_glass(&self, m: &MapMaterial, max_dim: u32, spec_max: u32) -> Result<Look, String> {
-        let mut out = self.look_inner(m, max_dim, spec_max, Cover::Alpha)?;
+        let mut out = self.look_inner(m, max_dim, spec_max, Cover::Alpha, false)?;
         let tint = m.constant::<3>("colorTint").unwrap_or([1.0; 3]);
         let a0 = m.constant::<1>("tintAmount").map_or(0.0, |v| v[0]) * 0.92 + 0.08;
         let range = m.constant::<2>("glossRange").unwrap_or([6.0, 17.0]);
