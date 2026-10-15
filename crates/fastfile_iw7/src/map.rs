@@ -1285,13 +1285,18 @@ fn read_scriptables(map: &Walked, image: &[u8]) -> Vec<ScriptableInstance> {
 /// boards are placed on their spots): not drawn as props.
 const SCRIPTABLES_REPLACED: &[&str] = &["pap_machine", "magicwheel", "magic_wheel", "perk_machine", "power_switch", "wood_board", "zmb_core_wood"];
 
+/// Scriptables not drawn, by their def's exact name: Spaceland's entrance
+/// gate, which its scripts open as the match starts (drawn as it stands in
+/// the zone, it closed the arch).
+const SCRIPTABLES_SCRIPTED: &[&str] = &["zmb_main_entrance_gate", "zmb_main_entrance_gate_light_only"];
+
 /// The model a scriptable is drawn as (a prop, as it stands when the map
 /// is running): its own, else its def's lit one (`*_on`, `*_animated`, a
 /// neon colour) before an unlit one (`*_off`); `None` for one Black Ops
 /// II's kit replaces or one with no model.
 pub fn scriptable_prop_model(sc: &ScriptableInstance) -> Option<&str> {
     let replaced = |n: &str| SCRIPTABLES_REPLACED.iter().any(|w| n.contains(w));
-    if replaced(&sc.def) {
+    if replaced(&sc.def) || SCRIPTABLES_SCRIPTED.contains(&sc.def.as_str()) {
         return None;
     }
     if !sc.model.is_empty() && !sc.model.starts_with("<ref") {
