@@ -76,3 +76,38 @@ that have parts (2,497,482 rows, all equal to the part's own row); the 8
 `*_cdn.xpak` (kind 4) name no installed parts. `xpak_cache/cache_N_2.xpak`
 (flavor 1, kind 1) index `cache_N_2.xpakdata` (entries start `1D F0`); not
 read yet.
+
+## Maps (`fastfile_jup::map`, `assets::lane::jup_map`)
+
+Played: Rebirth Island (`mp_jup_escape5`, Resurgence) and Tokyo
+(`mp_jup_elevated`); the rest of the install's `mp_jup_*` maps are left out
+(`asset_transport::JUP_MAPS`). Tokyo's zone is the one dressed as Japan
+(`jup_appliance_vending_machine_food_japan_01`, `jup_sign_arcade_japan_*`,
+`jup_sign_convenience_japan_*`, pachinko and ramen props: 198 `japan`
+names, no other map zone more than one). Start one with `map jup:<zone>`.
+
+- World: the `gfx_map`'s 128-byte surface records over `gfx_map_trzone`
+  vertex streams (`map/world.rs`). Each record names its world zone: 0 the
+  map zone's own, k the k-th `<map>_*_0_tr` zone in name order (Rebirth: 24
+  grid tiles `_<x>_<y>_0_0_tr` and 11 swap zones; checked by every zone's
+  packed triangle bytes). Swap zones' other states (`_swap_dest_`,
+  `_swap_t_`) are left out. Triangle tables run in the records' packed order
+  but for a few surfaces placed later: matched by size, read in table order.
+  Rebirth: 8297 surfaces, 1.40 M triangles, read in about 9 s.
+- Materials (`map/materials.rs`): the `gfx_map`'s material table (back-
+  pointers to asset-list entries, all materials) and a 40-byte record per
+  surface (+0 surface record, +4 table entry, +0x0e world zone). Material
+  headers (0x78 bytes; +0x1b picture count, +0x30 the pictures) are found by
+  shape as the run of exactly the zone's material count (Rebirth: 5841);
+  pictures are asset-list entries of the image run. Format 0x25 (BC1) is
+  the colour maps' form; 0x2a (BC1) holds masks and terrain blend maps, 0x2f
+  BC5, 0x30 BC7. Pixels: the largest streamed group within 1024 px from the
+  zone `.xpak` indexes (levels placed from the top: BC1 streams to 2x2).
+  Terrain (virtual textures) and materials whose pictures are shared tables
+  draw without a picture.
+- Collision: the drawn world inside the play area (not sea sheets wider
+  than 16384 units, not the far backdrop tiles); the zone's `col_map` is not
+  read. Spawns: made over the walkable floor of the play area (no path
+  nodes or entity text for these two maps).
+- Not read yet: placed static models, the sky, lightmaps, `col_map`,
+  `map_ents`.
