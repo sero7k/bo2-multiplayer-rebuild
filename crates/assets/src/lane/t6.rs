@@ -1524,6 +1524,9 @@ impl ZoneLane for T6Lane {
                         })
                         .filter_map(|e| e.vec3("origin"))
                         .collect();
+                    // (A few, to place cameras by.)
+                    let some: Vec<String> = spawn_points.iter().step_by((spawn_points.len() / 6).max(1)).take(6).map(|p| format!("{:.0} {:.0} {:.0}", p[0], p[1], p[2])).collect();
+                    report.push(format!("bo3 look: {} spawn points, some at {}", spawn_points.len(), some.join(", ")));
                     super::bo3_look::apply(
                         &mut draw,
                         &materials,
