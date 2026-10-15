@@ -779,12 +779,20 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
         let wfres = saturate(wc0.z + wc0.w * pow(1.0 - wndotv, max(wc0.y, 0.5)));
         let wvis = page2.a * sun_shadow_at(in.world_position);
         let wsun = t6.sun_color.rgb * wvis;
-        let wlg = page0.rgb + page1.rgb * f + wsun * saturate(dot(wn, t6.sun_dir_exposure.xyz));
+        // (The games light water by the sun and its reflection, not a
+        // lightmap: where its baked light is dark it keeps a third of the
+        // sun's colour, so a gutter is never a black trench.)
+        let wlg = max(
+            page0.rgb + page1.rgb * f + wsun * saturate(dot(wn, t6.sun_dir_exposure.xyz)),
+            t6.sun_color.rgb * 0.35,
+        );
         let wr = wv - 2.0 * dot(wv, wn) * wn;
         let we = textureSampleLevel(probe_cubes, probe_sampler, wr, i32(in.probe), 0.0);
         // (The map's own probes are gamma values, their alpha folded in; a
-        // Black Ops II model map's are linear rgb / a.)
-        let wenv = select(sqrt(max(we.rgb / (we.a + 0.000001), vec3(0.0))), we.rgb, t6.sun_color.a > 3.5);
+        // Black Ops II model map's are linear rgb / a. A black one, the
+        // compiler's stand-in, reflects the light here instead.)
+        let wprobe = select(sqrt(max(we.rgb / (we.a + 0.000001), vec3(0.0))), we.rgb, t6.sun_color.a > 3.5);
+        let wenv = select(wprobe, wlg * 0.6, dot(wprobe, vec3(0.333)) < 0.02);
         let wbody = mix(wca, wcb, wndotv);
         var wg = mix(wbody.rgb * wlg, wenv, wfres);
         let wglint = exp2(log2(max(saturate(dot(wr, t6.sun_dir_exposure.xyz)), 0.000001)) * max(wc0.x, 1.0));
