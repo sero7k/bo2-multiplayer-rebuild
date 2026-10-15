@@ -308,6 +308,24 @@ pub fn packets(stream: &[u8], table_len: usize) -> impl Iterator<Item = &[u8]> {
     })
 }
 
+/// A loaded sound's package entry (key at 0x10 of its sndasset, no stream
+/// length) starts with a 32-byte header before its seek table: u64 0,
+/// u64 -4, u64 table + data length, u64 0; the entry is padded after the
+/// data. The stream (seek table + packets) without that header; a streamed
+/// sound's entry is returned as it is.
+pub fn loaded_stream(entry: &[u8], table_len: u32) -> &[u8] {
+    if entry.len() >= 32
+        && u64_at(entry, 0) == 0
+        && u64_at(entry, 8) == u64::MAX - 3
+        && u64_at(entry, 16) > u64::from(table_len)
+        && entry.len() as u64 >= 32 + u64_at(entry, 16)
+    {
+        &entry[32..]
+    } else {
+        entry
+    }
+}
+
 /// The packets of the preload alone (packet data without a seek table).
 pub fn preload_packets(preload: &[u8]) -> impl Iterator<Item = &[u8]> {
     packets(preload, 0)
@@ -358,6 +376,22 @@ mod tests {
         assert_eq!((s[1].key, s[1].frames, s[1].channels), (0x2222, 960, 1));
         let pkts: Vec<&[u8]> = preload_packets(&z[s[0].preload.clone().unwrap()]).collect();
         assert_eq!(pkts, vec![&[0xf8u8, 0xff, 0xfe][..]]);
+    }
+
+    #[test]
+    fn a_loaded_entry_loses_its_header() {
+        // header, a 4-byte seek table, one packet, padding
+        let mut e = vec![0u8; 8];
+        e.extend((u64::MAX - 3).to_le_bytes());
+        e.extend(9u64.to_le_bytes());
+        e.extend(0u64.to_le_bytes());
+        e.extend([0, 0, 0, 0, 3, 0, 0xf8, 0xff, 0xfe, 0, 0, 0]);
+        let s = loaded_stream(&e, 4);
+        assert_eq!(s.len(), 12);
+        let p: Vec<&[u8]> = packets(s, 4).collect();
+        assert_eq!(p, vec![&[0xf8u8, 0xff, 0xfe][..]]);
+        // a streamed entry stays as it is
+        assert_eq!(loaded_stream(&e[32..], 4).len(), 12);
     }
 
     #[test]

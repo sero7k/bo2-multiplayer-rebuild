@@ -304,6 +304,12 @@ impl SoundBank {
         f.seek(SeekFrom::Start(row.entry.offset))?;
         f.read_exact(&mut blob)?;
         let bytes = xsub::decode_entry(&row.entry, &blob, oodle)?;
+        let body = sound::loaded_stream(&bytes, sound.asset.table_len);
+        let bytes = if body.len() == bytes.len() {
+            bytes
+        } else {
+            body.to_vec()
+        };
         Ok((bytes, sound.asset.table_len as usize))
     }
 

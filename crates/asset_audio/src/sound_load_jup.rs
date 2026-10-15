@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use fastfile_jup::oodle::{self, Decompressor};
-use fastfile_jup::sound::{FORMAT_OPUS, alias_hash, packets};
+use fastfile_jup::sound::{FORMAT_OPUS, alias_hash, loaded_stream, packets};
 use fastfile_jup::sound_bank::{Pcm, SoundBank, decode_opus};
 use fastfile_jup::xsub::{XSubEntry, decode_entry};
 
@@ -307,7 +307,9 @@ pub fn read_jup_clip(package: &str, clip: &str) -> Result<Pcm, String> {
         u8::try_from(channels).map_err(|_| bad("channels"))?,
         u32::try_from(frames).map_err(|_| bad("frames"))?,
     );
-    decode_opus(packets(&bytes, table as usize), rate, channels, frames).map_err(|e| e.to_string())
+    // (A loaded sound's entry has a header before its seek table.)
+    let stream = loaded_stream(&bytes, u32::try_from(table).map_err(|_| bad("table"))?);
+    decode_opus(packets(stream, table as usize), rate, channels, frames).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
