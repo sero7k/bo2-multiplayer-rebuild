@@ -240,10 +240,16 @@ impl T7Map {
         let binds = |s: &str| m.bound.iter().any(|b| b == s);
         let known = !m.bound.is_empty();
         let c3 = |name: &str, d: [f32; 3]| m.constant::<3>(name).unwrap_or(d);
-        let gloss_range = m.constant::<2>("glossRange");
-        let tint = c3("colorTint", [1.0; 3]);
-        let spec_tint = c3("specColorTint", [0.04; 3]);
+        // (A buffer read as zeros where Black Ops III draws the material
+        // lit, its tint and normal height zero: mp_redwood's
+        // `fxanim_vegetation` ferns. Zero there is not the material's.)
+        let zeros = c3("colorTint", [1.0; 3]).iter().all(|v| v.abs() < 1e-6)
+            && m.constant::<2>("glossRange").is_none_or(|g| g.iter().all(|v| v.abs() < 1e-6));
+        let gloss_range = m.constant::<2>("glossRange").filter(|_| !zeros);
+        let tint = if zeros { [1.0; 3] } else { c3("colorTint", [1.0; 3]) };
+        let spec_tint = if zeros { [0.04; 3] } else { c3("specColorTint", [0.04; 3]) };
         let normal_height = m.constant::<1>("baseNormalHeight").map_or(1.0, |v| v[0]);
+        let normal_height = if zeros && normal_height.abs() < 1e-6 { 1.0 } else { normal_height };
 
         let colour = match self.slot(m, "colorMap", max_dim)? {
             Slot::Image(c) => Some(c),
