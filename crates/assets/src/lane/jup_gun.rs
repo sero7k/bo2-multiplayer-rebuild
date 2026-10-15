@@ -885,6 +885,51 @@ pub(crate) fn jup_check() -> Vec<String> {
     out
 }
 
+/// A gun's own sounds (`asset_audio::JUP_GUN_SOUNDS`) in its donor's
+/// slots, and its donor's notetrack sounds replaced, as `jup:#<hash>`.
+fn guest_sounds(
+    gun: &str,
+) -> (
+    Vec<(asset_game::WeaponSoundSlot, String)>,
+    Vec<(String, String)>,
+) {
+    use asset_game::WeaponSoundSlot as S;
+    let Some(s) = asset_audio::JUP_GUN_SOUNDS.iter().find(|s| s.gun == gun) else {
+        return Default::default();
+    };
+    let key = |a: &str| {
+        if a.is_empty() {
+            String::new()
+        } else {
+            format!("jup:{}", asset_audio::jup_alias_key(a))
+        }
+    };
+    let slots = [
+        (S::Fire, s.fire),
+        (S::FirePlayer, s.fire_player),
+        // (The donor's last-shot sounds would play otherwise.)
+        (S::FireLast, s.fire),
+        (S::FireLastPlayer, s.fire_last_player),
+        (S::RaisePlayer, s.raise_player),
+        (S::FirstRaisePlayer, s.first_raise_player),
+        (S::PutawayPlayer, s.putaway_player),
+        (S::Pickup, s.pickup),
+        (S::PickupPlayer, s.pickup_player),
+        (S::AdsRaisePlayer, s.ads_up),
+        (S::AdsLowerPlayer, s.ads_down),
+    ]
+    .into_iter()
+    .filter(|(_, a)| !a.is_empty())
+    .map(|(slot, a)| (slot, key(a)))
+    .collect();
+    let notes = s
+        .notes
+        .iter()
+        .map(|(word, a)| ((*word).to_owned(), key(a)))
+        .collect();
+    (slots, notes)
+}
+
 /// bo2mp: the Modern Warfare III guest guns as weapons: each a copy of its
 /// Black Ops II donor (animations, arms, effects, sounds, damage) with its
 /// own models, name and handling. Before the guest names are given and
@@ -900,6 +945,7 @@ pub(crate) fn jup_guest_rows(weapons: &mut asset_game::WeaponBuild, report: &mut
             report.push(format!("jup guest guns: {}: no {} to copy", g.gun, g.donor));
             continue;
         };
+        let (sounds, notetrack_remap) = guest_sounds(g.gun);
         let id = weapons.add_guest_copy(
             donor,
             asset_game::GuestCopy {
@@ -912,6 +958,8 @@ pub(crate) fn jup_guest_rows(weapons: &mut asset_game::WeaponBuild, report: &mut
                 fire_time_ms: g.fire_time_ms,
                 clip_size: g.clip_size,
                 max_ammo: g.max_ammo,
+                sounds,
+                notetrack_remap,
             },
         );
         report.push(format!(

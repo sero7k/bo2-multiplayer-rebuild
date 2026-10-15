@@ -952,6 +952,12 @@ pub struct WeaponSoundAliases {
 
     pub notetrack_rumble_map: Vec<(String, String)>,
 
+    /// bo2mp: a guest gun copied from another gun plays its own game's
+    /// sounds on the donor's animation notetracks: the first (word, alias)
+    /// pair whose word the note's alias holds replaces its sound (an empty
+    /// word: any note; an empty alias: none); other notes keep theirs.
+    pub notetrack_remap: Vec<(String, String)>,
+
     pub fire_player_akimbo: Option<String>,
 
     pub fire_loop: Option<String>,
@@ -997,6 +1003,13 @@ macro_rules! weapon_sound_slots {
             fn hint(&self, slot: WeaponSoundSlot) -> Option<&str> {
                 match slot {
                     $(WeaponSoundSlot::$variant => self.$field.as_deref()),+
+                }
+            }
+
+            /// bo2mp: a slot's alias, to set.
+            pub fn slot_mut(&mut self, slot: WeaponSoundSlot) -> &mut Option<String> {
+                match slot {
+                    $(WeaponSoundSlot::$variant => &mut self.$field),+
                 }
             }
         }
@@ -1737,6 +1750,7 @@ impl WeaponCatalog {
                     geometry.notetrack_sound_keys,
                     geometry.notetrack_sound_values,
                 ),
+                notetrack_remap: Vec::new(),
                 notetrack_rumble_map: read_script_string_map(
                     stream,
                     &self.strings,
@@ -2772,12 +2786,22 @@ fn world_model_edge(
     }
 }
 
+/// bo2mp: an alias as a weapon names it: `<game>:<alias>`
+/// (`jup:#5aacf21decedf094`) is in that game's namespace, any other in the
+/// weapon's own (`ns`).
+pub fn alias_namespace(ns: crate::AssetNamespace, alias: &str) -> (crate::AssetNamespace, &str) {
+    alias
+        .split_once(':')
+        .and_then(|(game, rest)| Some((crate::AssetNamespace::parse(game)?, rest)))
+        .unwrap_or((ns, alias))
+}
+
 fn sound_alias_in_bank<'a>(
     hint: Option<&str>,
     ns: crate::AssetNamespace,
     catalog: &'a crate::SoundCatalog,
 ) -> Option<(crate::AssetNamespace, &'a str)> {
-    let name = hint.filter(|name| !name.is_empty())?;
+    let (ns, name) = alias_namespace(ns, hint.filter(|name| !name.is_empty())?);
     let order = catalog.index_in(ns, name)?;
     Some((catalog.namespace_of_alias(order), catalog.name_at(order)?))
 }
@@ -4123,6 +4147,7 @@ fn leftover_iw5_sounds(
             stream.layout(sz::WEAPON_DEF_NOTE_SOUND_VALUES_OFF, 56),
             sz::WEAPON_DEF_NOTE_SOUND_MAP_COUNT,
         ),
+        notetrack_remap: Vec::new(),
         notetrack_rumble_map: leftover_iw5_script_string_map(
             stream,
             strings,
@@ -5400,6 +5425,10 @@ pub struct GuestCopy {
     pub fire_time_ms: i32,
     pub clip_size: i32,
     pub max_ammo: i32,
+    /// Its own game's sounds in the donor's slots (`<game>:<alias>`).
+    pub sounds: Vec<(WeaponSoundSlot, String)>,
+    /// See [`WeaponSoundAliases::notetrack_remap`].
+    pub notetrack_remap: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -5490,6 +5519,10 @@ impl WeaponBuild {
         row.facts.clip_size = copy.clip_size;
         row.facts.max_ammo = copy.max_ammo;
         row.facts.start_ammo = copy.max_ammo;
+        for (slot, alias) in copy.sounds {
+            *row.sounds.slot_mut(slot) = Some(alias);
+        }
+        row.sounds.notetrack_remap = copy.notetrack_remap;
         let slots = self.combat_slots.get(base as usize).copied().unwrap_or_default();
         self.combat_slots.resize(self.registry.rows.len(), CombatFxSlots::default());
         self.combat_slots.push(slots);
@@ -5863,6 +5896,22 @@ impl WeaponBuild {
                             action.sound_alias = sound.map(str::to_owned);
                             action.rumble_alias = rumble.map(str::to_owned);
                         }
+                    }
+                }
+            }
+            if !row.sounds.notetrack_remap.is_empty() {
+                for action in actions.values_mut() {
+                    let Some(alias) = action.sound_alias.as_deref() else {
+                        continue;
+                    };
+                    let alias = alias.to_ascii_lowercase();
+                    if let Some((_, to)) = row
+                        .sounds
+                        .notetrack_remap
+                        .iter()
+                        .find(|(word, _)| word.is_empty() || alias.contains(word.as_str()))
+                    {
+                        action.sound_alias = (!to.is_empty()).then(|| to.clone());
                     }
                 }
             }
