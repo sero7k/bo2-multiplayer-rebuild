@@ -247,7 +247,10 @@ pub fn build_iw3_world_draw(
         t5_tree_scatter_amount: None,
         t5_exposure_volume_count: 0,
         t6_vision_saturation: None,
-        t6_sky_parms: None,
+        // bo2mp: the lane's sky parameters (CoD4 / World at War skies take
+        // none of the fog: without them the sky pass took BO2's default, the
+        // whole fog, and drew every sky as flat fog colour).
+        t6_sky_parms: lighting.map(|l| l.sky_parms),
         t6_vision_grade: None,
         t6_script_grades: Vec::new(),
         t6_lights: Vec::new(),
