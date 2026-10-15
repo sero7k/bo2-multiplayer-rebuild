@@ -60,6 +60,11 @@ pub const KEY_NAMES: &[(u64, &str)] = &[
     (0xfc00_43e9_5242_d5cb, "visionset"),
     (0xd3d6_e303_d72b_e8d3, "dmg"),
     (0x5319_e500_f2f2_4095, "screenshot"),
+    // worldspawn's sun, by their values on Rebirth Island ("0.9882 0.9961
+    // 1", "-37.8088 -30.9786 0", "72.4139").
+    (0xac01_d72a_7986_f738, "suncolor"),
+    (0xfeb0_1f62_2fdc_982a, "sundirection"),
+    (0x06aa_653c_8f1f_9e0f, "sunlight"),
 ];
 
 /// An entity: its keys and values, in the zone's order.
