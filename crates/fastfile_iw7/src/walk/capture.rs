@@ -395,6 +395,10 @@ pub struct GfxWorldRec {
     /// IW7: per placed model, its baked vertex lighting
     /// (`GfxStaticModelVertexLighting`, 20 bytes a vertex) when inline.
     pub smodel_lighting: Vec<Option<Span>>,
+    /// IW7: the light grid's probes (64 bytes each) and their positions
+    /// (three floats each).
+    pub light_probes: Option<Span>,
+    pub light_probe_positions: Option<Span>,
     /// IW7: the lightmap reindex table (`GfxWorldLightmapReindexDataElement`:
     /// index, x, y, width, height) and the packed pages' sizes.
     pub lightmap_reindex: Option<Span>,

@@ -305,6 +305,7 @@ pub fn build_iw5_world_draw(
             sun_effects: None,
             t5_sun_parse_exposure: None,
             iw3_lightmaps: false,
+            linear_lightmaps: false,
             t5_sky_dynamic_intensity: None,
             t5_sun_light: None,
             t5_tree_scatter_intensity: None,

@@ -15,10 +15,15 @@
 //! colour), and what the map names but the common zones hold
 //! (`fastfile_iw7::shared`).
 //!
-//! Light: the lightmaps (`fastfile_iw7::light`, exposed per map), the
-//! ComWorld's sun, the vision's fog; each placed model the floor's light
-//! under and around it; players and other moving things a light grid made
-//! from the lightmaps (`light_grid`). Brush models (doors, signs) are drawn
+//! Light as IW7's lit shaders add it, linear (`fastfile_iw7::light`): the
+//! lightmaps' base and directional light, the ComWorld's sun by N.L and the
+//! baked sun shadow (a signed distance), all in the draw's units (the HDR
+//! light times the vision's exposure, `Vision::draw_scale`); the frame's
+//! final colour IW7's tone map and colour table (`light::grade_lut`, the
+//! final pass's grade); the vision's fog and sky brightness in the same
+//! units. Each placed model takes the floor's light under and around it;
+//! players and other moving things a light grid made from the lightmaps
+//! (`light_grid`). Brush models (doors, signs) are drawn
 //! where their entities place them as the map starts
 //! (`Iw7Map::place_brush_models`).
 //!
@@ -46,9 +51,15 @@ use super::LoadedWorld;
 use crate::lane_capability::PreparedCapability;
 use crate::session_load::PreparedWorld;
 
-/// The largest level kept of a surface's or model's colour map
-/// (`BO2MP_IW7_MAP_TEXTURE=<size>` changes it).
-const TEXTURE_MAX: u32 = 512;
+/// The largest level kept of a surface's or model's pictures: the
+/// largest of these whose drawn pictures (colour, normal and layer maps,
+/// block compressed with their mips) fit `TEXTURE_BUDGET_MB`
+/// (`BO2MP_IW7_MAP_TEXTURE=<size>` sets one). IW7's world pictures stream
+/// up to 2048 (a few 4096).
+const TEXTURE_CAPS: [u32; 4] = [4096, 2048, 1024, 512];
+
+/// The video memory the map's pictures may take (MB).
+const TEXTURE_BUDGET_MB: usize = 2048;
 
 /// The world light table's row the placed models' sun is in (a primary
 /// light of type 1: the shader's sun, its shadow included).
@@ -58,8 +69,8 @@ const SUN_LIGHT_ROW: usize = 1;
 const COLLIDE_MIN_RADIUS: f32 = 24.0;
 
 /// The largest specular map kept (half the colour map's at most: the
-/// specular colour and gloss vary slowly).
-const SPECULAR_MAX: u32 = 256;
+/// specular colour and gloss vary more slowly than the colour).
+const SPECULAR_MAX: u32 = 1024;
 
 /// Whether materials get their normal and specular maps
 /// (`BO2MP_IW7_SHINE=0` draws colour maps only).
@@ -67,12 +78,153 @@ fn shine_on() -> bool {
     std::env::var("BO2MP_IW7_SHINE").map_or(true, |v| v.trim() != "0")
 }
 
-fn texture_max() -> u32 {
-    std::env::var("BO2MP_IW7_MAP_TEXTURE")
-        .ok()
-        .and_then(|v| v.trim().parse().ok())
-        .filter(|&v: &u32| (64..=4096).contains(&v))
-        .unwrap_or(TEXTURE_MAX)
+fn texture_max_override() -> Option<u32> {
+    std::env::var("BO2MP_IW7_MAP_TEXTURE").ok().and_then(|v| v.trim().parse().ok()).filter(|&v: &u32| (64..=4096).contains(&v))
+}
+
+/// The materials a map draws: its world surfaces' (not hidden) and its
+/// placed models'.
+fn drawn_materials(map: &Iw7Map, hidden: &[bool]) -> Vec<usize> {
+    let mut used = std::collections::BTreeSet::new();
+    for (i, s) in map.surfaces.iter().enumerate() {
+        if let Some(m) = s.material.filter(|_| !hidden.get(i).copied().unwrap_or(false)) {
+            used.insert(m);
+        }
+    }
+    for sm in &map.static_models {
+        for s in &map.models[sm.model].surfaces {
+            used.extend(s.material);
+        }
+    }
+    used.into_iter().collect()
+}
+
+/// The largest picture size (`TEXTURE_CAPS`) whose drawn pictures fit the
+/// budget, and their size at it (MB).
+fn texture_cap(map: &Iw7Map, used: &[usize]) -> (u32, usize) {
+    let mut names = std::collections::BTreeSet::new();
+    for &m in used {
+        for slot in ["colorMap", "normalMap", "colorMap1", "colorMap2"] {
+            if let Some(n) = map.materials[m].texture(slot).filter(|n| !n.starts_with('$')) {
+                names.insert(n);
+            }
+        }
+    }
+    let mb_at = |cap: u32| -> usize {
+        let mut bytes = 0usize;
+        for n in &names {
+            let Some(r) = map.image_info(n) else { continue };
+            let top = (0..4).rev().find(|&k| r.streams[k].0 != 0).map_or((r.width, r.height), |k| (r.streams[k].0, r.streams[k].1));
+            let (mut w, mut h) = (u32::from(top.0), u32::from(top.1));
+            while w.max(h) > cap && w > 4 && h > 4 {
+                w /= 2;
+                h /= 2;
+            }
+            let levels = 32 - w.max(h).max(1).leading_zeros();
+            // (Re-encoded pictures, BC1/BC3/BC5, are no bigger than BC7.)
+            bytes += fastfile_iw7::texture::chain_size(r.format.max(70), w, h, levels).unwrap_or(0);
+        }
+        bytes >> 20
+    };
+    if let Some(cap) = texture_max_override() {
+        return (cap, mb_at(cap));
+    }
+    for cap in TEXTURE_CAPS {
+        let mb = mb_at(cap);
+        if mb <= TEXTURE_BUDGET_MB || cap == TEXTURE_CAPS[TEXTURE_CAPS.len() - 1] {
+            return (cap, mb);
+        }
+    }
+    (512, mb_at(512))
+}
+
+/// What the materials' pictures are made from, read and decoded ahead on
+/// every core (`prepare_pictures`): each lit material's shine
+/// (`Iw7Map::shine`), each colour map with its opacity
+/// (`Iw7Map::layer_rgba`, block compressed again), each picture's levels.
+#[derive(Default)]
+struct Prepared {
+    shine: HashMap<usize, Result<fastfile_iw7::shine::Shine, String>>,
+    /// Block compressed (`shine::compress_rgba`), else as RGBA8.
+    alpha: HashMap<(usize, usize), Result<Result<fastfile_iw7::texture::ImageLevels, fastfile_iw7::look::Rgba>, String>>,
+    images: HashMap<String, Result<fastfile_iw7::texture::ImageLevels, String>>,
+}
+
+/// Reads and decodes the pictures `Materials` will link, in parallel.
+fn prepare_pictures(map: &Iw7Map, used: &[usize], max: u32, shine_on: bool) -> Prepared {
+    enum Job {
+        Shine(usize, bool),
+        Alpha(usize, usize, bool),
+        Image(String),
+    }
+    let mut jobs = Vec::new();
+    let mut names = std::collections::BTreeSet::new();
+    for &m in used {
+        let mm = &map.materials[m];
+        let draw = iw7_draw(&mm.technique_set, mm.sort_key, false);
+        if hidden_kind(&mm.technique_set).is_some() {
+            continue;
+        }
+        if let Some(name) = mm.texture("colorMap") {
+            let has_alpha_map = mm.textures.iter().any(|t| t.0 == fastfile_iw7::look::ALPHA_MAP_HASH);
+            let wants_alpha = draw.alpha_test || matches!(draw.blend, T6Blend::Blend);
+            let lit = shine_on && !draw.unlit && matches!(draw.blend, T6Blend::Opaque);
+            if lit {
+                jobs.push(Job::Shine(m, !draw.alpha_test));
+            }
+            let tinted = fastfile_iw7::look::tint(mm, 0).is_some();
+            if (wants_alpha && (has_alpha_map || fastfile_iw7::look::colour_alpha_is_opacity(name))) || tinted {
+                jobs.push(Job::Alpha(m, 0, fastfile_iw7::look::colour_alpha_is_opacity(name)));
+            }
+            names.insert(name.to_owned());
+        }
+        if draw.layered {
+            for k in 0..2 {
+                if draw.layers[k] != 0
+                    && let Some(n) = mm.texture(&format!("colorMap{}", k + 1))
+                {
+                    jobs.push(Job::Alpha(m, k + 1, fastfile_iw7::look::colour_alpha_is_opacity(n)));
+                }
+            }
+        }
+    }
+    jobs.extend(names.into_iter().map(Job::Image));
+    // (Biggest first is unknown; the jobs are dealt round so each thread
+    // takes a share of every kind.)
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 16);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let out = std::sync::Mutex::new(Prepared::default());
+    std::thread::scope(|scope| {
+        for _ in 0..threads {
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(job) = jobs.get(i) else { break };
+                    match job {
+                        Job::Shine(m, colour) => {
+                            let r = map.shine(&map.materials[*m], max, SPECULAR_MAX.min(max / 2).max(64), *colour);
+                            if let Ok(mut o) = out.lock() {
+                                o.shine.insert(*m, r);
+                            }
+                        }
+                        Job::Alpha(m, layer, keep) => {
+                            let r = map.layer_rgba(&map.materials[*m], *layer, max, *keep).map(|rgba| fastfile_iw7::shine::compress_rgba(&rgba).ok_or(rgba));
+                            if let Ok(mut o) = out.lock() {
+                                o.alpha.insert((*m, *layer), r);
+                            }
+                        }
+                        Job::Image(n) => {
+                            let r = map.image(n, max);
+                            if let Ok(mut o) = out.lock() {
+                                o.images.insert(n.clone(), r);
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    });
+    out.into_inner().unwrap_or_default()
 }
 
 /// CoD4's packed unit vector (as `asset_model::unpack_unit_vec` reads it,
@@ -118,7 +270,7 @@ fn hidden_kind(technique_set: &str) -> Option<&'static str> {
 /// An IW7 technique set as Black Ops II's draw: its blend, alpha test,
 /// lighting and decal step by the words of its name
 /// (`fastfile_iw7::look`: `replace`, `atest`, `blend`, `blendadd`, `add`,
-/// `multiply`, `unlit`, `ndw`), drawn double-sided for models. A world
+/// `multiply`, `unlit`, `ndw`), drawn double-sided for models and cut-outs. A world
 /// material's layers (`r0c0.._b1c1..`, `m1c1`, `t1c1`, `b2c2`: two- and
 /// three-layer walls, streets and terrain) are BO2's, their weights in the
 /// vertex colour (`iw3_colour`); a model's are not drawn.
@@ -151,8 +303,12 @@ fn iw7_draw(technique_set: &str, sort_key: u8, model: bool) -> T6Draw {
     draw.unlit = look.unlit;
     // A decal (no depth write over the world) sits a step toward the eye.
     draw.polygon_offset = u8::from(look.decal);
-    if model {
+    // (Cut-out world surfaces, leaves, grates and fences, are cards IW7
+    // draws from both sides.)
+    if model || draw.alpha_test {
         draw.cull = T6Cull::None;
+    }
+    if model {
         if draw.blend == T6Blend::Sky {
             draw.blend = T6Blend::Opaque;
         }
@@ -186,6 +342,8 @@ struct Materials<'a> {
     /// many glow.
     glow_scale: f32,
     with_glow: usize,
+    /// Pictures read ahead (`prepare_pictures`).
+    prepared: Prepared,
 }
 
 impl Materials<'_> {
@@ -229,7 +387,11 @@ impl Materials<'_> {
             return *s;
         }
         let m = &self.map.materials[material];
-        let slots = match self.map.shine(m, self.max, SPECULAR_MAX.min(self.max), colour) {
+        let read = match self.prepared.shine.remove(&material) {
+            Some(r) => r,
+            None => self.map.shine(m, self.max, SPECULAR_MAX.min(self.max / 2).max(64), colour),
+        };
+        let slots = match read {
             Ok(sh) => {
                 let base = format!("iw7:{}#{}", m.name, self.max);
                 let c = sh.colour.and_then(|l| self.link_levels(format!("{base}#diffuse"), l, TS_COLOR_MAP));
@@ -255,7 +417,8 @@ impl Materials<'_> {
         if let Some(slot) = self.images.get(name) {
             return *slot;
         }
-        let slot = match self.map.image(name, self.max).and_then(|l| {
+        let read = self.prepared.images.remove(name).unwrap_or_else(|| self.map.image(name, self.max));
+        let slot = match read.and_then(|l| {
             let px = fastfile_iw6::image::ImagePixels {
                 width: l.width,
                 height: l.height,
@@ -310,7 +473,27 @@ impl Materials<'_> {
         // keeps its own alpha as its opacity, as the base's does.)
         let slot_name = if layer == 0 { "colorMap".to_owned() } else { format!("colorMap{layer}") };
         let keep = m.texture(&slot_name).is_some_and(fastfile_iw7::look::colour_alpha_is_opacity);
-        let slot = match self.map.layer_rgba(m, layer, self.max, keep) {
+        // Block compressed again (BC3, or BC1 when opaque), as the game's
+        // own are: full size in a quarter (BC3) or an eighth of RGBA8's.
+        let read = self
+            .prepared
+            .alpha
+            .remove(&(material, layer))
+            .unwrap_or_else(|| self.map.layer_rgba(m, layer, self.max, keep).map(|rgba| fastfile_iw7::shine::compress_rgba(&rgba).ok_or(rgba)));
+        let read = match read {
+            Ok(Ok(levels)) => {
+                let slot = self.link_levels(format!("iw7:{}#alpha{layer}#{}", m.name, self.max), levels, TS_COLOR_MAP);
+                if slot.is_some() {
+                    self.decoded += 1;
+                    self.with_alpha += 1;
+                }
+                self.alpha_images.insert((material, layer), slot);
+                return slot;
+            }
+            Ok(Err(rgba)) => Ok(rgba),
+            Err(e) => Err(e),
+        };
+        let slot = match read {
             Ok(rgba) => {
                 use bevy::asset::RenderAssetUsages;
                 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
@@ -592,12 +775,13 @@ fn nearest_probe(map: &Iw7Map, p: [f32; 3]) -> u8 {
         .map_or(0, |(i, _)| i as u8)
 }
 
-/// The map's sun as CoD4's (angles toward the sun, colour, gamma-space
-/// light): the ComWorld's sun (its primary light of type 1: HDR linear
-/// light, the brightest channel the light, the direction toward the sun),
-/// in the lightmap pages' exposure (`fastfile_iw7::light::sun_gamma`);
-/// else the worldspawn's `sundirection`, `suncolor` and `sunlight`.
-fn sun_of(map: &Iw7Map, entities: &[iw3::ents::Entity], exposure: Option<f32>) -> ([f32; 3], [f32; 3], f32, &'static str) {
+/// The map's sun (angles toward the sun, colour, linear light in the
+/// draw's units): the ComWorld's sun (its primary light of type 1: HDR
+/// linear light, the brightest channel the light, the direction toward the
+/// sun) times the draw's scale (`fastfile_iw7::light::Vision::draw_scale`),
+/// as IW7's lit shaders add it (linear, with the lightmaps); else the
+/// worldspawn's `sundirection`, `suncolor` and `sunlight`.
+fn sun_of(map: &Iw7Map, entities: &[iw3::ents::Entity], scale: f32) -> ([f32; 3], [f32; 3], f32, &'static str) {
     if let Some(l) = map.lights.iter().find(|l| l.kind == 1 && l.color.iter().any(|&c| c > 0.0)) {
         let d = l.dir;
         let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(1e-6);
@@ -605,10 +789,7 @@ fn sun_of(map: &Iw7Map, entities: &[iw3::ents::Entity], exposure: Option<f32>) -
         let yaw = d[1].atan2(d[0]).to_degrees();
         let pitch = (-d[2]).clamp(-1.0, 1.0).asin().to_degrees();
         let peak = l.color.iter().copied().fold(1e-6f32, f32::max);
-        // (In the lightmap pages' units when they were read: their exposure;
-        // else Ghosts' quarter.)
-        let light = fastfile_iw7::light::sun_gamma(peak, exposure.unwrap_or(0.25));
-        return ([pitch, yaw, 0.0], l.color.map(|c| c / peak), light, "the ComWorld");
+        return ([pitch, yaw, 0.0], l.color.map(|c| c / peak), peak * scale, "the ComWorld");
     }
     let world = entities.iter().find(|e| e.classname() == "worldspawn");
     let vec3 = |k: &str| -> Option<[f32; 3]> {
@@ -618,18 +799,19 @@ fn sun_of(map: &Iw7Map, entities: &[iw3::ents::Entity], exposure: Option<f32>) -
     let angles = vec3("sundirection").unwrap_or([-60.0, 45.0, 0.0]);
     let colour = vec3("suncolor").unwrap_or([1.0; 3]);
     // (IW7's `sunlight` is in its HDR units: about 7 outdoors.)
-    let light = world.and_then(|e| e.get("sunlight")).and_then(|v| v.trim().parse::<f32>().ok()).map_or(1.0, |l| (l.max(0.0).sqrt() * 0.5).clamp(0.6, 1.6));
+    let light = world.and_then(|e| e.get("sunlight")).and_then(|v| v.trim().parse::<f32>().ok()).map_or(0.0, |l| l.max(0.0) * scale);
     (angles, colour, light, "the worldspawn")
 }
 
 /// The fog of a map's vision (`vision/<map>.vision`): IW7 keeps it as
 /// dvar lines, `fogStartDist`, `fogDensity` (a distance: the halfway one,
-/// 300 under Geneva's water, 30000..70000 outdoors), `fogColor` (and an
-/// HDR `fogColorIntensity`, not used: the fog here is in display colour),
-/// `fogMaxOpacity` and the sun fog (`fogSunColor`, `fogSunDir`,
-/// `fogSunBeginFadeAngle`, `fogSunEndFadeAngle`, on with
-/// `fogSunColorIntensity` above zero).
-fn vision_fog(text: &str) -> Option<super::cod4::LegacyFog> {
+/// 300 under Geneva's water, 30000..70000 outdoors), `fogColor` (sRGB) times
+/// its HDR `fogColorIntensity`, `fogMaxOpacity` and the sun fog
+/// (`fogSunColor` times `fogSunColorIntensity`, `fogSunDir`,
+/// `fogSunBeginFadeAngle`, `fogSunEndFadeAngle`, on with the intensity
+/// above zero). The colours are linear light in the draw's units (`scale`),
+/// given as their square roots (the fog table squares them).
+fn vision_fog(text: &str, scale: f32) -> Option<super::cod4::LegacyFog> {
     let mut vals: HashMap<String, Vec<f32>> = HashMap::new();
     for line in text.lines() {
         let Some((key, value)) = line.trim().split_once(' ') else { continue };
@@ -645,11 +827,13 @@ fn vision_fog(text: &str) -> Option<super::cod4::LegacyFog> {
     if half <= 0.0 || opacity <= 0.0 {
         return None;
     }
-    let colour = three("fogcolor")?.map(|c| c.clamp(0.0, 1.0));
-    let sun = (one("fogsuncolorintensity").unwrap_or(0.0) > 0.0)
+    let hdr = |c: [f32; 3], intensity: f32| c.map(|v| (srgb_to_linear(v.clamp(0.0, 1.0)) * intensity.max(0.0) * scale).sqrt());
+    let colour = hdr(three("fogcolor")?, one("fogcolorintensity").unwrap_or(1.0));
+    let sun_intensity = one("fogsuncolorintensity").unwrap_or(0.0);
+    let sun = (sun_intensity > 0.0)
         .then(|| {
             Some(asset_world::SunFog {
-                color_rgb: three("fogsuncolor")?.map(|c| c.clamp(0.0, 1.0)),
+                color_rgb: hdr(three("fogsuncolor")?, sun_intensity),
                 sun_dir: three("fogsundir")?,
                 begin_angle_deg: one("fogsunbeginfadeangle").unwrap_or(0.0),
                 end_angle_deg: one("fogsunendfadeangle").unwrap_or(90.0),
@@ -668,6 +852,17 @@ fn vision_fog(text: &str) -> Option<super::cod4::LegacyFog> {
     })
 }
 
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+}
+
+/// The light a placed model or a moving thing takes from a lightmap
+/// sample: the base light and three quarters of the directional (it faces
+/// every way), linear, the draw's units.
+fn body_light(s: &fastfile_iw7::light::LightSample) -> [f32; 3] {
+    std::array::from_fn(|k| s.base[k] + s.directional[k] * 0.75)
+}
+
 /// IW7's world vertex colour (bytes R, G, B, A) as CoD4's D3DCOLOR (bytes
 /// B, G, R, A), which the IW3 world builder reads, opaque.
 ///
@@ -684,22 +879,24 @@ fn iw3_colour(rgba: u32) -> u32 {
 
 /// The light grid Black Ops II's rules light players, guns and other
 /// moving things by (`asset_world::T6LightSampler`); with none they took a
-/// flat 0.5 everywhere. IW7's own grid (its light probes) is not read; this
-/// one is made from the lightmaps, in Modern Warfare 2's layout
+/// flat 0.5 everywhere. This one is made from IW7's own light grid probes
+/// (`fastfile_iw7::light::ProbeIndex`), else the lightmaps, in Modern Warfare 2's layout
 /// (`asset_model::OwnedLightGrid`, the sampler's `row_rle`): a point every
 /// 32 x 32 x 64 units over the area of the spawn points and AI path nodes
 /// (`places`: a Zombies map's player starts and its nodes through every
 /// room) and `GRID_MARGIN` round it, from below the lowest to above the
 /// highest, each the light of
-/// the floor under it (`Iw7Map::light_volume`) plus the sun where the floor
-/// sees it, the same in every direction but a little brighter from above.
+/// the floor under it (`Iw7Map::light_volume`, `body_light`: linear, the
+/// draw's units), the same in every direction but a little brighter from
+/// above; where the floor sees the sun its entry names the sun's row, and
+/// the model shader adds the sun by N.L (IW7 lights moving things by the
+/// sun and its shadow maps, not by the grid).
 /// Rows run along x, columns along y, every column one solid run of every
 /// height.
 fn light_grid(
     map: &Iw7Map,
     places: &[[f32; 3]],
     pages: &[Option<fastfile_iw7::light::LightmapPage>],
-    sun_linear: [f32; 3],
     fallback: Option<fastfile_iw7::light::LightSample>,
 ) -> Result<(asset_model::OwnedLightGrid, String), String> {
     const BIAS: f32 = 131_072.0;
@@ -749,11 +946,7 @@ fn light_grid(
             for iz in 0..dims[2] {
                 let sample = volume.at(ix, iy, iz);
                 found += usize::from(sample.is_some());
-                let l = sample.or(fallback).map_or([0.5; 3], |s| {
-                    let a = s.ambient_linear();
-                    // (Half the sun: a body faces it on one side.)
-                    std::array::from_fn(|k| a[k] + sun_linear[k] * s.sun * 0.5)
-                });
+                let l = sample.or(fallback).map_or([0.1; 3], |s| body_light(&s));
                 let sun = sample.is_some_and(|s| s.sun > 0.5);
                 sunlit += usize::from(sun);
                 // Quantised to 6 bits a channel for the palette.
@@ -809,7 +1002,7 @@ fn light_grid(
         color_encoding: asset_model::LightGridColorEncoding::Rgb8,
     };
     let total = dims[0] * dims[1] * dims[2];
-    Ok((grid, format!("{dims:?} = {total} points from {world0:?}, {found} over a lit floor ({sunlit} in the sun), {} colours", palette.len())))
+    Ok((grid, format!("{dims:?} = {total} points from {world0:?}, {found} lit by the light grid's probes or a floor ({sunlit} in the sun), {} colours", palette.len())))
 }
 
 /// The largest lightmap page width kept (`BO2MP_IW7_LIGHTMAP=<px>`): IW7's
@@ -1228,11 +1421,25 @@ fn build_iw7_world(
     let stage = progress.begin_scoped(StageId::MapAssets, "infinite warfare materials", None);
     let mut catalog = material_seed;
     catalog.set_capture_ns(AssetNamespace::T6);
+    // The pictures' size (`texture_cap`), read ahead on every core.
+    let used = drawn_materials(map, &hidden);
+    let (max, budget_mb) = texture_cap(map, &used);
+    let started_pictures = std::time::Instant::now();
+    let shine_on = shine_on();
+    let prepared = prepare_pictures(map, &used, max, shine_on);
+    report.push(format!(
+        "iw7 pictures: {} materials drawn, pictures at most {max}px ({budget_mb} MB at that size, budget {TEXTURE_BUDGET_MB} MB), {} shines, {} colour maps with opacity and {} pictures read ahead in {:.1}s",
+        used.len(),
+        prepared.shine.len(),
+        prepared.alpha.len(),
+        prepared.images.len(),
+        started_pictures.elapsed().as_secs_f32()
+    ));
     let mut b = Materials {
         map,
         catalog,
         owner: ZoneOwner::from_zone_path(path),
-        max: texture_max(),
+        max,
         linked: HashMap::new(),
         images: HashMap::new(),
         alpha_images: HashMap::new(),
@@ -1241,10 +1448,11 @@ fn build_iw7_world(
         with_alpha: 0,
         failures: Vec::new(),
         shine: HashMap::new(),
-        shine_on: shine_on(),
+        shine_on,
         with_shine: 0,
         glow_scale: 0.0,
         with_glow: 0,
+        prepared,
     };
     let surface_materials: Vec<Option<usize>> = map
         .surfaces
@@ -1274,14 +1482,27 @@ fn build_iw7_world(
         None => "iw7 sky: no sky material".to_owned(),
     });
 
-    // The baked light: each GfxLightMap as CoD4's page
+    // The map's vision: its exposure (the HDR light's scale into the
+    // draw's units), tone map and colour table (`fastfile_iw7::light`).
+    // With `tonemapAuto` (all but two multiplayer maps) IW7 meters the
+    // view and adapts; here the exposure is fixed per map, metered once
+    // round the spawn points (`Iw7Map::metered_light`, from small pages).
+    let vision = map.vision_params();
+    let metered = fastfile_iw7::light::metered_view_light(&map.name, None).or_else(|| {
+        let small: Vec<Option<fastfile_iw7::light::LightmapPage>> = (0..map.light_maps.len()).map(|i| map.lightmap_page(i, 256, vision.draw_scale()).ok()).collect();
+        let points: Vec<[f32; 3]> = spawns.iter().map(|s| s.origin).collect();
+        fastfile_iw7::light::metered_view_light(&map.name, map.metered_light(&small, &points))
+    });
+    let scale = metered.map_or_else(|| vision.draw_scale(), |m| vision.draw_scale_for(m));
+
+    // The baked light: each GfxLightMap as the fallback draw's linear page
     // (`fastfile_iw7::light`), for the world's lit surfaces; the placed
     // models take the light of the floor under them.
     let stage_light = progress.begin_scoped(StageId::MapAssets, "infinite warfare lightmaps", None);
     let lm_max = lightmap_max();
     let mut lightmap_gaps = Vec::new();
     let pages: Vec<Option<fastfile_iw7::light::LightmapPage>> = (0..map.light_maps.len())
-        .map(|i| match map.lightmap_page(i, lm_max) {
+        .map(|i| match map.lightmap_page(i, lm_max, scale) {
             Ok(p) => Some(p),
             Err(e) => {
                 lightmap_gaps.push(format!("page {i}: {e}"));
@@ -1322,29 +1543,44 @@ fn build_iw7_world(
     let fallback_light = {
         let mut lit: Vec<fastfile_iw7::light::LightSample> = ground.iter().flatten().copied().collect();
         let lum = |l: &fastfile_iw7::light::LightSample| {
-            let a = l.ambient_linear();
+            let a = body_light(l);
             0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2]
         };
         lit.sort_by(|a, b| lum(a).total_cmp(&lum(b)));
         lit.get(lit.len() / 2).copied()
     };
-    // (The pages' exposure: the sun is brought into the same units.)
-    let exposure = pages.iter().flatten().next().map(|p| p.exposure);
     report.push(format!(
-        "iw7 exposure: {}",
-        pages
-            .iter()
-            .flatten()
-            .map(|p| format!("mean light {:.3} x{:.2}", p.mean_light, p.exposure))
-            .collect::<Vec<_>>()
-            .join(", ")
+        "iw7 exposure: {} stops{}, metered {metered:?} (x{:.5} into the draw's units), tone map black {} white {} crossover {} shoulder {} toe {}; pages' mean HDR light {}",
+        vision.ev,
+        if vision.auto { ", adapted at run time in IW7" } else { "" },
+        scale,
+        vision.black,
+        vision.white,
+        vision.crossover,
+        vision.shoulder,
+        vision.toe,
+        pages.iter().flatten().map(|p| format!("{:.3}", p.mean_light)).collect::<Vec<_>>().join(", ")
     ));
-    // The light grid for players and other moving things, in the sun's
-    // units (`sun_of`: gamma; linear is its square).
-    let sun = sun_of(map, &entities, exposure);
-    let sun_linear: [f32; 3] = std::array::from_fn(|k| (sun.1[k] * sun.2).powi(2));
+    // The final colour: IW7's tone map and colour table as the table Black
+    // Ops II's final pass looks the frame up in (`light::grade_lut`;
+    // installed by the rules, `bo2_look::take_pending_grade`).
+    let clut = map.colour_table(&vision);
+    report.push(format!(
+        "iw7 grade: tone map{}",
+        match (&vision.clut, &clut) {
+            (Some(name), Some(_)) => format!(" and colour table {name}"),
+            (Some(name), None) => format!(" (colour table {name} not read)"),
+            (None, _) => " (no colour table)".to_owned(),
+        }
+    ));
+    super::bo2_look::set_pending_grade(Some(asset_world::T6Grade {
+        lut: fastfile_iw7::light::grade_lut(&vision, clut.as_deref()),
+        vision: asset_world::T6Vision::default(),
+    }));
+    // The light grid for players and other moving things.
+    let sun = sun_of(map, &entities, scale);
     let places: Vec<[f32; 3]> = spawns.iter().map(|s| s.origin).chain(map.path_nodes.iter().map(|n| n.origin)).collect();
-    let light_grid = match light_grid(map, &places, &pages, sun_linear, fallback_light) {
+    let light_grid = match light_grid(map, &places, &pages, fallback_light) {
         Ok((grid, line)) => {
             report.push(format!("iw7 light grid: {line}"));
             Some(grid)
@@ -1358,7 +1594,7 @@ fn build_iw7_world(
     stage_light.done();
 
     // bo2mp: the placed models' glow in the pages' light units.
-    b.glow_scale = exposure.unwrap_or(1.0);
+    b.glow_scale = scale;
     // The placed models.
     let (prop_meshes, prop_placements) = {
         use bevy::prelude::{Mat3, Quat, Transform, Vec3};
@@ -1446,13 +1682,13 @@ fn build_iw7_world(
                 reflection_probe_index: nearest_probe(map, sm.lighting_origin),
                 primary_light_index: 0,
                 flags: 0,
-                // The floor's light under the model (linear, packed as the
-                // light grid's sqrt(light / 32)) and the sun (primary light
+                // The floor's light under the model (`body_light`: linear,
+                // the draw's units, packed as sqrt(light / 32)) and the sun (primary light
                 // 1, `SUN_LIGHT_ROW`) by the floor's sun visibility; with no
                 // lit floor below, a neutral light and half the sun.
                 packed_lighting: Some(match ground.get(i).copied().flatten().inspect(|_| lit += 1).or(fallback_light) {
                     Some(g) => {
-                        let a = g.ambient_linear();
+                        let a = body_light(&g);
                         let p = |v: f32| ((v.max(0.0) / 32.0).sqrt() * 255.0).round().clamp(1.0, 255.0) as u8;
                         [p(a[0]), p(a[1]), p(a[2]), 0]
                     }
@@ -1523,7 +1759,9 @@ fn build_iw7_world(
     let lighting = asset_world::T6WorldLighting {
         sun: asset_world::WorldSunLight { direction: dir, diffuse: colour, specular: colour },
         exposure_scale: 1.0,
-        sky: [0.0, 1.0, 0.0, 1.0],
+        // (The sky cube is HDR light: in the draw's units, times the
+        // vision's `r_hdrSkyIntensity`.)
+        sky: [0.0, 1.0, 0.0, scale * vision.sky_intensity],
         sky_parms: [1.0, 0.0],
         saturation: None,
         grade: None,
@@ -1532,7 +1770,7 @@ fn build_iw7_world(
         Ok(mut draw) => {
             // The fog (the map's vision) and the sun as a primary light for
             // the placed models (rows 30 and 31 are the fog's).
-            let fog = map.vision.as_ref().and_then(|(_, text)| vision_fog(text));
+            let fog = map.vision.as_ref().and_then(|(_, text)| vision_fog(text, scale));
             match (&fog, &map.vision) {
                 (Some(f), Some((name, _))) => report.push(format!(
                     "iw7 fog: READY from {name}: start={:.1} half={:.1} opacity={:.3} colour={:?} sun={}",
@@ -1550,6 +1788,8 @@ fn build_iw7_world(
             // (bo2mp: never shorter: the fog rows sit after the 256 lights.)
             draw.t6_lights.resize(draw.t6_lights.len().max(32), [0.0; 16]);
             draw.t6_lights[SUN_LIGHT_ROW][3] = 1.0;
+            // The pages hold linear light (`fastfile_iw7::light`).
+            draw.linear_lightmaps = draw.iw3_lightmaps;
             report.push(format!(
                 "world mesh: {} vertices, {} triangles, {} surfaces (Infinite Warfare, fallback draw with colour maps{})",
                 draw.stats.vertices,

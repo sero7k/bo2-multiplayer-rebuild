@@ -172,6 +172,16 @@ impl Iw7Map {
     }
 }
 
+/// An RGBA8 picture (`look::Rgba`, its top level) block compressed with
+/// its full mip chain: BC3 (`DXGI_FORMAT_BC3_UNORM_SRGB`) when any texel is
+/// not opaque, else BC1 (`BC1_UNORM_SRGB`). `None` when the size is not
+/// whole blocks.
+pub fn compress_rgba(r: &crate::look::Rgba) -> Option<ImageLevels> {
+    let top = r.levels.first()?;
+    let opaque = top.chunks_exact(4).all(|p| p[3] == 255);
+    encode(r.width, r.height, top.clone(), if opaque { Format::Bc1 } else { Format::Bc3 })
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Format {
     Bc1,

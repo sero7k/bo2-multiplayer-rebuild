@@ -980,10 +980,14 @@ pub fn extract_geometry(
     if let Some(scene) = lighting.2.as_ref().filter(|scene| scene.iw3_lightmaps)
         && let Some(l) = full_lighting.as_mut()
     {
-        l[1][3] = match (scene.light_grid.is_some(), scene.t6_probes.is_empty()) {
-            (false, _) => 2.0,
-            (true, false) => 3.0,
-            (true, true) => 4.0,
+        // bo2mp: 5 when its pages hold linear light (Infinite Warfare's):
+        // the pages squared and added, the sun linear, models lit as Black
+        // Ops II's (linear), reflecting the map's probes as BO2's.
+        l[1][3] = match (scene.linear_lightmaps, scene.light_grid.is_some(), scene.t6_probes.is_empty()) {
+            (true, _, _) => 5.0,
+            (false, false, _) => 2.0,
+            (false, true, false) => 3.0,
+            (false, true, true) => 4.0,
         };
     }
     // bo2mp: BO2's bloom and final colour only where the map has its full

@@ -21,7 +21,7 @@ fn main() {
     if std::env::var("IW7_PAGE").is_ok() {
         let map = fastfile_iw7::map::Iw7Map::load(&fastfile_iw7::map::MapSources::beside(Path::new(&a[1]))).expect("map");
         for i in 0..map.light_maps.len() {
-            let p = map.lightmap_page(i, 1024).expect("page");
+            let p = map.lightmap_page(i, 1024, map.vision_params().draw_scale()).expect("page");
             let (w, h, s) = &p.secondary;
             let mut rgba = Vec::with_capacity(s.len());
             let mut alpha = Vec::with_capacity(s.len());

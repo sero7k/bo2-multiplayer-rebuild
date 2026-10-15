@@ -1,111 +1,402 @@
-//! A map's baked light in the form the CoD4 world draw reads.
+//! A map's baked light, its vision's exposure and tone map, in the form the
+//! fallback world draw reads.
 //!
-//! An IW7 `GfxLightMap` is Ghosts' lightmap carried on: a primary (BC4,
-//! the sun's baked visibility, one page in size), a secondary (BC6H, two
-//! pages stacked, linear light: the upper the base light, the lower the
-//! directional light) and a second-unorm image (R8G8 at a page's size: the
-//! dominant light's tangent-space x and y, 0..1 for -1..1, which Ghosts
-//! kept in the secondary's alpha). Read on mp_flip: one 4096 x 2048 page;
-//! its surfaces' `lightmapIndex` is 0 or 31 (31: none), their vertices'
-//! lightmap coordinates span 0..1 of the page.
+//! IW7's lit world shaders (`lmap_specenv_*`, fxc disassembly of retail
+//! mp_flip's `lib_lmap_specenv_g0_0__ng0_0__c0_r0_n0_s0_p0_sm_fplusbt_*`)
+//! light a surface in linear HDR light:
 //!
-//! `LightmapPage` is that page as Call of Duty 4's (as
-//! `fastfile_iw6::map::iw3_lightmap` makes Ghosts'): the primary as 8-bit
-//! luminance, the secondary as `A8R8G8B8` bytes (B, G, R, A): the light as
-//! gamma bytes (`sqrt`, clamped at 1), the direction in CoD4's alpha code
-//! (`a * 4.08 - 2.08`, `a * 4.064516 - 2.064516`).
+//! * the secondary (BC6H, two pages stacked) at `(u, v / 2)` is the base
+//!   light A, at `(u, v / 2 + 1 / 2)` the directional light B;
+//! * the second unorm (R8G8, a page in size) is the dominant light's
+//!   tangent-space direction, stored turned 45 degrees as the packed normal
+//!   maps are: `r = R * 2 - 1`, `g = G * 2 - 1`, `x = (r + g) / 2`,
+//!   `y = (r - g) / 2`, `z = 1 - |x| - |y|`, normalised; in world space
+//!   `T x + B y + N z`;
+//! * the diffuse light is `A + B * ssao * saturate(N'.D)` (N' the normal
+//!   mapped normal);
+//! * the primary (BC4, a page in size) is the sun's shadow as a signed
+//!   distance: `s = p * 2 - 1`, the sun's visibility
+//!   `smoothstep(saturate((s + k) / 2k))` (k a code constant), times the
+//!   sun's shadow maps; the sun adds `albedo * sunColour * N'.L *
+//!   visibility` (`sunColour` the ComWorld's primary light 0, HDR);
+//! * the output is HDR (clamped at 32255), which the post pass tone maps
+//!   (`postfx_tonemap_macroclut`, see `Vision`).
+//!
+//! `LightmapPage` is a page in the form the fallback draw's IW3 branch
+//! takes in its linear mode (`WorldDraw::linear_lightmaps`): the secondary
+//! as `A8R8G8B8` bytes (B, G, R, A), the light times the map's draw scale
+//! (`Vision::draw_scale`) over `LIGHT_RANGE` as `sqrt` (the shader squares
+//! each page and adds them up, times `LIGHT_RANGE`), the direction as Call
+//! of Duty 4's tangent slopes in the alphas (`a * 4.08 - 2.08`,
+//! `a * 4.064516 - 2.064516`); the primary as the sun's signed distance
+//! (the shader thresholds it, `SUN_SHADOW_SOFTNESS`).
 
 use crate::map::Iw7Map;
 
-/// One lightmap page in Call of Duty 4's form.
+/// The headroom of a page's light over the draw's unit (`sqrt(light /
+/// LIGHT_RANGE)` in eight bits: four, an exposed 256, lit lamps and
+/// sunlit bounce included).
+pub const LIGHT_RANGE: f32 = 4.0;
+
+/// The width of the sun shadow's edge in the primary's signed distance
+/// (`k`, half of it each side of 0.5). The fallback draw's linear mode
+/// takes the same.
+pub const SUN_SHADOW_SOFTNESS: f32 = 0.25;
+
+/// The scale IW7's exposure (`tonemapExposure` plus
+/// `tonemapExposureAdjust`, in stops) turns its HDR light by:
+/// `EXPOSURE_K * 2^-stops`, the tone map's input (`Vision::exposure`).
+/// Fitted to the maps' preview pictures (see `iw7_render`).
+pub const EXPOSURE_K: f32 = 32768.0;
+
+/// What IW7's automatic exposure (`tonemapAuto`) brings the scene's
+/// log-average HDR luminance to, exposed (the tone map's input). Fitted to
+/// the maps' preview pictures (see `iw7_render`).
+pub const AUTO_KEY: f32 = 4.0;
+
+/// The albedo the metering proxy (`Iw7Map::metered_light`) takes surfaces
+/// to have.
+pub const METER_ALBEDO: f32 = 0.25;
+
+/// What the proxy's estimate is times to stand for the views' own metering
+/// (the median over the multiplayer maps of their ratio, `iw7_render
+/// meter:8` against `metered_light`).
+pub const PROXY_TO_VIEW: f32 = 0.45;
+
+/// The log-average HDR luminance of each multiplayer map's views, as IW7's
+/// automatic exposure meters them: `iw7_render <map> - meter:8` (eight
+/// spawn views spread over the spawn list, the geometric mean of each
+/// view's log-average; the sky drawn).
+pub const METERED: &[(&str, f32)] = &[
+    ("mp_afghan", 0.39135),
+    ("mp_breakneck", 0.03851),
+    ("mp_carnage2", 0.28498),
+    ("mp_codphish", 0.13218),
+    ("mp_depot", 0.03762),
+    ("mp_desert", 0.10671),
+    ("mp_divide", 0.21472),
+    ("mp_dome_iw", 0.35551),
+    ("mp_fallen", 1.25439),
+    ("mp_flip", 0.11408),
+    ("mp_frontier", 0.12695),
+    ("mp_geneva", 0.07642),
+    ("mp_hawkwar", 0.29666),
+    ("mp_junk", 0.04828),
+    ("mp_mansion", 0.67600),
+    ("mp_marsoasis", 0.51156),
+    ("mp_metropolis", 1.33450),
+    ("mp_neon", 1.55041),
+    ("mp_nova", 0.72618),
+    ("mp_overflow", 0.03780),
+    ("mp_paris", 0.10544),
+    ("mp_parkour", 0.18395),
+    ("mp_permafrost2", 0.03364),
+    ("mp_pixel", 0.82741),
+    ("mp_prime", 0.45268),
+    ("mp_proto", 5.51926),
+    ("mp_quarry", 0.02308),
+    ("mp_rally", 0.28594),
+    ("mp_renaissance2", 0.09453),
+    ("mp_riot", 0.87391),
+    ("mp_rivet", 0.02487),
+    ("mp_skyway", 0.34679),
+    ("mp_turista2", 0.56764),
+];
+
+/// The metered light of a map: its views' (`METERED`), else the proxy's
+/// estimate (`PROXY_TO_VIEW`).
+pub fn metered_view_light(map: &str, proxy: Option<f32>) -> Option<f32> {
+    METERED.iter().find(|(m, _)| m.eq_ignore_ascii_case(map)).map(|(_, l)| *l).or(proxy.map(|p| p * PROXY_TO_VIEW))
+}
+
+/// The exposed light (the tone map's input) the draw's unit light stands
+/// for: the draw works in `exposed / DRAW_UNIT` (the BO2 output's square
+/// root of 1 is an exposed 64; its roll-off and the grade's table go to
+/// about 250).
+pub const DRAW_UNIT: f32 = 64.0;
+
+/// A map's vision (`vision/<map>.vision`): its exposure and tone map
+/// (`tonemapMode 2` on every multiplayer map: Insomniac's (Mike Day's)
+/// piecewise rational curve, which `postfx_tonemap_macroclut` evaluates
+/// per channel as `(a x + b) / (c x + d)`, toe below the crossover,
+/// shoulder above), its colour table and sky.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Vision {
+    /// `tonemapExposure - tonemapExposureAdjust` (stops; 12 when unset,
+    /// mp_neon's -10).
+    pub ev: f32,
+    /// `tonemapAuto`: the game adapts the exposure at run time.
+    pub auto: bool,
+    /// `tonemapAutoExposureAdjust` (stops, brighter when positive).
+    pub auto_adjust: f32,
+    /// `tonemapExposureAdjust` (stops).
+    pub adjust: f32,
+    /// `tonemapMaxExposure`: the brightest exposure the automatic one may
+    /// take (stops; none when far below zero).
+    pub max_exposure: Option<f32>,
+    pub black: f32,
+    pub white: f32,
+    pub crossover: f32,
+    pub shoulder: f32,
+    pub toe: f32,
+    /// `clut0Image`: the 32^3 colour table looked up after the tone map.
+    pub clut: Option<String>,
+    /// `r_hdrSkyIntensity`.
+    pub sky_intensity: f32,
+}
+
+impl Default for Vision {
+    fn default() -> Self {
+        Vision { ev: 12.0, auto: true, auto_adjust: 0.0, adjust: 0.0, max_exposure: None, black: 0.0, white: 650.0, crossover: 2.0, shoulder: 0.95, toe: 0.2, clut: None, sky_intensity: 1.0 }
+    }
+}
+
+/// A vision line's first value (`name "values"`).
+pub fn vision_value(text: &str, key: &str) -> Option<String> {
+    text.lines().find_map(|l| {
+        let (k, v) = l.trim().split_once(char::is_whitespace)?;
+        k.eq_ignore_ascii_case(key).then(|| v.trim().trim_matches('"').to_owned())
+    })
+}
+
+impl Vision {
+    pub fn parse(text: &str) -> Self {
+        let d = Vision::default();
+        let num = |k: &str| vision_value(text, k).and_then(|v| v.split_whitespace().next()?.parse::<f32>().ok()).filter(|v| v.is_finite());
+        // (The adjustments are exposure compensation, brighter when
+        // positive: mp_mansion's and mp_pixel's +1.5 and mp_dome_iw's +1
+        // drew those maps darkest of all taken the other way.)
+        let ev = num("tonemapExposure").filter(|&e| e > 0.0).unwrap_or(d.ev) - num("tonemapExposureAdjust").unwrap_or(0.0);
+        let white = num("tonemapWhitePoint").filter(|&w| w > 0.0).unwrap_or(d.white);
+        let crossover = num("tonemapCrossover").filter(|&c| c > 0.0 && c < white).unwrap_or(d.crossover);
+        Vision {
+            ev,
+            auto: num("tonemapAuto").is_none_or(|v| v != 0.0),
+            auto_adjust: num("tonemapAutoExposureAdjust").unwrap_or(0.0),
+            adjust: num("tonemapExposureAdjust").unwrap_or(0.0),
+            max_exposure: num("tonemapMaxExposure").filter(|&m| m > -5.0),
+            black: num("tonemapBlackPoint").unwrap_or(d.black).clamp(0.0, crossover * 0.5),
+            white,
+            crossover,
+            shoulder: num("tonemapShoulder").unwrap_or(d.shoulder).clamp(0.0, 0.999),
+            toe: num("tonemapToe").unwrap_or(d.toe).clamp(0.0, 0.999),
+            clut: vision_value(text, "clut0Image").filter(|c| !c.is_empty()),
+            sky_intensity: num("r_hdrSkyIntensity").unwrap_or(1.0).max(0.0),
+        }
+    }
+
+    /// The scale from HDR light to the tone map's input, fixed
+    /// (`tonemapExposure` plus its adjustment).
+    pub fn exposure(&self) -> f32 {
+        EXPOSURE_K * (-self.ev).exp2()
+    }
+
+    /// The scale from HDR light to the tone map's input for a scene of
+    /// log-average HDR luminance `metered`: with `tonemapAuto`, the one
+    /// bringing it to `AUTO_KEY` (moved by the vision's adjustments), no
+    /// brighter than `tonemapMaxExposure`; else the fixed one.
+    pub fn exposure_for(&self, metered: f32) -> f32 {
+        if !self.auto || !(metered.is_finite() && metered > 0.0) {
+            return self.exposure();
+        }
+        let e = AUTO_KEY / metered * (self.auto_adjust + self.adjust).exp2();
+        match self.max_exposure {
+            Some(m) => e.min(EXPOSURE_K * (-m).exp2()),
+            None => e,
+        }
+    }
+
+    /// The scale from HDR light to the draw's units (`DRAW_UNIT`), fixed.
+    pub fn draw_scale(&self) -> f32 {
+        self.exposure() / DRAW_UNIT
+    }
+
+    /// The same for a metered scene (`exposure_for`).
+    pub fn draw_scale_for(&self, metered: f32) -> f32 {
+        self.exposure_for(metered) / DRAW_UNIT
+    }
+
+    /// The tone map of an exposed value, linear 0..1: toe `k (1 - t) (x -
+    /// b) / (c - (1 - t) b - t x)` below the crossover c, shoulder `k + (1 -
+    /// k) (x - c) / (s x + (1 - s) w - c)` above, `k = (1 - t)(c - b) / ((1 -
+    /// s)(w - c) + (1 - t)(c - b))` (both meet at c with one slope).
+    pub fn tonemap(&self, x: f32) -> f32 {
+        let (b, w, c, s, t) = (self.black, self.white, self.crossover, self.shoulder, self.toe);
+        let k = (1.0 - t) * (c - b) / ((1.0 - s) * (w - c) + (1.0 - t) * (c - b));
+        let x = x.max(0.0);
+        let y = if x < c {
+            k * (1.0 - t) * (x - b) / (c - (1.0 - t) * b - t * x)
+        } else {
+            k + (1.0 - k) * (x - c) / (s * x + (1.0 - s) * w - c)
+        };
+        y.clamp(0.0, 1.0)
+    }
+}
+
+/// The sun's visibility from the primary's signed distance (0..1, 0.5 the
+/// shadow's edge), as the lit shaders threshold it.
+pub fn sun_visibility(p: f32) -> f32 {
+    let k = SUN_SHADOW_SOFTNESS;
+    let t = ((p * 2.0 - 1.0 + k) / (2.0 * k)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Black Ops II's highlight roll-off above 0.75 (gamma values), and its
+/// inverse (which the final pass applies before the grade's table).
+pub fn bo2_rolloff(e: f32) -> f32 {
+    if e <= 0.75 { e.max(0.0) } else { 0.75 + 0.25 * (1.0 - (-5.77078 * (e - 0.75)).exp2()) }
+}
+
+pub fn bo2_unroll(r: f32) -> f32 {
+    if r <= 0.75 {
+        r.max(0.0)
+    } else {
+        let rest = ((1.0 - r) * 4.0).max(0.5 / 255.0 * 4.0);
+        0.75 - rest.log2() / 5.77078
+    }
+}
+
+/// Side of a colour table.
+pub const LUT_SIZE: usize = 32;
+
+/// Trilinear lookup in a 32^3 RGBA8 table (red fastest, then green, then
+/// blue) of a colour 0..1.
+pub fn lut_sample(lut: &[u8], c: [f32; 3]) -> [f32; 3] {
+    let n = LUT_SIZE;
+    if lut.len() < n * n * n * 4 {
+        return c;
+    }
+    let f: [f32; 3] = c.map(|v| v.clamp(0.0, 1.0) * (n - 1) as f32);
+    let i0: [usize; 3] = f.map(|v| (v.floor() as usize).min(n - 1));
+    let i1: [usize; 3] = i0.map(|v| (v + 1).min(n - 1));
+    let t: [f32; 3] = std::array::from_fn(|k| f[k] - i0[k] as f32);
+    let at = |r: usize, g: usize, b: usize, ch: usize| f32::from(lut[((b * n + g) * n + r) * 4 + ch]) / 255.0;
+    std::array::from_fn(|ch| {
+        let mut v = 0.0;
+        for (bz, wb) in [(i0[2], 1.0 - t[2]), (i1[2], t[2])] {
+            for (gy, wg) in [(i0[1], 1.0 - t[1]), (i1[1], t[1])] {
+                for (rx, wr) in [(i0[0], 1.0 - t[0]), (i1[0], t[0])] {
+                    v += wb * wg * wr * at(rx, gy, bz, ch);
+                }
+            }
+        }
+        v
+    })
+}
+
+fn linear_to_srgb(c: f32) -> f32 {
+    let c = c.clamp(0.0, 1.0);
+    if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+}
+
+/// IW7's final colour of a light in the draw's units (`DRAW_UNIT`): the
+/// tone map per channel, sRGB, then the colour table (`clut`, the vision's
+/// `clut0Image`: 32^3 RGBA8, red fastest; `None`: none).
+pub fn iw7_display(v: &Vision, clut: Option<&[u8]>, x: [f32; 3]) -> [f32; 3] {
+    let s = x.map(|c| linear_to_srgb(v.tonemap(c * DRAW_UNIT)));
+    match clut {
+        Some(t) => lut_sample(t, s),
+        None => s,
+    }
+}
+
+/// The table Black Ops II's final pass looks the frame up in
+/// (`asset_world::T6Grade::lut`: 32^3 RGBA8, red fastest; its input the
+/// frame's rolled-off square root of the light) that gives IW7's final
+/// colour: each entry unrolled, squared and put through `iw7_display`.
+pub fn grade_lut(v: &Vision, clut: Option<&[u8]>) -> Vec<u8> {
+    let n = LUT_SIZE;
+    let mut out = Vec::with_capacity(n * n * n * 4);
+    for b in 0..n {
+        for g in 0..n {
+            for r in 0..n {
+                let x = [r, g, b].map(|i| {
+                    let e = bo2_unroll(i as f32 / (n - 1) as f32);
+                    e * e
+                });
+                let d = iw7_display(v, clut, x);
+                out.extend(d.map(|c| (c * 255.0).round().clamp(0.0, 255.0) as u8));
+                out.push(255);
+            }
+        }
+    }
+    out
+}
+
+/// One lightmap page in the fallback draw's linear form.
 #[derive(Clone, Debug)]
 pub struct LightmapPage {
-    /// Width, height, L8 texels.
+    /// Width, height, the sun's signed distance as L8 texels.
     pub primary: (u16, u16, Vec<u8>),
     /// Width, height (two pages), B, G, R, A bytes.
     pub secondary: (u16, u16, Vec<u8>),
-    /// The scale the light was given (linear) and the geometric mean of the
-    /// lit texels' base plus directional luminance before it.
-    pub exposure: f32,
+    /// The scale the HDR light was given (`Vision::draw_scale`).
+    pub scale: f32,
+    /// The geometric mean of the lit texels' base plus directional HDR
+    /// light (for reports).
     pub mean_light: f32,
-    /// The exposure the pages alone would take (`TARGET_LIGHT`).
-    pub auto_exposure: f32,
-}
-
-/// The light a lit texel of a page is brought to on average (linear, base
-/// plus directional): IW7's pages differ by map (its renderer exposes each
-/// map by its vision's `tonemapExposure`, 9.5 to 15); here each page is
-/// scaled so its lit texels' geometric mean is this, within
-/// `EXPOSURE_RANGE`.
-pub const TARGET_LIGHT: f32 = 0.22;
-pub const EXPOSURE_RANGE: (f32, f32) = (0.03, 4.0);
-
-/// The scale that turns a vision's exposure (`tonemapExposure` plus
-/// `tonemapExposureAdjust`, in stops) into the pages' linear scale:
-/// `VISION_EXPOSURE_K * 2^-stops`, fitted on mp_riot. For reports only (see
-/// `Iw7Map::lightmap_page`: the pages' own exposure is used).
-pub const VISION_EXPOSURE_K: f32 = 965.0;
-
-/// A vision's exposure as the pages' linear scale (`VISION_EXPOSURE_K`),
-/// when it sets `tonemapExposure`.
-pub fn vision_exposure(vision: &str) -> Option<f32> {
-    let get = |k: &str| {
-        vision.lines().find_map(|l| {
-            let (key, v) = l.trim().split_once(' ')?;
-            key.eq_ignore_ascii_case(k).then(|| v.trim().trim_matches('"').split_whitespace().next()?.parse::<f32>().ok()).flatten()
-        })
-    };
-    let stops = get("tonemapExposure")? + get("tonemapExposureAdjust").unwrap_or(0.0);
-    (stops.is_finite() && (4.0..=20.0).contains(&stops)).then(|| VISION_EXPOSURE_K * 2f32.powf(-stops))
 }
 
 /// What a point on the world takes from its lightmap: the base and
-/// directional light (CoD4 gamma, 0..1 each) and the sun's visibility.
+/// directional light (the draw's linear units) and the sun's visibility.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LightSample {
     pub base: [f32; 3],
     pub directional: [f32; 3],
     pub sun: f32,
+    /// How much of the directional light a surface lying along the page
+    /// takes (`N.D` for the vertex normal: the direction's tangent z).
+    pub facing: f32,
 }
 
 impl LightSample {
-    /// The light as the world shader adds it up for a surface facing the
-    /// dominant light, without the sun: `(A + B)^2`, linear.
+    /// The light of a surface facing the dominant light, without the sun
+    /// (linear, the draw's units).
     pub fn ambient_linear(&self) -> [f32; 3] {
-        std::array::from_fn(|k| {
-            let g = self.base[k] + self.directional[k];
-            g * g
-        })
+        std::array::from_fn(|k| self.base[k] + self.directional[k])
     }
 }
 
 impl LightmapPage {
-    /// The page at `(u, v)` (nearest texel, clamped).
+    /// The page at `(u, v)` (bilinear).
     pub fn sample(&self, uv: [f32; 2]) -> LightSample {
-        let (sw, sh, s) = (&self.secondary.0, &self.secondary.1, &self.secondary.2);
-        let (sw, page_h) = (usize::from(*sw), usize::from(*sh) / 2);
-        let px = |w: usize, h: usize| {
-            let x = ((uv[0].clamp(0.0, 1.0) * w as f32) as usize).min(w.saturating_sub(1));
-            let y = ((uv[1].clamp(0.0, 1.0) * h as f32) as usize).min(h.saturating_sub(1));
-            (x, y)
+        let (sw, sh, s) = (usize::from(self.secondary.0), usize::from(self.secondary.1), &self.secondary.2);
+        let page_h = sh / 2;
+        // Texel centres, clamped.
+        let taps = |w: usize, h: usize| {
+            let fx = (uv[0].clamp(0.0, 1.0) * w as f32 - 0.5).max(0.0);
+            let fy = (uv[1].clamp(0.0, 1.0) * h as f32 - 0.5).max(0.0);
+            let (x0, y0) = ((fx as usize).min(w - 1), (fy as usize).min(h - 1));
+            let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
+            let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+            [(x0, y0, (1.0 - tx) * (1.0 - ty)), (x1, y0, tx * (1.0 - ty)), (x0, y1, (1.0 - tx) * ty), (x1, y1, tx * ty)]
         };
-        let (x, y) = px(sw, page_h);
-        let at = |page: usize| {
-            let o = ((page * page_h + y) * sw + x) * 4;
-            [s[o + 2], s[o + 1], s[o]].map(|b| f32::from(b) / 255.0)
+        let light = |page: usize| -> [f32; 3] {
+            let mut acc = [0f32; 3];
+            for (x, y, wt) in taps(sw, page_h) {
+                let o = ((page * page_h + y) * sw + x) * 4;
+                for (k, b) in [s[o + 2], s[o + 1], s[o]].into_iter().enumerate() {
+                    let g = f32::from(b) / 255.0;
+                    acc[k] += wt * g * g * LIGHT_RANGE;
+                }
+            }
+            acc
         };
+        let mut slope = [0f32; 2];
+        for (x, y, wt) in taps(sw, page_h) {
+            for (page, (scale, bias)) in [(4.08f32, 2.08f32), (4.064516, 2.064516)].into_iter().enumerate() {
+                let a = f32::from(s[((page * page_h + y) * sw + x) * 4 + 3]) / 255.0;
+                slope[page] += wt * (a * scale - bias);
+            }
+        }
+        let facing = (1.0 + slope[0] * slope[0] + slope[1] * slope[1]).sqrt().recip();
         let (pw, ph) = (usize::from(self.primary.0), usize::from(self.primary.1));
-        let (qx, qy) = px(pw, ph);
-        LightSample { base: at(0), directional: at(1), sun: f32::from(self.primary.2[qy * pw + qx]) / 255.0 }
+        let mut sdf = 0.0;
+        for (x, y, wt) in taps(pw, ph) {
+            sdf += wt * f32::from(self.primary.2[y * pw + x]) / 255.0;
+        }
+        LightSample { base: light(0), directional: light(1), sun: sun_visibility(sdf), facing }
     }
-}
-
-/// The sun's light in CoD4's gamma for an HDR sun of brightest channel
-/// `peak`, in the units of a page exposed by `exposure`: `sqrt(peak *
-/// exposure)` (Ghosts' `sqrt(peak) / 2` is an exposure of a quarter),
-/// within 0.5..1.15 (brighter burnt every sunlit surface white).
-pub fn sun_gamma(peak: f32, exposure: f32) -> f32 {
-    (peak.max(0.0) * exposure).sqrt().clamp(0.5, 1.15)
 }
 
 /// An IEEE half float.
@@ -120,10 +411,43 @@ fn half(h: u16) -> f32 {
     }
 }
 
+/// The dominant light's tangent-space direction from the second unorm's
+/// bytes (turned 45 degrees, as the lit shaders read it), unit length.
+pub fn light_direction(r: u8, g: u8) -> [f32; 3] {
+    let (r, g) = (f32::from(r) / 255.0 * 2.0 - 1.0, f32::from(g) / 255.0 * 2.0 - 1.0);
+    let (x, y) = ((r + g) * 0.5, (r - g) * 0.5);
+    let z = (1.0 - x.abs() - y.abs()).max(0.0);
+    let l = (x * x + y * y + z * z).sqrt().max(1e-6);
+    [x / l, y / l, z / l]
+}
+
 impl Iw7Map {
-    /// Light map `index` as Call of Duty 4's page, its pages at most
-    /// `max_width` wide (whole halvings).
-    pub fn lightmap_page(&self, index: usize, max_width: u32) -> Result<LightmapPage, String> {
+    /// The map's vision (`Vision::default` when it has none).
+    pub fn vision_params(&self) -> Vision {
+        self.vision.as_ref().map_or_else(Vision::default, |(_, t)| Vision::parse(t))
+    }
+
+    /// The vision's colour table (`clut0Image`) as 32^3 RGBA8, red fastest.
+    pub fn colour_table(&self, v: &Vision) -> Option<Vec<u8>> {
+        let name = v.clut.as_deref()?;
+        let rec = self.image_info(name)?;
+        if usize::from(rec.width) != LUT_SIZE || usize::from(rec.height) != LUT_SIZE || usize::from(rec.depth) != LUT_SIZE {
+            return None;
+        }
+        let l = self.image(name, 64).ok()?;
+        let n = LUT_SIZE * LUT_SIZE * LUT_SIZE;
+        match l.format {
+            // R8G8B8A8 (UNORM, sRGB: the bytes as they are), B8G8R8A8.
+            27..=32 if l.data.len() >= n * 4 => Some(l.data[..n * 4].to_vec()),
+            87 | 88 | 90 | 91 if l.data.len() >= n * 4 => Some(l.data[..n * 4].chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect()),
+            _ => None,
+        }
+    }
+
+    /// Light map `index` as the fallback draw's linear page, its pages at
+    /// most `max_width` wide (whole halvings), the HDR light times `scale`
+    /// (`Vision::draw_scale`).
+    pub fn lightmap_page(&self, index: usize, max_width: u32, scale: f32) -> Result<LightmapPage, String> {
         let names = self.light_maps.get(index).ok_or_else(|| format!("no light map {index}"))?;
         let sec = self.image(&names[1], 1 << 14).map_err(|e| format!("secondary: {e}"))?;
         let (w, h) = (sec.width as usize, sec.height as usize);
@@ -209,36 +533,37 @@ impl Iw7Map {
         drop(sec);
         let (ow, oh) = (w / f, h / f);
         let opage = oh / 2;
-        // The directions (a page in size).
+        // The directions (a page in size): each texel's unit vector,
+        // averaged over the texels a page texel covers, as Call of Duty
+        // 4's tangent slopes (x / z, y / z).
         let dirs: Option<Vec<[f32; 2]>> = self.image(&names[2], 1 << 14).ok().and_then(|d| {
             let (dw, dh) = (d.width as usize, d.height as usize);
             (d.format == 49 && dw > 0 && dh > 0 && d.data.len() >= dw * dh * 2).then(|| {
                 let (fx, fy) = ((dw / ow).max(1), (dh / opage).max(1));
-                let mut out = vec![[0.5f32; 2]; ow * opage];
+                let mut out = vec![[0.0f32; 2]; ow * opage];
                 for (i, o) in out.iter_mut().enumerate() {
                     let (x, y) = (i % ow, i / ow);
-                    let mut acc = [0f32; 2];
-                    let mut n = 0f32;
+                    let mut acc = [0f32; 3];
                     for dy in 0..fy {
                         for dx in 0..fx {
                             let (sx, sy) = (x * fx + dx, y * fy + dy);
                             if sx < dw && sy < dh {
                                 let at = (sy * dw + sx) * 2;
-                                acc[0] += f32::from(d.data[at]) / 255.0;
-                                acc[1] += f32::from(d.data[at + 1]) / 255.0;
-                                n += 1.0;
+                                let v = light_direction(d.data[at], d.data[at + 1]);
+                                for k in 0..3 {
+                                    acc[k] += v[k];
+                                }
                             }
                         }
                     }
-                    if n > 0.0 {
-                        *o = acc.map(|a| a / n);
-                    }
+                    let z = acc[2].max(1e-3 * (acc[0].abs() + acc[1].abs()).max(1e-6));
+                    *o = [acc[0] / z, acc[1] / z];
                 }
                 out
             })
         });
-        // The exposure: the lit texels' geometric mean (base page plus the
-        // directional page under it) brought to `TARGET_LIGHT`.
+        // For reports: the lit texels' geometric mean (base page plus the
+        // directional page under it).
         let (mut log_sum, mut lit) = (0f64, 0usize);
         for y in 0..opage {
             for x in 0..ow {
@@ -250,36 +575,20 @@ impl Iw7Map {
                 }
             }
         }
-        let mean_light = if lit > 0 { (log_sum / lit as f64).exp() as f32 } else { TARGET_LIGHT };
-        let auto = (TARGET_LIGHT / mean_light).clamp(EXPOSURE_RANGE.0, EXPOSURE_RANGE.1);
-        // (The vision's own exposure, `vision_exposure`, was tried and left:
-        // against the pages it runs from 3.8 stops darker to half a stop
-        // brighter map by map, mp_riot and mp_proto about even, mp_mansion
-        // and mp_pixel nearly four stops under: IW7 adapts most maps' exposure
-        // at run time, `tonemapAuto`.)
-        let exposure = auto;
-        // Highlights rolled off above `KNEE` toward 1 (as IW7's filmic tone
-        // map's shoulder does) rather than clipped: mp_proto's snow and
-        // mp_fallen's sunlit concrete kept no detail clipped.
-        const KNEE: f32 = 0.6;
-        let shoulder = |v: f32| if v <= KNEE { v } else { KNEE + (1.0 - KNEE) * (1.0 - (-(v - KNEE) / (1.0 - KNEE)).exp()) };
-        let gamma = |v: f32| (shoulder((v * exposure).max(0.0)).sqrt() * 255.0).round() as u8;
+        let mean_light = if lit > 0 { (log_sum / lit as f64).exp() as f32 } else { 0.0 };
+        let gamma = |v: f32| ((v * scale / LIGHT_RANGE).clamp(0.0, 1.0).sqrt() * 255.0).round() as u8;
         let mut secondary = vec![0u8; ow * oh * 4];
         for y in 0..oh {
             for x in 0..ow {
                 let (page, py) = (y / opage, y % opage);
-                let d = dirs.as_ref().map_or([0.5, 0.5], |d| d[py * ow + x]);
-                let a = if page == 0 {
-                    ((d[0] * 2.0 - 1.0 + 2.08) / 4.08 * 255.0).round()
-                } else {
-                    ((d[1] * 2.0 - 1.0 + 2.064516) / 4.064516 * 255.0).round()
-                };
+                let d = dirs.as_ref().map_or([0.0, 0.0], |d| d[py * ow + x]);
+                let a = if page == 0 { ((d[0] + 2.08) / 4.08 * 255.0).round() } else { ((d[1] + 2.064516) / 4.064516 * 255.0).round() };
                 let l = small[y * ow + x];
                 let o = (y * ow + x) * 4;
                 secondary[o..o + 4].copy_from_slice(&[gamma(l[2]), gamma(l[1]), gamma(l[0]), a.clamp(0.0, 255.0) as u8]);
             }
         }
-        // The primary, down to the page's size.
+        // The primary (the sun's signed distance), down to the page's size.
         let primary = match self.image(&names[0], 1 << 14) {
             Ok(p) if matches!(p.format, 79..=81) && p.width % 4 == 0 && p.height % 4 == 0 => {
                 let (pw, ph) = (p.width as usize, p.height as usize);
@@ -313,11 +622,11 @@ impl Iw7Map {
                 }
                 out
             }
-            // No sun visibility: lit everywhere.
+            // No sun shadow: lit everywhere.
             _ => vec![255u8; ow * opage],
         };
         let to16 = |v: usize| u16::try_from(v).map_err(|_| format!("{v} is too large"));
-        Ok(LightmapPage { primary: (to16(ow)?, to16(opage)?, primary), secondary: (to16(ow)?, to16(oh)?, secondary), exposure, mean_light, auto_exposure: auto })
+        Ok(LightmapPage { primary: (to16(ow)?, to16(opage)?, primary), secondary: (to16(ow)?, to16(oh)?, secondary), scale, mean_light })
     }
 
     /// The light under each point: the highest lightmapped, upward-facing
@@ -338,17 +647,50 @@ impl Iw7Map {
             .collect()
     }
 
-    /// The light each placed model takes: the floor's light under it and
-    /// around it (eight points on a ring of about its radius), the middle
-    /// one by brightness. The floor right under a model is in its own baked
+    /// The log-average HDR luminance a player sees round `points` (spawn
+    /// points), estimated for the automatic exposure (`Vision::exposure_for`):
+    /// at each, the floor's light (base, three quarters of the directional)
+    /// plus half the sun where the floor sees it, times `METER_ALBEDO`.
+    /// `None` when no point stands over a lit floor.
+    pub fn metered_light(&self, pages: &[Option<LightmapPage>], points: &[[f32; 3]]) -> Option<f32> {
+        let scale = pages.iter().flatten().next()?.scale;
+        if scale <= 0.0 {
+            return None;
+        }
+        let sun = self.lights.iter().find(|l| l.kind == 1).map_or([0.0; 3], |l| l.color);
+        let lifted: Vec<[f32; 3]> = points.iter().map(|p| [p[0], p[1], p[2] + 8.0]).collect();
+        let (mut sum, mut n) = (0f64, 0usize);
+        for s in self.ground_light(pages, &lifted, 256.0).into_iter().flatten() {
+            let c: [f32; 3] = std::array::from_fn(|k| (s.base[k] + 0.75 * s.directional[k]) / scale + 0.5 * sun[k] * s.sun);
+            let l = (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) * METER_ALBEDO;
+            if l > 1e-6 && l.is_finite() {
+                sum += f64::from(l.ln());
+                n += 1;
+            }
+        }
+        (n > 0).then(|| (sum / n as f64).exp() as f32)
+    }
+
+    /// The light each placed model takes: the light grid's probes round its
+    /// lighting origin (`ProbeIndex`), as IW7 lights them; where no probe is
+    /// near, the floor's light under it and around it (eight points on a
+    /// ring of about its radius), the middle one by brightness. The floor right under a model is in its own baked
     /// shadow (mp_proto's crates, mp_hawkwar's station wagon drew black by
     /// it); one ring point out in the sun would light a model in the shade.
     /// `None` where no floor is found.
     pub fn static_model_light(&self, pages: &[Option<LightmapPage>]) -> Vec<Option<LightSample>> {
         let floors = FloorIndex::new(self, pages);
+        // The light grid's probes at the model's lighting origin, as IW7
+        // lights its placed models (`lprobe_*`); the floor where none is
+        // near.
+        let probes = ProbeIndex::new(self);
+        let scale = pages.iter().flatten().next().map_or(1.0, |p| p.scale);
         self.static_models
             .iter()
             .map(|sm| {
+                if let Some(l) = probes.light(self, sm.lighting_origin, scale) {
+                    return Some(l);
+                }
                 let m = &self.models[sm.model];
                 let c = sm.lighting_origin;
                 let r = (m.radius * sm.scale * 0.75).clamp(8.0, 192.0);
@@ -381,10 +723,13 @@ impl Iw7Map {
 
     /// Baked light through the space players move in, for lighting them
     /// (`LightVolume`): at points `spacing` apart over `mins..maxs`, the
-    /// light of the floor under each point (`ground_light`, within `reach`
-    /// units), or `None` where there is none.
+    /// light grid's probes round each point (`ProbeIndex`), else the light
+    /// of the floor under it (`ground_light`, within `reach` units), or
+    /// `None` where there is neither.
     pub fn light_volume(&self, pages: &[Option<LightmapPage>], mins: [f32; 3], maxs: [f32; 3], spacing: [f32; 3], reach: f32) -> LightVolume {
         let floors = FloorIndex::new(self, pages);
+        let probes = ProbeIndex::new(self);
+        let scale = pages.iter().flatten().next().map_or(1.0, |p| p.scale);
         let dims: [usize; 3] = std::array::from_fn(|k| (((maxs[k] - mins[k]) / spacing[k]).floor().max(0.0) as usize + 1).min(4096));
         let mut samples = Vec::with_capacity(dims[0] * dims[1] * dims[2]);
         for ix in 0..dims[0] {
@@ -394,6 +739,12 @@ impl Iw7Map {
                 col.sort_by(|a, b| a.0.total_cmp(&b.0));
                 for iz in 0..dims[2] {
                     let z = mins[2] + iz as f32 * spacing[2];
+                    // (The light grid's probes where there are some near,
+                    // as IW7 lights moving things; else the floor's.)
+                    if let Some(l) = probes.light(self, [x, y, z], scale) {
+                        samples.push(Some(l));
+                        continue;
+                    }
                     let below = col.iter().rev().find(|(fz, _)| *fz <= z + 4.0 && z - *fz <= reach);
                     samples.push(below.map(|f| f.1));
                 }
@@ -416,6 +767,77 @@ pub struct LightVolume {
 impl LightVolume {
     pub fn at(&self, ix: usize, iy: usize, iz: usize) -> Option<LightSample> {
         self.samples.get((ix * self.dims[1] + iy) * self.dims[2] + iz).copied().flatten()
+    }
+}
+
+/// The light grid's probes (`Iw7Map::light_probes`) binned in cubes, to
+/// find the light at a point.
+///
+/// A probe is 27 halves, the red, green and blue light's second order
+/// spherical harmonics (nine each, the real basis IW7's `lprobe_*` vertex
+/// shaders evaluate: 0.282095, 0.488603, 1.092548, 0.315392, 0.546274),
+/// then the sun's visibility (a half), then padding. Read on mp_riot and
+/// mp_frontier: the first coefficient times 0.282095 (the light averaged
+/// over every direction, a lightmap's units) is the floor's base plus most
+/// of its directional light under it, and the visibility is the floor's
+/// sun shadow (0.97 in the sun, 0 in the shade).
+pub struct ProbeIndex {
+    cells: std::collections::HashMap<[i32; 3], Vec<u32>>,
+}
+
+impl ProbeIndex {
+    const CELL: f32 = 128.0;
+
+    pub fn new(map: &Iw7Map) -> Self {
+        let mut cells: std::collections::HashMap<[i32; 3], Vec<u32>> = std::collections::HashMap::new();
+        for (i, (p, _)) in map.light_probes.iter().enumerate() {
+            cells.entry(p.map(|v| (v / Self::CELL).floor() as i32)).or_default().push(i as u32);
+        }
+        ProbeIndex { cells }
+    }
+
+    /// One probe's light averaged over every direction (HDR) and its sun
+    /// visibility.
+    pub fn probe(d: &[u8; 64]) -> ([f32; 3], f32) {
+        let h = |i: usize| half(u16::from_le_bytes([d[2 * i], d[2 * i + 1]]));
+        let avg = [h(0), h(9), h(18)].map(|c| if c.is_finite() { (c * 0.282_095).max(0.0) } else { 0.0 });
+        let vis = h(27);
+        (avg, if vis.is_finite() { vis.clamp(0.0, 1.0) } else { 0.0 })
+    }
+
+    /// The light at `p` (the draw's units, `scale` times HDR): the probes
+    /// within two cells, weighted by the inverse square of their distance;
+    /// `None` with none near.
+    pub fn light(&self, map: &Iw7Map, p: [f32; 3], scale: f32) -> Option<LightSample> {
+        let c = p.map(|v| (v / Self::CELL).floor() as i32);
+        let (mut acc, mut vis, mut wsum) = ([0f32; 3], 0f32, 0f32);
+        for reach in [1, 2] {
+            for dx in -reach..=reach {
+                for dy in -reach..=reach {
+                    for dz in -reach..=reach {
+                        let Some(list) = self.cells.get(&[c[0] + dx, c[1] + dy, c[2] + dz]) else { continue };
+                        for &i in list {
+                            let (q, d) = &map.light_probes[i as usize];
+                            let d2: f32 = (0..3).map(|k| (q[k] - p[k]).powi(2)).sum();
+                            if d2 > (reach as f32 * Self::CELL).powi(2) {
+                                continue;
+                            }
+                            let w = 1.0 / (d2 + 64.0);
+                            let (l, v) = Self::probe(d);
+                            for k in 0..3 {
+                                acc[k] += w * l[k];
+                            }
+                            vis += w * v;
+                            wsum += w;
+                        }
+                    }
+                }
+            }
+            if wsum > 0.0 {
+                break;
+            }
+        }
+        (wsum > 0.0).then(|| LightSample { base: acc.map(|a| a / wsum * scale), directional: [0.0; 3], sun: vis / wsum, facing: 1.0 })
     }
 }
 
@@ -610,5 +1032,58 @@ impl Iw7Map {
                 d(a.1).total_cmp(&d(b.1))
             })
             .map_or(0, |(i, _)| i)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tone_map_meets_at_the_crossover() {
+        let v = Vision::default();
+        let c = v.crossover;
+        let (a, b) = (v.tonemap(c - 1e-3), v.tonemap(c + 1e-3));
+        assert!((a - b).abs() < 1e-3, "{a} {b}");
+        assert!((v.tonemap(v.white) - 1.0).abs() < 1e-4);
+        assert_eq!(v.tonemap(0.0), 0.0);
+        // Rising throughout.
+        let mut last = -1.0;
+        for i in 0..2000 {
+            let y = v.tonemap(i as f32 * 0.5);
+            assert!(y >= last);
+            last = y;
+        }
+    }
+
+    #[test]
+    fn roll_off_turns_back() {
+        for i in 0..95 {
+            let e = i as f32 / 50.0;
+            assert!((bo2_unroll(bo2_rolloff(e)) - e).abs() < 2e-3, "{e}");
+        }
+    }
+
+    #[test]
+    fn directions_turn_back() {
+        // Straight out: R = G = 128.
+        let d = light_direction(128, 128);
+        assert!(d[2] > 0.99, "{d:?}");
+        // Along x: r = g > 0.
+        let d = light_direction(191, 191);
+        assert!(d[0] > 0.3 && d[1].abs() < 0.02, "{d:?}");
+    }
+
+    #[test]
+    fn vision_reads() {
+        let v = Vision::parse("tonemapExposure \"11.5\"\ntonemapExposureAdjust \"-0.25\"\ntonemapWhitePoint \"650\"\nclut0Image \"mp_riot_final_clut\"\n");
+        assert_eq!(v.ev, 11.75);
+        assert_eq!(v.clut.as_deref(), Some("mp_riot_final_clut"));
+        let lut = grade_lut(&v, None);
+        assert_eq!(lut.len(), 32 * 32 * 32 * 4);
+        // Black stays black; the table rises.
+        assert_eq!(&lut[..3], &[0, 0, 0]);
+        let last = lut.len() - 4;
+        assert!(lut[last] > 200);
     }
 }

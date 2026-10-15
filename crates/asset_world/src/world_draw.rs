@@ -421,6 +421,10 @@ pub struct WorldDraw {
     /// bo2mp: the world's lightmaps are Call of Duty 4's (or World at
     /// War's), read by the fallback pass's IW3 branch (`world_iw3::iw3_lightmap`).
     pub iw3_lightmaps: bool,
+    /// bo2mp: those pages hold linear light (Infinite Warfare's,
+    /// `fastfile_iw7::light`): the IW3 branch squares each page and adds
+    /// them, and the sun, linear.
+    pub linear_lightmaps: bool,
 
     pub t5_sun_light: Option<WorldSunLight>,
 
@@ -1091,6 +1095,7 @@ pub fn build_world_draw(
             sun_effects,
             t5_sun_parse_exposure: None,
             iw3_lightmaps: false,
+            linear_lightmaps: false,
             t5_sky_dynamic_intensity: None,
             t5_sun_light: None,
             t5_tree_scatter_intensity: None,

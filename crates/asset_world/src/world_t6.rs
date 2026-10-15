@@ -444,6 +444,7 @@ pub fn build_t6_world_draw(
         // T6 world only the renderer's fallback draw reads them.
         t5_sun_parse_exposure: lighting.map(|l| l.exposure_scale),
         iw3_lightmaps: false,
+        linear_lightmaps: false,
         t5_sky_dynamic_intensity: lighting.map(|l| l.sky),
         t5_sun_light: lighting.map(|l| l.sun),
         t5_tree_scatter_intensity: None,

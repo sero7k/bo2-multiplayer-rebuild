@@ -125,7 +125,7 @@ pub struct MapModel {
 }
 
 /// A placed static model.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct StaticModel {
     pub model: usize,
     pub origin: [f32; 3],
@@ -142,6 +142,13 @@ pub struct StaticModel {
     /// A scriptable drawn as a prop: its index in `Iw7Map::scriptables`
     /// (`index` is then `u32::MAX`).
     pub scriptable: Option<u32>,
+    /// Its baked vertex lighting (`GfxStaticModelVertexLighting`, 20 bytes
+    /// each: visibility, ambient and highlight colours as halves), when it
+    /// has some.
+    pub vertex_lighting: Vec<[u8; 20]>,
+    /// Its place in a lightmap (`GfxStaticModelLightmapInfo`: uv offset,
+    /// uv scale, lightmap index), as the zone stores it.
+    pub lightmap: ([f32; 2], [f32; 2], u32),
 }
 
 /// A spawn point from the zone's spawn list.
@@ -297,6 +304,9 @@ pub struct Iw7Map {
     /// destructible and scripted props (Zombies maps' buyable blockers
     /// among them), not among the placed models.
     pub scriptables: Vec<ScriptableInstance>,
+    /// The light grid's probes (`GfxLightGrid::probeData`): each one's
+    /// position and its 64 bytes of light.
+    pub light_probes: Vec<([f32; 3], [u8; 64])>,
     /// The server triggers' hulls by `?<n>` (a volume's or trigger's
     /// `model`): each hull's midpoint and half size, about the entity's
     /// origin.
@@ -646,6 +656,8 @@ impl Iw7Map {
             index: u32,
             draw_flags: u16,
             scriptable: Option<u32>,
+            vertex_lighting: Vec<[u8; 20]>,
+            lightmap: ([f32; 2], [f32; 2], u32),
         }
         let mut placing: Vec<Placing> = Vec::new();
         if let Some(at) = g.smodels {
@@ -668,6 +680,19 @@ impl Iw7Map {
                     index: i as u32,
                     draw_flags: u16_at(d, D::flags),
                     scriptable: None,
+                    vertex_lighting: g
+                        .smodel_lighting
+                        .get(i)
+                        .copied()
+                        .flatten()
+                        .and_then(|s| image.get(s.pos..s.pos + s.len))
+                        .map(|b| b.chunks_exact(20).map(|c| c.try_into().unwrap()).collect())
+                        .unwrap_or_default(),
+                    lightmap: (
+                        [f32_at(d, D::modelLightmapInfo__offset), f32_at(d, D::modelLightmapInfo__offset + 4)],
+                        [f32_at(d, D::modelLightmapInfo__scale), f32_at(d, D::modelLightmapInfo__scale + 4)],
+                        u32_at(d, D::modelLightmapInfo__lightmapIndex),
+                    ),
                 });
             }
         }
@@ -684,6 +709,8 @@ impl Iw7Map {
                 index: u32::MAX,
                 draw_flags: 0,
                 scriptable: Some(k as u32),
+                vertex_lighting: Vec::new(),
+                lightmap: ([0.0; 2], [0.0; 2], u32::MAX),
             });
         }
         let scriptables_placed = placing.iter().filter(|p| p.scriptable.is_some()).count();
@@ -784,8 +811,19 @@ impl Iw7Map {
                     index: pl.index,
                     draw_flags: pl.draw_flags,
                     scriptable: pl.scriptable,
+                    vertex_lighting: pl.vertex_lighting.clone(),
+                    lightmap: pl.lightmap,
                 });
             }
+        }
+        if let (Some(d), Some(p)) = (g.light_probes, g.light_probe_positions) {
+            let (d, p) = (d.get(image), p.get(image));
+            out.light_probes = d
+                .chunks_exact(64)
+                .zip(p.chunks_exact(12))
+                .map(|(d, p)| ([f32_at(p, 0), f32_at(p, 4), f32_at(p, 8)], d.try_into().unwrap()))
+                .filter(|(p, _): &([f32; 3], [u8; 64])| p.iter().all(|c| c.is_finite()))
+                .collect();
         }
         out.report.push(format!(
             "world: {} vertices, {} indices, {} surfaces, {} materials ({} not defined{}); {} static models placed of {} (and {} scriptables), {} meshes{}",
