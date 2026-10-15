@@ -71,7 +71,14 @@ fn catalog() -> Option<&'static Catalog> {
         };
         // (Every picture is in a package: none is kept in the zone, which
         // is dropped once its names are read.)
-        let found: Vec<Item> = jc::find_items(&zone).into_iter().filter(|i| i.image.inline.is_none() && fastfile_jup::image::dxgi(i.image.format).is_some()).collect();
+        // (Only those whose pixels the install has: a few are fetched by
+        // the game on demand.)
+        let mut packages = Packages::new(&zone_dir, false);
+        let found: Vec<Item> = jc::find_items(&zone)
+            .into_iter()
+            .filter(|i| i.image.inline.is_none() && fastfile_jup::image::dxgi(i.image.format).is_some())
+            .filter(|i| i.image.groups.last().is_some_and(|g| packages.find(g.key).is_some()))
+            .collect();
         let (mut cards, mut emblems) = (Vec::new(), Vec::new());
         for it in &found {
             let name = format!("{PREFIX}:{}", it.name);
@@ -86,7 +93,7 @@ fn catalog() -> Option<&'static Catalog> {
             cards,
             emblems,
             oodle,
-            packages: Mutex::new(Packages::new(&zone_dir, false)),
+            packages: Mutex::new(packages),
             install,
         })
     })
