@@ -6,6 +6,7 @@ license.workspace = true
 description = "Call of Duty: Modern Warfare III (2023, cod23) containers: the .ff Oodle block envelope and the KAPI .xsub/.xpak packages."
 
 [dependencies]
+bcdec_rs.workspace = true # emblems' and calling cards' pictures
 
 [target.'cfg(windows)'.dependencies]
 libloading.workspace = true
@@ -14,5 +15,4 @@ libloading.workspace = true
 workspace = true
 
 [dev-dependencies]
-bcdec_rs.workspace = true
 png.workspace = true
