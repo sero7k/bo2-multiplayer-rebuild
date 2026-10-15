@@ -231,6 +231,14 @@ pub(crate) fn modern_hud_enabled() -> bool {
     hks_t6::host::bo1_hud_on() && crate::lui_hud::lui_enabled()
 }
 
+/// bo2mp: the Warzone HUD is drawn: the modern HUD is on and Resurgence
+/// publishes his values (`bo2mp_br`, the dvar's text). The menu-drawn HUD
+/// (the `hud` crate: the score corner and the weapon bar with its ammo
+/// and compass ring, Black Ops' menus) gives way to it.
+pub fn warzone_hud_up(br: Option<&str>) -> bool {
+    modern_hud_enabled() && br.is_some_and(|s| crate::hud_warzone::parse(s).is_some())
+}
+
 #[derive(Component)]
 struct HudRoot;
 

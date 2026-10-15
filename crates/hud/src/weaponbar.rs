@@ -667,6 +667,15 @@ pub(crate) fn update_weaponbar(
         hide(&mut pass);
         return;
     };
+    // bo2mp: Resurgence's Warzone HUD draws the gun, its ammo and the
+    // grenades itself (`ui::hud_modern`).
+    if presented
+        .snapshot()
+        .is_some_and(|s| ui::hud_modern::warzone_hud_up(s.meta.script_dvars(local.0).string("bo2mp_br")))
+    {
+        hide(&mut pass);
+        return;
+    }
 
     let meta = presented
         .snapshot()

@@ -311,6 +311,11 @@ pub(crate) fn update_scorebar(
         hide(&mut pass);
         return;
     };
+    // bo2mp: Resurgence's Warzone HUD has its own (`ui::hud_modern`).
+    if ui::hud_modern::warzone_hud_up(snap.meta.script_dvars(local.0).string("bo2mp_br")) {
+        hide(&mut pass);
+        return;
+    }
 
     let mut others = [0i32; 18];
     let mut n_others = 0usize;
