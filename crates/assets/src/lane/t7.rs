@@ -1068,6 +1068,31 @@ fn load_t7_guests(z: T7Zone, material_seed: MaterialCatalog) -> T7Guests {
             }
         }
     }
+    // Black Ops III's arm skeleton, which the guns' view animations pose:
+    // the first person view carries those poses onto Black Ops II's arms
+    // (`asset_game::FpvArmsRetarget`). Its mesh is never drawn.
+    let reference = cap
+        .models
+        .iter()
+        .filter(|m| m.name.starts_with("c_hro_player_male_") && m.name.ends_with("_viewhands"))
+        .find_map(|rec| {
+            let (mut xref, _) = b.model_ref(rec).ok()?;
+            for s in &mut xref.lod0 {
+                s.material = None;
+            }
+            xref.materials.clear();
+            xref.name = asset_game::T7_REFERENCE_ARMS.to_owned();
+            let skel = asset_model::capture_model_skel_t6(&xref, |_| None)?;
+            let names = &skel.bone_names;
+            names.iter().any(|n| n == "tag_weapon_right").then_some((rec.name.clone(), skel))
+        });
+    match reference {
+        Some((from, skel)) => {
+            fpv.insert_in(NS, skel, None);
+            report.push(format!("t7 guest guns: arms skeleton from {from}"));
+        }
+        None => report.push("t7 guest guns: no Black Ops III arms skeleton (view animations stay on BO2's arms as they are)".into()),
+    }
     report.push(format!(
         "t7 guest guns: models: {} first person, {} third person built; {} not {:?}",
         fpv.len(),

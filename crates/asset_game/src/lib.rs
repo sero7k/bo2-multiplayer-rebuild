@@ -16,6 +16,7 @@ mod attachment_hide;
 mod cac_stats;
 pub mod weapon_camo_models; // bo2mp
 mod fpv_assembly;
+mod fpv_retarget; // bo2mp
 mod fx_catalog;
 mod fx_model_catalog;
 mod graph_support;
@@ -35,6 +36,7 @@ pub use arena::*;
 pub use attachment_hide::*;
 pub use cac_stats::*;
 pub use fpv_assembly::*;
+pub use fpv_retarget::*;
 pub use fx_catalog::*;
 pub use fx_model_catalog::*;
 pub use graph_support::AuthoredRef;

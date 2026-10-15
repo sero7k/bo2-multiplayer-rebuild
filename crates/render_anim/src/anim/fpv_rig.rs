@@ -565,7 +565,12 @@ impl PreparedFpvRig {
             &instances,
             &self.parts,
             Mat4::IDENTITY,
-            |_, _, locals| {
+            |dobj, _, locals| {
+                // bo2mp: a Black Ops III gun's clips carried onto Black Ops
+                // II's arms (the gun where Black Ops III holds it).
+                if let Some(retarget) = &assembly.retarget {
+                    retarget.apply(dobj, &instances, locals);
+                }
                 let Some((bone, sample, weight)) = camera else {
                     return;
                 };

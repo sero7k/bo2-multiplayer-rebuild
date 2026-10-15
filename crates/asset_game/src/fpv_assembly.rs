@@ -54,6 +54,10 @@ pub struct FpvAssembly {
     /// bo2zm: a second gun hangs on the arms (Black Ops II dual wield: one
     /// set of arms, both guns, the left and right animations together).
     pub arms_gun: bool,
+    /// bo2mp: a Black Ops III gun on Black Ops II's arms: its clips pose
+    /// Black Ops III's arms and these carry the pose over
+    /// ([`crate::FpvArmsRetarget`]).
+    pub retarget: Option<Arc<crate::FpvArmsRetarget>>,
 }
 
 #[derive(Debug)]
@@ -227,6 +231,16 @@ impl FpvAssembly {
             weapon: tag("tag_weapon"),
         };
         let arms_gun = mounts.attachments.iter().any(|mount| mount.parent_model == 0);
+        // bo2mp: a Black Ops III gun held in another game's arms.
+        let t7 = crate::AssetNamespace::T7;
+        let retarget = catalog
+            .get_at(mounts.gun.order())
+            .filter(|gun| gun.namespace == t7)
+            .filter(|_| catalog.get_at(hands.order()).is_some_and(|arms| arms.namespace != t7))
+            .and_then(|_| catalog.get_at(catalog.index_by_name(t7, crate::T7_REFERENCE_ARMS)?))
+            .and_then(|reference| reference.skel.pose.as_ref())
+            .and_then(|reference| crate::FpvArmsRetarget::build(reference, &dobj))
+            .map(Arc::new);
         let paired_bones = specs[0].0.num_bones + specs[1].0.num_bones;
         let parts = parts
             .into_iter()
@@ -250,6 +264,7 @@ impl FpvAssembly {
             paired_bones,
             tags,
             arms_gun,
+            retarget,
         })
     }
 

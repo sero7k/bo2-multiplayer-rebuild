@@ -58,7 +58,7 @@ fn main() {
         }
     }
     println!("  hide tags: {:?}", r.hide_tags.iter().map(|&t| ss(t)).collect::<Vec<_>>());
-    let models: Vec<String> = r
+    let mut models: Vec<String> = r
         .fields
         .iter()
         .filter_map(|(f, v)| match v {
@@ -66,6 +66,18 @@ fn main() {
             _ => None,
         })
         .collect();
+    // `T7_MODELS=<name>,<name>`: those models' skeletons too (a viewhands
+    // model, a character); `T7_MODELS=?<substring>` lists the zone's models
+    // whose names hold it.
+    if let Ok(more) = std::env::var("T7_MODELS") {
+        if let Some(sub) = more.strip_prefix('?') {
+            for m in w.capture.models.iter().filter(|m| m.name.contains(sub)) {
+                println!("zone model {} ({} bones)", m.name, m.bones);
+            }
+        } else {
+            models.extend(more.split(',').map(str::to_owned));
+        }
+    }
     for m in models {
         let Some(m) = w.capture.model(&m) else { continue };
         let k = &m.skeleton;
