@@ -29,28 +29,22 @@ use fastfile_iw7::texture;
 use std::collections::HashMap;
 use std::path::Path;
 
-/// A colour map's mip chain, texels as raw 0..1 values (what the game's
-/// shaders square).
+/// A colour map's mip chain, texels as bytes (raw 0..1 values, what the
+/// game's shaders square), their colour times `scale` when sampled.
 struct Tex {
-    levels: Vec<(usize, usize, Vec<[f32; 4]>)>,
+    levels: Vec<(usize, usize, Vec<[u8; 4]>)>,
+    scale: f32,
 }
 
 impl Tex {
     fn from_rgba(r: &fastfile_iw7::look::Rgba) -> Self {
-        let to = |b: u8| f32::from(b) / 255.0;
         let mut levels = Vec::new();
         let (mut w, mut h) = (r.width as usize, r.height as usize);
         for l in &r.levels {
-            levels.push((
-                w,
-                h,
-                l.chunks_exact(4)
-                    .map(|p| [to(p[0]), to(p[1]), to(p[2]), to(p[3])])
-                    .collect(),
-            ));
+            levels.push((w, h, l.chunks_exact(4).map(|p| [p[0], p[1], p[2], p[3]]).collect()));
             (w, h) = ((w / 2).max(1), (h / 2).max(1));
         }
-        Tex { levels }
+        Tex { levels, scale: 1.0 }
     }
     fn size(&self) -> (usize, usize) {
         (self.levels[0].0, self.levels[0].1)
@@ -70,12 +64,11 @@ impl Tex {
             wrap(x0 + 1.0, w),
             wrap(y0 + 1.0, h),
         );
-        let a = px[y0i * w + x0i];
-        let b = px[y0i * w + x1i];
-        let c = px[y1i * w + x0i];
-        let d = px[y1i * w + x1i];
+        let f = |p: [u8; 4]| p.map(|b| f32::from(b) / 255.0);
+        let (a, b, c, d) = (f(px[y0i * w + x0i]), f(px[y0i * w + x1i]), f(px[y1i * w + x0i]), f(px[y1i * w + x1i]));
         std::array::from_fn(|k| {
-            (a[k] * (1.0 - tx) + b[k] * tx) * (1.0 - ty) + (c[k] * (1.0 - tx) + d[k] * tx) * ty
+            let v = (a[k] * (1.0 - tx) + b[k] * tx) * (1.0 - ty) + (c[k] * (1.0 - tx) + d[k] * tx) * ty;
+            if k < 3 { v * self.scale } else { v }
         })
     }
 }
@@ -755,8 +748,9 @@ fn main() {
             .filter(|(_, m)| fastfile_iw7::glow::emissive(m).is_some())
             .filter_map(|(i, m)| {
                 let g = map.glow(m, tex_size).ok()?;
-                let px = g.light.iter().map(|l| [l[0], l[1], l[2], 1.0]).collect();
-                Some((i, Tex { levels: vec![(g.width as usize, g.height as usize, px)] }))
+                let peak = g.peak().max(1e-6);
+                let px = g.light.iter().map(|l| l.map(|c| (c / peak * 255.0).round() as u8)).map(|c| [c[0], c[1], c[2], 255]).collect();
+                Some((i, Tex { levels: vec![(g.width as usize, g.height as usize, px)], scale: peak }))
             })
             .collect()
     };
