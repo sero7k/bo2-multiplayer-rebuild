@@ -134,7 +134,17 @@ pub(crate) fn update(
         }) {
             continue;
         }
-        let Some(key) = clip_keys_for_alias(&bank.0, ns, alias).into_iter().next() else {
+        // bo2mp: a Modern Warfare III (2023) loop (`jup:<name>` or
+        // `jup:#<hash>`, Resurgence's island emitters) is kept by its hash.
+        let jup_key;
+        let (ns, lookup) = match alias.strip_prefix("jup:") {
+            Some(name) => {
+                jup_key = asset_audio::jup_alias_key(name);
+                (AssetNamespace::Jup, jup_key.as_str())
+            }
+            None => (ns, alias),
+        };
+        let Some(key) = clip_keys_for_alias(&bank.0, ns, lookup).into_iter().next() else {
             gaps.record(alias);
             continue;
         };
@@ -144,10 +154,10 @@ pub(crate) fn update(
         };
         let Some(sound) = bank
             .0
-            .sound_in(ns, alias)
+            .sound_in(ns, lookup)
             .or_else(|| {
                 bank.0
-                    .index_unique(alias)
+                    .index_unique(lookup)
                     .and_then(|index| bank.0.sounds.get(index))
             })
             .and_then(|s| s.aliases.first())
