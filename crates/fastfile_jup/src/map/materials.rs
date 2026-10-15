@@ -58,7 +58,8 @@ pub struct MapMaterial {
     pub hash: u64,
     pub images: Vec<usize>,
     /// The picture it is coloured by: its first of format 0x25 (BC1, the
-    /// form colour maps take), else its first 0x2a (BC1).
+    /// form colour maps take; 0x2a, also BC1, holds masks and terrain
+    /// blend maps).
     pub colour: Option<usize>,
 }
 
@@ -275,7 +276,7 @@ pub fn read(zone: &ZoneImage, zones: &[u32], report: &mut Vec<String>) -> Found 
                 .copied()
                 .find(|&i| out.images[i].format == f)
         };
-        mat.colour = pick(0x25).or_else(|| pick(0x2a));
+        mat.colour = pick(0x25);
         out.materials.push(mat);
         by_ordinal.insert(ordinal, out.materials.len() - 1);
         *slot = Some(out.materials.len() - 1);
@@ -291,8 +292,12 @@ pub fn read(zone: &ZoneImage, zones: &[u32], report: &mut Vec<String>) -> Found 
         }
     }
     let coloured = out.materials.iter().filter(|m| m.colour.is_some()).count();
+    let mut formats: std::collections::BTreeMap<u8, usize> = Default::default();
+    for i in &out.images {
+        *formats.entry(i.format).or_default() += 1;
+    }
     report.push(format!(
-        "materials: {} used, {coloured} with a colour picture, {} pictures",
+        "materials: {} used, {coloured} with a colour picture, {} pictures (formats {formats:x?})",
         out.materials.len(),
         out.images.len()
     ));
