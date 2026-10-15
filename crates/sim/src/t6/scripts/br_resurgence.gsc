@@ -1125,6 +1125,30 @@ br_plates_input()
 
 // ---- the circle -------------------------------------------------------------
 
+// The map's own places, where its entities have them (Rebirth Island's):
+// its intel upload stations stand where the buy stations go, its loadout
+// drop spots (script_noteworthy "dropBagLocation") hold the ground loot and
+// the supply boxes.
+br_map_places()
+{
+    level.br_station_spots = [];
+    level.br_loot_spots = [];
+
+    if ( !isdefined( level.struct ) )
+        return;
+
+    foreach ( s in level.struct )
+    {
+        if ( !isdefined( s.origin ) )
+            continue;
+
+        if ( isdefined( s.targetname ) && s.targetname == "intel_upload_station" )
+            level.br_station_spots[level.br_station_spots.size] = s;
+        else if ( isdefined( s.script_noteworthy ) && s.script_noteworthy == "dropBagLocation" )
+            level.br_loot_spots[level.br_loot_spots.size] = s;
+    }
+}
+
 // Where players can stand: the map's spawn points (any game type's).
 br_spots()
 {
@@ -1139,6 +1163,13 @@ br_spots()
     if ( level.br_spot_list.size == 0 && isdefined( level.spawnpoints ) )
         level.br_spot_list = level.spawnpoints;
 
+    // (And the map's own loadout drop spots, where it has them.)
+    br_map_places();
+
+    foreach ( s in level.br_loot_spots )
+        level.br_spot_list[level.br_spot_list.size] = s;
+
+    println( "resurgence: " + level.br_spot_list.size + " spots, " + level.br_loot_spots.size + " of the map's drop spots, " + level.br_station_spots.size + " of its stations" );
     sum = ( 0, 0, 0 );
 
     foreach ( s in level.br_spot_list )
@@ -1560,11 +1591,19 @@ br_place_loot()
     level endon( "game_ended" );
     wait 1;
     spots = level.br_spot_list;
+    // (Around the map's own drop spots, close: they stand by walls.)
+    spread = 96;
+
+    if ( level.br_loot_spots.size > 0 )
+    {
+        spots = level.br_loot_spots;
+        spread = 32;
+    }
 
     for ( i = 0; i < level.br_loot_count && spots.size > 0; i++ )
     {
         s = spots[randomint( spots.size )];
-        origin = s.origin + ( randomfloatrange( -96, 96 ), randomfloatrange( -96, 96 ), 12 );
+        origin = s.origin + ( randomfloatrange( 0 - spread, spread ), randomfloatrange( 0 - spread, spread ), 12 );
         roll = randomint( 100 );
 
         br_spawn_loot( origin, roll );
@@ -1633,6 +1672,21 @@ br_spawn_loot( origin, roll )
 // squad's dead come back sooner).
 br_place_caches()
 {
+    // (On the map's own drop spots, each box on a spot of its own.)
+    spots = level.br_loot_spots;
+
+    for ( i = 0; i < level.br_cache_count && spots.size > 0; i++ )
+    {
+        k = randomint( spots.size );
+        level thread br_cache( spots[k].origin, 0, undefined );
+        last = spots.size - 1;
+        spots[k] = spots[last];
+        spots[last] = undefined;
+    }
+
+    if ( level.br_loot_spots.size > 0 )
+        return;
+
     for ( i = 0; i < level.br_cache_count && level.br_spot_list.size > 0; i++ )
     {
         s = level.br_spot_list[randomint( level.br_spot_list.size )];
@@ -1814,13 +1868,23 @@ br_place_stations()
     level endon( "game_ended" );
     wait 0.5;
     used = [];
+    // (Where the map has its own stations, among them; else among the
+    // spots in the middle three quarters.)
+    spots = level.br_spot_list;
+    reach = level.br_radius0 * 0.75;
 
-    for ( i = 0; i < level.br_station_count && level.br_spot_list.size > 0; i++ )
+    if ( level.br_station_spots.size > 0 )
+    {
+        spots = level.br_station_spots;
+        reach = level.br_radius0 * 2;
+    }
+
+    for ( i = 0; i < level.br_station_count && spots.size > 0; i++ )
     {
         best = undefined;
         bestd = -1;
 
-        foreach ( s in level.br_spot_list )
+        foreach ( s in spots )
         {
             nearest = 1000000;
 
@@ -1832,7 +1896,7 @@ br_place_stations()
                     nearest = d;
             }
 
-            if ( distance2d( s.origin, level.br_center ) > level.br_radius0 * 0.75 )
+            if ( distance2d( s.origin, level.br_center ) > reach || nearest < 1 )
                 continue;
 
             if ( nearest > bestd )
