@@ -223,6 +223,152 @@ fn build(tris: &mut [Tri], a: usize, b: usize, nodes: &mut Vec<Node>) -> u32 {
     me as u32
 }
 
+/// A baked sun shadow map: the scene seen from the sun (orthographic),
+/// per texel the height toward the sun of the nearest surface. A point is
+/// in the sun when its own height is not below the texel's (less a bias).
+pub struct SunDepth {
+    pub size: u32,
+    /// Toward the sun (unit), and two axes across it.
+    pub dir: [f32; 3],
+    pub u: [f32; 3],
+    pub v: [f32; 3],
+    /// The covered square in (u, v): its low corner and texel size.
+    pub origin: [f32; 2],
+    pub texel: f32,
+    /// Heights toward the sun (`f32::MIN` where nothing is).
+    pub height: Vec<f32>,
+}
+
+/// A triangle for the sun map: corners, and whether it casts a partial
+/// shadow (foliage cards: every other texel, a dither PCF softens).
+#[derive(Clone, Copy, Debug)]
+pub struct Caster {
+    pub p: [[f32; 3]; 3],
+    pub partial: bool,
+}
+
+impl SunDepth {
+    /// Rasterises the casters into a `size` x `size` map over the square
+    /// (in the sun's view) round `centre` of side `span` units.
+    pub fn render(casters: &[Caster], dir: [f32; 3], centre: [f32; 3], span: f32, size: u32) -> SunDepth {
+        let (u, v) = basis(dir);
+        let texel = span / size as f32;
+        let origin = [dot(centre, u) - span * 0.5, dot(centre, v) - span * 0.5];
+        let n = size as usize;
+        let threads = std::thread::available_parallelism().map_or(4, |c| c.get()).clamp(1, 32);
+        let band = n.div_ceil(threads);
+        let mut height = vec![f32::MIN; n * n];
+        // Each caster in texel space once.
+        let projected: Vec<([[f32; 3]; 3], bool)> = casters
+            .iter()
+            .map(|c| (c.p.map(|p| [(dot(p, u) - origin[0]) / texel, (dot(p, v) - origin[1]) / texel, dot(p, dir)]), c.partial))
+            .collect();
+        std::thread::scope(|s| {
+            for (b, rows) in height.chunks_mut(band * n).enumerate() {
+                let projected = &projected;
+                s.spawn(move || {
+                    let y0 = b * band;
+                    let y1 = (y0 + band).min(n);
+                    for (t, partial) in projected {
+                        let lo_y = t[0][1].min(t[1][1]).min(t[2][1]).floor().max(y0 as f32) as i64;
+                        let hi_y = t[0][1].max(t[1][1]).max(t[2][1]).ceil().min(y1 as f32 - 1.0) as i64;
+                        if lo_y > hi_y {
+                            continue;
+                        }
+                        let lo_x = t[0][0].min(t[1][0]).min(t[2][0]).floor().max(0.0) as i64;
+                        let hi_x = t[0][0].max(t[1][0]).max(t[2][0]).ceil().min(n as f32 - 1.0) as i64;
+                        if lo_x > hi_x {
+                            continue;
+                        }
+                        let area = (t[1][0] - t[0][0]) * (t[2][1] - t[0][1]) - (t[2][0] - t[0][0]) * (t[1][1] - t[0][1]);
+                        if area.abs() < 1e-9 {
+                            continue;
+                        }
+                        let inv = 1.0 / area;
+                        for y in lo_y..=hi_y {
+                            for x in lo_x..=hi_x {
+                                if *partial && (x + y) & 1 == 1 {
+                                    continue;
+                                }
+                                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                                let w0 = ((t[1][0] - px) * (t[2][1] - py) - (t[2][0] - px) * (t[1][1] - py)) * inv;
+                                let w1 = ((t[2][0] - px) * (t[0][1] - py) - (t[0][0] - px) * (t[2][1] - py)) * inv;
+                                let w2 = 1.0 - w0 - w1;
+                                if w0 < -1e-4 || w1 < -1e-4 || w2 < -1e-4 {
+                                    continue;
+                                }
+                                let h = w0 * t[0][2] + w1 * t[1][2] + w2 * t[2][2];
+                                let at = (y as usize - y0) * n + x as usize;
+                                if h > rows[at] {
+                                    rows[at] = h;
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        SunDepth { size, dir, u, v, origin, texel, height }
+    }
+
+    /// World point to (texel x, texel y, height toward the sun).
+    pub fn project(&self, p: [f32; 3]) -> [f32; 3] {
+        [(dot(p, self.u) - self.origin[0]) / self.texel, (dot(p, self.v) - self.origin[1]) / self.texel, dot(p, self.dir)]
+    }
+
+    /// How much sun `p` gets (3x3 texels, `bias` units).
+    pub fn visibility(&self, p: [f32; 3], bias: f32) -> f32 {
+        let [x, y, h] = self.project(p);
+        let n = self.size as i64;
+        let (cx, cy) = (x.floor() as i64, y.floor() as i64);
+        let (mut lit, mut all) = (0.0, 0.0);
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                let (tx, ty) = (cx + dx, cy + dy);
+                all += 1.0;
+                if tx < 0 || ty < 0 || tx >= n || ty >= n {
+                    lit += 1.0;
+                    continue;
+                }
+                if h + bias >= self.height[(ty * n + tx) as usize] {
+                    lit += 1.0;
+                }
+            }
+        }
+        lit / all
+    }
+
+    /// The map as RGBA8 texels: the height over `range` (low corner
+    /// `base`) in 24 bits (r high, g, b low), alpha 255 where something is
+    /// and 0 where nothing is.
+    pub fn packed(&self, base: f32, range: f32) -> Vec<u8> {
+        let mut out = Vec::with_capacity(self.height.len() * 4);
+        for &h in &self.height {
+            if h == f32::MIN {
+                out.extend_from_slice(&[0, 0, 0, 0]);
+                continue;
+            }
+            let t = ((h - base) / range).clamp(0.0, 1.0);
+            let q = (t * 16_777_215.0).round() as u32;
+            out.extend_from_slice(&[(q >> 16) as u8, (q >> 8) as u8, q as u8, 255]);
+        }
+        out
+    }
+
+    /// The lowest and highest heights stored.
+    pub fn height_range(&self) -> (f32, f32) {
+        let mut lo = f32::MAX;
+        let mut hi = f32::MIN;
+        for &h in &self.height {
+            if h != f32::MIN {
+                lo = lo.min(h);
+                hi = hi.max(h);
+            }
+        }
+        (lo, hi)
+    }
+}
+
 /// Runs `f` over `0..n` on every core, results in order.
 pub fn parallel_map<T: Send + Default + Clone>(n: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
     let threads = std::thread::available_parallelism().map_or(4, |c| c.get()).clamp(1, 32);
@@ -257,5 +403,18 @@ mod tests {
         let under = t.openness([0.0, 0.0, 0.0], up, 1000.0, 32, 1, 0.5);
         let out = t.openness([400.0, 400.0, 0.0], up, 1000.0, 32, 1, 0.5);
         assert!(under < 0.85 && out > 0.95, "{under} {out}");
+    }
+
+    #[test]
+    fn the_sun_map_shades_under_a_roof() {
+        let roof = [[[-50.0, -50.0, 100.0], [50.0, -50.0, 100.0], [50.0, 50.0, 100.0]], [[-50.0, -50.0, 100.0], [50.0, 50.0, 100.0], [-50.0, 50.0, 100.0]]];
+        let floor = [[[-500.0, -500.0, 0.0], [500.0, -500.0, 0.0], [500.0, 500.0, 0.0]], [[-500.0, -500.0, 0.0], [500.0, 500.0, 0.0], [-500.0, 500.0, 0.0]]];
+        let casters: Vec<Caster> = roof.iter().chain(floor.iter()).map(|p| Caster { p: *p, partial: false }).collect();
+        let m = SunDepth::render(&casters, [0.0, 0.0, 1.0], [0.0; 3], 1000.0, 256);
+        assert_eq!(m.visibility([0.0, 0.0, 0.0], 2.0), 0.0);
+        assert_eq!(m.visibility([200.0, 0.0, 0.0], 2.0), 1.0);
+        assert_eq!(m.visibility([0.0, 0.0, 100.0], 2.0), 1.0);
+        let (lo, hi) = m.height_range();
+        assert!((lo - 0.0).abs() < 1e-3 && (hi - 100.0).abs() < 1e-3);
     }
 }
