@@ -274,7 +274,24 @@ fn sound_sources(games: &GamesRoot, map: &Path) -> (Vec<SoundSource>, Vec<SoundS
         // namespace).
         after_map.extend(bo3_sound_source(games));
     }
+    // bo2mp: Resurgence's sounds from Modern Warfare III (2023), when the
+    // match is Resurgence and the install is set.
+    after_map.extend(jup_sound_source());
     (before_map, after_map)
+}
+
+/// bo2mp: Modern Warfare III's (2023) install, for Resurgence's sounds.
+fn jup_sound_source() -> Option<SoundSource> {
+    crate::jup_sounds_wanted()?;
+    Some(SoundSource {
+        namespace: AssetNamespace::Jup,
+        name: "Resurgence (MW3 2023)",
+        found: crate::jup_install().ok_or_else(|| {
+            format!("{} is not set to a Modern Warfare III (2023) install", crate::JUP_INSTALL_ENV)
+        }),
+        merge: Merge::Missing,
+        absent: Absent::Skip,
+    })
 }
 
 /// bo2mp: World at War's common zone, its guns' sounds, when it is
@@ -437,6 +454,10 @@ impl SoundSources {
             AssetNamespace::T4 => (crate::waw_weapon_sounds(path), ZoneSoundOrigin::AudioOnly),
             AssetNamespace::S1 => (crate::aw_weapon_sounds(path), ZoneSoundOrigin::AudioOnly),
             AssetNamespace::T7 => (crate::bo3_weapon_sounds(path), ZoneSoundOrigin::AudioOnly),
+            AssetNamespace::Jup => (
+                crate::jup_resurgence_sounds(path, crate::jup_sounds_wanted().unwrap_or(false)),
+                ZoneSoundOrigin::AudioOnly,
+            ),
             _ => ensure_zone_sound(path),
         };
         match catalog {

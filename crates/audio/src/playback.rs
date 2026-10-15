@@ -316,6 +316,9 @@ fn apply_svc_local_sound(
         // announcer's and interface sounds' routes as the event path does.
         let Some((namespace, alias)) = adopted.sound_alias_name(cmd.index).map(|alias| {
             match alias.split_once(':').and_then(|(ns, name)| AssetNamespace::parse(ns).map(|ns| (ns, name))) {
+                // bo2mp: Modern Warfare III's (2023) aliases are kept by
+                // their hash (`jup:<name>` or `jup:#<hash>`).
+                Some((AssetNamespace::Jup, name)) => (AssetNamespace::Jup, asset_audio::jup_alias_key(name)),
                 Some((ns, name)) => {
                     let (ns, name) = announcer.routed(ns, name).unwrap_or((ns, name));
                     match bank

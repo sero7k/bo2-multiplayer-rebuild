@@ -381,6 +381,8 @@ pub(crate) fn install_sound_bank(
                     .filter(|bank| {
                         bank.products_id == products_id
                             && bank.common_profile_id == compose.common_profile_id
+                            // bo2mp: a Resurgence match wants its MW3 (2023) sounds in.
+                            && (!sim::resurgence_on() || asset_audio::has_jup_sounds(&bank.catalog))
                     })
                     .map(|bank| ComposedBank {
                         loaded: Ok((Arc::clone(&bank.catalog), bank.gaps)),
@@ -423,6 +425,12 @@ pub(crate) fn install_sound_bank(
                         },
                     };
                     let loaded = found.map(|found| {
+                        // bo2mp: Resurgence takes in Modern Warfare III's (2023)
+                        // sounds; Rebirth Island's own zone with that map.
+                        asset_audio::want_jup_sounds(
+                            sim::resurgence_on(),
+                            zone.eq_ignore_ascii_case(asset_audio::REBIRTH_MAP_ZONE),
+                        );
                         let sources = gather_sound_sources(&games, &found.path);
                         let LoadedSoundBank { catalog, gaps, .. } =
                             compose_sound_bank(sources, &zone, namespace, map);
