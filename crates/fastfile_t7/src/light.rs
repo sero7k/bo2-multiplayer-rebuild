@@ -81,6 +81,11 @@ impl FogVolume {
     }
 }
 
+/// bo2mp: the picture of a map's LUT material (`GfxWorld` header).
+pub fn lut_image(map: &T7Map) -> Option<String> {
+    map.light_refs.as_ref().and_then(|r| r.lut_image.clone())
+}
+
 /// bo2mp: a map's fog volumes (none when its sun volume was not read).
 pub fn fog(map: &T7Map) -> &[FogVolume] {
     map.light_refs.as_ref().map_or(&[], |r| r.fog.as_slice())

@@ -417,6 +417,45 @@ impl Fog {
     }
 }
 
+/// bo2mp: the final pass's grade for a Black Ops III map lit by its own
+/// light: its colour table (the `GfxWorld`'s LUT material's picture, a
+/// `create_lut2dv` source like Black Ops II's: 32 tables of 32 x 32 side by
+/// side per 32 rows, R10G10B10A2; the first band, which the map starts in)
+/// and a bloom for its highlights (BO3's bloom settings are not read: its
+/// post shaders are not in the zones read; the ramp and tints are ours).
+/// `BO2MP_T7_GRADE=0`: no table; `BO2MP_T7_BLOOM` scales the bloom (0 none).
+pub(super) fn grade(map: &T7Map, report: &mut Vec<String>) -> Option<asset_world::T6Grade> {
+    let mut vision = asset_world::T6Vision::default();
+    let bloom = env_scale("BO2MP_T7_BLOOM", 1.0);
+    if bloom > 0.0 {
+        vision.bloom_rgb_hi = [0.35 * bloom, 0.35 * bloom, 0.35 * bloom, 0.7];
+        vision.bloom_rgb_lo = [0.45 * bloom, 0.45 * bloom, 0.45 * bloom, 3.0];
+    }
+    let mut base: Option<Vec<u8>> = None;
+    if env_scale("BO2MP_T7_GRADE", 1.0) > 0.0
+        && let Some(name) = fastfile_t7::light::lut_image(map)
+    {
+        match map.image(&name, 1024) {
+            Ok(l) if l.format == 24 && l.width == 1024 && l.height >= 32 && l.data.len() >= 1024 * 32 * 4 => {
+                let px: Vec<u8> = l.data[..1024 * 32 * 4]
+                    .chunks_exact(4)
+                    .flat_map(|w| {
+                        let v = u32::from_le_bytes([w[0], w[1], w[2], w[3]]);
+                        let c = |k: u32| ((((v >> (10 * k)) & 1023) as f32) * 255.0 / 1023.0).round() as u8;
+                        [c(0), c(1), c(2), 255]
+                    })
+                    .collect();
+                report.push(format!("t7 grade: {name} (band 0 of {} rows)", l.height));
+                base = Some(px);
+            }
+            Ok(l) => report.push(format!("t7 grade: {name}: format {} {}x{} not read", l.format, l.width, l.height)),
+            Err(e) => report.push(format!("t7 grade: {e}")),
+        }
+    }
+    report.push(format!("t7 bloom: x{bloom}"));
+    Some(asset_world::T6Grade { lut: asset_world::t6_grade_lut(&vision, base.as_deref()), vision })
+}
+
 /// A reveal decal vertex's alpha with its material's soft edge, for the
 /// shader (`t7_reveal`): -(2 + 2 q + 0.999 a), q the soft edge in 64ths.
 fn reveal_alpha(a: f32, soft: f32) -> f32 {
