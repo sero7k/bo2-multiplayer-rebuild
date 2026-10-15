@@ -374,6 +374,7 @@ pub fn gfx_world(w: &GNode, remap: &dyn Fn(Option<usize>) -> Option<usize>) -> z
         None => z3::LightGrid::default(),
     };
     let range = |begin: &str, end: &str| w.int(&format!("dpvs::{begin}")) as u32..w.int(&format!("dpvs::{end}")) as u32;
+    let dpvs = gfx_dpvs(w);
     z3::GfxWorld {
         name: w.string("name").unwrap_or("").to_owned(),
         base_name: w.string("baseName").unwrap_or("").to_owned(),
@@ -395,7 +396,80 @@ pub fn gfx_world(w: &GNode, remap: &dyn Fn(Option<usize>) -> Option<usize>) -> z
         emissive_surfs: range("emissiveSurfsBegin", "emissiveSurfsEnd"),
         models,
         light_grid,
+        dpvs,
     }
+}
+
+/// bo2mp: the world's visibility (BSP planes and nodes, cells with their
+/// surface trees and portals, the sorted surface order), when every part
+/// of it is in the zone. World at War's `GfxAabbTree` is 40 bytes (CoD4's
+/// 44 less the no-decal span) and its sorted surfaces hold no no-decal
+/// copy; `GfxPortal` and `GfxCell` are laid out as CoD4's.
+fn gfx_dpvs(w: &GNode) -> Option<z3::GfxDpvs> {
+    let planes_node = w.node("dpvsPlanes")?;
+    let planes: Vec<([f32; 3], f32, u8)> = raw(planes_node, "planes")
+        .chunks_exact(20)
+        .map(|p| (std::array::from_fn(|k| f32::from_bits(u32_at(p, k * 4))), f32::from_bits(u32_at(p, 12)), p[16]))
+        .collect();
+    let nodes: Vec<u16> = u16s(&raw(planes_node, "nodes")).collect();
+    let cell_count = planes_node.int("cellCount").max(0) as usize;
+    let cells_nodes = w.nodes("cells");
+    if planes.is_empty() || nodes.is_empty() || cells_nodes.len() != cell_count {
+        return None;
+    }
+    let cells_base = array_base(w, "cells");
+    let mut cells = Vec::with_capacity(cell_count);
+    for c in cells_nodes {
+        let aabb_tree: Vec<z3::GfxAabbNode> = c
+            .nodes("aabbTree")
+            .iter()
+            .map(|t| {
+                let u16_at = |o: usize| u16::from_le_bytes([t.data[o], t.data[o + 1]]);
+                z3::GfxAabbNode {
+                    mins: vec3(t, "mins"),
+                    maxs: vec3(t, "maxs"),
+                    child_count: u16_at(24),
+                    surface_count: u16_at(26),
+                    start_surf_index: u16_at(28),
+                    surface_count_no_decal: u16_at(26),
+                    start_surf_index_no_decal: u16_at(28),
+                    children_offset: u32_at(&t.data, 36) as i32,
+                    node_size: 40,
+                }
+            })
+            .collect();
+        if aabb_tree.len() != c.int("aabbTreeCount").max(0) as usize {
+            return None;
+        }
+        let mut portals = Vec::new();
+        for p in c.nodes("portals") {
+            let neighbor = index_in(cells_base, Ptr::from_raw(u32_at(&p.data, 32)), 56)?;
+            let vertices: Vec<[f32; 3]> = raw(p, "vertices")
+                .chunks_exact(12)
+                .map(|v| std::array::from_fn(|k| f32::from_bits(u32_at(v, k * 4))))
+                .collect();
+            if vertices.len() != usize::from(p.data[40]) {
+                return None;
+            }
+            let f = |o: usize| f32::from_bits(u32_at(&p.data, o));
+            portals.push(z3::GfxPortal {
+                plane: [f(12), f(16), f(20), f(24)],
+                cell: u16::try_from(neighbor).ok()?,
+                vertices,
+                hull_axis: [[f(44), f(48), f(52)], [f(56), f(60), f(64)]],
+            });
+        }
+        if portals.len() != c.int("portalCount").max(0) as usize {
+            return None;
+        }
+        cells.push(z3::GfxCell { mins: vec3(c, "mins"), maxs: vec3(c, "maxs"), aabb_tree, portals });
+    }
+    let static_surface_count = w.int("dpvs::staticSurfaceCount").max(0) as u32;
+    let sorted_surf_index: Vec<u16> = w.node("dpvs").map(|d| u16s(&raw(d, "sortedSurfIndex")).collect()).unwrap_or_default();
+    if sorted_surf_index.len() != static_surface_count as usize {
+        return None;
+    }
+    Some(z3::GfxDpvs { planes, nodes, cells, sorted_surf_index, static_surface_count, static_surface_count_no_decal: 0 })
 }
 
 const PLANE_SIZE: u32 = 20;

@@ -172,7 +172,14 @@ pub fn build_iw3_world_draw(
         &surface_primary_lights,
         &surface_reflection_probes,
     );
-    let dpvs = one_cell(n, world.mins, world.maxs, surface_bounds)?;
+    // bo2mp: the world's own cells, portals and surface trees when the zone
+    // has them whole (CoD4, World at War), so only what the eye's cell sees
+    // through its portals is drawn; one cell over everything otherwise.
+    let drawn_ranges: Vec<bool> = surface_index_ranges.iter().map(|&(_, count)| count > 0).collect();
+    let dpvs = match world.dpvs.as_ref().map(|d| iw3_dpvs(d, n, &drawn_ranges, surface_bounds.clone())) {
+        Some(Ok(dpvs)) => dpvs,
+        _ => one_cell(n, world.mins, world.maxs, surface_bounds)?,
+    };
     // bo2mp: a layered material's other colour maps use the vertex's own
     // texture coordinates (CoD4 / World at War keep one set).
     let layer_uvs: Vec<[f32; 4]> = texture_uvs.iter().map(|uv| [uv[0], uv[1], uv[0], uv[1]]).collect();
@@ -473,6 +480,142 @@ pub fn iw3_normal_to_bo2(rgba: &mut [u8]) {
 }
 
 /// One cell, one AABB node over every surface, identity sort order.
+/// bo2mp: a CoD4 / World at War world's visibility as the renderer's
+/// (the IW4 culling: BSP to the eye's cell, portals, then each visible
+/// cell's surface tree against the view). A drawn surface no tree reaches
+/// (a world whose trees leave some out) is added to every cell in a leaf of
+/// its own, so nothing that drew before goes missing.
+pub fn iw3_dpvs(
+    d: &iw3::zone::GfxDpvs,
+    n: usize,
+    drawn: &[bool],
+    surface_bounds: Vec<Bounds>,
+) -> Result<DpvsWorldData, WorldMeshError> {
+    use crate::world_draw::OwnedPortal;
+    use dpvs_iw4::{AABB_NODE_STRIDE, CPlane};
+
+    let cell_count = d.cells.len();
+    let count = u16::try_from(n).map_err(|_| WorldMeshError::NoGeometry)?;
+    if cell_count == 0 || d.nodes.is_empty() || d.sorted_surf_index.iter().any(|&s| usize::from(s) >= n) {
+        return Err(WorldMeshError::NoGeometry);
+    }
+    let mut reached = vec![false; n];
+    let mut sorted_surf_index = d.sorted_surf_index.clone();
+    let mut aabb_trees = Vec::with_capacity(cell_count);
+    let mut cell_roots = Vec::with_capacity(cell_count);
+    let mut portals_per_cell = Vec::with_capacity(cell_count);
+    let mut portal_verts = Vec::new();
+    for cell in &d.cells {
+        let mut nodes = Vec::with_capacity(cell.aabb_tree.len());
+        for node in &cell.aabb_tree {
+            let size = i32::from(node.node_size.max(1));
+            let children_offset = if node.children_offset <= 0 || node.children_offset % size != 0 {
+                if node.child_count > 0 && node.children_offset > 0 {
+                    return Err(WorldMeshError::InvalidAabbChildrenOffset { offset: node.children_offset, stride: size });
+                }
+                node.children_offset.min(0)
+            } else {
+                node.children_offset / size * AABB_NODE_STRIDE as i32
+            };
+            if node.child_count == 0 {
+                let start = usize::from(node.start_surf_index);
+                for &s in sorted_surf_index.get(start..start + usize::from(node.surface_count)).unwrap_or(&[]) {
+                    reached[usize::from(s)] = true;
+                }
+            }
+            nodes.push(AabbNodeView {
+                bounds: Bounds::from_mins_maxs(node.mins, node.maxs),
+                child_count: node.child_count,
+                children_offset,
+                start_surf: node.start_surf_index,
+                surface_count: node.surface_count,
+                start_surf_no_decal: node.start_surf_index_no_decal,
+                surface_count_no_decal: node.surface_count_no_decal,
+                smodel_index_start: 0,
+                smodel_index_count: 0,
+            });
+        }
+        cell_roots.push(nodes.first().map_or(SurfRange::default(), |root| SurfRange {
+            start: root.start_surf,
+            count: root.surface_count,
+        }));
+        aabb_trees.push(nodes);
+        let mut portals = Vec::with_capacity(cell.portals.len());
+        for portal in &cell.portals {
+            if usize::from(portal.cell) >= cell_count {
+                return Err(WorldMeshError::NoGeometry);
+            }
+            let vert_start = portal_verts.len();
+            portal_verts.extend_from_slice(&portal.vertices);
+            portals.push(OwnedPortal {
+                plane: portal.plane,
+                neighbor: portal.cell,
+                vert_start,
+                vert_count: portal.vertices.len(),
+                hull_axis: Some(portal.hull_axis),
+            });
+        }
+        portals_per_cell.push(portals);
+    }
+    // Drawn surfaces no leaf reaches: one more leaf in front of every
+    // cell's tree (a new root over both; the old tree keeps its offsets).
+    let orphans: Vec<u16> = (0..count).filter(|&s| drawn.get(usize::from(s)).copied().unwrap_or(false) && !reached[usize::from(s)]).collect();
+    if !orphans.is_empty() {
+        let start = u16::try_from(sorted_surf_index.len()).map_err(|_| WorldMeshError::NoGeometry)?;
+        let orphan_count = u16::try_from(orphans.len()).map_err(|_| WorldMeshError::NoGeometry)?;
+        sorted_surf_index.extend_from_slice(&orphans);
+        let everything = Bounds::from_mid_half([0.0; 3], [1.0e9; 3]);
+        for nodes in &mut aabb_trees {
+            let leaf = AabbNodeView {
+                bounds: everything,
+                child_count: 0,
+                children_offset: 0,
+                start_surf: start,
+                surface_count: orphan_count,
+                start_surf_no_decal: start,
+                surface_count_no_decal: orphan_count,
+                smodel_index_start: 0,
+                smodel_index_count: 0,
+            };
+            let root = AabbNodeView {
+                bounds: everything,
+                child_count: if nodes.is_empty() { 1 } else { 2 },
+                children_offset: AABB_NODE_STRIDE as i32,
+                ..leaf
+            };
+            nodes.splice(0..0, [root, leaf]);
+        }
+    }
+    let mut out = DpvsWorldData::new(CameraSurfRanges::new(
+        CameraSurfRange {
+            kind: CameraRangeKind::LitOpaque,
+            begin: 0,
+            end: n as u32,
+        },
+        Vec::new(),
+    ));
+    out.planes = d
+        .planes
+        .iter()
+        .map(|&(normal, dist, r#type)| CPlane { normal, dist, r#type })
+        .collect();
+    out.nodes = d.nodes.clone();
+    out.cell_count = cell_count;
+    out.static_surface_count = d.static_surface_count as usize;
+    out.static_surface_count_no_decal = d.static_surface_count_no_decal as usize;
+    out.lit_opaque_begin = 0;
+    out.lit_opaque_end = n as u32;
+    out.sorted_surf_index = sorted_surf_index;
+    out.surface_bounds = surface_bounds;
+    out.cell_roots = cell_roots;
+    out.aabb_trees = aabb_trees;
+    out.aabb_smodel_indices = vec![Vec::new(); cell_count];
+    out.portal_verts = portal_verts;
+    out.portals_per_cell = portals_per_cell;
+    out.cell_reflection_probes = vec![Vec::new(); cell_count];
+    out.checked()
+}
+
 fn one_cell(
     n: usize,
     mins: [f32; 3],
@@ -1252,5 +1395,62 @@ mod iw3_lightmap_tests {
         assert_eq!(d[p2 + 3], 0);
         assert_eq!(d[p2 + 4 * 5 + 3], 50);
         assert!(iw3_lightmap((4, 4, 21, &prim), (2, 4, 21, &sec), ("p", "s")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod dpvs_tests {
+    use iw3::zone::{GfxAabbNode, GfxCell, GfxDpvs, GfxPortal};
+
+    use super::{Bounds, iw3_dpvs};
+
+    fn leaf(start: u16, count: u16) -> GfxAabbNode {
+        GfxAabbNode {
+            mins: [-10.0; 3],
+            maxs: [10.0; 3],
+            surface_count: count,
+            start_surf_index: start,
+            surface_count_no_decal: count,
+            start_surf_index_no_decal: start,
+            node_size: 40,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn cells_portals_and_trees_convert() {
+        // Two cells split by the plane x = 0; cell 0's tree is a root over
+        // two leaves (World at War's 40-byte nodes), cell 1's one leaf.
+        let root = GfxAabbNode { child_count: 2, children_offset: 40, ..leaf(0, 2) };
+        let portal = |to| GfxPortal { plane: [1.0, 0.0, 0.0, 0.0], cell: to, vertices: vec![[0.0; 3]; 4], hull_axis: [[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] };
+        let d = GfxDpvs {
+            planes: vec![([1.0, 0.0, 0.0], 0.0, 0)],
+            // Node 0 splits on plane 0 (3 = cell count + 1 + plane): its
+            // front is the next slot but one (leaf cell 0), its back three
+            // slots on (leaf cell 1).
+            nodes: vec![3, 3, 1, 2],
+            cells: vec![
+                GfxCell { aabb_tree: vec![root, leaf(0, 1), leaf(1, 1)], portals: vec![portal(1)], ..Default::default() },
+                GfxCell { aabb_tree: vec![leaf(2, 1)], portals: vec![portal(0)], ..Default::default() },
+            ],
+            sorted_surf_index: vec![0, 1, 2],
+            static_surface_count: 3,
+            static_surface_count_no_decal: 0,
+        };
+        // Surface 3 is drawn but in no tree (a brush model's).
+        let drawn = [true, true, true, true];
+        let out = iw3_dpvs(&d, 4, &drawn, vec![Bounds::from_mins_maxs([-1.0; 3], [1.0; 3]); 4]).expect("converts");
+        assert_eq!(out.cell_count, 2);
+        assert_eq!(out.portals_per_cell[0][0].neighbor, 1);
+        assert_eq!(out.portal_verts.len(), 8);
+        // The orphan went in a leaf of its own under a new root in each cell.
+        assert_eq!(out.sorted_surf_index, vec![0, 1, 2, 3]);
+        let t0 = &out.aabb_trees[0];
+        assert_eq!((t0[0].child_count, t0[1].start_surf, t0[1].surface_count), (2, 3, 1));
+        // The old root's children offset is in the renderer's node stride.
+        assert_eq!(t0[2].children_offset, dpvs_iw4::AABB_NODE_STRIDE as i32);
+        let planes = dpvs_iw4::DpvsPlanes { planes: &out.planes, nodes: &out.nodes, cell_count: 2 };
+        assert_eq!(planes.cell_for_point([5.0, 0.0, 0.0]), Some(0));
+        assert_eq!(planes.cell_for_point([-5.0, 0.0, 0.0]), Some(1));
     }
 }

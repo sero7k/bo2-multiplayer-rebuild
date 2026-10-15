@@ -860,6 +860,7 @@ fn iw3_world(map: &Iw7Map, sun: ([f32; 3], [f32; 3], f32, &'static str)) -> iw3:
         emissive_surfs: 0..0,
         models: Vec::new(),
         light_grid: Default::default(),
+        dpvs: None,
     }
 }
 

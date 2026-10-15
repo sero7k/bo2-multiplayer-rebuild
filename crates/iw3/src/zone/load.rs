@@ -752,20 +752,40 @@ impl<'a> Loader<'a> {
         }
         // reflectionProbeTextures (@236): runtime block.
 
-        // dpvsPlanes
-        if s.ptr(244).is_inline() {
-            self.r.array(4, 20, plane_count)?;
+        // dpvsPlanes (bo2mp: kept, with the cells, for the world's culling)
+        let mut dpvs = Some(GfxDpvs::default());
+        match self.fixed_array(s.ptr(244), 4, 20, plane_count)? {
+            Some(a) => {
+                if let Some(d) = dpvs.as_mut() {
+                    d.planes = (0..plane_count).map(|i| (a.vec3(i * 20), a.f32(i * 20 + 12), a.u8(i * 20 + 16))).collect();
+                }
+            }
+            None => dpvs = None,
         }
-        if s.ptr(248).is_inline() {
-            self.r.array(2, 2, node_count)?;
+        match self.fixed_array(s.ptr(248), 2, 2, node_count)? {
+            Some(a) => {
+                if let Some(d) = dpvs.as_mut() {
+                    d.nodes = (0..node_count).map(|i| a.u16(i * 2)).collect();
+                }
+            }
+            None => dpvs = None,
         }
         // sceneEntCellBits (@252): runtime.
 
         if s.ptr(260).is_inline() {
-            let (_, cells) = self.r.array(4, 56, cell_count)?;
+            let (cells_loc, cells) = self.r.array(4, 56, cell_count)?;
+            let mut out = Vec::with_capacity(cell_count);
             for i in 0..cell_count {
-                self.gfx_cell(cells.elem(i, 56))?;
+                out.push(self.gfx_cell(cells.elem(i, 56), cells_loc)?);
             }
+            if out.iter().any(Option::is_none) {
+                dpvs = None;
+            }
+            if let Some(d) = dpvs.as_mut() {
+                d.cells = out.into_iter().flatten().collect();
+            }
+        } else {
+            dpvs = None;
         }
 
         let lightmap_count = s.i32(264).max(0) as usize;
@@ -936,8 +956,16 @@ impl<'a> Loader<'a> {
         let smodel_count = s.u32(580) as usize;
         let static_surface_count = s.u32(584) as usize;
         let static_surface_count_no_decal = s.u32(588) as usize;
-        if s.ptr(652).is_inline() {
-            self.r.array(2, 2, static_surface_count + static_surface_count_no_decal)?;
+        let sorted_count = static_surface_count + static_surface_count_no_decal;
+        match self.fixed_array(s.ptr(652), 2, 2, sorted_count)? {
+            Some(a) => {
+                if let Some(d) = dpvs.as_mut() {
+                    d.sorted_surf_index = (0..sorted_count).map(|i| a.u16(i * 2)).collect();
+                    d.static_surface_count = static_surface_count as u32;
+                    d.static_surface_count_no_decal = static_surface_count_no_decal as u32;
+                }
+            }
+            None => dpvs = None,
         }
         if s.ptr(656).is_inline() {
             self.r.array(4, 28, smodel_count)?;
@@ -1016,34 +1044,71 @@ impl<'a> Loader<'a> {
             emissive_surfs: s.u32(608)..s.u32(612),
             models,
             light_grid,
+            dpvs,
         })
     }
 
-    fn gfx_cell(&mut self, c: S<'a>) -> Result<()> {
-        // aabbTree
+    /// One `GfxCell` (56 bytes) of the cell array at `cells`: its surface
+    /// tree and portals (bo2mp: kept; `None` when a part of it is not in
+    /// this zone's own data).
+    fn gfx_cell(&mut self, c: S<'a>, cells: Loc) -> Result<Option<GfxCell>> {
+        let mut whole = true;
+        let mut cell = GfxCell { mins: c.vec3(0), maxs: c.vec3(12), ..Default::default() };
+        // aabbTree (GfxAabbTree, 44 bytes)
         let tree_count = c.i32(24).max(0) as usize;
         if c.ptr(28).is_inline() {
             let (_, trees) = self.r.array(4, 44, tree_count)?;
             for t in 0..tree_count {
                 let tree = trees.elem(t, 44);
+                cell.aabb_tree.push(GfxAabbNode {
+                    mins: tree.vec3(0),
+                    maxs: tree.vec3(12),
+                    child_count: tree.u16(24),
+                    surface_count: tree.u16(26),
+                    start_surf_index: tree.u16(28),
+                    surface_count_no_decal: tree.u16(30),
+                    start_surf_index_no_decal: tree.u16(32),
+                    children_offset: tree.i32(40),
+                    node_size: 44,
+                });
                 if tree.ptr(36).is_inline() {
                     self.r.array(2, 2, tree.u16(34) as usize)?;
                 }
             }
+        } else if tree_count > 0 {
+            whole = false;
         }
-        // portals
+        // portals (GfxPortal, 68 bytes)
         let portal_count = c.i32(32).max(0) as usize;
         if c.ptr(36).is_inline() {
             let (_, portals) = self.r.array(4, 68, portal_count)?;
             for p in 0..portal_count {
                 let portal = portals.elem(p, 68);
-                if portal.ptr(32).is_inline() {
-                    bail!("inline GfxCell inside a portal is not supported");
-                }
-                if portal.ptr(36).is_inline() {
-                    self.r.array(4, 12, portal.u8(40) as usize)?;
+                // The cell it leads to: a reference into the cell array.
+                let neighbor = match portal.ptr(32) {
+                    Ptr::Inline | Ptr::Insert => bail!("inline GfxCell inside a portal is not supported"),
+                    Ptr::Ref { block, offset } if block == cells.block && offset >= cells.offset && (offset - cells.offset) % 56 == 0 => {
+                        u16::try_from((offset - cells.offset) / 56).ok()
+                    }
+                    _ => None,
+                };
+                let vertex_count = portal.u8(40) as usize;
+                let vertices = match self.fixed_array(portal.ptr(36), 4, 12, vertex_count)? {
+                    Some(v) => (0..vertex_count).map(|k| v.vec3(k * 12)).collect(),
+                    None => Vec::new(),
+                };
+                match neighbor {
+                    Some(cell_index) if vertices.len() == vertex_count => cell.portals.push(GfxPortal {
+                        plane: [portal.f32(12), portal.f32(16), portal.f32(20), portal.f32(24)],
+                        cell: cell_index,
+                        vertices,
+                        hull_axis: [portal.vec3(44), portal.vec3(56)],
+                    }),
+                    _ => whole = false,
                 }
             }
+        } else if portal_count > 0 {
+            whole = false;
         }
         if c.ptr(44).is_inline() {
             self.r.array(4, 4, c.i32(40).max(0) as usize)?;
@@ -1051,7 +1116,7 @@ impl<'a> Loader<'a> {
         if c.ptr(52).is_inline() {
             self.r.array(1, 1, c.u8(48) as usize)?;
         }
-        Ok(())
+        Ok(whole.then_some(cell))
     }
 
     fn clip_map(&mut self) -> Result<ClipMap> {
