@@ -85,8 +85,8 @@ impl PlayArea {
     }
 }
 
-/// A drawn surface too big to stand on as one (a sea sheet, a far vista's
-/// ground) spans more than this on the ground plan.
+/// A surface too big to stand on as one (a sea sheet, a far vista's
+/// ground) spans more than this on the ground plan; it is not drawn.
 const SHEET: f32 = 16384.0;
 
 /// Floor points when the map has no path nodes: the middles of the
@@ -144,13 +144,30 @@ fn floor_points(map: &JupMap) -> (Vec<[f32; 3]>, Option<PlayArea>) {
 fn as_t7(map: &JupMap, report: &mut Vec<String>) -> T7Map {
     let mut t7 = T7Map::default();
     t7.name = map.name.clone();
-    (t7.mins, t7.maxs) = (map.mins, map.maxs);
+    let mut sheets = 0usize;
     for s in &map.surfaces {
         if s.tris.is_empty()
             || s.positions.is_empty()
             || s.positions.len() > usize::from(u16::MAX)
             || s.tris.len() > usize::from(u16::MAX)
         {
+            continue;
+        }
+        // A sheet wider than the play area (the sea, the sea bed, a far
+        // vista's ground) is left out: it would stretch the world's bounds
+        // (and the view's far plane with them) tens of times past the map
+        // and lie over it in the depth buffer.
+        let extent = |k: usize| {
+            let (lo, hi) = s
+                .positions
+                .iter()
+                .fold((f32::MAX, f32::MIN), |(lo, hi), p| {
+                    (lo.min(p[k]), hi.max(p[k]))
+                });
+            hi - lo
+        };
+        if extent(0) > SHEET || extent(1) > SHEET {
+            sheets += 1;
             continue;
         }
         let normals = normals_of(&s.positions, &s.tris);
@@ -184,18 +201,33 @@ fn as_t7(map: &JupMap, report: &mut Vec<String>) -> T7Map {
             maxs: hi,
         });
     }
+    // The bounds of what is drawn.
+    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for s in &t7.surfaces {
+        for k in 0..3 {
+            lo[k] = lo[k].min(s.mins[k]);
+            hi[k] = hi[k].max(s.maxs[k]);
+        }
+    }
+    (t7.mins, t7.maxs) = if t7.surfaces.is_empty() {
+        (map.mins, map.maxs)
+    } else {
+        (lo, hi)
+    };
+    report.push(format!(
+        "jup world drawn: {} surfaces ({sheets} sheets wider than {SHEET} left out), bounds {:?} {:?}",
+        t7.surfaces.len(),
+        t7.mins,
+        t7.maxs
+    ));
     let (ground, area) = floor_points(map);
-    // Collision only where the map is played: not the sea sheets, not the
-    // backdrop beyond the play area (a big map's far tiles).
+    // Collision only where the map is played: not the backdrop beyond the
+    // play area (a big map's far tiles).
     if let Some(area) = area {
         t7.no_collision = t7
             .surfaces
             .iter()
-            .map(|s| {
-                s.maxs[0] - s.mins[0] > SHEET
-                    || s.maxs[1] - s.mins[1] > SHEET
-                    || !area.reaches(s.mins, s.maxs)
-            })
+            .map(|s| !area.reaches(s.mins, s.maxs))
             .collect();
         let left = t7.no_collision.iter().filter(|&&n| n).count();
         report.push(format!(
