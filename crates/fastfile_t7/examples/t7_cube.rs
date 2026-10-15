@@ -13,6 +13,26 @@ fn main() {
     let map = T7Map::load(&MapSources::beside(path)).expect("map");
     let faces = fastfile_t7::light::probe_faces(&map, probe, mip).expect("probe");
     let s = faces.size as usize;
+    // The brightest texel at level 0 (the sun's disc, if the probe saw it).
+    if let Ok(top) = fastfile_t7::light::probe_faces(&map, probe, 0) {
+        let n = top.size as usize;
+        let (mut best, mut at) = (0f32, [0f32; 3]);
+        for f in 0..6 {
+            for (i, c) in top.texels[f].iter().enumerate() {
+                let l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+                if l > best {
+                    best = l;
+                    let (x, y) = (i % n, i / n);
+                    let u = (x as f32 + 0.5) / n as f32 * 2.0 - 1.0;
+                    let w = (y as f32 + 0.5) / n as f32 * 2.0 - 1.0;
+                    at = fastfile_t7::light::cube_dir(f, u, w);
+                }
+            }
+        }
+        let l = (at[0] * at[0] + at[1] * at[1] + at[2] * at[2]).sqrt();
+        let d = at.map(|v| v / l);
+        println!("probe {probe} brightest {best:.1} toward {d:.3?} (azimuth {:.1}, elevation {:.1})", d[1].atan2(d[0]).to_degrees(), d[2].asin().to_degrees());
+    }
     let w = s * 6 + 5 * 4;
     let mut img = vec![60u8; w * s * 3];
     for f in 0..6 {
