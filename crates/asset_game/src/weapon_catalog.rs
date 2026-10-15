@@ -5122,6 +5122,10 @@ fn merge_body_facts(dst: &mut WeaponBodyFacts, src: WeaponBodyFacts) {
 #[derive(Clone, Debug)]
 struct WeaponRow {
     name: String,
+    /// bo2mp: the namespace the pieces it borrows are named in, when not
+    /// its own (a guest gun made from a Black Ops II gun keeps Black Ops
+    /// II's animations, effects, HUD pictures and knife).
+    donor_namespace: Option<crate::AssetNamespace>,
     alternate_weapon: Option<String>,
     alternate_index: u32,
 
@@ -5249,6 +5253,7 @@ impl Default for WeaponRow {
     fn default() -> Self {
         Self {
             name: String::new(),
+            donor_namespace: None,
             alternate_weapon: None,
             alternate_index: 0,
             namespace: crate::AssetNamespace::Iw4,
@@ -5382,6 +5387,21 @@ pub struct Iw5PreparationCensus {
     pub refused: Vec<crate::WeaponSelection>,
 }
 
+/// bo2mp: what a guest gun made from a Black Ops II gun takes as its own
+/// (`WeaponBuild::add_guest_copy`).
+#[derive(Clone, Debug)]
+pub struct GuestCopy {
+    pub namespace: crate::AssetNamespace,
+    pub name: String,
+    pub display_name_key: String,
+    pub gun_xmodel: String,
+    pub world_model: String,
+    pub fire_type: i32,
+    pub fire_time_ms: i32,
+    pub clip_size: i32,
+    pub max_ammo: i32,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct WeaponBuild {
     registry: WeaponRegistry,
@@ -5434,6 +5454,50 @@ impl WeaponBuild {
         self.registry.rebuild_name_maps();
         self.registry.revision = mint_weapon_revision();
         out
+    }
+
+    /// bo2mp: a guest gun made from a Black Ops II gun (`base`): the copy
+    /// keeps its animations, arms, effects, sounds and damage and takes
+    /// its own namespace, name, models and handling. Returns its index (0:
+    /// no such base).
+    pub fn add_guest_copy(&mut self, base: u32, copy: GuestCopy) -> u32 {
+        let Some(row) = self.registry.rows.get(base as usize).filter(|_| base != 0) else {
+            return 0;
+        };
+        let mut row = row.clone();
+        row.donor_namespace = Some(row.donor_namespace.unwrap_or(row.namespace));
+        row.name = normalize_weapon_name(&copy.name);
+        row.namespace = copy.namespace;
+        row.display_name_key = Some(copy.display_name_key);
+        row.gun_xmodel = Some(copy.gun_xmodel);
+        row.world_model = Some(copy.world_model);
+        row.attachment_view_models.clear();
+        row.attachment_view_offsets.clear();
+        row.attachment_world_models.clear();
+        row.attachment_world_mounts.clear();
+        row.world_parts.clear();
+        row.ads_view_models.clear();
+        row.ads_view_offsets.clear();
+        row.hide_tags.clear();
+        row.alternate_weapon = None;
+        row.alternate_index = 0;
+        row.dual_wield_weapon = None;
+        row.iw5_configuration = None;
+        row.facts.ammo_index = 0;
+        row.facts.clip_index = 0;
+        row.facts.fire_type = copy.fire_type;
+        row.facts.fire_time_ms = copy.fire_time_ms;
+        row.facts.clip_size = copy.clip_size;
+        row.facts.max_ammo = copy.max_ammo;
+        row.facts.start_ammo = copy.max_ammo;
+        let slots = self.combat_slots.get(base as usize).copied().unwrap_or_default();
+        self.combat_slots.resize(self.registry.rows.len(), CombatFxSlots::default());
+        self.combat_slots.push(slots);
+        let id = self.registry.rows.len() as u32;
+        self.registry.rows.push(row);
+        self.registry.rebuild_name_maps();
+        self.registry.revision = mint_weapon_revision();
+        id
     }
 
     /// bo2mp: the text key a row's name is shown by (an upgraded guest gun
@@ -5594,7 +5658,7 @@ impl WeaponBuild {
             stamp_combat_fx(
                 &mut row.combat_fx,
                 self.combat_slots[i],
-                row.namespace,
+                row.donor_namespace.unwrap_or(row.namespace),
                 fx,
                 tracers,
             );
@@ -5664,47 +5728,48 @@ impl WeaponBuild {
 
     pub fn resolve_hud_material_edges(&mut self, materials: &crate::MaterialDefinitions) {
         for row in &mut self.registry.rows {
+            let ns = row.donor_namespace.unwrap_or(row.namespace);
             if row.overlay_image.is_none()
                 && let Some(name) = row.overlay_material.as_deref()
-                && let Some(index) = materials.material_index_by_ns(row.namespace, name)
+                && let Some(index) = materials.material_index_by_ns(ns, name)
                 && let Some(material) = materials.materials.get(index.order())
             {
                 row.overlay_image = materials.hud_image_name(material).map(str::to_owned);
             }
             row.reticle.center_edge = material_hint_edge(
                 row.reticle.center_material.as_deref(),
-                row.namespace,
+                ns,
                 row.reticle.center_authored,
                 materials,
             );
             row.reticle.side_edge = material_hint_edge(
                 row.reticle.side_material.as_deref(),
-                row.namespace,
+                ns,
                 row.reticle.side_authored,
                 materials,
             );
             row.hud_material_edges = WeaponHudMaterialEdges {
                 overlay: material_hint_edge(
                     row.overlay_material.as_deref(),
-                    row.namespace,
+                    ns,
                     row.overlay_material_from_slot,
                     materials,
                 ),
                 hud_icon: material_hint_edge(
                     row.hud_icon.as_deref(),
-                    row.namespace,
+                    ns,
                     row.hud_icon_from_slot,
                     materials,
                 ),
                 pickup_icon: material_hint_edge(
                     row.pickup_icon.as_deref(),
-                    row.namespace,
+                    ns,
                     row.pickup_icon_authored,
                     materials,
                 ),
                 kill_icon: material_hint_edge(
                     row.kill_icon.as_deref(),
-                    row.namespace,
+                    ns,
                     row.kill_icon_from_slot,
                     materials,
                 ),
@@ -5736,16 +5801,17 @@ impl WeaponBuild {
 
     pub fn resolve_sz_xanim_edges(&mut self, xanims: &crate::XAnimCatalog) {
         for row in &mut self.registry.rows {
+            let ns = row.donor_namespace.unwrap_or(row.namespace);
             let mut edges = [AssetEdge::Absent; WEAPON_ANIM_SLOTS];
             for (edge, hint) in edges.iter_mut().zip(row.sz_xanims.iter()) {
-                *edge = xanims.hint_edge(hint.as_deref(), row.namespace);
+                *edge = xanims.hint_edge(hint.as_deref(), ns);
             }
             row.sz_xanim_edges = edges;
             row.sz_xanim_right_edges = std::array::from_fn(|slot| {
-                xanims.hint_edge(row.sz_xanims_right[slot].as_deref(), row.namespace)
+                xanims.hint_edge(row.sz_xanims_right[slot].as_deref(), ns)
             });
             row.sz_xanim_left_edges = std::array::from_fn(|slot| {
-                xanims.hint_edge(row.sz_xanims_left[slot].as_deref(), row.namespace)
+                xanims.hint_edge(row.sz_xanims_left[slot].as_deref(), ns)
             });
         }
     }
@@ -5996,7 +6062,7 @@ impl WeaponBuild {
                 .filter_map(|edge| edge.bound_index())
                 .collect();
             let knife_model = row.knife_xmodel.as_deref().map(|name| {
-                fpv_model_edge(Some(name), row.namespace, fpv)
+                fpv_model_edge(Some(name), row.donor_namespace.unwrap_or(row.namespace), fpv)
                     .bound_index()
                     .map(crate::FpvMeshIndex::from_order)
                     .ok_or_else(|| format!("knife model `{name}` missing from FPV catalog"))
@@ -6408,6 +6474,7 @@ impl WeaponBuild {
             combat_slots.push(entry.combat_slots);
             rows.push(WeaponRow {
                 name,
+                donor_namespace: None,
                 alternate_weapon: entry.alternate_weapon,
                 alternate_index: 0,
                 namespace: crate::AssetNamespace::Iw4,
