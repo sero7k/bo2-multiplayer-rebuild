@@ -30,6 +30,6 @@ pub fn pass_color_space(namespace: AssetNamespace, tech_slot: u8) -> PassColorSp
             }
         }
         // bo2zm: Black Ops II passes are not measured yet.
-        AssetNamespace::T6 | AssetNamespace::Iw6 | AssetNamespace::T4 | AssetNamespace::Iw3 | AssetNamespace::S1 | AssetNamespace::T7 => PassColorSpace::Unknown,
+        AssetNamespace::T6 | AssetNamespace::Iw6 | AssetNamespace::T4 | AssetNamespace::Iw3 | AssetNamespace::S1 | AssetNamespace::T7 | AssetNamespace::Jup => PassColorSpace::Unknown,
     }
 }

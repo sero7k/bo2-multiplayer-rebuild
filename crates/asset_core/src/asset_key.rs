@@ -20,6 +20,9 @@ pub enum AssetNamespace {
     /// bo2mp: Call of Duty: Black Ops III (guest guns only; its maps are
     /// read into Black Ops II's own namespace).
     T7,
+    /// bo2mp: Call of Duty: Modern Warfare III (2023, "jup"): Resurgence's
+    /// sounds on Rebirth Island so far.
+    Jup,
 }
 
 impl AssetNamespace {
@@ -34,6 +37,7 @@ impl AssetNamespace {
             Self::Iw3 => "iw3",
             Self::S1 => "s1",
             Self::T7 => "t7",
+            Self::Jup => "jup",
         }
     }
 
@@ -50,6 +54,7 @@ impl AssetNamespace {
             Self::Iw3 => "cod4_",
             Self::S1 => "aw_",
             Self::T7 => "bo3_",
+            Self::Jup => "jup_",
             Self::T6 => "",
         }
     }
@@ -77,7 +82,7 @@ impl AssetNamespace {
                 "aperture", "bayonet", "bigammo", "flash", "gl", "grip", "sawoff", "scoped", "silenced", "telescopic",
             ],
             Self::Iw3 => &["acog", "gl", "grip", "reflex", "silencer"],
-            Self::Iw5 | Self::T6 | Self::Iw6 | Self::S1 | Self::T7 => &[],
+            Self::Iw5 | Self::T6 | Self::Iw6 | Self::S1 | Self::T7 | Self::Jup => &[],
         }
     }
 
@@ -128,6 +133,7 @@ impl AssetNamespace {
             "iw3" => Some(Self::Iw3),
             "s1" => Some(Self::S1),
             "t7" => Some(Self::T7),
+            "jup" => Some(Self::Jup),
             _ => None,
         }
     }
