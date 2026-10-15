@@ -229,6 +229,11 @@ fn main() {
     for p in files_with(&zone_dir, "xpak") {
         let name = name_of(&p);
         match XPak::open(&p) {
+            Ok(x) if x.parts.is_empty() => println!(
+                "xpak {name:<32} entries {:>7}, no local parts (kind {:#x}, CDN)",
+                x.entries.len(),
+                x.header.kind
+            ),
             Ok(x) => {
                 let mut status = String::new();
                 if let (Some(dec), Some(e)) = (oodle.as_deref(), x.entries.first()) {

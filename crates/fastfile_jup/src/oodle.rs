@@ -2,10 +2,11 @@
 //!
 //! Every compressed run in Modern Warfare III is an Oodle LZ stream. The
 //! zones' chunks say compressor 6 (Kraken in the open decoders' numbering);
-//! all the Oodle codecs share the chunk framing. The repository carries no Oodle decoder: no pure-Rust one with
-//! a licence that fits this Apache-2.0 tree exists on crates.io (`oozle` is
-//! GPL-3.0; `oozextract` says MIT but is a structural port of GPL-3.0
-//! `ooz`). So decoding goes through [`Decompressor`], and the backends are:
+//! all the Oodle codecs share the chunk framing. The repository carries no
+//! Oodle decoder: no pure-Rust one with a licence that fits this Apache-2.0
+//! tree exists on crates.io (`oozle` is GPL-3.0; `oozextract` says MIT but is
+//! a structural port of GPL-3.0 `ooz`). So decoding goes through
+//! [`Decompressor`], and the backends are:
 //!
 //! - [`StoredOnly`], pure Rust: the Oodle "stored" chunks (first byte
 //!   `0xCC`/`0x4C`, the raw bytes after a two-byte header) and nothing else.
@@ -27,7 +28,7 @@ pub const OODLE_DLL_ENV: &str = "JUP_OODLE_DLL";
 #[derive(Debug)]
 pub enum OodleError {
     /// The backend cannot decode this stream (e.g. [`StoredOnly`] given a
-    /// Leviathan stream).
+    /// compressed chunk).
     Unsupported(&'static str),
     /// The decoder ran and produced a different length (or failed: 0).
     WrongLength { got: i64, want: usize },

@@ -53,15 +53,20 @@ hash row (20, sorted by key): u64 key; u64 packed: bit 0 compressed,
       bits 1..31 size in the file, bits 32..63 offset / 128; u32 decoded size
 ```
 
-A stored entry is its bytes. A compressed entry: `u16 0xF01D`, u64 key (= the
-row's), u64 0, u32 1, u8 block count, then per block 21 bytes (u8 compressor,
-u32 compressed, u32 decoded, u32 stream offset from the entry start, u32
-offset in the decoded entry, u32 checksum — not checked), then the streams.
-Decoded blocks are 0x3ffe0 bytes, the last shorter.
+A stored entry is its bytes. A compressed entry is one or more segments of
+at most 1 MiB, each: `u16 0xF01D`, u64 key (= the row's), u32 this segment's
+offset in the entry, u32 the next one's (0 = last), u16 segment count, u16
+index, u8 block count, then per block 21 bytes (u8 compressor, u32 compressed,
+u32 decoded, u32 stream offset from the segment start, u32 offset in the
+decoded entry, u32 checksum — not checked), then the streams. Decoded blocks
+are 0x3ffe0 bytes, a segment's last shorter.
 
-The 139 `.xsub` parts carry data and their own table at the end. The 71 zone
-`.xpak` are tables only, one row per entry of all their parts
-(`<name>-00000.xsub` ...): offset = part × stride + offset in the part, the
-stride being the smallest power of two that holds the largest part (256 MiB
-for `boot`, 1 GiB for `codhq23a`). `xpak_cache/cache_N_2.xpak` (flavor 1, kind
-1) index `cache_N_2.xpakdata` (entries start `1D F0`); not read yet.
+The 139 `.xsub` parts (2,539,703 entries) carry data and their own table at
+the end. The 39 zone `.xpak` are tables only, one row per entry of all their
+parts (`<name>-00000.xsub` ...): offset = part × stride + offset in the part,
+the stride being the smallest power of two that holds the largest part
+(256 MiB for `boot`, 1 GiB for `codhq23a`). Checked on every row of the 31
+that have parts (2,497,482 rows, all equal to the part's own row); the 8
+`*_cdn.xpak` (kind 4) name no installed parts. `xpak_cache/cache_N_2.xpak`
+(flavor 1, kind 1) index `cache_N_2.xpakdata` (entries start `1D F0`); not
+read yet.

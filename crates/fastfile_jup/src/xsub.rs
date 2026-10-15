@@ -19,14 +19,16 @@
 //!               bits 1..31 = size in the file, bits 32..63 = offset >> 7
 //!   u32 decompressed size
 //! stored entry: the bytes themselves
-//! compressed entry:
-//!   u16 0xF01D, u64 key (= the table's), u64 0, u32 1, u8 block count
+//! compressed entry: one or more segments of at most 1 MiB, each
+//!   u16 0xF01D, u64 key (= the table's),
+//!   u32 this segment's offset in the entry, u32 the next one's (0 = last),
+//!   u16 segment count, u16 segment index, u8 block count
 //!   block count x 21 bytes:
 //!     u8 compressor (6), u32 compressed length, u32 decompressed length,
-//!     u32 offset of the stream from the entry start, u32 offset in the
+//!     u32 offset of the stream from the segment start, u32 offset in the
 //!     decoded entry, u32 checksum (not checked here)
 //!   the Oodle streams (each a whole Oodle LZ stream; streams 4-aligned;
-//!   decoded blocks of 0x3ffe0 bytes, the last shorter)
+//!   decoded blocks of 0x3ffe0 bytes, a segment's last shorter)
 //! ```
 #![forbid(unsafe_code)]
 
@@ -185,50 +187,77 @@ pub struct EntryBlock {
     pub checksum: u32,
 }
 
-/// Parse a compressed entry's header and block table.
+/// Parse a compressed entry's segment headers and block tables. The block
+/// offsets returned are from the entry start.
 pub fn parse_entry_blocks(entry: &XSubEntry, blob: &[u8]) -> Result<Vec<EntryBlock>, XSubError> {
     let bad = |why| XSubError::BadEntry {
         key: entry.key,
         why,
     };
-    if blob.len() < ENTRY_HEAD_LEN {
-        return Err(bad("shorter than its header"));
-    }
-    if u16_at(blob, 0) != ENTRY_MAGIC {
-        return Err(bad("no 0xF01D entry magic"));
-    }
-    if u64_at(blob, 2) != entry.key {
-        return Err(bad("entry key differs from the table's"));
-    }
-    let count = blob[22] as usize;
-    let table_end = ENTRY_HEAD_LEN + count * ENTRY_BLOCK_LEN;
-    if count == 0 || blob.len() < table_end {
-        return Err(bad("block table missing"));
-    }
-    let mut blocks = Vec::with_capacity(count);
+    let mut blocks = Vec::new();
     let mut next_dst = 0u32;
-    for i in 0..count {
-        let r = ENTRY_HEAD_LEN + i * ENTRY_BLOCK_LEN;
-        let b = EntryBlock {
-            compressor: blob[r],
-            compressed: u32_at(blob, r + 1),
-            decompressed: u32_at(blob, r + 5),
-            src_offset: u32_at(blob, r + 9),
-            dst_offset: u32_at(blob, r + 13),
-            checksum: u32_at(blob, r + 17),
+    let mut seg_start = 0usize;
+    let mut index = 0u16;
+    loop {
+        let head = blob
+            .get(seg_start..seg_start + ENTRY_HEAD_LEN)
+            .ok_or(bad("a segment header lies past the entry"))?;
+        if u16_at(head, 0) != ENTRY_MAGIC {
+            return Err(bad("no 0xF01D segment magic"));
+        }
+        if u64_at(head, 2) != entry.key {
+            return Err(bad("entry key differs from the table's"));
+        }
+        let this = u32_at(head, 10) as usize;
+        let next = u32_at(head, 14) as usize;
+        let segments = u16_at(head, 18);
+        if this != seg_start || u16_at(head, 20) != index || index >= segments {
+            return Err(bad("segment header out of sequence"));
+        }
+        let count = head[22] as usize;
+        let table_end = seg_start + ENTRY_HEAD_LEN + count * ENTRY_BLOCK_LEN;
+        if count == 0 || blob.len() < table_end {
+            return Err(bad("block table missing"));
+        }
+        let seg_end = if next == 0 {
+            blob.len()
+        } else {
+            next.min(blob.len())
         };
-        if (b.src_offset as usize) < table_end
-            || b.src_offset as usize + b.compressed as usize > blob.len()
-        {
-            return Err(bad("block stream outside the entry"));
+        for i in 0..count {
+            let r = seg_start + ENTRY_HEAD_LEN + i * ENTRY_BLOCK_LEN;
+            let b = EntryBlock {
+                compressor: blob[r],
+                compressed: u32_at(blob, r + 1),
+                decompressed: u32_at(blob, r + 5),
+                src_offset: u32_at(blob, r + 9) + seg_start as u32,
+                dst_offset: u32_at(blob, r + 13),
+                checksum: u32_at(blob, r + 17),
+            };
+            if (b.src_offset as usize) < table_end
+                || b.src_offset as usize + b.compressed as usize > seg_end
+            {
+                return Err(bad("block stream outside its segment"));
+            }
+            if b.dst_offset != next_dst {
+                return Err(bad("decoded block offsets are not contiguous"));
+            }
+            next_dst = next_dst
+                .checked_add(b.decompressed)
+                .ok_or(bad("decoded size overflows"))?;
+            blocks.push(b);
         }
-        if b.dst_offset != next_dst {
-            return Err(bad("decoded block offsets are not contiguous"));
+        index += 1;
+        if next == 0 {
+            if index != segments {
+                return Err(bad("fewer segments than the header says"));
+            }
+            break;
         }
-        next_dst = next_dst
-            .checked_add(b.decompressed)
-            .ok_or(bad("decoded size overflows"))?;
-        blocks.push(b);
+        if next <= seg_start {
+            return Err(bad("segments do not move forward"));
+        }
+        seg_start = next;
     }
     if next_dst != entry.decompressed {
         return Err(bad("blocks do not add up to the decompressed size"));
@@ -299,8 +328,10 @@ pub fn read_index<R: Read + Seek>(
     reader.seek(SeekFrom::Start(header.hash_offset))?;
     reader.read_exact(&mut table)?;
     let entries = table
-        .chunks_exact(HASH_ENTRY_LEN)
-        .map(XSubEntry::from_row)
+        .as_chunks::<HASH_ENTRY_LEN>()
+        .0
+        .iter()
+        .map(|row| XSubEntry::from_row(row))
         .collect();
     Ok((header, entries))
 }
@@ -356,7 +387,8 @@ impl<R: Read + Seek> XSub<R> {
 /// `part * stride + offset in the part`, with the stride the smallest power
 /// of two that holds the largest part (256 MiB for `boot`, 1 GiB for
 /// `codhq23a`); the sizes and the decoded size are the part's own. Checked
-/// by key against every row of `boot` and `codhq23a`.
+/// by key on every row of the 31 zone `.xpak` of build 1.21 that have parts
+/// (2,497,482 rows); the 8 `*_cdn.xpak` have none installed.
 pub struct XPak {
     pub header: XSubHeader,
     pub entries: Vec<XSubEntry>,
@@ -380,7 +412,13 @@ impl XPak {
             largest = largest.max(std::fs::metadata(&p)?.len());
             parts.push(p);
         }
-        let stride = largest.next_power_of_two();
+        // The `_cdn` indexes (kind 4) name no local parts: stride 0, and
+        // every row fails to locate.
+        let stride = if largest == 0 {
+            0
+        } else {
+            largest.next_power_of_two()
+        };
         Ok(Self {
             header,
             entries,
@@ -416,7 +454,7 @@ impl XPak {
     pub fn read(&self, entry: &XSubEntry, oodle: &dyn Decompressor) -> Result<Vec<u8>, XSubError> {
         let (part, local) = self.locate(entry).ok_or(XSubError::BadEntry {
             key: entry.key,
-            why: "offset past the last part",
+            why: "not in a local part (past the last, or a CDN-only package)",
         })?;
         let mut f = std::fs::File::open(&self.parts[part])?;
         let mut blob = vec![0u8; local.size as usize];
@@ -434,15 +472,30 @@ mod tests {
 
     /// A compressed entry whose blocks are Oodle stored chunks.
     fn synth_entry(key: u64, data: &[u8], block: usize) -> Vec<u8> {
+        synth_segment(key, data, block, (0, 0), (1, 0), 0)
+    }
+
+    /// One segment: `at` = (this, next) offsets, `seq` = (count, index),
+    /// `dst0` = where its bytes go in the decoded entry.
+    fn synth_segment(
+        key: u64,
+        data: &[u8],
+        block: usize,
+        at: (u32, u32),
+        seq: (u16, u16),
+        dst0: usize,
+    ) -> Vec<u8> {
         let chunks: Vec<&[u8]> = data.chunks(block).collect();
         let mut e = Vec::new();
         e.extend_from_slice(&ENTRY_MAGIC.to_le_bytes());
         e.extend_from_slice(&key.to_le_bytes());
-        e.extend_from_slice(&0u64.to_le_bytes());
-        e.extend_from_slice(&1u32.to_le_bytes());
+        e.extend_from_slice(&at.0.to_le_bytes());
+        e.extend_from_slice(&at.1.to_le_bytes());
+        e.extend_from_slice(&seq.0.to_le_bytes());
+        e.extend_from_slice(&seq.1.to_le_bytes());
         e.push(chunks.len() as u8);
         let mut src = ENTRY_HEAD_LEN + chunks.len() * ENTRY_BLOCK_LEN;
-        let mut dst = 0;
+        let mut dst = dst0;
         for c in &chunks {
             src = (src + 3) & !3;
             e.push(6);
@@ -462,6 +515,34 @@ mod tests {
             e.extend_from_slice(c);
         }
         e
+    }
+
+    #[test]
+    fn reads_segmented_entries() {
+        // Two segments, the second at 0x400 (the game's are 1 MiB apart);
+        // stream offsets are per segment, decoded offsets run on.
+        let data: Vec<u8> = (0..1500u32).map(|i| (i * 13 % 241) as u8).collect();
+        let mut blob = synth_segment(9, &data[..700], 300, (0, 0x400), (2, 0), 0);
+        assert!(blob.len() <= 0x400);
+        blob.resize(0x400, 0);
+        blob.extend(synth_segment(9, &data[700..], 300, (0x400, 0), (2, 1), 700));
+        let e = XSubEntry {
+            key: 9,
+            offset: 0x8000,
+            size: blob.len() as u32,
+            decompressed: data.len() as u32,
+            compressed: true,
+        };
+        let blocks = parse_entry_blocks(&e, &blob).unwrap();
+        assert_eq!(blocks.len(), 6);
+        assert!(blocks[3].src_offset > 0x400);
+        assert_eq!(decode_entry(&e, &blob, &StoredOnly).unwrap(), data);
+        // A second segment that claims to be the first is refused.
+        blob[0x400 + 20] = 0;
+        assert!(matches!(
+            parse_entry_blocks(&e, &blob),
+            Err(XSubError::BadEntry { why, .. }) if why.contains("sequence")
+        ));
     }
 
     fn synth_pak(entries: &[(u64, Vec<u8>, bool, u32)]) -> Vec<u8> {
