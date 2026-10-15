@@ -137,7 +137,25 @@ pub struct Blocker {
     pub brushes: Vec<(u32, [f32; 3])>,
     /// The name its pieces share (the interactions' and trigger's target).
     pub group: String,
+    /// The placed models that stand in its brushes (`find_props`): what is
+    /// seen of it (Spaceland's shop doors, gates, planter rows across a
+    /// path), its brushes being clip only.
+    pub props: Vec<BlockerProp>,
 }
+
+/// A placed model that is part of a blocker: its index among the map's
+/// placed models (`Iw7Map::static_models`) and where it stands.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BlockerProp {
+    pub index: usize,
+    pub origin: [f32; 3],
+    /// Rows: the model's forward, left and up axes (scaled by its scale).
+    pub axis: [[f32; 3]; 3],
+}
+
+/// How much of a placed model's box must lie in a blocker's brush for the
+/// model to be part of it.
+const PROP_INSIDE: f32 = 0.4;
 
 /// A machine by its IW7 interaction name (`perk_machine_tough`).
 #[derive(Clone, Debug, PartialEq)]
@@ -213,7 +231,62 @@ fn area_name(link: &str) -> String {
 impl ZmLayout {
     /// The layout of a map read by [`Iw7Map::load`].
     pub fn read(map: &Iw7Map) -> Self {
-        Self::from_parts(&parse_entities(&map.entities), &map.trigger_hulls, &map.path_nodes)
+        let mut out = Self::from_parts(&parse_entities(&map.entities), &map.trigger_hulls, &map.path_nodes);
+        out.find_props(map);
+        out
+    }
+
+    /// Each blocker's placed models: those whose box (the model's bounds
+    /// where it stands) has its middle in one of the blocker's brushes
+    /// (a little grown) and `PROP_INSIDE` of its volume in it. IW7's
+    /// blocker brushes (`script_brushmodel` named by the group) hold no
+    /// surfaces on cp_zmb: they only clip; the doors and piles seen there
+    /// are placed models, which the game's scripts take away with the
+    /// clip. A model is given to one blocker at most.
+    pub fn find_props(&mut self, map: &Iw7Map) {
+        let mut taken = vec![false; map.static_models.len()];
+        for b in &mut self.blockers {
+            b.props.clear();
+            for &(n, origin) in &b.brushes {
+                let Some(bm) = map.brush_models.get(n as usize) else { continue };
+                let lo: [f32; 3] = std::array::from_fn(|k| origin[k] + bm.mins[k]);
+                let hi: [f32; 3] = std::array::from_fn(|k| origin[k] + bm.maxs[k]);
+                if (0..3).any(|k| hi[k] - lo[k] <= 0.0) {
+                    continue;
+                }
+                let brush_volume: f32 = (0..3).map(|k| hi[k] - lo[k]).product();
+                for (i, sm) in map.static_models.iter().enumerate() {
+                    if taken[i] {
+                        continue;
+                    }
+                    let Some(model) = map.models.get(sm.model) else { continue };
+                    // The model's box where it stands.
+                    let (mut mlo, mut mhi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                    for c in 0..8 {
+                        let local = [0, 1, 2].map(|k| if c >> k & 1 == 0 { model.mins[k] } else { model.maxs[k] });
+                        for k in 0..3 {
+                            let p = sm.origin[k] + (local[0] * sm.axis[0][k] + local[1] * sm.axis[1][k] + local[2] * sm.axis[2][k]) * sm.scale;
+                            mlo[k] = mlo[k].min(p);
+                            mhi[k] = mhi[k].max(p);
+                        }
+                    }
+                    let mid: [f32; 3] = std::array::from_fn(|k| (mlo[k] + mhi[k]) * 0.5);
+                    if !(0..3).all(|k| mid[k] >= lo[k] - 4.0 && mid[k] <= hi[k] + 4.0) {
+                        continue;
+                    }
+                    let size: [f32; 3] = std::array::from_fn(|k| (mhi[k] - mlo[k]).max(1.0));
+                    let volume: f32 = size.iter().product();
+                    let inside: f32 = (0..3).map(|k| (mhi[k].min(hi[k] + 4.0) - mlo[k].max(lo[k] - 4.0)).max(0.0).min(size[k])).product();
+                    // (A building whose middle falls in a doorway is not
+                    // the door.)
+                    if inside < PROP_INSIDE * volume || volume > 4.0 * brush_volume {
+                        continue;
+                    }
+                    taken[i] = true;
+                    b.props.push(BlockerProp { index: i, origin: sm.origin, axis: sm.axis.map(|r| r.map(|v| v * sm.scale)) });
+                }
+            }
+        }
     }
 
     pub fn from_parts(ents: &[Ent], trigger_hulls: &[Vec<([f32; 3], [f32; 3])>], nodes: &[crate::map::PathNode]) -> Self {
@@ -314,7 +387,7 @@ impl ZmLayout {
                 .filter(|e| e.is("classname", "script_brushmodel"))
                 .filter_map(|e| Some((model_index(e.get("model")?, '*')?, e.origin())))
                 .collect();
-            out.blockers.push(Blocker { kind, cost, sides, triggers, brushes, group: g });
+            out.blockers.push(Blocker { kind, cost, sides, triggers, brushes, group: g, props: Vec::new() });
         }
 
         for e in ents.iter().filter(|e| e.is("targetname", "interaction")) {
@@ -377,13 +450,14 @@ impl ZmLayout {
     /// One line: what it found.
     pub fn summary(&self) -> String {
         format!(
-            "{} player starts, {} respawns, {} areas ({} spawners), {} windows, {} debris/doors, {} perk machines, {} wheel spots, pack-a-punch {}, {} portals, {} generators, {} wall weapons, {} dog spots, {} traversals",
+            "{} player starts, {} respawns, {} areas ({} spawners), {} windows, {} debris/doors ({} placed models in them), {} perk machines, {} wheel spots, pack-a-punch {}, {} portals, {} generators, {} wall weapons, {} dog spots, {} traversals",
             self.starts.len(),
             self.respawns.len(),
             self.areas.len(),
             self.areas.iter().map(|a| a.spawners.len()).sum::<usize>(),
             self.windows.len(),
             self.blockers.len(),
+            self.blockers.iter().map(|b| b.props.len()).sum::<usize>(),
             self.perks.len(),
             self.wheels.len(),
             if self.pap.is_some() { "yes" } else { "no" },

@@ -11,6 +11,7 @@ fn main() {
     let ents = parse_entities(&map.entities);
     for b in &layout.blockers {
         println!("== {} {:?} cost {} sides {:?}", b.group, b.kind, b.cost, b.sides.iter().map(|s| &s.1).collect::<Vec<_>>());
+        println!("   PROPS: {:?}", b.props.iter().map(|p| map.models[map.static_models[p.index].model].name.as_str()).collect::<Vec<_>>());
         for e in ents.iter().filter(|e| e.get("targetname") == Some(&b.group) || e.get("target") == Some(&b.group)) {
             let mut kv: Vec<String> = e.iter().filter(|(k, _)| !k.starts_with("_k") || k.as_str() == "_k502").map(|(k, v)| format!("{k}={v}")).collect();
             kv.sort();

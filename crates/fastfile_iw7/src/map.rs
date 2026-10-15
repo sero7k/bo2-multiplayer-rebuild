@@ -225,7 +225,15 @@ impl MapSources {
             .map(|z| (dir.join(format!("{z}.ff")), Some(dir.join(format!("techsets_{z}.ff"))).filter(|p| p.is_file())))
             .filter(|(p, _)| p.is_file())
             .collect();
-        Self { zone: zone.to_owned(), techsets, pak_dir: dir, shared_ranges: None, extra_zones: Vec::new(), model_zones, shared: None }
+        // A Zombies map's own patch zone (`patch_cp_zmb.ff`: 1449 pictures
+        // on cp_zmb, among them signs and posters the map names): read for
+        // what the map zone lacks.
+        let extra_zones = if stem.trim_start_matches("iw7_").starts_with("cp_") {
+            [dir.join(format!("patch_{}.ff", stem.trim_start_matches("iw7_")))].into_iter().filter(|p| p.is_file()).collect()
+        } else {
+            Vec::new()
+        };
+        Self { zone: zone.to_owned(), techsets, pak_dir: dir, shared_ranges: None, extra_zones, model_zones, shared: None }
     }
 
     /// With the common zones beside the map read for the pictures and

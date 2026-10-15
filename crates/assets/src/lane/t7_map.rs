@@ -1000,6 +1000,7 @@ pub(crate) mod zm {
                 triggers: Vec::new(),
                 brushes: named(&group).iter().filter_map(|e| Some((model_index(e, '*')?, e.origin().unwrap_or_default()))).collect(),
                 group: group.clone(),
+                props: Vec::new(),
             });
             if let (Some(sp), Some(zone)) = (spot(t), t.get("script_flag").and_then(zone_of_flag)) {
                 b.sides.push((sp, zone));

@@ -1012,6 +1012,7 @@ mod tests {
                 triggers: vec![([1500.0, 0.0, 30.0], 9)],
                 brushes: vec![(12, [1500.0, 0.0, 40.0])],
                 group: "pf7_auto6".to_owned(),
+                props: Vec::new(),
             }],
             perks: vec![
                 Machine { name: "perk_machine_tough".to_owned(), spot: spot(200.0, 200.0, 270.0) },

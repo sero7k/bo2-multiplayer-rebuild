@@ -181,6 +181,11 @@ struct Materials<'a> {
     shine: HashMap<usize, [Option<usize>; 3]>,
     shine_on: bool,
     with_shine: usize,
+    /// bo2mp: the map's HDR-to-draw light scale for model materials' glow
+    /// (`super::iw7_glow`; 0 until the light is read: no glow), and how
+    /// many glow.
+    glow_scale: f32,
+    with_glow: usize,
 }
 
 impl Materials<'_> {
@@ -390,6 +395,24 @@ impl Materials<'_> {
             } else {
                 shine[0].or_else(|| self.image(&name))
             };
+            // bo2mp: a lit model material's own light (an emissive map:
+            // neon tubes, signs, lamps) as BO2's emissive tile glow, in the
+            // specular map's place (`super::iw7_glow`).
+            let map = self.map;
+            let glow = (model
+                && self.glow_scale > 0.0
+                && !draw.unlit
+                && !draw.alpha_test
+                && matches!(draw.blend, T6Blend::Opaque)
+                && fastfile_iw7::glow::emissive(&map.materials[index]).is_some())
+            .then(|| super::iw7_glow::link_glow(&mut self.catalog, map, &map.materials[index], self.glow_scale))
+            .and_then(|r| r.map_err(|e| if self.failures.len() < 64 { self.failures.push(format!("{} (glow): {e}", map.materials[index].name)) }).ok());
+            if let Some(bindings) = glow {
+                draw.tile = true;
+                self.with_glow += 1;
+                textures.extend(bindings);
+            }
+            let shine = if draw.tile { [shine[0], shine[1], None] } else { shine };
             for (semantic, image) in [(TS_NORMAL_MAP, shine[1]), (TS_SPECULAR_MAP, shine[2])] {
                 if let Some(image) = image {
                     textures.push(MaterialTextureBinding {
@@ -890,14 +913,18 @@ fn spawns_of(entities: &[iw3::ents::Entity]) -> Vec<asset_world::SpawnPoint> {
 /// per folder (a few seconds; image records, small inline pictures and
 /// material texture lists kept, streamed pictures read from the paks when a
 /// map wants them), as Ghosts' `iw6_map::shared_images`.
-fn shared_zones(dir: &Path) -> Option<Arc<fastfile_iw7::shared::SharedZones>> {
+/// A Zombies map (`cp_*`) reads Zombies' common zones
+/// (`fastfile_iw7::shared::common_zones_cp`) instead of multiplayer's.
+fn shared_zones(dir: &Path, map: &str) -> Option<Arc<fastfile_iw7::shared::SharedZones>> {
     use std::sync::{Mutex, OnceLock};
-    static CACHE: OnceLock<Mutex<HashMap<std::path::PathBuf, Arc<fastfile_iw7::shared::SharedZones>>>> = OnceLock::new();
+    type Cache = Mutex<HashMap<(std::path::PathBuf, bool), Arc<fastfile_iw7::shared::SharedZones>>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
-    if let Some(hit) = cache.lock().ok()?.get(dir) {
+    let key = (dir.to_path_buf(), map.trim_start_matches("iw7_").starts_with("cp_"));
+    if let Some(hit) = cache.lock().ok()?.get(&key) {
         return Some(hit.clone());
     }
-    let zones = fastfile_iw7::shared::common_zones(dir);
+    let zones = fastfile_iw7::shared::common_zones_for(dir, map);
     let read = std::panic::catch_unwind(|| fastfile_iw7::shared::SharedZones::read(&zones));
     let shared = match read {
         Ok(s) => Arc::new(s),
@@ -907,7 +934,7 @@ fn shared_zones(dir: &Path) -> Option<Arc<fastfile_iw7::shared::SharedZones>> {
         }
     };
     diag::info!(World, "bo2mp iw7: common zones: {:?}", shared.zones);
-    cache.lock().ok()?.insert(dir.to_path_buf(), shared.clone());
+    cache.lock().ok()?.insert(key, shared.clone());
     Some(shared)
 }
 
@@ -919,7 +946,8 @@ pub(crate) fn load_iw7_world(path: &Path, progress: &LoadProgress, material_seed
     let started = std::time::Instant::now();
     let read = std::panic::catch_unwind(|| {
         let mut src = MapSources::beside(path);
-        src.shared = path.parent().and_then(shared_zones);
+        let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        src.shared = path.parent().and_then(|dir| shared_zones(dir, &stem));
         Iw7Map::load(&src)
     });
     let map = match read {
@@ -1206,6 +1234,8 @@ fn build_iw7_world(
         shine: HashMap::new(),
         shine_on: shine_on(),
         with_shine: 0,
+        glow_scale: 0.0,
+        with_glow: 0,
     };
     let surface_materials: Vec<Option<usize>> = map
         .surfaces
@@ -1318,6 +1348,8 @@ fn build_iw7_world(
     drop(pages);
     stage_light.done();
 
+    // bo2mp: the placed models' glow in the pages' light units.
+    b.glow_scale = exposure.unwrap_or(1.0);
     // The placed models.
     let (prop_meshes, prop_placements) = {
         use bevy::prelude::{Mat3, Quat, Transform, Vec3};
@@ -1438,6 +1470,7 @@ fn build_iw7_world(
         if b.failures.is_empty() { String::new() } else { format!(" (first: {})", b.failures.iter().take(4).cloned().collect::<Vec<_>>().join("; ")) },
     ));
     report.push(format!("iw7 shine: {} materials with normal or specular maps{}", b.with_shine, if b.shine_on { "" } else { " (off: BO2MP_IW7_SHINE=0)" }));
+    report.push(format!("iw7 glow: {} model materials glow by their emissive maps (x{:.2} to the draw's light)", b.with_glow, b.glow_scale));
     let mut materials = std::mem::take(&mut b.catalog);
     let owner = b.owner;
     drop(b);
