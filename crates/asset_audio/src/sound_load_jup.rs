@@ -163,8 +163,8 @@ pub fn jup_resurgence_sounds(install: &Path, with_map: bool) -> Result<Arc<Sound
 
 /// The zone Modern Warfare III's guns' sounds are read from: `ingame`,
 /// the guns' fire layers (`wpn_pi_mike93_fire_plr_transient`, `_shot`,
-/// `_mech`, `_lfe`, `_atmo` ...), their foley (`wfoly_plr_pi_mike93_
-/// reload_magout` ...) and aim-down-sight sounds (`wpn_pi_mike93_ads_up`).
+/// `_mech`, `_lfe`, `_atmo` ...) and their foley (`wfoly_plr_pi_mike93_
+/// reload_magout` ...).
 pub const JUP_GUN_ZONE: &str = "ingame";
 
 /// A Modern Warfare III gun's own sounds, in the slots of the Black Ops II
@@ -232,10 +232,13 @@ pub const JUP_GUN_SOUNDS: &[JupGunSounds] = &[JupGunSounds {
     raise_player: "wfoly_plr_pi_mike93_raise_quick_01",
     first_raise_player: "wfoly_plr_pi_mike93_raise_01",
     putaway_player: "wfoly_plr_pi_mike93_drop_quick_01",
-    pickup: "weap_pickup_pistol_npc",
+    // (`weap_pickup_pistol_npc` is in `ingame_shared_mp`, not read.)
+    pickup: "",
     pickup_player: "weap_pickup_pistol_plr",
-    ads_up: "wpn_pi_mike93_ads_up",
-    ads_down: "wpn_pi_mike93_ads_down",
+    // (`wpn_pi_mike93_ads_up` and `_ads_down` name other aliases, not a
+    // sound of their own: not followed yet, the donor's play.)
+    ads_up: "",
+    ads_down: "",
     notes: &[
         ("magout", "wfoly_plr_pi_mike93_reload_magout"),
         ("mag_out", "wfoly_plr_pi_mike93_reload_magout"),
