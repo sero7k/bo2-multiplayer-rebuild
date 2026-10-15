@@ -450,7 +450,9 @@ pub(crate) struct Category {
 pub(crate) fn categories() -> &'static [Category] {
     static FOUND: OnceLock<Vec<Category>> = OnceLock::new();
     FOUND.get_or_init(|| {
+        let started = std::time::Instant::now();
         let categories = discover();
+        diag::info!(Ui, "bo2mp maps: found in {:.2} s", started.elapsed().as_secs_f32());
         session::bo2mp_setup::register_foreign_maps(
             categories
                 .iter()
@@ -819,6 +821,7 @@ pub(crate) fn picture_async(
 /// bo2mp: which other games' guns Create-a-Class lists (an installed game
 /// with its multiplayer common zone; off with `BO2MP_GUEST_GUNS=0`).
 pub(crate) fn guest_guns_available() {
+    let started = std::time::Instant::now();
     let on = std::env::var("BO2MP_GUEST_GUNS").map_or(true, |v| v.trim() != "0");
     let root = asset_transport::games_root_from_env().ok();
     // (Black Ops' zone version, as its common_mp carries it.)
@@ -864,6 +867,7 @@ pub(crate) fn guest_guns_available() {
         Some(m) => diag::info!(Ui, "bo2mp mod guns: {} {} by {} listed ({})", m.name, m.version, m.author, asset_transport::t6_mod::root().map_or_else(String::new, |r| r.display().to_string())),
         None => diag::info!(Ui, "bo2mp mod guns: no mod ({} unset and no {})", asset_transport::t6_mod::ENV, asset_transport::t6_mod::DEFAULT_FOLDER),
     }
+    diag::info!(Ui, "bo2mp guest guns: found in {:.2} s", started.elapsed().as_secs_f32());
 }
 
 /// bo2mp: Black Ops III's weapon icons (`t7_icon_weapon_*` in core_common),

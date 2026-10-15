@@ -619,12 +619,19 @@ fn is_not_game_dir(path: &Path) -> bool {
 }
 
 fn files_under(roots: Vec<PathBuf>) -> impl Iterator<Item = Result<PathBuf, String>> {
-    let mut pending: VecDeque<_> = roots.into_iter().map(Ok).collect();
+    // (Each with whether its folder's listing already said it is a plain
+    // file: a zone is then handed on as it is, without the canonicalize and
+    // stat a folder or a link needs. Modern Warfare III's install alone
+    // holds 17,000 zones: those two calls on each made every walk of the
+    // game folders take seconds.)
+    let mut pending: VecDeque<Result<(PathBuf, bool), String>> =
+        roots.into_iter().map(|root| Ok((root, false))).collect();
     let mut visited = HashSet::new();
     std::iter::from_fn(move || {
         loop {
             let path = match pending.pop_front()? {
-                Ok(path) => path,
+                Ok((path, true)) => return Some(Ok(path)),
+                Ok((path, false)) => path,
                 Err(error) => return Some(Err(error)),
             };
             if is_not_game_dir(&path) {
@@ -669,9 +676,12 @@ fn files_under(roots: Vec<PathBuf>) -> impl Iterator<Item = Result<PathBuf, Stri
                     })
                 })
                 .map(|entry| {
-                    entry.map(|entry| entry.path()).map_err(|error| {
-                        format!("cannot read entry in {}: {error}", path.display())
-                    })
+                    entry
+                        .map(|entry| {
+                            let file = entry.file_type().is_ok_and(|t| t.is_file());
+                            (entry.path(), file)
+                        })
+                        .map_err(|error| format!("cannot read entry in {}: {error}", path.display()))
                 })
                 .collect::<Vec<_>>();
             children.sort();
