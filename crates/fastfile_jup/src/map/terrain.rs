@@ -188,3 +188,40 @@ const VT_EXTENT: f32 = 34900.0 / 16384.0;
 pub fn level_start(level: u32) -> usize {
     (((1u64 << (2 * level)) - 1) / 3) as usize
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grid_from_its_header() {
+        let hash = 0x2967_331b_f0f1_8bc6u64;
+        let at = 16;
+        let mut z = vec![0u8; at + GRID_AT + 2 * 12 * 12 + 64];
+        let put = |z: &mut Vec<u8>, o: usize, b: &[u8]| z[at + o..at + o + b.len()].copy_from_slice(b);
+        put(&mut z, 0, &hash.to_le_bytes());
+        put(&mut z, 0x14, &1024f32.to_le_bytes());
+        put(&mut z, 0x18, &1024f32.to_le_bytes());
+        put(&mut z, 0x20, &65u32.to_le_bytes());
+        put(&mut z, 0x24, &65u32.to_le_bytes());
+        put(&mut z, 0x28, &8u32.to_le_bytes());
+        put(&mut z, 0x2c, &(-100f32).to_le_bytes());
+        put(&mut z, 0x3c, &2048f32.to_le_bytes());
+        // Sample (1, 0) 100 units over the lowest.
+        put(&mut z, GRID_AT + 2, &800u16.to_le_bytes());
+        let g = height_grid(&z, hash).expect("grid");
+        assert_eq!(g.size, 12);
+        assert_eq!(g.cell, 256.0);
+        assert_eq!(g.origin, [-1024.0 - 512.0 + 128.0; 2]);
+        assert_eq!(g.at(1, 0), -100.0 + 100.0 + LIFT);
+        assert_eq!(g.at(0, 0), -100.0 + LIFT);
+        assert!(height_grid(&z, hash ^ 1).is_none());
+    }
+
+    #[test]
+    fn levels_start_where_the_coarser_end() {
+        assert_eq!(level_start(0), 0);
+        assert_eq!(level_start(3), 21);
+        assert_eq!(level_start(6), 1365);
+    }
+}
