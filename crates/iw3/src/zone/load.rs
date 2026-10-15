@@ -787,7 +787,17 @@ impl<'a> Loader<'a> {
             let maxs = [s.u16(286), s.u16(288), s.u16(290)];
             let rows =
                 if row_axis < 3 { (maxs[row_axis] as i64 - mins[row_axis] as i64 + 1).max(0) as usize } else { 0 };
-            let mut grid = LightGrid { mins, maxs, row_axis: row_axis as u32, col_axis: s.u32(296), ..Default::default() };
+            // bo2mp: GfxLightGrid starts at 272: hasLightRegions, then
+            // sunPrimaryLightIndex.
+            let mut grid = LightGrid {
+                mins,
+                maxs,
+                row_axis: row_axis as u32,
+                col_axis: s.u32(296),
+                sun_primary_light_index: s.u32(276),
+                has_light_regions: s.u8(272) != 0,
+                ..Default::default()
+            };
             if s.ptr(300).is_inline() {
                 let (_, a) = self.r.array(2, 2, rows)?;
                 grid.row_data_start = (0..rows).map(|i| a.u16(i * 2)).collect();

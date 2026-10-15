@@ -39,10 +39,12 @@ fn main() {
         }
         for a in &zone.assets {
             if let iw3::zone::Asset::RawFile(r) = a
-                && (r.name.contains("vision") || r.name.contains("createart") || std::env::var("PROBE_RAW").is_ok_and(|v| v == "all"))
+                && (r.name.contains("vision") || r.name.contains("createart") || std::env::var("PROBE_RAW").is_ok_and(|v| v == "all" || r.name.contains(v.as_str())))
             {
                 println!("rawfile {} ({} bytes)", r.name, r.data.len());
-                if std::env::var("PROBE_RAW").is_ok_and(|v| v != "all") {
+                // `PROBE_RAW=1` prints them all, `PROBE_RAW=<text>` those
+                // whose name holds it.
+                if std::env::var("PROBE_RAW").is_ok_and(|v| v == "1" || (v != "all" && r.name.contains(v.as_str()))) {
                     println!("{}", String::from_utf8_lossy(&r.data));
                 }
             }

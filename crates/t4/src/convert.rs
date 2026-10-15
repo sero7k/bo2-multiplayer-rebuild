@@ -358,6 +358,8 @@ pub fn gfx_world(w: &GNode, remap: &dyn Fn(Option<usize>) -> Option<usize>) -> z
             maxs: std::array::from_fn(|k| g.int(&format!("maxs[{k}]")) as u16),
             row_axis: g.int("rowAxis") as u32,
             col_axis: g.int("colAxis") as u32,
+            sun_primary_light_index: g.int("sunPrimaryLightIndex") as u32,
+            has_light_regions: g.int("hasLightRegions") != 0,
             row_data_start: u16s(&raw(g, "rowDataStart")).collect(),
             raw_row_data: raw(g, "rawRowData"),
             entries: raw(g, "entries")
