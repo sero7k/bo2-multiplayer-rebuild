@@ -334,23 +334,49 @@ pub const BO3: &[GuestGun] = &[
 /// The first statstable index of Black Ops III's guns.
 pub const BO3_FIRST_INDEX: i32 = 1000;
 
-const fn jup_roster<const N: usize>(names: &[(&'static str, &'static str, &'static str, &'static str)]) -> [GuestGun; N] {
+const fn same(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+const fn jup_roster<const N: usize>(
+    names: &[(&'static str, &'static str, &'static str, &'static str)],
+    played: &[&'static str],
+) -> [GuestGun; N] {
     let mut out = [GuestGun { game: "jup", gun: "", name: "", group: "", slot: "", attachments: "", icon: "" }; N];
     let mut i = 0;
     while i < N {
-        let (gun, name, group, slot) = names[i];
-        out[i] = GuestGun { game: "jup", gun, name, group, slot, attachments: "", icon: "" };
+        let mut k = 0;
+        while k < names.len() {
+            let (gun, name, group, slot) = names[k];
+            if same(gun, played[i]) {
+                out[i] = GuestGun { game: "jup", gun, name, group, slot, attachments: "", icon: "" };
+            }
+            k += 1;
+        }
         i += 1;
     }
     out
 }
 
-/// bo2mp: Call of Duty: Modern Warfare III (2023)'s guns (`jup_<gun>_mp`
-/// in its global_stream_mp; Create-a-Class and the scripts call it
-/// `jup_<gun>` too, `jup_jp01_ar_golf36`), the ones whose public name is
-/// known (`crate::jup_names`). A guest gun is the base gun with its default
-/// parts. Its statstable rows are numbered from `JUP_FIRST_INDEX`.
-pub const JUP: &[GuestGun] = &jup_roster::<{ crate::jup_names::JUP_NAMES.len() }>(crate::jup_names::JUP_NAMES);
+/// bo2mp: Call of Duty: Modern Warfare III (2023)'s guns (`jup_<gun>_mp`;
+/// Create-a-Class and the scripts call it `jup_<gun>` too,
+/// `jup_jp12_pi_mike93`): the ones played (`crate::jup_names::JUP_PLAYED`,
+/// whose models the match builds), named by `crate::jup_names`. A guest
+/// gun is the base gun with its default parts. Its statstable rows are
+/// numbered from `JUP_FIRST_INDEX`.
+pub const JUP: &[GuestGun] =
+    &jup_roster::<{ crate::jup_names::JUP_PLAYED.len() }>(crate::jup_names::JUP_NAMES, crate::jup_names::JUP_PLAYED);
 
 /// The first statstable index of Modern Warfare III (2023)'s guns.
 pub const JUP_FIRST_INDEX: i32 = 1200;
@@ -1735,16 +1761,19 @@ mod tests {
     /// pistol a secondary, a Black Ops II-style Pack-a-Punch name.
     #[test]
     fn modern_warfare_iii_guns() {
-        let holger = JUP.iter().find(|g| g.gun == "jp01_ar_golf36").unwrap();
-        assert_eq!(holger.name, "Holger 556");
-        assert_eq!(holger.reference(), "jup_jp01_ar_golf36");
-        assert_eq!(script_name(holger), "jup_jp01_ar_golf36_mp");
-        assert_eq!(reference_for_index(JUP_FIRST_INDEX).as_deref(), Some("jup_jp01_ar_golf36"));
+        assert_eq!(JUP.len(), crate::jup_names::JUP_PLAYED.len());
+        let renetti = JUP.iter().find(|g| g.gun == "jp12_pi_mike93").unwrap();
+        assert_eq!(renetti.name, "Renetti");
+        assert_eq!(renetti.slot, S);
+        assert_eq!(renetti.reference(), "jup_jp12_pi_mike93");
+        assert_eq!(script_name(renetti), "jup_jp12_pi_mike93_mp");
+        assert_eq!(reference_for_index(JUP_FIRST_INDEX).as_deref(), Some("jup_jp12_pi_mike93"));
         assert_eq!(game_for_index(JUP_FIRST_INDEX), Some("jup"));
-        assert!(is_guest_name("jup_jp01_ar_golf36_mp+reflex"));
+        assert!(is_guest_name("jup_jp12_pi_mike93_mp"));
         assert!(!has_own_pack_a_punch("jup"));
-        assert_eq!(zm_upgraded_name(holger), "Holger 556-115");
-        assert_eq!(JUP.iter().find(|g| g.gun == "jp12_pi_mike93").unwrap().slot, S);
+        assert_eq!(zm_upgraded_name(renetti), "Renetti-115");
+        // (Named but not played: not listed.)
+        assert!(JUP.iter().all(|g| g.gun != "jp01_ar_golf36"));
     }
 }
 
