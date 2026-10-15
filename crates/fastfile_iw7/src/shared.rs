@@ -97,6 +97,10 @@ pub fn common_zones_cp(dir: &Path) -> Vec<PathBuf> {
         "patch_global_core_mp",
         "global_core_mp",
         "techsets_global_core_mp",
+        // (`flat_nml`, the flat normal map cp_zmb's painted metal names.)
+        "patch_common_mp",
+        "common_mp",
+        "techsets_common_mp",
     ]
     .iter()
     .map(|z| dir.join(format!("{z}.ff")))
