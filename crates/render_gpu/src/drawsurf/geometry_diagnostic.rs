@@ -118,6 +118,9 @@ struct DiagnosticPerf {
     prop_batches: u64,
     props_culled: u64,
     props_unseen: u64,
+    /// bo2mp: world surfaces drawn, and the draw calls they took.
+    world_surfaces: u64,
+    world_calls: u64,
     last_census_at: Option<Instant>,
 }
 
@@ -3174,9 +3177,31 @@ fn draw_geometry_diagnostic(
     // bo2zm: opaque surfaces first; blended ones after every opaque world
     // surface and prop, in their materials' sort order (as the game draws
     // them: decals, then blend layers, then glass).
-    let opaque_order: Vec<usize> = (0..draws.len())
+    let mut opaque_order: Vec<usize> = (0..draws.len())
         .filter(|&i| !t6_blended(surface_draw(&draws[i].0)))
         .collect();
+    // bo2mp: the world comes here one surface per draw (thousands a
+    // frame). Opaque surfaces are drawn by state (draw code, colour map,
+    // lightmap page, primary light), then by where their indices sit, so
+    // the same material's neighbours follow each other and merge into one
+    // draw below (as Black Ops II batches its world by material). Surfaces
+    // with a polygon offset (decals) stay after the rest; props and models
+    // keep their order, first.
+    opaque_order.sort_by_cached_key(|&i| match draws[i].0.kind {
+        RetainedDrawKind::World { surf, .. } => {
+            let s = usize::from(surf);
+            let code = geometry.world_surface_draw.get(s).copied().unwrap_or(T6_NONE);
+            (
+                1 + u8::from(code != T6_NONE && code & 0x0c00 != 0),
+                code,
+                geometry.world_surface_color.get(s).copied().unwrap_or(u32::MAX),
+                geometry.world_surface_lightmap.get(s).copied().unwrap_or(u8::MAX),
+                geometry.world_surface_primary.get(s).copied().unwrap_or(0),
+                geometry.world_surface_ranges.get(s).map_or(u32::MAX, |r| r.0),
+            )
+        }
+        _ => (0, 0, 0, 0, 0, 0),
+    });
     let mut blended_order: Vec<usize> = (0..draws.len())
         .filter(|&i| t6_blended(surface_draw(&draws[i].0)))
         .collect();
@@ -3202,6 +3227,19 @@ fn draw_geometry_diagnostic(
     // bo2zm: world surfaces drawn untextured (diagnostic colours), a few ids.
     let mut untextured: Vec<u16> = Vec::new();
     let mut untextured_n = 0u32;
+    // bo2mp: world surfaces drawn back to back with the same state and
+    // touching index ranges go out as one draw: the range waiting to be
+    // drawn, and the draws that went out for world surfaces.
+    let mut pending: Option<(u32, u32, std::ops::Range<u32>)> = None;
+    let mut world_batch_draws = 0u32;
+    macro_rules! flush_world {
+        () => {
+            if let Some((first, end, instances)) = pending.take() {
+                pass.draw_indexed(first..end, 0, instances);
+                world_batch_draws += 1;
+            }
+        };
+    }
     for blended_phase in [false, true] {
         let order = if blended_phase {
             &blended_order
@@ -3219,6 +3257,9 @@ fn draw_geometry_diagnostic(
             if !geometry_diagnostic_covers(&item.kind, item.key) {
                 xmodel_skipped = xmodel_skipped.saturating_add(1);
                 continue;
+            }
+            if !matches!(item.kind, RetainedDrawKind::World { .. }) {
+                flush_world!();
             }
             let (tess, start, count, instances) = match item.kind {
                 RetainedDrawKind::World { surf, .. } => {
@@ -3326,6 +3367,7 @@ fn draw_geometry_diagnostic(
                     let textured = group1.zip(t6_pipeline(key)).filter(|_| group2.is_some());
                     let tess = if let Some((bind_group, textured_pipeline)) = textured {
                         if bound_tess != Some(key) {
+                            flush_world!();
                             pass.set_render_pipeline(textured_pipeline);
                             pass.set_vertex_buffer(0, vertex.slice(..));
                             if style_layers(style)
@@ -3349,12 +3391,14 @@ fn draw_geometry_diagnostic(
                             shine_group.map(|_| [shine[0], shine[1], layers[0]]),
                         );
                         if bound_texture != Some(texture_key) {
+                            flush_world!();
                             pass.set_bind_group(1, bind_group, &[]);
                             bound_texture = Some(texture_key);
                         }
                         if let Some((group, id)) = group2
                             && bound_lightmap != Some(id)
                         {
+                            flush_world!();
                             pass.set_bind_group(2, group, &[]);
                             bound_lightmap = Some(id);
                         }
@@ -3365,6 +3409,7 @@ fn draw_geometry_diagnostic(
                             untextured.push(surf);
                         }
                         if bound_tess != Some(DiagnosticTess::World) {
+                            flush_world!();
                             pass.set_render_pipeline(pipeline);
                             pass.set_vertex_buffer(0, vertex.slice(..));
                             pass.set_index_buffer(index.slice(..), IndexFormat::Uint32);
@@ -3489,6 +3534,7 @@ fn draw_geometry_diagnostic(
                 let (depth_min, depth_max) =
                     reverse_z_viewport_depth(depth_range_type_for_draw(&item.kind, item.key));
                 if bound_depth != Some((depth_min, depth_max)) {
+                    flush_world!();
                     pass.set_viewport(vp_x, vp_y, vp_w, vp_h, depth_min, depth_max);
                     bound_depth = Some((depth_min, depth_max));
                 }
@@ -3501,8 +3547,27 @@ fn draw_geometry_diagnostic(
             if !retained_within(what, start, count, indices) {
                 continue;
             }
-            pass.draw_indexed(start..start.saturating_add(count), 0, instances);
+            let end = start.saturating_add(count);
+            if matches!(tess, DiagnosticTess::World | DiagnosticTess::WorldTextured(_)) {
+                // bo2mp: an opaque surface whose indices follow the waiting
+                // range's, under the same state, joins it. (Blended ones
+                // keep a draw each: their order is their sort key's.)
+                match pending.as_mut() {
+                    Some((_, pending_end, pending_instances))
+                        if !blended_phase && *pending_end == start && *pending_instances == instances =>
+                    {
+                        *pending_end = end;
+                    }
+                    _ => {
+                        flush_world!();
+                        pending = Some((start, end, instances));
+                    }
+                }
+                continue;
+            }
+            pass.draw_indexed(start..end, 0, instances);
         }
+        flush_world!();
         // bo2zm: Black Ops II props of this phase (blended ones by sort key).
         if let (Some(vertex), Some(index_buffer), Some(instances), Some(lighting_group)) = (
             geometry.smodel_vertex.as_ref(),
@@ -3856,6 +3921,8 @@ fn draw_geometry_diagnostic(
     perf.prop_batches += u64::from(prop_batch_draws);
     perf.props_culled += u64::from(props_culled);
     perf.props_unseen += u64::from(props_unseen);
+    perf.world_surfaces += u64::from(world_draws);
+    perf.world_calls += u64::from(world_batch_draws);
     let start = *perf.window_start.get_or_insert(now);
     let span = now.duration_since(start).as_secs_f32();
     // (`IW4L_PERF_WINDOW=secs`: a shorter window, for tests that must end
@@ -3872,7 +3939,7 @@ fn draw_geometry_diagnostic(
         let n = perf.frames as f32;
         diag::info!(
             World,
-            "bo2zm perf: {:.1} fps, {:.2} ms average, {:.2} ms worst; props {:.0} drawn ({:.0} opaque draws), {:.0} hidden by distance, {:.0} out of view per frame; quality {}",
+            "bo2zm perf: {:.1} fps, {:.2} ms average, {:.2} ms worst; props {:.0} drawn ({:.0} opaque draws), {:.0} hidden by distance, {:.0} out of view per frame; world {:.0} surfaces in {:.0} draws; quality {}",
             (n - 1.0) / span,
             span * 1000.0 / (n - 1.0),
             perf.worst_ms,
@@ -3880,6 +3947,8 @@ fn draw_geometry_diagnostic(
             perf.prop_batches as f32 / n,
             perf.props_culled as f32 / n,
             perf.props_unseen as f32 / n,
+            perf.world_surfaces as f32 / n,
+            perf.world_calls as f32 / n,
             if asset_core::t6_fast() { "fast" } else { "full" }
         );
         *perf = DiagnosticPerf {
@@ -3890,7 +3959,7 @@ fn draw_geometry_diagnostic(
     }
     let g0_queued = geometry.g0_world_surfs.len();
     let line = format!(
-        "drawsurf geometry diagnostic: world_draws={world_draws} smodel_draws={smodel_draws} xmodel_draws={xmodel_draws} fx_draws={fx_draws} world_skipped={world_skipped} smodel_skipped={smodel_skipped} xmodel_skipped={xmodel_skipped} fx_skipped={fx_skipped} g0_queued={g0_queued} untextured={untextured_n} {untextured:?}"
+        "drawsurf geometry diagnostic: world_draws={world_draws} (in {world_batch_draws} draw calls) smodel_draws={smodel_draws} xmodel_draws={xmodel_draws} fx_draws={fx_draws} world_skipped={world_skipped} smodel_skipped={smodel_skipped} xmodel_skipped={xmodel_skipped} fx_skipped={fx_skipped} g0_queued={g0_queued} untextured={untextured_n} {untextured:?}"
     );
     // bo2zm: on change, at most every 5 s (it changes most frames);
     // IW4L_RENDER_LOG=1 only (written on this thread, a slow write held up
