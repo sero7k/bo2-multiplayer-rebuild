@@ -68,6 +68,8 @@ pub struct MapMaterial {
 #[derive(Default)]
 pub struct Found {
     pub surface_material: Vec<Option<usize>>,
+    /// A material's asset-list entry -> its index in `materials`.
+    pub by_entry: std::collections::HashMap<usize, usize>,
     pub materials: Vec<MapMaterial>,
     pub images: Vec<MapImage>,
 }
@@ -187,7 +189,7 @@ fn material_headers(z: &[u8], count: usize) -> Option<Vec<usize>> {
 
 /// Reads which material every surface record draws with and the pictures
 /// of those materials. `zones`: each surface record's world zone.
-pub fn read(zone: &ZoneImage, zones: &[u32], report: &mut Vec<String>) -> Found {
+pub fn read(zone: &ZoneImage, zones: &[u32], extra: &[usize], report: &mut Vec<String>) -> Found {
     let mut out = Found {
         surface_material: vec![None; zones.len()],
         ..Default::default()
@@ -239,12 +241,23 @@ pub fn read(zone: &ZoneImage, zones: &[u32], report: &mut Vec<String>) -> Found 
     let mut by_ordinal: std::collections::HashMap<usize, usize> = Default::default();
     let mut image_of: std::collections::HashMap<usize, usize> = Default::default();
     let mut material_of_entry = vec![None; table_len];
-    for (e, slot) in material_of_entry.iter_mut().enumerate() {
-        let Some(ordinal) = asset_of(u64_at(z, table + 8 * e)).map(|a| nth[a]) else {
+    // The table's entries, then the other materials asked for (the placed
+    // models'), by asset index.
+    let wanted: Vec<Option<usize>> = (0..table_len)
+        .map(|e| asset_of(u64_at(z, table + 8 * e)))
+        .chain(extra.iter().map(|&a| (zone.types.get(a) == Some(&11)).then_some(a)))
+        .collect();
+    for (e, &asset) in wanted.iter().enumerate() {
+        let Some(ordinal) = asset.map(|a| nth[a]) else {
             continue;
         };
         if let Some(&m) = by_ordinal.get(&ordinal) {
-            *slot = Some(m);
+            if let Some(slot) = material_of_entry.get_mut(e) {
+                *slot = Some(m);
+            }
+            if let Some(a) = asset {
+                out.by_entry.insert(a, m);
+            }
             continue;
         }
         let mut mat = MapMaterial::default();
@@ -278,8 +291,14 @@ pub fn read(zone: &ZoneImage, zones: &[u32], report: &mut Vec<String>) -> Found 
         };
         mat.colour = pick(0x25);
         out.materials.push(mat);
-        by_ordinal.insert(ordinal, out.materials.len() - 1);
-        *slot = Some(out.materials.len() - 1);
+        let m = out.materials.len() - 1;
+        by_ordinal.insert(ordinal, m);
+        if let Some(slot) = material_of_entry.get_mut(e) {
+            *slot = Some(m);
+        }
+        if let Some(a) = asset {
+            out.by_entry.insert(a, m);
+        }
     }
     for k in 0..zones.len() {
         let r = infos + SURFACE_INFO * k;
@@ -377,7 +396,8 @@ impl Packages {
         self.paks.iter().any(|p| p.find(key).is_some())
     }
 
-    fn fetch(&self, key: u64, oodle: &dyn Decompressor) -> Option<Vec<u8>> {
+    /// An entry's bytes (a picture's mip group, a model's mesh).
+    pub fn fetch(&self, key: u64, oodle: &dyn Decompressor) -> Option<Vec<u8>> {
         self.paks
             .iter()
             .find_map(|p| p.find(key).map(|e| (p, *e)))

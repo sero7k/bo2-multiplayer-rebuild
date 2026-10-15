@@ -14,6 +14,7 @@
 pub mod ents;
 pub mod index;
 pub mod materials;
+pub mod models;
 pub mod tiles;
 pub mod world;
 
@@ -62,6 +63,13 @@ pub struct JupMap {
     /// The materials the surfaces draw with, and their pictures.
     pub materials: Vec<materials::MapMaterial>,
     pub images: Vec<materials::MapImage>,
+    /// The placed static models: the models (first LODs) and where each
+    /// stands.
+    pub prop_models: Vec<models::PropModel>,
+    pub props: Vec<models::Prop>,
+    /// The install's packages (opened for the models' meshes; the pictures
+    /// come from them too).
+    pub packages: Option<materials::Packages>,
     /// What was read and what was missing, line by line.
     pub report: Vec<String>,
 }
@@ -118,11 +126,36 @@ impl JupMap {
             "surface list: {count} surfaces over {} world zone(s)",
             zones.len()
         ));
+        // The placed models (their materials are read with the world's).
+        let placed = models::read(&zone, list, &mut out.report);
+        let mut extra: Vec<usize> = placed
+            .models
+            .values()
+            .flat_map(|d| d.materials.iter().flatten().copied())
+            .collect();
+        extra.sort_unstable();
+        extra.dedup();
         let found = materials::read(
             &zone,
             &recs.iter().map(|r| r.zone).collect::<Vec<_>>(),
+            &extra,
             &mut out.report,
         );
+        let started_models = std::time::Instant::now();
+        let paks = materials::Packages::open(&src.install);
+        (out.prop_models, out.props) = models::meshes(
+            &zone,
+            &placed,
+            &|key| paks.fetch(key, oodle),
+            &found.by_entry,
+            &mut out.report,
+        );
+        out.report.push(format!(
+            "static models: read in {:.1}s",
+            started_models.elapsed().as_secs_f32()
+        ));
+        drop(placed);
+        out.packages = Some(paks);
         // The map's own world zone.
         if zones.contains(&0) {
             let buffers = world::find_buffers(z, name_hash(&src.name))
