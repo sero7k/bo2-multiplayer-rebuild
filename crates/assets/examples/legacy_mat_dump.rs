@@ -37,6 +37,23 @@ fn main() {
             .collect();
         let all = format!("{} {ts} {}", m.name, tex.join(" ")).to_ascii_lowercase();
         if pats.iter().any(|p| all.contains(p.as_str())) {
+            // The colour map as the lane decodes it: mean colour and alpha.
+            let stats = m
+                .textures
+                .iter()
+                .find(|t| t.semantic == iw3::zone::TextureSemantic::Color)
+                .and_then(|t| t.image.and_then(|i| z.image(i)))
+                .and_then(|i| {
+                    let main = asset_transport::game_root_for_zone(path).ok()?.join("main");
+                    asset_material::decode_ui_image_from_main(&main, &i.name).ok().flatten()
+                })
+                .map(|(w, h, px)| {
+                    let n = (px.len() / 4).max(1) as f64;
+                    let mean = |c: usize| px.chunks_exact(4).map(|p| f64::from(p[c])).sum::<f64>() / n;
+                    let opaque = px.chunks_exact(4).filter(|p| p[3] >= 128).count() as f64 / n;
+                    format!("{w}x{h} mean rgba {:.0} {:.0} {:.0} {:.0}, {:.0}% alpha>=128", mean(0), mean(1), mean(2), mean(3), opaque * 100.0)
+                });
+            println!("  colour: {stats:?}");
             println!("{} [{ts}] sort={} consts={:?}\n    {}", m.name, m.sort_key, m.constants.iter().map(|c| (&c.name, c.literal)).collect::<Vec<_>>(), tex.join("\n    "));
         }
     }
