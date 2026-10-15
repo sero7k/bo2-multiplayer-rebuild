@@ -8,7 +8,7 @@
 //! `set_available` says its guns are there (the front end: the game is
 //! installed; the match: its guns were loaded).
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU16, Ordering};
 
 /// The first statstable index a guest gun takes (BO2's own end at 255).
 pub const FIRST_INDEX: i32 = 300;
@@ -333,6 +333,27 @@ pub const BO3: &[GuestGun] = &[
 
 /// The first statstable index of Black Ops III's guns.
 pub const BO3_FIRST_INDEX: i32 = 1000;
+
+const fn jup_roster<const N: usize>(names: &[(&'static str, &'static str, &'static str, &'static str)]) -> [GuestGun; N] {
+    let mut out = [GuestGun { game: "jup", gun: "", name: "", group: "", slot: "", attachments: "", icon: "" }; N];
+    let mut i = 0;
+    while i < N {
+        let (gun, name, group, slot) = names[i];
+        out[i] = GuestGun { game: "jup", gun, name, group, slot, attachments: "", icon: "" };
+        i += 1;
+    }
+    out
+}
+
+/// bo2mp: Call of Duty: Modern Warfare III (2023)'s guns (`jup_<gun>_mp`
+/// in its global_stream_mp; Create-a-Class and the scripts call it
+/// `jup_<gun>` too, `jup_jp01_ar_golf36`), the ones whose public name is
+/// known (`crate::jup_names`). A guest gun is the base gun with its default
+/// parts. Its statstable rows are numbered from `JUP_FIRST_INDEX`.
+pub const JUP: &[GuestGun] = &jup_roster::<{ crate::jup_names::JUP_NAMES.len() }>(crate::jup_names::JUP_NAMES);
+
+/// The first statstable index of Modern Warfare III (2023)'s guns.
+pub const JUP_FIRST_INDEX: i32 = 1200;
 
 const fn w3(
     gun: &'static str,
@@ -733,6 +754,7 @@ pub fn prefix(game: &str) -> &'static str {
         "iw3" => "cod4_",
         "s1" => "aw_",
         "t7" => "bo3_",
+        "jup" => "jup_",
         _ => "",
     }
 }
@@ -744,10 +766,10 @@ pub fn is_guest_name(name: &str) -> bool {
     GAMES.iter().any(|g| name.starts_with(prefix(g)))
 }
 
-const GAMES: [&str; 8] = ["t5", "iw4", "iw5", "iw6", "t4", "iw3", "s1", "t7"];
-static AVAILABLE: AtomicU8 = AtomicU8::new(0);
+const GAMES: [&str; 9] = ["t5", "iw4", "iw5", "iw6", "t4", "iw3", "s1", "t7", "jup"];
+static AVAILABLE: AtomicU16 = AtomicU16::new(0);
 
-fn bit(game: &str) -> u8 {
+fn bit(game: &str) -> u16 {
     GAMES.iter().position(|g| *g == game).map_or(0, |i| 1 << i)
 }
 
@@ -777,7 +799,7 @@ pub fn available(game: &str) -> bool {
 
 /// Every guest gun, available or not, in table order.
 pub fn all() -> impl Iterator<Item = &'static GuestGun> {
-    BO1.iter().chain(MW2.iter()).chain(GHOSTS.iter()).chain(MW3.iter()).chain(WAW.iter()).chain(COD4.iter()).chain(AW.iter()).chain(BO3.iter()).chain(MOD.iter())
+    BO1.iter().chain(MW2.iter()).chain(GHOSTS.iter()).chain(MW3.iter()).chain(WAW.iter()).chain(COD4.iter()).chain(AW.iter()).chain(BO3.iter()).chain(JUP.iter()).chain(MOD.iter())
 }
 
 /// The statstable index of the guest gun at `position` in `all()`: a
@@ -791,6 +813,7 @@ fn stats_index(position: usize, gun: &GuestGun) -> i32 {
         (GHOSTS, GHOSTS_FIRST_INDEX),
         (AW, AW_FIRST_INDEX),
         (BO3, BO3_FIRST_INDEX),
+        (JUP, JUP_FIRST_INDEX),
         (MOD, MOD_FIRST_INDEX),
     ];
     for (roster, first) in own {
@@ -827,6 +850,7 @@ impl GuestGun {
             "iw3" => "Call of Duty 4",
             "s1" => "Call of Duty: Advanced Warfare",
             "t7" => "Call of Duty: Black Ops III",
+            "jup" => "Call of Duty: Modern Warfare III (2023)",
             MOD_GAME => "the @leetinservers mod",
             _ => "another game",
         }
@@ -862,6 +886,8 @@ impl GuestGun {
             // (Black Ops III's are its weapon icons in core_common: the
             // pick-up icon, then the kill icon.)
             "t7" => format!("t7:t7_icon_weapon_{gun}_pu|t7_icon_weapon_{gun}_kf"),
+            // (Modern Warfare III's menu pictures are not read.)
+            "jup" => String::new(),
             // (The mod's are in its archive, else Black Ops II's packs.)
             MOD_GAME => format!("{MOD_GAME}:{}|{}_big", self.icon, self.icon),
             _ => {
@@ -884,7 +910,7 @@ impl GuestGun {
 // one kept, `family_of_reference`).
 
 /// Which game's copy of a shared gun is listed (Black Ops II's always).
-const PRIORITY: [&str; 8] = ["iw4", "iw5", "t5", "iw6", "iw3", "t4", "s1", "t7"];
+const PRIORITY: [&str; 9] = ["iw4", "iw5", "t5", "iw6", "iw3", "t4", "s1", "t7", "jup"];
 
 /// Guns known by another name in another game (name without its game's
 /// `iw5_` prefix -> the family). (game, name, family); game "" = any.
@@ -1703,6 +1729,22 @@ mod tests {
         assert_eq!(reference_for_index(500).as_deref(), Some("mw3_m4"));
         assert_eq!(family_of_reference("mw3_m4"), family_of_reference("mw2_m4"));
         assert_eq!(family_of_reference("sa58"), "fal");
+    }
+
+    /// Modern Warfare III (2023)'s guns: their own rows and names, the
+    /// pistol a secondary, a Black Ops II-style Pack-a-Punch name.
+    #[test]
+    fn modern_warfare_iii_guns() {
+        let holger = JUP.iter().find(|g| g.gun == "jp01_ar_golf36").unwrap();
+        assert_eq!(holger.name, "Holger 556");
+        assert_eq!(holger.reference(), "jup_jp01_ar_golf36");
+        assert_eq!(script_name(holger), "jup_jp01_ar_golf36_mp");
+        assert_eq!(reference_for_index(JUP_FIRST_INDEX).as_deref(), Some("jup_jp01_ar_golf36"));
+        assert_eq!(game_for_index(JUP_FIRST_INDEX), Some("jup"));
+        assert!(is_guest_name("jup_jp01_ar_golf36_mp+reflex"));
+        assert!(!has_own_pack_a_punch("jup"));
+        assert_eq!(zm_upgraded_name(holger), "Holger 556-115");
+        assert_eq!(JUP.iter().find(|g| g.gun == "jp12_pi_mike93").unwrap().slot, S);
     }
 }
 

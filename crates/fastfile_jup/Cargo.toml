@@ -8,9 +8,13 @@ description = "Call of Duty: Modern Warfare III (2023, cod23): the .ff Oodle blo
 [dependencies]
 # Pure-Rust Opus decoder (BSD-3-Clause): the sounds are Opus streams.
 rusty-opus = "1.0.1"
+bcdec_rs.workspace = true # emblems' and calling cards' pictures
 
 [target.'cfg(windows)'.dependencies]
 libloading.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+png.workspace = true

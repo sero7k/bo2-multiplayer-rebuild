@@ -18,6 +18,7 @@ fastfile_iw6.workspace = true # bo2mp: Ghosts' Create-a-Class pictures
 fastfile_s1.workspace = true
 fastfile_t7.workspace = true # bo2mp: Black Ops III's weapon icons
 fastfile_iw7.workspace = true # bo2mp: Infinite Warfare's map pictures
+fastfile_jup.workspace = true # bo2mp: Modern Warfare III's (2023) emblems and calling cards
 assets.workspace = true
 bcdec_rs.workspace = true # bo2zm: popup blur of menu pictures
 frame.workspace = true

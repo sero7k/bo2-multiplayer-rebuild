@@ -30,6 +30,9 @@ pub(crate) struct Ctx<'a> {
     pub pad: bool,
     /// The screen's colours (blue, or the Zombies screens' red).
     pub pal: Palette,
+    /// Calling cards and emblems are drawn still (a picker's page: only
+    /// the one in focus and his card move).
+    pub still: bool,
 }
 
 impl Ctx<'_> {
@@ -115,7 +118,8 @@ pub(crate) fn banner(c: &mut Kids, cx: &mut Ctx, card: &str, w: f32, h: f32, nam
             match (pic, size) {
                 (Some(p), Some(size)) => {
                     let s = cover(size, Vec2::new(w, h) * cx.s);
-                    b.spawn((
+                    let book = flipbook(cx, card);
+                    let mut e = b.spawn((
                         ImageNode::new(p),
                         Node {
                             position_type: PositionType::Absolute,
@@ -126,6 +130,9 @@ pub(crate) fn banner(c: &mut Kids, cx: &mut Ctx, card: &str, w: f32, h: f32, nam
                             ..default()
                         },
                     ));
+                    if let Some(book) = book {
+                        e.insert(book);
+                    }
                 }
                 // (Not in yet, or the game is not installed: a plain plate.)
                 _ => {
@@ -160,6 +167,44 @@ pub(crate) fn banner(c: &mut Kids, cx: &mut Ctx, card: &str, w: f32, h: f32, nam
         });
 }
 
+/// A flipbook's frames on screen (Modern Warfare III's animated emblems
+/// and calling cards), turned by [`turn_flipbooks`].
+#[derive(Component, Clone, Debug)]
+pub(crate) struct Flipbook {
+    pub frames: Vec<Handle<Image>>,
+}
+
+/// Frames a second a flipbook turns at.
+const FLIPBOOK_FPS: f32 = 12.0;
+
+/// The flipbook of a calling card's or emblem's picture, once its frames
+/// are in (its still picture shows till then): `None` for a still one, and
+/// while they are being read (asking for them; the view is drawn again as
+/// they come in).
+pub(crate) fn flipbook(cx: &mut Ctx, name: &str) -> Option<Flipbook> {
+    let n = cards::frames(name);
+    if n < 2 || cx.still {
+        return None;
+    }
+    let mut frames = Vec::with_capacity(n as usize);
+    for i in 0..n {
+        frames.push(cx.pic(&[cards::frame_name(name, i)])?);
+    }
+    Some(Flipbook { frames })
+}
+
+/// Turns every flipbook on screen.
+pub(crate) fn turn_flipbooks(time: Res<Time>, mut books: Query<(&mut ImageNode, &Flipbook)>) {
+    let at = (time.elapsed_secs() * FLIPBOOK_FPS) as usize;
+    for (mut img, book) in &mut books {
+        if let Some(f) = book.frames.get(at % book.frames.len().max(1))
+            && img.image != *f
+        {
+            img.image = f.clone();
+        }
+    }
+}
+
 /// An emblem in a square.
 pub(crate) fn emblem(c: &mut Kids, cx: &mut Ctx, name: &str, size: f32) {
     let pic = cx.pic(&[name.to_owned()]);
@@ -171,7 +216,11 @@ pub(crate) fn emblem(c: &mut Kids, cx: &mut Ctx, name: &str, size: f32) {
         Some(p) => {
             let sz = cx.pic_size(&p);
             let k = (size / sz.x.max(1.0)).min(size / sz.y.max(1.0));
-            b.spawn((ImageNode::new(p), Node { width: cx.px(sz.x * k), height: cx.px(sz.y * k), ..default() }));
+            let book = flipbook(cx, name);
+            let mut e = b.spawn((ImageNode::new(p), Node { width: cx.px(sz.x * k), height: cx.px(sz.y * k), ..default() }));
+            if let Some(book) = book {
+                e.insert(book);
+            }
         }
         None => {
             b.spawn((
@@ -227,7 +276,7 @@ fn player_card(c: &mut Kids, cx: &mut Ctx, card: &PlayerCard) {
 }
 
 /// A key hint: the key (or the pad's button picture) and what it does.
-fn hint(c: &mut Kids, cx: &mut Ctx, key: &str, pad: &str, what: &str) {
+pub(crate) fn hint(c: &mut Kids, cx: &mut Ctx, key: &str, pad: &str, what: &str) {
     let icon = if cx.pad && !pad.is_empty() { cx.pic(&[pad.to_owned()]) } else { None };
     c.spawn(Node { column_gap: cx.px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|h| {
         match icon {
@@ -1128,6 +1177,7 @@ pub(crate) fn shell_view(
         images: &mut images,
         pad,
         pal: palette(&shell),
+        still: false,
     };
     commands
         .spawn((

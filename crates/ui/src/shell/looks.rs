@@ -4,14 +4,16 @@
 //! on it, the emblem at its right), PAGE n/m at the right, a page of them
 //! under it (emblems 8 by 6, calling cards in 3 columns of 9 with their
 //! names on them) and a big arrow each side to turn the page. ENTER keeps
-//! the one in focus (his stats), ESC goes back without a change.
+//! the one in focus (his stats), ESC goes back without a change. The games
+//! are categories, one shown at a time (MODERN WARFARE 2 / 3 / III, at the
+//! left: Z and C, or the triggers, or a click).
 
 use bevy::prelude::*;
 
 use super::bridge::Catalog;
 use super::cards::{self, Kind};
 use super::theme::*;
-use super::view::{Ctx, Kids, abs, banner, emblem, header};
+use super::view::{Ctx, Kids, abs, banner, emblem, header, hint};
 use super::{Hit, Row, Shell, look_kind};
 
 /// The grids' tiles (design units at 1080 lines) and where they start.
@@ -23,7 +25,7 @@ const GRID_TOP: f32 = 318.0;
 
 pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row]) {
     let kind = look_kind(shell.screen);
-    let list = cards::list(kind);
+    let list = cards::shown(kind, shell.look_cat);
     let pages = cards::pages(kind, list.len());
     let page = shell.page.min(pages - 1);
     let items = cards::page_items(kind, &list, page);
@@ -37,6 +39,7 @@ pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, row
         t.spawn((Text::new("PAGE"), cx.bold(26.0), TextColor(DIM)));
         t.spawn((Text::new(format!("{}/{}", page + 1, pages)), cx.bold(40.0), TextColor(WHITE)));
     });
+    categories(c, cx, kind, shell.look_cat);
     // The card he would have: the one in focus.
     let focused = items.get(shell.focus).cloned().unwrap_or_else(|| equipped.clone());
     let (card, mark) = if kind == Kind::Card { (focused.clone(), my_emblem.clone()) } else { (my_card.clone(), focused.clone()) };
@@ -69,7 +72,9 @@ pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, row
                 let on = k == shell.focus;
                 let mine = name == equipped;
                 let title = rows.get(k).map_or_else(|| cards::title(name), |r| r.label.clone());
+                cx.still = true;
                 tile(g, cx, kind, name, &title, tw, th, k, on, mine);
+                cx.still = false;
             }
         });
     // The page arrows, each side of the grid.
@@ -83,6 +88,30 @@ pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, row
         ))
         .with_child((Text::new(glyph), cx.light(230.0), TextColor(if more { WHITE.with_alpha(0.9) } else { FAINT }), TextShadow { offset: Vec2::splat(3.0 * cx.s), color: Color::srgba(0.0, 0.0, 0.0, 0.6), ..default() }));
     }
+}
+
+/// The categories (the games) down the left, the one shown lit.
+fn categories(c: &mut Kids, cx: &mut Ctx, kind: Kind, on: usize) {
+    let tabs = cards::category_tabs(kind);
+    if tabs.len() < 2 {
+        return;
+    }
+    let on = on.min(tabs.len() - 1);
+    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(6.0), ..abs(Some(72.0), Some(124.0), None, None, cx) }).with_children(|col| {
+        hint(col, cx, "Z", "xenonbutton_lt", "");
+        for (i, label) in tabs.iter().enumerate() {
+            let sel = i == on;
+            col.spawn((
+                Hit::LookCat(i),
+                Button,
+                Node { padding: UiRect::axes(cx.px(16.0), cx.px(6.0)), border: UiRect::left(cx.px(4.0)), ..default() },
+                BorderColor::all(if sel { cx.pal.accent } else { Color::NONE }),
+                BackgroundColor(if sel { cx.pal.accent_soft.with_alpha(0.16) } else { Color::NONE }),
+            ))
+            .with_child((Text::new(label.clone()), cx.bold(22.0), TextColor(if sel { WHITE } else { DIM })));
+        }
+        hint(col, cx, "C", "xenonbutton_rt", "");
+    });
 }
 
 /// The card as it would show: his calling card with its name at the top and

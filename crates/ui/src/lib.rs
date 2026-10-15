@@ -26,6 +26,7 @@ pub mod hud_match; // bo2mp: our kill feed, hit marker, kill banner, scoreboard
 pub mod hud_nuke; // bo2mp: the Tactical Nuke's KEM STRIKE INBOUND banner
 pub mod hud_medals; // bo2mp: Black Ops' medal notification
 pub(crate) mod hud_cards; // bo2mp: MW2/MW3 calling cards and emblems in the HUD
+mod jup_cards; // bo2mp: Modern Warfare III's (2023) emblems and calling cards
 pub(crate) mod hud_prematch; // bo2mp: the match's start countdown
 pub mod hud_outcome; // bo2mp: the free-for-all end screen
 pub(crate) mod online_match; // bo2mp: the front end's matches through the master

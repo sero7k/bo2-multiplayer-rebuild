@@ -110,3 +110,36 @@ Not named yet, so these events keep Black Ops II's stand-ins (or the
 nearest MW3 sound, said in the route): the plate insert itself (the armor
 box's refill plays), plates full, squads remaining, gas tick/enter, the
 circle closed, the loadout crate landing, the first spawn.
+
+## Emblems and calling cards (`cards.rs`, probe `jup_cards`)
+
+All of them are defined in `zone/global.ff` (13.7 MB, 44 MB of zone), one
+script bundle (type 115) each. A bundle's string cells hold its name in the
+clear (`-2`, a 32-bit hash, 4 zero bytes, the name, NUL): `ui_emblem_005`,
+`jup_emblem_n5934_1`, `ui_playercard_100`,
+`jup_playercard_animated_opc_outbreak_mike4_tier1_atlas`, ... (calling cards
+are "player cards"), and its title's localize key (`EMBLEMS/EMBLEM_005`;
+the title is encrypted and not read). Its picture is the image asset of the
+same name (`hash::name(name)`), stored just before the bundle; on 1.21 every
+one has a single level (image header 0x2c) in a single streamed group,
+found in `boot_shared` (the older ones), `codhq23b` / `codhq23a` (the
+seasons') or `codhq_shared` (87). Image format byte 0x25 is BC1 (cards),
+0x30 BC7.
+
+1.21: 5,315 names, 5,272 with a picture in the zone: 2,889 emblems (2,182
+flipbooks) and 2,383 calling cards (1,710 flipbooks); 2 pictures are in no
+installed package (fetched on demand), 5,270 are there.
+
+Flipbooks are frames side by side in rows, an emblem's 256x256, a card's
+512x128: a 768x1024 emblem is 3 by 4 frames, a 1024x1024 one 4 by 4, a
+1024x1024 card 2 by 8, a 1536x512 card 3 by 4. Neither the bundle's cells
+nor the name tells one from a still picture (`ui_emblem_143` and
+`ui_emblem_286`, both 1024x1024, have the same cells; some `_atlas` names
+are 256x256 stills). The size decides where it can (a card of whole frames
+not itself 4:1, an emblem of whole frames not square: a flipbook); a square
+emblem of several frames is a flipbook when its neighbouring frames are
+nearly the same picture (`detect_grid`).
+
+The game shows them at runtime through `crates/ui/src/jup_cards.rs`
+(`jup:<name>`, a frame `jup:<name>#<n>`), from `$BO2_JUP_INSTALL` or the
+game folders file's `jup` line.

@@ -2840,7 +2840,9 @@ dependencies = [
 name = "fastfile_jup"
 version = "0.1.0"
 dependencies = [
+ "bcdec_rs",
  "libloading",
+ "png",
  "rusty-opus",
 ]
 
@@ -6561,6 +6563,7 @@ dependencies = [
  "diag",
  "fastfile_iw6",
  "fastfile_iw7",
+ "fastfile_jup",
  "fastfile_s1",
  "fastfile_t7",
  "frame",

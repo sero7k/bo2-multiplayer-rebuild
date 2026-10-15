@@ -15,13 +15,19 @@
 //! See `docs/JUP.md`.
 #![deny(unsafe_code)]
 
+pub mod cards;
 pub mod container;
+pub mod hash;
+pub mod image;
 pub mod oodle;
 #[cfg(windows)]
 pub mod oodle_dll;
 pub mod sound;
 pub mod sound_bank;
+pub mod ptr;
+pub mod surfs;
 pub mod xsub;
+pub mod zone;
 
 pub use container::{
     BlockRef, ContainerError, FileHeader, inflate_zone, is_jup_zone, parse_file_header, read_zone,

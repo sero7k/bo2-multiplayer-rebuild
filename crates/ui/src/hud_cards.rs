@@ -2,7 +2,8 @@
 //! card, the Killed By card, the killcam's name card). Black Ops II's
 //! banners and emblems are not shown: each player has a Modern Warfare 2
 //! or 3 calling card (`cardtitle_*`) and emblem (`cardicon_*`), read from
-//! that game's own files (`iw4:<material>` / `iw5:<material>`). His own are
+//! that game's own files (`iw4:<material>` / `iw5:<material>`), or a Modern
+//! Warfare III (2023) one (`jup:<name>`, its first frame here). His own are
 //! the ones his stats hold (`bo2mp.callingcard` / `bo2mp.emblem`, picked in
 //! the shell's Barracks); anyone else's follow from the name (the shell's
 //! `cards::for_name`), so a player keeps his for good. A picture the games
@@ -47,7 +48,7 @@ pub(crate) fn look_of(name: &str, mine: Option<&(String, String)>) -> (String, S
 /// when the game lacks it (the reader logs which).
 pub(crate) fn picture(material: &str) -> Option<Arc<Image>> {
     let (game, name) = material.split_once(':')?;
-    if !matches!(game, "iw4" | "iw5") || !(name.starts_with("cardtitle_") || name.starts_with("cardicon_")) {
+    if !is_look(material) {
         return None;
     }
     let (game, name) = (game.to_owned(), name.to_owned());
@@ -65,6 +66,7 @@ pub(crate) fn picture(material: &str) -> Option<Arc<Image>> {
 /// Whether a material is one of these (a calling card or an emblem).
 pub(crate) fn is_look(material: &str) -> bool {
     material.split_once(':').is_some_and(|(g, n)| matches!(g, "iw4" | "iw5") && (n.starts_with("cardtitle_") || n.starts_with("cardicon_")))
+        || crate::jup_cards::is_look(material)
 }
 
 #[cfg(test)]
@@ -78,6 +80,7 @@ mod tests {
         assert!(a.0.contains(":cardtitle_") && a.1.contains(":cardicon_"));
         assert!(is_look(&a.0) && is_look(&a.1));
         assert!(!is_look("emblem_bg_default") && !is_look("em_rank_pvt_full"));
+        assert!(is_look("jup:ui_playercard_100") && is_look("jup:ui_emblem_005"));
         // His own: what his stats hold when the games have it.
         let list = cards::list(Kind::Card);
         let mine = look_of("sero", Some(&(list[list.len() - 1].clone(), String::new())));
