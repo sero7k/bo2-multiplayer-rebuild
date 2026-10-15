@@ -196,9 +196,52 @@ struct Materials<'a> {
     failures: Vec<String>,
     /// bo2mp: Black Ops III's own look (`super::t7_look`), when on.
     looks: Option<super::t7_look::Looks>,
+    /// bo2mp: with Black Ops III's own light, water is drawn as a clear
+    /// tinted sheet (`water_sheet`): its colour map (a flow or ramp picture
+    /// for BO3's water shader, which this draw has not) read as a colour
+    /// drew mp_waterpark's pools in rainbow stripes. The slot, once made.
+    water: Option<Option<usize>>,
 }
 
 impl Materials<'_> {
+    /// The water sheet's picture: 2 x 2 of a pale turquoise (sRGB 95, 170,
+    /// 185) at alpha 120 (the pool's floor shows through).
+    fn water_sheet(&mut self) -> Option<usize> {
+        if let Some(Some(slot)) = self.water {
+            return Some(slot);
+        }
+        use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+        let px: Vec<u8> = [95u8, 170, 185, 120].repeat(4);
+        let image = bevy::prelude::Image::new(
+            Extent3d { width: 2, height: 2, depth_or_array_layers: 1 },
+            TextureDimension::D2,
+            px,
+            TextureFormat::Rgba8UnormSrgb,
+            bevy::asset::RenderAssetUsages::RENDER_WORLD,
+        );
+        let slot = self.catalog.link_image(AuthoredImage {
+            namespace: AssetNamespace::T6,
+            name: AssetRef::Real("t7:#water_sheet".to_owned()),
+            map_type: 0,
+            semantic: TS_COLOR_MAP,
+            category: 0,
+            use_srgb_reads: true,
+            width: 2,
+            height: 2,
+            depth: 1,
+            level_count: 1,
+            format: 0,
+            payload: Arc::new(Vec::new()),
+            decoded: Some(Arc::new(image)),
+            common_owned: false,
+            decoded_variant: None,
+            decoded_by: None,
+            pending_decode: None,
+        });
+        self.water = Some(Some(slot));
+        Some(slot)
+    }
+
     fn image(&mut self, name: &str) -> Option<usize> {
         if let Some(slot) = self.images.get(name) {
             return *slot;
@@ -267,7 +310,13 @@ impl Materials<'_> {
         };
         let m = &self.map.materials[index];
         let glowing = !textures.is_empty();
-        if let Some(slot) = look[0].filter(|_| !glowing) {
+        let water = self.water.is_some() && !glowing && {
+            let words: Vec<&str> = m.name.split(['_', '/', '#']).chain(m.technique_set.split(['_', '/', '#'])).collect();
+            words.contains(&"water")
+        };
+        if let Some(slot) = water.then(|| self.water_sheet()).flatten() {
+            textures.push(MaterialTextureBinding { name_hash: 0xa0ab_1041, name_start: 0, name_end: 0, sampler_state: 0x13, semantic: TS_COLOR_MAP, image: Some(slot) });
+        } else if let Some(slot) = look[0].filter(|_| !glowing) {
             textures.push(MaterialTextureBinding { name_hash: 0xa0ab_1041, name_start: 0, name_end: 0, sampler_state: 0x13, semantic: TS_COLOR_MAP, image: Some(slot) });
         } else if !glowing
             && let Some((hash, name)) = colour_map(self.map, &m.textures)
@@ -750,6 +799,7 @@ pub(super) fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, 
         decoded: 0,
         failures: Vec::new(),
         looks: super::t7_look::on().then(|| super::t7_look::Looks::new(texture_max(), lit.is_some())),
+        water: (lit.is_some() && !map_name.contains("jup")).then_some(None),
     };
     let surface_materials: Vec<Option<usize>> =
         map.surfaces.iter().enumerate().map(|(i, s)| if hidden[i] { None } else { s.material.and_then(|m| b.material(m, false)) }).collect();
