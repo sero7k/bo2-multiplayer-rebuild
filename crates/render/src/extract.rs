@@ -977,7 +977,15 @@ pub fn extract_geometry(
     // in gamma space as those games do; 4 when it also reflects the map's
     // own probes (gamma, no lighting table) rather than a Black Ops II model
     // map's (`bo2_look`).
-    if let Some(scene) = lighting.2.as_ref().filter(|scene| scene.iw3_lightmaps)
+    // bo2mp: a Black Ops III world lit by its own light (`t7_light`): row
+    // 3's z says so (its numbers ride in the light table); row 1's w stays
+    // Black Ops II's, so what moves draws as before.
+    if lighting.2.as_ref().is_some_and(|scene| scene.t7_light)
+        && let Some(l) = full_lighting.as_mut()
+    {
+        l[3][2] = 1.0;
+    }
+    if let Some(scene) = lighting.2.as_ref().filter(|scene| scene.iw3_lightmaps && !scene.t7_light)
         && let Some(l) = full_lighting.as_mut()
     {
         l[1][3] = match (scene.light_grid.is_some(), scene.t6_probes.is_empty()) {

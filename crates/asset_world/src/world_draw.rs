@@ -484,7 +484,20 @@ pub struct WorldDraw {
     /// bo2zm: per world vertex (parallel to `positions`), a layered
     /// Black Ops II surface's layer 1 and 2 texcoords; empty elsewhere.
     pub t6_layer_uvs: Vec<[f32; 4]>,
+
+    /// bo2mp: a Black Ops III world lit by its own light
+    /// (`assets::lane::t7_light`). The fallback pass then draws the world,
+    /// its placed models and its sky by its T7 branch: the world's vertex
+    /// colours hold the baked ambient light, `t6_lut` the baked sun map (not
+    /// a colour table), light rows 254 and 255 of `t6_lights` the branch's
+    /// numbers (`T7_LIGHT_ROW`). False on every other map.
+    pub t7_light: bool,
 }
+
+/// bo2mp: the first of the two light rows (of `WorldDraw::t6_lights`) a
+/// Black Ops III world lit by its own light keeps its numbers in: no
+/// surface names them as its primary light (their kind is 7).
+pub const T7_LIGHT_ROW: usize = 254;
 
 /// bo2zm: one Black Ops II fog volume (`GfxWorldFogVolume`); its box is
 /// zero in the data, its planes bound it.
@@ -1110,6 +1123,7 @@ pub fn build_world_draw(
             t6_flicker: Vec::new(),
             t6_probes: Vec::new(),
             t6_layer_uvs: Vec::new(),
+            t7_light: false,
         },
         materials,
     ))

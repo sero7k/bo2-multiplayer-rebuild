@@ -330,7 +330,7 @@ fn sun_of(map: &T7Map, entities: &[iw3::ents::Entity]) -> ([f32; 3], [f32; 3], f
 }
 
 /// The world as CoD4's `GfxWorld` (materials beside it, not in it).
-fn iw3_world(map: &T7Map, sun: ([f32; 3], [f32; 3], f32)) -> iw3::zone::GfxWorld {
+fn iw3_world(map: &T7Map, sun: ([f32; 3], [f32; 3], f32), probes: &dyn Fn(usize) -> u8) -> iw3::zone::GfxWorld {
     iw3::zone::GfxWorld {
         name: map.name.clone(),
         base_name: map.name.clone(),
@@ -351,14 +351,15 @@ fn iw3_world(map: &T7Map, sun: ([f32; 3], [f32; 3], f32)) -> iw3::zone::GfxWorld
         surfaces: map
             .surfaces
             .iter()
-            .map(|s| iw3::zone::GfxSurface {
+            .enumerate()
+            .map(|(i, s)| iw3::zone::GfxSurface {
                 first_vertex: s.first_vertex as i32,
                 vertex_count: s.vertex_count.min(u32::from(u16::MAX)) as u16,
                 tri_count: s.tri_count,
                 base_index: s.base_index as i32,
                 material: None,
                 lightmap_index: 0,
-                reflection_probe_index: 0,
+                reflection_probe_index: probes(i),
                 primary_light_index: 0,
                 flags: s.flags,
                 bounds: [s.mins, s.maxs],
@@ -683,6 +684,40 @@ fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, progress: &
     let surface_materials: Vec<Option<usize>> =
         map.surfaces.iter().enumerate().map(|(i, s)| if hidden[i] { None } else { s.material.and_then(|m| b.material(m, false)) }).collect();
 
+    // bo2mp: Black Ops III's own light (`super::t7_light`), when on.
+    let stage_light = progress.begin_scoped(StageId::MapAssets, "black ops iii light", None);
+    let lit = if super::t7_light::on() {
+        let blocks = |m: usize| {
+            let mat = &map.materials[m];
+            if hidden_kind(&mat.name, &mat.technique_set).is_some() {
+                return fastfile_t7::light::Blocks::No;
+            }
+            let d = t7_draw(&mat.name, &mat.technique_set, false);
+            if d.blend != T6Blend::Opaque || d.unlit {
+                fastfile_t7::light::Blocks::No
+            } else if d.alpha_test {
+                fastfile_t7::light::Blocks::Partly
+            } else {
+                fastfile_t7::light::Blocks::Fully
+            }
+        };
+        let places: Vec<[f32; 3]> = spawns.iter().map(|s| s.origin).collect();
+        match super::t7_light::Lit::prepare(map, &places, &blocks) {
+            Ok(lit) => {
+                report.extend(lit.report.iter().cloned());
+                Some(lit)
+            }
+            Err(e) => {
+                report.push(format!("t7 light: none ({e}); the flat light"));
+                None
+            }
+        }
+    } else {
+        report.push("t7 light: off (BO2MP_T7_LIGHT=0): the flat light".to_owned());
+        None
+    };
+    stage_light.done();
+
     // The placed models.
     let (prop_meshes, prop_placements) = {
         use bevy::prelude::{Mat3, Quat, Transform, Vec3};
@@ -757,11 +792,13 @@ fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, progress: &
                 axis: sm.axis,
                 scale: sm.scale,
                 cull_dist: 0,
-                reflection_probe_index: 0,
+                reflection_probe_index: lit.as_ref().map_or(0, |l| l.probe_for(sm.origin)),
                 primary_light_index: 0,
                 flags: 0,
-                // No light grid read: a neutral light (sqrt(1 / 32)).
-                packed_lighting: Some([45, 45, 45, 0]),
+                // No light grid read: a neutral light (sqrt(1 / 32)); with
+                // Black Ops III's own light, its ambient light there (the
+                // sun is the renderer's, from the sun map).
+                packed_lighting: Some(lit.as_ref().map_or([45, 45, 45, 0], |l| l.prop_light(sm.origin, placements.len() as u32))),
                 t6_primary: [0, 0],
             }));
         }
@@ -783,15 +820,32 @@ fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, progress: &
     ));
     report.push(b.looks.as_ref().map_or_else(|| "t7 look: off (BO2MP_T7_MATERIALS=0): colour maps only".to_owned(), super::t7_look::Looks::report));
     let mut materials = std::mem::take(&mut b.catalog);
+    let owner = b.owner;
     drop(b);
+    if let Some(lit) = lit.as_ref() {
+        report.extend(lit.link(map, &map_name, &mut materials, owner));
+    }
     stage.done();
 
     let sun = sun_of(map, &entities);
-    let iw3w = iw3_world(map, sun);
+    let probe_of = |i: usize| {
+        let s = &map.surfaces[i];
+        lit.as_ref().map_or(0, |l| l.probe_for(std::array::from_fn(|k| (s.mins[k] + s.maxs[k]) * 0.5)))
+    };
+    let iw3w = iw3_world(map, sun, &probe_of);
     let (pitch, yaw) = (sun.0[0].to_radians(), sun.0[1].to_radians());
-    let dir = [pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), -pitch.sin()];
+    // (With Black Ops III's own light, the sun lies opposite the way its
+    // angles aim: `fastfile_t7::light::sun_toward`, as its probes saw it.)
+    let dir = match lit.as_ref() {
+        Some(l) => l.sun,
+        None => [pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), -pitch.sin()],
+    };
     let colour = [sun.1[0] * sun.2, sun.1[1] * sun.2, sun.1[2] * sun.2, 1.0];
-    report.push(format!("t7 sun: toward {dir:?} colour {colour:?}; sky models {:?} (not drawn)", map.sky_models));
+    report.push(format!(
+        "t7 sun: toward {dir:?} colour {colour:?}; sky models {:?} ({})",
+        map.sky_models,
+        if lit.is_some() { "the sky picture drawn" } else { "not drawn" }
+    ));
     let lighting = asset_world::T6WorldLighting {
         sun: asset_world::WorldSunLight { direction: dir, diffuse: colour, specular: colour },
         exposure_scale: 1.0,
@@ -800,11 +854,31 @@ fn build_t7_world(path: &Path, map: &T7Map, mut report: Vec<String>, progress: &
         saturation: None,
         grade: None,
     };
-    match asset_world::world_iw3::build_iw3_world_draw(&iw3w, &surface_materials, &hidden, Vec::new(), Some(lighting)) {
-        Ok(draw) => {
+    let pages = if lit.is_some() { vec![Some(super::t7_light::blank_page())] } else { Vec::new() };
+    match asset_world::world_iw3::build_iw3_world_draw(&iw3w, &surface_materials, &hidden, pages, Some(lighting)) {
+        Ok(mut draw) => {
+            if let Some(lit) = lit.as_ref() {
+                // Black Ops III's own light: the vertices' ambient light,
+                // the sun map, the probes and the branch's numbers.
+                let t = std::time::Instant::now();
+                draw.colors = lit.world_colours(map, &draw.colors);
+                draw.t6_lut = Some(Arc::new(lit.sun_map_lut()));
+                draw.t6_probes = lit.probe_rows();
+                let mut rows = vec![[0.0f32; 16]; asset_world::T7_LIGHT_ROW + 2];
+                rows[asset_world::T7_LIGHT_ROW..].copy_from_slice(&lit.light_rows(sun.2));
+                draw.t6_lights = rows;
+                draw.t7_light = true;
+                asset_world::install_t6_probe_origins(lit.keep.iter().map(|&i| lit.bake.probes[i].origin).collect());
+                report.push(format!("t7 light: world vertices lit in {:.1}s; exposure {}", t.elapsed().as_secs_f32(), lit.exposure));
+            } else {
+                asset_world::install_t6_probe_origins(Vec::new());
+            }
             report.push(format!(
-                "world mesh: {} vertices, {} triangles, {} surfaces (Black Ops III, fallback draw with colour maps, no lightmaps)",
-                draw.stats.vertices, draw.stats.triangles, draw.stats.surfaces
+                "world mesh: {} vertices, {} triangles, {} surfaces (Black Ops III, fallback draw with colour maps, {})",
+                draw.stats.vertices,
+                draw.stats.triangles,
+                draw.stats.surfaces,
+                if draw.t7_light { "Black Ops III's own light" } else { "no lightmaps" }
             ));
             let (min, max) = (draw.stats.min, draw.stats.max);
             materials.set_capture_ns(AssetNamespace::T6);

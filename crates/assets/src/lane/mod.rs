@@ -16,6 +16,7 @@ pub(crate) use iw6_map::load_iw6_world;
 mod iw7;
 pub(crate) use iw7::load_iw7_world;
 // bo2mp: Black Ops III's maps (no ZoneGame of their own).
+mod t7_light;
 mod t7_look;
 mod t7_map;
 pub(crate) use t7_map::load_t7_world;

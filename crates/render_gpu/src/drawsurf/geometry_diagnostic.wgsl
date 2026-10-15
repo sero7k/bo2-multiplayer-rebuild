@@ -22,7 +22,8 @@ struct T6Lighting {
     // negative when z flips).
     sky: vec4<f32>,
     // bo2zm: the sky's skyColorParm x (above 0: the cube is rgb / a, else
-    // rgb^2) and w (the share of the fog it takes).
+    // rgb^2) and w (the share of the fog it takes). bo2mp: z is 1 on a
+    // Black Ops III world lit by its own light (`t7_shade`).
     sky_parms: vec4<f32>,
     // bo2zm: the vision's colour grade (see bo2_final): tone band slopes and
     // offsets, the red, green and blue rows of the shadow, mid and highlight
@@ -558,6 +559,132 @@ fn primary_light(index: u32, p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     return ray.colour * saturate(dot(n, ray.dir));
 }
 
+// bo2mp: Black Ops III's own light (`assets::lane::t7_light`), on a world
+// that has it (`t7_on`). Its numbers sit in light rows 254 and 255: the
+// exposure and the sun's brightness over the sun colour drawn; the baked
+// sun map's axes (u, v: (axis, origin), toward the sun: (axis, 1 / texel))
+// and its height packing (base, range, size). The sun map is the colour
+// table's slot (`t6_lut`): per texel the height toward the sun of the
+// nearest surface in 24 bits (rgb), alpha 0 where nothing is.
+const T7_ROW: u32 = 254u;
+
+fn t7_on() -> bool {
+    return t6.sky_parms.z > 0.5;
+}
+
+fn t7_row(i: u32) -> vec4<f32> {
+    return t6_lights.v[T7_ROW * 4u + i];
+}
+
+fn t7_sun_height(x: i32, y: i32, size: i32) -> f32 {
+    if (x < 0 || y < 0 || x >= size || y >= size) {
+        return -1e30;
+    }
+    let t = textureLoad(t6_lut, vec2<i32>(x, y), 0);
+    if (t.a < 0.5) {
+        return -1e30;
+    }
+    let q = round(t.r * 255.0) * 65536.0 + round(t.g * 255.0) * 256.0 + round(t.b * 255.0);
+    let b = t6_lights.v[(T7_ROW + 1u) * 4u];
+    return b.x + b.y * q / 16777215.0;
+}
+
+// How much of the baked sun reaches `p` (surface normal `n`): the sun map
+// read 4 x 4 texels round it, bilinear weights (a 3-texel tent), the point
+// moved off the surface by a texel and a half and up toward the sun by two.
+fn t7_sun_visibility(p: vec3<f32>, n: vec3<f32>) -> f32 {
+    let ru = t7_row(1u);
+    let rv = t7_row(2u);
+    let rd = t7_row(3u);
+    let size = i32(t6_lights.v[(T7_ROW + 1u) * 4u].z + 0.5);
+    if (size < 2) {
+        return 1.0;
+    }
+    let texel = 1.0 / max(rd.w, 0.000001);
+    let q = p + n * (texel * 1.5);
+    let fx = (dot(q, ru.xyz) - ru.w) * rd.w - 0.5;
+    let fy = (dot(q, rv.xyz) - rv.w) * rd.w - 0.5;
+    let h = dot(q, rd.xyz) + texel * 2.0 + 1.0;
+    let x0 = i32(floor(fx));
+    let y0 = i32(floor(fy));
+    let f = vec2(fx - floor(fx), fy - floor(fy));
+    var lit = 0.0;
+    for (var j = -1; j <= 2; j++) {
+        let wy = select(select(1.0, f.y, j == 2), 1.0 - f.y, j == -1);
+        for (var i = -1; i <= 2; i++) {
+            let wx = select(select(1.0, f.x, i == 2), 1.0 - f.x, i == -1);
+            lit += wx * wy * select(0.0, 1.0, h >= t7_sun_height(x0 + i, y0 + j, size));
+        }
+    }
+    return lit / 9.0;
+}
+
+// The tone curve (a filmic fit) of light times the exposure, gamma-encoded
+// for the frame (which then takes Black Ops II's roll-off, bloom and grade).
+fn t7_tone(c: vec3<f32>, exposure: f32) -> vec3<f32> {
+    let x = max(c * exposure, vec3(0.0));
+    let a = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+    return pow(saturate(a), vec3(1.0 / 2.2));
+}
+
+fn t7_out(c: vec3<f32>) -> vec3<f32> {
+    return bo2_final(t7_tone(c, t7_row(0u).x));
+}
+
+// A surface lit as Black Ops III's forward `lit` shader does, reduced:
+// albedo (linear) times the ambient light (the vertex's or the model's,
+// baked from the probes) and the sun (Lambert, its baked visibility and
+// the moving things' shadows); on a surface with its normal and specular
+// maps (SHINE) the ambient bent by the normal map (the probe's smallest
+// level), the sun's GGX highlight, and the probe's reflection at a level
+// by gloss (5 (1 - gloss)), weighted by the split-sum fit and darkened
+// where the ambient is. Gloss: Black Ops II's specular alpha back to Black
+// Ops III's (power 2^(17 g)).
+fn t7_shade(base: vec3<f32>, amb_in: vec3<f32>, vn: vec3<f32>, n: vec3<f32>, st: vec4<f32>, probe: u32, p: vec3<f32>) -> vec3<f32> {
+    let sun_dir = t6.sun_dir_exposure.xyz;
+    let sun = t6.sun_color.rgb * t7_row(0u).y;
+    let ndl = saturate(dot(n, sun_dir));
+    var vis = 0.0;
+    if (dot(vn, sun_dir) > -0.05) {
+        vis = t7_sun_visibility(p, vn) * sun_shadow_at(p);
+    }
+    var amb = amb_in;
+    var colour = vec3(0.0);
+#ifdef SHINE
+    let lum = vec3(0.2126, 0.7152, 0.0722);
+    let pi = min(probe, 31u);
+    let gain = probes.v[pi * 3u].x;
+    let l6v = textureSampleLevel(probe_cubes, probe_sampler, vn, i32(pi), 6.0).rgb;
+    let l6n = textureSampleLevel(probe_cubes, probe_sampler, n, i32(pi), 6.0).rgb;
+    amb *= clamp(dot(l6n, lum) / max(dot(l6v, lum), 0.0001), 0.5, 2.0);
+    let sraw = raw_texel(st.rgb);
+    let f0 = sraw * sraw;
+    let g = log2(max(exp2(13.0 * st.a) - 2.0, 1.0)) / 17.0;
+    let a2 = clamp(2.0 / (exp2(17.0 * g) + 2.0), 0.0005, 1.0);
+    let v = normalize(view.world_position - p);
+    let ndv = max(dot(n, v), 0.0001);
+    let h = normalize(sun_dir + v);
+    let ndh = saturate(dot(n, h));
+    let ldh = saturate(dot(sun_dir, h));
+    let dd = ndh * ndh * (a2 - 1.0) + 1.0;
+    let d = a2 / (3.14159265 * dd * dd);
+    let fq = 1.0 - ldh;
+    let fr = f0 + (1.0 - f0) * (fq * fq * fq * fq * fq);
+    colour += sun * (vis * ndl * d / max(4.0 * ldh * ldh, 0.05)) * fr;
+    let r = reflect(-v, n);
+    let mip = clamp(5.0 * (1.0 - g) - 0.35, 0.0, 6.0);
+    let env = textureSampleLevel(probe_cubes, probe_sampler, r, i32(pi), mip).rgb * gain;
+    let rough = sqrt(sqrt(a2));
+    let rr = rough * vec4(-1.0, -0.0275, -0.572, 0.022) + vec4(1.0, 0.0425, 1.04, -0.04);
+    let a004 = min(rr.x * rr.x, exp2(-9.28 * ndv)) * rr.x + rr.y;
+    let ab = vec2(-1.04, 1.04) * a004 + rr.zw;
+    let so = saturate(dot(amb_in, lum) / max(dot(l6v, lum) * gain, 0.0001));
+    colour += env * (f0 * ab.x + ab.y) * so;
+#endif
+    colour += base * (amb + sun * (vis * ndl));
+    return colour;
+}
+
 // bo2zm: world surfaces without a lightmap. Unlit ones as the game's unlit
 // shaders draw them: (texel * vertex colour)^2 times the material's colour
 // scale, then the BO2 output. A multiply decal scales what is behind by
@@ -574,11 +701,14 @@ fn fragment_textured(in: VertexOut) -> @location(0) vec4<f32> {
 #endif
     let texel = raw_texel(albedo.rgb);
 #ifdef UNLIT
+    // (bo2mp: on a world lit by Black Ops III's own light the vertex
+    // colour is its baked light, not a tint.)
+    let tint = select(in.color.rgb, vec3(1.0), t7_on());
 #ifdef MULTIPLY
     let a = albedo.a * in.color.a;
-    return vec4(mix(vec3(1.0), texel * in.color.rgb, a), a);
+    return vec4(mix(vec3(1.0), texel * tint, a), a);
 #else
-    let c = texel * in.color.rgb;
+    let c = texel * tint;
     return vec4(
         unlit_out(unlit_fog(c * c * f32(#{UNLIT_SCALE}), in.world_position)),
         albedo.a * in.color.a,
@@ -729,6 +859,19 @@ fn fragment_lightmapped(in: VertexOut) -> @location(0) vec4<f32> {
     let tinted = texel * in.color.rgb;
     let base = tinted * tinted;
 #endif
+    // bo2mp: Black Ops III's own light (`t7_shade`): the vertex colour is
+    // the baked ambient light, not a tint.
+    if (t7_on()) {
+        let vn7 = normalize(in.normal);
+        var n7 = vn7;
+        var st7 = vec4(0.0);
+#ifdef SHINE
+        let nm7 = textureSample(normal_map, colour_sampler, in.uv).xy * 4.015748 - 2.015748;
+        n7 = normalize(nm7.x * in.tangent + nm7.y * in.binormal + vn7);
+        st7 = textureSample(specular_map, colour_sampler, in.uv);
+#endif
+        return vec4(t7_out(t7_shade(texel * texel, in.color.rgb, vn7, n7, st7, in.probe, in.world_position)), albedo.a);
+    }
     let v = in.lightmap_uv.y / 3.0;
     let page0 = textureSample(lightmap, lightmap_sampler, vec2(in.lightmap_uv.x, v));
     let page1 = textureSample(lightmap, lightmap_sampler, vec2(in.lightmap_uv.x, v + 1.0 / 3.0));
@@ -1311,6 +1454,14 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
     let tg = dp2perp * duv1.x + dp1perp * duv2.x;
     let bt = dp2perp * duv1.y + dp1perp * duv2.y;
     let frame = inverseSqrt(max(max(dot(tg, tg), dot(bt, bt)), 1e-20));
+    // bo2mp: Black Ops III's own light (`t7_shade`).
+    if (t7_on()) {
+        let nm7 = textureSample(normal_map, colour_sampler, in.uv).xy * 4.015748 - 2.015748;
+        let n7 = normalize(nm7.x * tg * frame + nm7.y * bt * frame + vn);
+        let st7 = textureSample(specular_map, colour_sampler, in.uv);
+        let pr7 = u32(max(in.primary.w - 0.5, 0.0));
+        return vec4(t7_out(t7_shade(base, light, vn, n7, st7, pr7, in.world_position)), albedo.a * in.color.a);
+    }
 #ifdef FLOW
     // bo2mp: a lava prop (`mc_cod7emissiveflow`), as the world's.
     return vec4(bo2_out(bo2_flow(in.uv, in.color, vn, tg * frame, bt * frame, in.world_position)), 1.0);
@@ -1444,6 +1595,11 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
         albedo.a * in.color.a,
     );
 #else
+    // bo2mp: Black Ops III's own light (`t7_shade`).
+    if (t7_on()) {
+        let vn7 = normalize(in.normal);
+        return vec4(t7_out(t7_shade(base, light, vn7, vn7, vec4(0.0), 0u, in.world_position)), albedo.a * in.color.a);
+    }
     let n = normalize(in.normal);
     let pray = primary_light_ray(u32(in.primary.x + 0.5), in.world_position);
     light = add_light(light, pray.colour * in.primary.y, saturate(dot(n, pray.dir)));
@@ -1518,6 +1674,12 @@ fn fragment_sky(in: SkyOut) -> @location(0) vec4<f32> {
             sky_lights.v[1024u],
         );
         fogged = mix(sky, f.tint, f.fog * f.fog * f.opacity * parms.y);
+    }
+    // bo2mp: a Black Ops III sky (its picture in its probes' unit) through
+    // the world's tone curve (`t7_tone`).
+    if (sky_t6.sky_parms.z > 0.5) {
+        let t7_x = bo2_rolloff(t7_tone(fogged, sky_lights.v[T7_ROW * 4u].x));
+        return vec4(bo2_finish(t7_x, sky_t6, sky_lut, sky_lut_sampler), 1.0);
     }
     let sky_x = bo2_rolloff(sqrt(max(fogged * sky_t6.sun_dir_exposure.w, vec3(0.0))));
     return vec4(bo2_finish(sky_x, sky_t6, sky_lut, sky_lut_sampler), 1.0);
