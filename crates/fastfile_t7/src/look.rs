@@ -133,15 +133,40 @@ pub fn placeholder(name: &str) -> Option<[u8; 4]> {
 
 /// sRGB byte to linear.
 pub fn to_linear(b: u8) -> f32 {
-    let x = f32::from(b) / 255.0;
+    static LUT: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
+    LUT.get_or_init(|| {
+        std::array::from_fn(|i| {
+            let x = i as f32 / 255.0;
+            if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) }
+        })
+    })[usize::from(b)]
+}
+
+/// sRGB (0..1, filtered) to linear.
+fn to_linear_f(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
     if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) }
 }
 
-/// Linear to an sRGB byte.
+/// Linear to an sRGB byte (a 4096-step table: exact to the byte).
 pub fn to_srgb(x: f32) -> u8 {
+    static LUT: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    let lut = LUT.get_or_init(|| {
+        (0..=4096)
+            .map(|i| {
+                let x = i as f32 / 4096.0;
+                let s = if x <= 0.003_130_8 { 12.92 * x } else { 1.055 * x.powf(1.0 / 2.4) - 0.055 };
+                (s * 255.0).round() as u8
+            })
+            .collect()
+    });
     let x = x.clamp(0.0, 1.0);
-    let s = if x <= 0.003_130_8 { 12.92 * x } else { 1.055 * x.powf(1.0 / 2.4) - 0.055 };
-    (s * 255.0).round() as u8
+    // (Below 1/16 the curve is steep: computed.)
+    if x < 0.0625 {
+        let s = if x <= 0.003_130_8 { 12.92 * x } else { 1.055 * x.powf(1.0 / 2.4) - 0.055 };
+        return (s * 255.0).round() as u8;
+    }
+    lut[(x * 4096.0).round() as usize]
 }
 
 /// Black Ops II's gloss (power `2^(13 g)`) for Black Ops III's (power
@@ -415,7 +440,9 @@ impl T7Map {
         let ao = self.slot(m, "aoMap", max_dim)?;
         let mix_scale = [at(&mix_scale, 0, 1.0), at(&mix_scale, 1, 1.0)];
         let (mut colour, mut nrm, mut gloss) = (vec![0u8; (w * h * 4) as usize], vec![0u8; (w * h * 4) as usize], vec![0f32; (w * h) as usize]);
-        for y in 0..h {
+        // One row of the bake (rows spread over the cores: a map has some
+        // hundreds of these).
+        let row = |y: u32, colour: &mut [u8], nrm: &mut [u8], gloss: &mut [f32]| {
             for x in 0..w {
                 let (u, v) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
                 let t = mix.as_ref().map_or(0.0, |i| i.sample(u * mix_scale[0], v * mix_scale[1], 0));
@@ -427,7 +454,7 @@ impl T7Map {
                     if let Some(ci) = &l.colour {
                         let a = ci.sample(lu, lv, 3);
                         for ch in 0..3 {
-                            let lin = to_linear((ci.sample(lu, lv, ch) * 255.0).round() as u8);
+                            let lin = to_linear_f(ci.sample(lu, lv, ch));
                             rgb[k][ch] = lin * (1.0 + a * (l.tint[ch] - 1.0));
                         }
                     }
@@ -452,7 +479,7 @@ impl T7Map {
                     Slot::Image(i) => i.sample(u, v, 0),
                     _ => 1.0,
                 };
-                let i = (y * w + x) as usize;
+                let i = x as usize;
                 for ch in 0..3 {
                     colour[i * 4 + ch] = to_srgb((rgb[0][ch] + t * (rgb[1][ch] - rgb[0][ch])) * occ);
                 }
@@ -469,7 +496,22 @@ impl T7Map {
                 nrm[i * 4..i * 4 + 4].copy_from_slice(&[q(nx), q(ny), 0, 255]);
                 gloss[i] = (g[0] + t * (g[1] - g[0])).clamp(0.0, 1.0);
             }
-        }
+        };
+        let threads = std::thread::available_parallelism().map_or(4, usize::from).clamp(1, 16);
+        let rows_each = (h as usize).div_ceil(threads).max(1);
+        let wu = w as usize;
+        std::thread::scope(|sc| {
+            for (((k, c), n), g) in
+                colour.chunks_mut(rows_each * wu * 4).enumerate().zip(nrm.chunks_mut(rows_each * wu * 4)).zip(gloss.chunks_mut(rows_each * wu))
+            {
+                let row = &row;
+                sc.spawn(move || {
+                    for (r, ((c, n), g)) in c.chunks_mut(wu * 4).zip(n.chunks_mut(wu * 4)).zip(g.chunks_mut(wu)).enumerate() {
+                        row((k * rows_each + r) as u32, c, n, g);
+                    }
+                });
+            }
+        });
         out.colour = encode(w, h, colour, Format::Bc1);
         out.normal = encode(w, h, nrm, Format::Bc5);
         // The specular map: a dielectric's 0.04, the gloss.

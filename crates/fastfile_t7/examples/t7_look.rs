@@ -74,9 +74,7 @@ fn main() {
                 }
             }
             Err(err) => {
-                if failures.len() < 12 {
-                    failures.push(format!("{}: {err}", m.name));
-                }
+                failures.push(format!("{} [{}]: {err}", m.name, m.technique_set));
             }
         }
     }
@@ -84,6 +82,7 @@ fn main() {
     for (ts, e) in &by_ts {
         println!("{:5} {:5} {:5} {:5} | {:4} {:4} {:4} {:4} {:4}  {ts}", e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7], e[8]);
     }
+    println!("{} failed", failures.len());
     for f in failures {
         println!("failed: {f}");
     }
