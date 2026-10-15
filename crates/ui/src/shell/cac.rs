@@ -346,7 +346,7 @@ fn points_bar(c: &mut Kids, cx: &Ctx, spent: i32) {
         for k in 0..POINTS {
             b.spawn((
                 Node { width: cx.px(46.0), height: cx.px(6.0), ..default() },
-                BackgroundColor(if k < spent { ACCENT } else { KEYCAP }),
+                BackgroundColor(if k < spent { cx.pal.accent } else { KEYCAP }),
             ));
         }
         b.spawn((
@@ -367,7 +367,7 @@ fn item_cell(c: &mut Kids, cx: &mut Ctx, label: &str, item: Option<&ClassItem>, 
         padding: UiRect::axes(cx.px(12.0), cx.px(8.0)),
         ..default()
     })
-    .insert(BackgroundColor(PANEL_SOFT))
+    .insert(BackgroundColor(cx.pal.panel_soft))
     .with_children(|r| {
         let names = item.map(|i| vec![i.image.clone()]).unwrap_or_default();
         picture_contain(r, cx, &names, pic_w, pic_h);
@@ -421,8 +421,8 @@ pub(crate) fn class_card(c: &mut Kids, cx: &mut Ctx, book: &ClassBook, class: &C
             border: UiRect::top(cx.px(3.0)),
             ..default()
         },
-        BackgroundColor(PANEL),
-        BorderColor::all(ACCENT),
+        BackgroundColor(cx.pal.panel),
+        BorderColor::all(cx.pal.accent),
     ))
     .with_children(|p| {
         p.spawn(Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() }).with_children(|h| {
@@ -477,12 +477,12 @@ fn slot_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, width: f32) {
                 border: UiRect::left(cx.px(4.0)),
                 ..default()
             },
-            BorderColor::all(if on { ACCENT } else { Color::NONE }),
+            BorderColor::all(if on { cx.pal.accent } else { Color::NONE }),
         ));
         if on {
-            e.insert(fade_right(Color::srgba(0.26, 0.62, 0.95, 0.30), Color::srgba(0.26, 0.62, 0.95, 0.06)));
+            e.insert(fade_right(cx.pal.accent_a(0.30), cx.pal.accent_a(0.06)));
         } else {
-            e.insert(BackgroundColor(PANEL_SOFT));
+            e.insert(BackgroundColor(cx.pal.panel_soft));
         }
         e.with_children(|line| {
             line.spawn((Text::new(r.label.clone()), cx.bold(text), TextColor(if on { WHITE } else { DIM })));
@@ -496,9 +496,10 @@ fn slot_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, width: f32) {
 }
 
 pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, s: &Shell, book: &ClassBook, rows: &[Row]) {
+    let pal = cx.pal;
     match s.screen {
         Screen::Classes => {
-            header(c, cx, &["MULTIPLAYER", "CREATE A CLASS"]);
+            header(c, cx, &[super::view::section(s), "CREATE A CLASS"]);
             c.spawn(Node {
                 position_type: PositionType::Absolute,
                 left: cx.px(72.0),
@@ -562,8 +563,8 @@ pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, s: &Shell, book: &ClassBook, rows
                             border: UiRect::all(cx.px(if on { 3.0 } else { 1.0 })),
                             ..default()
                         },
-                        BorderColor::all(if on { ACCENT } else { LINE }),
-                        BackgroundColor(if on { Color::srgba(0.26, 0.62, 0.95, 0.16) } else { PANEL }),
+                        BorderColor::all(if on { pal.accent } else { pal.line }),
+                        BackgroundColor(if on { pal.accent_a(0.16) } else { pal.panel }),
                     ))
                     .with_children(|tile| {
                         tile.spawn(Node { justify_content: JustifyContent::Center, flex_grow: 1.0, align_items: AlignItems::Center, ..default() })
@@ -586,7 +587,7 @@ pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, s: &Shell, book: &ClassBook, rows
                                 } else {
                                     String::new()
                                 };
-                                bar.spawn((Text::new(tag), cx.bold(18.0), TextColor(if p.locked { GOLD } else { ACCENT })));
+                                bar.spawn((Text::new(tag), cx.bold(18.0), TextColor(if p.locked { GOLD } else { pal.accent })));
                             });
                     });
                 }
@@ -610,7 +611,7 @@ pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, s: &Shell, book: &ClassBook, rows
                     if !p.desc.is_empty() {
                         t.spawn((Text::new(p.desc.clone()), cx.regular(21.0), TextColor(DIM), TextLayout::justify(Justify::Right)));
                     }
-                    t.spawn((Text::new(format!("{} / {POINTS} POINTS IN THIS CLASS", class.spent)), cx.bold(18.0), TextColor(ACCENT)));
+                    t.spawn((Text::new(format!("{} / {POINTS} POINTS IN THIS CLASS", class.spent)), cx.bold(18.0), TextColor(pal.accent)));
                 });
             }
         }

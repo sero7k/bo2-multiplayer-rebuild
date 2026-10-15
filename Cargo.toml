@@ -52,6 +52,7 @@ members = [
     "crates/fastfile_s1", # Advanced Warfare zones (guns)
     "crates/fastfile_iw7", # Infinite Warfare zones (guns)
     "crates/fastfile_t7", # Black Ops III zones (guns, later)
+    "crates/fastfile_jup", # Modern Warfare III (2023) containers
     "crates/frame",
     "crates/fx",
     "crates/fx_iw4",
@@ -167,6 +168,9 @@ fastfile_iw6 = { path = "crates/fastfile_iw6" }
 fastfile_s1 = { path = "crates/fastfile_s1" }
 fastfile_iw7 = { path = "crates/fastfile_iw7" }
 fastfile_t7 = { path = "crates/fastfile_t7" }
+fastfile_jup = { path = "crates/fastfile_jup" }
+# Loads the game's own Oodle DLL at runtime (fastfile_jup, Windows only).
+libloading = "0.8"
 lz4_flex = { version = "0.11", default-features = false, features = ["safe-decode"] }
 frame = { path = "crates/frame" }
 fx = { path = "crates/fx" }

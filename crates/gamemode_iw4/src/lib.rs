@@ -19,6 +19,7 @@ pub mod phase;
 pub mod playerlogic;
 pub mod prematch;
 pub mod radius_damage;
+pub mod resurgence;
 mod score;
 pub mod stuck_in_client;
 pub mod suicide;

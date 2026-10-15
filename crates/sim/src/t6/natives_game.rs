@@ -101,7 +101,7 @@ fn table_find(world: &World, table: &str, col: usize, key: &str) -> Option<usize
 fn mp_setting(settings: &BTreeMap<String, String>, name: &str) -> Value {
     let key = name.to_ascii_lowercase();
     let over = std::env::var(format!("BO2MP_SETTING_{key}")).ok();
-    let raw = over.as_deref().or(settings.get(&key).map(String::as_str));
+    let raw = over.as_deref().or_else(|| super::br::setting(&key)).or(settings.get(&key).map(String::as_str));
     match raw {
         Some(v) if v.contains('.') => Value::Float(v.parse().unwrap_or(0.0)),
         Some(v) => Value::Int(v.parse().unwrap_or(0)),

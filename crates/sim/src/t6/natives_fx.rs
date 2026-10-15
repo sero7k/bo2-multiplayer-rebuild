@@ -128,7 +128,7 @@ pub(super) fn local_sound(world: &mut World, client: ClientId, alias: &str) {
     // (A game-tagged name, `iw4:nuke_explosion`, plays that game's alias.)
     let tagged = alias
         .split_once(':')
-        .is_some_and(|(ns, _)| matches!(ns.to_ascii_lowercase().as_str(), "iw4" | "iw5" | "t5" | "t6" | "iw6" | "t4" | "iw3" | "s1"));
+        .is_some_and(|(ns, _)| matches!(ns.to_ascii_lowercase().as_str(), "iw4" | "iw5" | "t5" | "t6" | "iw6" | "t4" | "iw3" | "s1" | "jup"));
     let name = if tagged { alias.to_ascii_lowercase() } else { format!("t6:{}", alias.to_ascii_lowercase()) };
     let alias_index = frame.sound_alias_index(&name);
     frame.push_local_sound(crate::PendingLocalSound { recipient: client, stop: false, alias_index });

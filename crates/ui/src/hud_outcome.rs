@@ -96,7 +96,12 @@ pub(crate) fn place_label(place: usize) -> String {
 
 /// The score as the row shows it.
 pub(crate) fn score_text(gametype: &str, score: i32) -> String {
-    if gametype == "gun" { format!("GUN {score}") } else { score.to_string() }
+    match gametype {
+        "gun" => format!("GUN {score}"),
+        // (Resurgence: the squad's place.)
+        "br" => format!("#{score}"),
+        _ => score.to_string(),
+    }
 }
 
 /// The rows shown: (place, row), the top three and then his own when he
@@ -249,6 +254,7 @@ fn spawn_screen(commands: &mut Commands, faces: &crate::hud_match::Faces, title_
     let (title, colour) = match outcome.winner {
         -1 => ("DRAW", DRAW_GREY),
         w if w == me => ("VICTORY", VICTORY_BLUE),
+        _ if outcome.gametype == "br" && outcome.placed.iter().any(|p| p.num == me && p.score == 1) => ("VICTORY", VICTORY_BLUE),
         _ => ("DEFEAT", DEFEAT_RED),
     };
     let rows = shown_rows(&outcome, me);
