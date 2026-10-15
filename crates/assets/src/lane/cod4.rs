@@ -1405,7 +1405,13 @@ pub(crate) fn build_legacy_world(
 
     // The map's film vision: its colour grade, drawn under Black Ops II's
     // rules as the colour table.
-    let film_vision = {
+    // bo2mp: not on a map in a Black Ops II look: its model map's colour
+    // table is the grade there, and both together lifted Dome and Makin
+    // into a milky veil.
+    let film_vision = if look.is_some() {
+        report.push("film vision: the Black Ops II look's colour table grades this map instead".to_owned());
+        None
+    } else {
         let mut zones: Vec<&iw3::zone::Zone> = vec![zone];
         zones.extend(commons.iter().copied());
         legacy_film_vision(&map, &zones, main.as_deref(), &mut report)
