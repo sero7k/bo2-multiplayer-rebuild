@@ -12,3 +12,7 @@ libloading.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+bcdec_rs.workspace = true
+png.workspace = true

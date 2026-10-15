@@ -17,10 +17,12 @@
 pub mod container;
 pub mod hash;
 pub mod map;
+pub mod image;
 pub mod oodle;
 #[cfg(windows)]
 pub mod oodle_dll;
 pub mod ptr;
+pub mod surfs;
 pub mod xsub;
 pub mod zone;
 
