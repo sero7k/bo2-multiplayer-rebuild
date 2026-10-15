@@ -500,20 +500,57 @@ fn link_world_materials(
 /// bo2mp: a CoD4 / World at War water material's (`wc_water`, not the
 /// dynamic ocean, whose colour map is its real foam) colour as one sRGB
 /// texel: its `waterColor` constant (gamma values; alpha its opacity, 0
-/// read as opaque), else a muddy grey-green.
+/// read as opaque), else a muddy grey-green. The game's shader reflects the
+/// sky over it by at least `envMapParms.x` (its fresnel's least share), which
+/// this draw has no reflection for: the colour keeps the rest (Cargoship's
+/// night sea, 0.5 reflected, drew as a bright lavender sheet).
 fn legacy_water_colour(technique_set: &str, material: &iw3::zone::Material) -> Option<[u8; 4]> {
     let tokens: Vec<&str> = technique_set.trim_start_matches(',').split('_').collect();
     if !tokens.contains(&"water") || tokens.contains(&"dynamic") {
         return None;
     }
-    let colour = material
-        .constants
-        .iter()
-        .find(|c| c.name == "waterColor")
-        .map_or([0.26, 0.28, 0.22, 0.6], |c| c.literal);
+    let constant = |name: &str| material.constants.iter().find(|c| c.name == name).map(|c| c.literal);
+    let colour = constant("waterColor").unwrap_or([0.26, 0.28, 0.22, 0.6]);
+    let kept = 1.0 - constant("envMapParms").map_or(0.0, |p| p[0]).clamp(0.0, 0.8);
     let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     let alpha = if colour[3] > 0.0 { colour[3].max(0.35) } else { 1.0 };
-    Some([byte(colour[0]), byte(colour[1]), byte(colour[2]), byte(alpha)])
+    Some([byte(colour[0] * kept), byte(colour[1] * kept), byte(colour[2] * kept), byte(alpha)])
+}
+
+#[cfg(test)]
+mod water_tests {
+    fn water(technique_set: &str, constants: &[(&str, [f32; 4])]) -> Option<[u8; 4]> {
+        let material = iw3::zone::Material {
+            name: "wc/water".into(),
+            game_flags: 0,
+            sort_key: 4,
+            surface_type_bits: 0,
+            state_bits_entry: [0xff; 34],
+            state_flags: 0,
+            camera_region: 0,
+            technique_set: None,
+            textures: Vec::new(),
+            constants: constants
+                .iter()
+                .map(|(n, v)| iw3::zone::MaterialConstant { name_hash: 0, name: (*n).into(), literal: *v })
+                .collect(),
+            state_bits: Vec::new(),
+        };
+        super::legacy_water_colour(technique_set, &material)
+    }
+
+    #[test]
+    fn water_takes_its_colour_less_its_reflection() {
+        // Cargoship's night sea: half of it is the sky's reflection.
+        let sea = water("wc_water", &[("waterColor", [0.4, 0.4, 0.5, 1.0]), ("envMapParms", [0.5, 0.9, 1.0, 2.5])]);
+        assert_eq!(sea, Some([51, 51, 64, 255]));
+        // A muddy puddle (no reflection at its least), half see-through.
+        let mud = water("wc_water", &[("waterColor", [0.4, 0.35, 0.3, 0.5]), ("envMapParms", [0.0, 0.45, 4.0, 2.5])]);
+        assert_eq!(mud, Some([102, 89, 77, 128]));
+        // The dynamic ocean keeps its own foam picture; lit surfaces are not water.
+        assert_eq!(water("wc_water_dynamic", &[]), None);
+        assert_eq!(water("wc_l_sm_r0c0n0s0", &[]), None);
+    }
 }
 
 /// The spawn points in the map's entities (`mp_*_spawn*`), and the first
