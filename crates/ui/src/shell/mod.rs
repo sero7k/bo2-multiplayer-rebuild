@@ -908,12 +908,16 @@ impl Shell {
                 self.played = true;
                 sim::set_moab_kills(MOAB_KILLS.get(self.moab as usize).copied().unwrap_or(0));
                 // (Never in a public match: the bridge turns it off for one.)
-                sim::set_trickshot(!self.public && self.trickshot);
+                // bo2mp: a Tricky mode plays its mode with two bots and his
+                // trickshot script.
+                let tricky = bridge::tricky_base(&self.mode).filter(|_| !self.public);
+                sim::set_trickshot(!self.public && (self.trickshot || tricky.is_some()));
+                let (bot_friends, bot_enemies) = if tricky.is_some() { bridge::TRICKY_BOTS } else { (self.friends, self.enemies) };
                 bridge::request(Request::Start(StartSpec {
                     map: self.map.clone(),
-                    gametype: self.mode.clone(),
-                    bot_friends: self.friends,
-                    bot_enemies: self.enemies,
+                    gametype: tricky.map_or_else(|| self.mode.clone(), str::to_owned),
+                    bot_friends,
+                    bot_enemies,
                     bot_difficulty: self.difficulty,
                     public: self.public,
                     br: None,

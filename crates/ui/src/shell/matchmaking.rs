@@ -34,7 +34,11 @@ pub(crate) fn is_party(key: &str) -> bool {
 /// Every mode in mp/gametypestable.csv is on one: PARTY GAMES the ones its
 /// playlist group calls party, CORE the rest.
 pub(crate) fn modes(c: &Catalog, tab: usize) -> Vec<(usize, &ModeEntry)> {
-    c.modes.iter().enumerate().filter(|(_, m)| (m.party || is_party(&m.key)) == (tab == 1)).collect()
+    c.modes
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| super::bridge::tricky_base(&m.key).is_none() && (m.party || is_party(&m.key)) == (tab == 1))
+        .collect()
 }
 
 /// Black Ops II's playlist picture for a mode (`playlist_tdm`, ...).

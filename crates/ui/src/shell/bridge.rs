@@ -99,6 +99,18 @@ pub(crate) struct PlayerCard {
     pub emblem: String,
 }
 
+/// bo2mp: the Tricky modes: (the mode they play, key, title).
+pub(crate) const TRICKY: &[(&str, &str, &str)] =
+    &[("dm", "tricky_dm", "TRICKY FREE FOR ALL"), ("sd", "tricky_sd", "TRICKY SEARCH AND DESTROY")];
+
+/// The mode a Tricky mode plays (`tricky_sd` -> `sd`); `None` for any other.
+pub(crate) fn tricky_base(key: &str) -> Option<&'static str> {
+    TRICKY.iter().find(|(_, k, _)| k.eq_ignore_ascii_case(key)).map(|(b, _, _)| *b)
+}
+
+/// Bots in a Tricky match: none with him, two against him.
+pub(crate) const TRICKY_BOTS: (u32, u32) = (0, 2);
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Catalog {
     /// Multiplayer's maps (the map picker, matchmaking's pool).
@@ -336,6 +348,18 @@ fn build_catalog(host: &Host, mp: Option<&Mp>) -> Catalog {
             party: cell(row, 9).eq_ignore_ascii_case("party"),
             picture: cell(row, 4).to_owned(),
         });
+    }
+    // bo2mp: the Tricky modes (Custom Games): a mode as it plays, two bots,
+    // his trickshot script on.
+    for (base, key, title) in TRICKY {
+        if let Some(m) = modes.iter().find(|m| m.key == *base).cloned() {
+            modes.push(ModeEntry {
+                key: (*key).to_owned(),
+                title: (*title).to_owned(),
+                desc: format!("{} Two bots, and your trickshot script runs.", m.desc).trim().to_owned(),
+                ..m
+            });
+        }
     }
     // His card.
     let name = v.dvars.get("name").filter(|n| !n.trim().is_empty()).cloned().unwrap_or_else(|| "Player".to_owned());
