@@ -31,7 +31,9 @@ fn accelerate_velocity(
             wish_y - velocity[1],
             wish_z - velocity[2],
         ];
-        let delta_speed = vec3_normalize(&mut delta);
+        let delta_speed = libm::sqrtf(delta[1] * delta[1] + delta[0] * delta[0] + delta[2] * delta[2]);
+        let scale = 1.0_f32 / if delta_speed <= 0.0 { 1.0 } else { delta_speed };
+        delta = [delta[0] * scale, delta[1] * scale, delta[2] * scale];
         let mut acceleration = frametime * accel * wishspeed;
         if delta_speed < acceleration {
             acceleration = delta_speed;
@@ -42,8 +44,9 @@ fn accelerate_velocity(
         return;
     }
 
+    // (The sums keep the order the speed is added in: the rounding differs.)
     let current_speed =
-        velocity[2] * wishdir[2] + velocity[0] * wishdir[0] + velocity[1] * wishdir[1];
+        wishdir[0] * velocity[0] + velocity[1] * wishdir[1] + velocity[2] * wishdir[2];
     let add_speed = wishspeed - current_speed;
     if add_speed <= 0.0 || add_speed.is_nan() {
         return;
@@ -59,16 +62,4 @@ fn accelerate_velocity(
     velocity[0] = wishdir[0] * acceleration + velocity[0];
     velocity[1] = wishdir[1] * acceleration + velocity[1];
     velocity[2] = wishdir[2] * acceleration + velocity[2];
-}
-
-#[allow(clippy::assign_op_pattern)]
-fn vec3_normalize(vector: &mut [f32; 3]) -> f32 {
-    let length_squared = vector[2] * vector[2] + vector[0] * vector[0] + vector[1] * vector[1];
-    let length = libm::sqrtf(length_squared);
-    let divisor = if length <= 0.0 { 1.0_f32 } else { length };
-    let scale = 1.0_f32 / divisor;
-    vector[0] = scale * vector[0];
-    vector[1] = scale * vector[1];
-    vector[2] = scale * vector[2];
-    length
 }

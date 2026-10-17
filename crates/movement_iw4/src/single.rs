@@ -70,8 +70,73 @@ pub struct PmoveSingleContext {
     pub weapon_blocks_prone: bool,
 }
 
-#[allow(clippy::too_many_lines)]
+/// Longest stretch one step moves; a longer command runs as several steps.
+const PMOVE_MAX_STEP_MS: i32 = 66;
+
+/// A command older than this is moved only from this far back.
+const PMOVE_MAX_BEHIND_MS: i32 = 150;
+
+/// Moves the player from `ps.command_time` up to `cmd.server_time`: nothing
+/// when the command is older than the state, never more than 150 ms of it,
+/// in steps of at most 66 ms. Between steps the command (as the step left
+/// it, cleared buttons and all) becomes the previous command.
 pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
+    ps: &mut PlayerState,
+    cmd: &mut UserCmd,
+    mut context: PmoveSingleContext,
+    collision: &C,
+    lengths: &L,
+    root: &R,
+) -> PmoveResult {
+    let server_time = cmd.server_time;
+    let mut result = PmoveResult {
+        pml: Pml {
+            forward: [0.0; 3],
+            right: [0.0; 3],
+            up: [0.0; 3],
+            frametime: 0.0,
+            msec: 0,
+            walking: 0,
+            ground_plane: 0,
+            almost_ground_plane: 0,
+            ground_trace: [0; 11],
+            previous_origin: ps.origin,
+            previous_velocity: ps.velocity,
+            holdrand: 0,
+        },
+        bounds: context.bounds,
+        stance_event: None,
+        reset_torso: false,
+        view_change: 0.0,
+    };
+    if ps.command_time > server_time {
+        return result;
+    }
+    if ps.command_time + PMOVE_MAX_BEHIND_MS < server_time {
+        ps.command_time = server_time - PMOVE_MAX_BEHIND_MS;
+    }
+    let mut view_change = 0.0;
+    let mut stance_event = None;
+    let mut reset_torso = false;
+    while ps.command_time != server_time {
+        let step = (server_time - ps.command_time).min(PMOVE_MAX_STEP_MS);
+        cmd.server_time = ps.command_time + step;
+        result = pmove_single(ps, cmd, context, collision, lengths, root);
+        view_change += result.view_change;
+        stance_event = result.stance_event.or(stance_event);
+        reset_torso |= result.reset_torso;
+        context.old_buttons = cmd.buttons;
+        context.walk.old_buttons = cmd.buttons;
+        context.old_move = [cmd.forwardmove, cmd.rightmove];
+    }
+    result.view_change = view_change;
+    result.stance_event = stance_event;
+    result.reset_torso = reset_torso;
+    result
+}
+
+#[allow(clippy::too_many_lines)]
+pub fn pmove_single<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     ps: &mut PlayerState,
     cmd: &mut UserCmd,
     context: PmoveSingleContext,
@@ -244,9 +309,8 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     // through a dive).
     crate::stance::bo2_lie_down(ps, &ads_cmd, collision, bounds, previous_stance & pm_flags::PRONE != 0);
 
-    update_ads_frac(ps, pml.msec, context.ads_frac);
-
     if ps.pm_type == PM_TYPE_NORMAL_LINKED {
+        update_ads_frac(ps, pml.msec, context.ads_frac);
         // The trigger link owns the origin: no walk, no air move, no jump, and
         // velocity zeroed every pmove. Viewangles and stance stay live above,
         // and the weapon ticks separately.
@@ -305,6 +369,8 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     if (ps.pm_flags & pm_flags::MANTLE) != 0 {
         mantle::cap_view(ps, MantleCapViewContext::default());
         mantle::advance(ps, pml.msec, MantleMoveContext::default(), lengths, root);
+        // The aim blends with the gun, after the move.
+        update_ads_frac(ps, pml.msec, context.ads_frac);
         return PmoveResult {
             pml,
             bounds,
@@ -416,6 +482,9 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         }
     }
 
+    // The aim blends with the gun, after the move: the move read last
+    // frame's aim.
+    update_ads_frac(ps, pml.msec, context.ads_frac);
     end_tick_velocity(ps, &pml);
     PmoveResult {
         pml,
@@ -496,7 +565,7 @@ impl<C: CollisionBackend> LadderAttachBackend for CollisionLadderBackend<'_, C> 
     }
 }
 
-pub use pmove as PmoveSingle;
+pub use pmove_single as PmoveSingle;
 
 fn clamped_msec(delta: i32) -> i32 {
     delta.clamp(1, 200)

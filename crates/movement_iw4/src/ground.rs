@@ -36,7 +36,12 @@ pub fn complete_ground_trace<C: CollisionBackend>(
         let Some(corrected) =
             collision.correct_solid(origin, bounds.mins, bounds.maxs, bounds.tracemask)
         else {
-            clear_ground_state(ps, pml);
+            // Stuck for good: the ground is whatever the trace hit (not
+            // none), and the player is off it.
+            ps.ground_entity_num = trace_entity_id(&trace);
+            pml.ground_plane = 0;
+            pml.almost_ground_plane = 0;
+            pml.walking = 0;
             jump::clear_state(ps);
             return;
         };
@@ -124,13 +129,6 @@ fn ground_trace_missed<C: CollisionBackend>(
     ps.ground_entity_num = ENTITYNUM_NONE;
     pml.ground_plane = 0;
     pml.almost_ground_plane = u32::from(almost);
-    pml.walking = 0;
-}
-
-fn clear_ground_state(ps: &mut PlayerState, pml: &mut Pml) {
-    ps.ground_entity_num = ENTITYNUM_NONE;
-    pml.ground_plane = 0;
-    pml.almost_ground_plane = 0;
     pml.walking = 0;
 }
 
