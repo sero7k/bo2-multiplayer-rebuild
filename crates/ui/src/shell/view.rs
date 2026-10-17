@@ -10,7 +10,7 @@ use super::online::{OnlineInfo, Status};
 use super::pics::{ShellPics, cover};
 use super::theme::*;
 use super::cards::{self, Kind};
-use super::{Act, DIFFICULTY, Hit, Row, Screen, Shell, Tab, bridge, pages, rows};
+use super::{Act, Hit, Row, Screen, Shell, Tab, bridge, pages, rows};
 
 #[derive(Component)]
 pub(crate) struct ViewRoot;
@@ -76,29 +76,14 @@ pub(crate) fn abs(left: Option<f32>, top: Option<f32>, right: Option<f32>, botto
     }
 }
 
-/// The title at the top left: a blue bar, then the trail of screens, the
-/// last one bright.
+/// The title at the top left, as Infinite Warfare's: the trail of screens
+/// above in small capitals (`MULTIPLAYER / CUSTOM GAME`), the screen's name
+/// under it large and thin.
 pub(crate) fn header(c: &mut Kids, cx: &Ctx, trail: &[&str]) {
-    c.spawn((
-        Node {
-            column_gap: cx.px(14.0),
-            align_items: AlignItems::Center,
-            ..abs(Some(72.0), Some(54.0), None, None, cx)
-        },
-    ))
-    .with_children(|h| {
-        h.spawn((Node { width: cx.px(5.0), height: cx.px(40.0), ..default() }, BackgroundColor(cx.pal.accent)));
-        for (i, part) in trail.iter().enumerate() {
-            let last = i + 1 == trail.len();
-            if i > 0 {
-                h.spawn((Text::new("›"), cx.regular(40.0), TextColor(FAINT)));
-            }
-            h.spawn((
-                Text::new(*part),
-                if last { cx.bold(46.0) } else { cx.regular(46.0) },
-                TextColor(if last { WHITE } else { DIM }),
-            ));
-        }
+    let (title, before) = trail.split_last().map_or(("", &[][..]), |(t, b)| (*t, b));
+    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(0.0), ..abs(Some(96.0), Some(30.0), None, None, cx) }).with_children(|h| {
+        h.spawn((Text::new(before.join(" / ")), cx.regular(19.0), TextColor(TEXT.with_alpha(0.86)), Node { min_height: cx.px(22.0), margin: UiRect::left(cx.px(3.0)), ..default() }));
+        h.spawn((Text::new(title), cx.regular(62.0), TextColor(WHITE), Node { margin: UiRect::top(cx.px(-8.0)), ..default() }));
     });
 }
 
@@ -232,46 +217,97 @@ pub(crate) fn emblem(c: &mut Kids, cx: &mut Ctx, name: &str, size: f32) {
     });
 }
 
-/// His card at the top right: his emblem, his calling card with his name
-/// on it, his rank icon, level and how far into it.
+/// His card at the top right, as Infinite Warfare's: a line of his numbers
+/// (rank and level, prestige, kills, wins) over a thin rule, then his
+/// calling card as a banner with his name and level on it, a band in the
+/// accent with his progress, and his emblem standing over its right end.
 fn player_card(c: &mut Kids, cx: &mut Ctx, card: &PlayerCard) {
     let icon = cx.pic(&[card.rank_picture.clone()]);
     let (title, mark) = (cards::mine(Kind::Card, &card.card), cards::mine(Kind::Emblem, &card.emblem));
-    c.spawn((
-        Node {
-            width: cx.px(540.0),
-            padding: UiRect::all(cx.px(10.0)),
-            column_gap: cx.px(12.0),
-            align_items: AlignItems::Center,
-            border: UiRect::left(cx.px(3.0)),
-            ..abs(None, Some(36.0), Some(64.0), None, cx)
-        },
-        BackgroundColor(cx.pal.panel),
-        BorderColor::all(cx.pal.accent),
-    ))
-    .with_children(|p| {
-        emblem(p, cx, &mark, 84.0);
-        p.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, row_gap: cx.px(6.0), ..default() }).with_children(|col| {
-            banner(col, cx, &title, 300.0, 56.0, Some((card.name.as_str(), 28.0)));
-            let prestige = if card.prestige > 0 { format!("PRESTIGE {}  ·  ", card.prestige) } else { String::new() };
-            col.spawn((Text::new(format!("{prestige}LEVEL {}", card.level)), cx.regular(18.0), TextColor(DIM)));
-            col.spawn((Node { width: cx.px(300.0), height: cx.px(4.0), ..default() }, BackgroundColor(KEYCAP)))
-                .with_child((
-                    Node { width: Val::Percent(card.xp_frac * 100.0), height: Val::Percent(100.0), ..default() },
-                    BackgroundColor(cx.pal.accent),
-                ));
-        });
-        p.spawn(Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: cx.px(2.0), ..default() }).with_children(|r| {
-            match icon {
-                Some(h) => {
-                    r.spawn((ImageNode::new(h), Node { width: cx.px(52.0), height: cx.px(52.0), ..default() }));
+    let w = 640.0;
+    c.spawn(Node { width: cx.px(w + 90.0), flex_direction: FlexDirection::Column, ..abs(None, Some(26.0), Some(0.0), None, cx) }).with_children(|p| {
+        // The numbers.
+        p.spawn((
+            Node { width: cx.px(w), height: cx.px(34.0), column_gap: cx.px(28.0), align_items: AlignItems::Center, padding: UiRect::horizontal(cx.px(10.0)), border: UiRect::bottom(cx.px(2.0)), ..default() },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
+            BorderColor::all(WHITE.with_alpha(0.85)),
+        ))
+        .with_children(|n| {
+            n.spawn(Node { column_gap: cx.px(6.0), align_items: AlignItems::Center, ..default() }).with_children(|r| {
+                if let Some(h) = icon.clone() {
+                    r.spawn((ImageNode::new(h), Node { width: cx.px(24.0), height: cx.px(24.0), ..default() }));
                 }
-                None => {
-                    r.spawn((Node { width: cx.px(52.0), height: cx.px(52.0), ..default() }, BackgroundColor(KEYCAP)));
-                }
+                r.spawn((Text::new(card.level.to_string()), cx.bold(22.0), TextColor(WHITE)));
+            });
+            if card.prestige > 0 {
+                n.spawn((Text::new(format!("PRESTIGE {}", card.prestige)), cx.bold(20.0), TextColor(TEXT)));
             }
-            r.spawn((Text::new(card.level.to_string()), cx.bold(30.0), TextColor(WHITE)));
+            for (k, v) in card.record.iter().take(3) {
+                n.spawn(Node { column_gap: cx.px(6.0), align_items: AlignItems::Baseline, ..default() }).with_children(|r| {
+                    r.spawn((Text::new(v.clone()), cx.bold(21.0), TextColor(WHITE)));
+                    r.spawn((Text::new(k.clone()), cx.regular(16.0), TextColor(DIM)));
+                });
+            }
         });
+        // The banner, the band, the emblem over its end.
+        p.spawn(Node { width: cx.px(w + 90.0), height: cx.px(112.0), ..default() }).with_children(|b| {
+            b.spawn((Node { width: cx.px(w), height: cx.px(112.0), flex_direction: FlexDirection::Column, border: UiRect::all(cx.px(1.0)), ..default() }, BorderColor::all(cx.pal.accent_a(0.65))))
+                .with_children(|card_box| {
+                    card_box.spawn(Node { width: Val::Percent(100.0), height: cx.px(62.0), ..default() }).with_children(|top| {
+                        banner(top, cx, &title, w - 2.0, 62.0, None);
+                        top.spawn(Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            right: cx.px(120.0),
+                            top: Val::Px(0.0),
+                            bottom: Val::Px(0.0),
+                            justify_content: JustifyContent::FlexEnd,
+                            align_items: AlignItems::Center,
+                            column_gap: cx.px(28.0),
+                            ..default()
+                        })
+                        .with_children(|t| {
+                            t.spawn((Text::new(card.name.to_uppercase()), cx.bold(34.0), TextColor(WHITE), TextShadow { offset: Vec2::splat(2.0 * cx.s), color: Color::srgba(0.0, 0.0, 0.0, 0.8), ..default() }));
+                            t.spawn((Text::new(card.level.to_string()), cx.bold(34.0), TextColor(WHITE), TextShadow { offset: Vec2::splat(2.0 * cx.s), color: Color::srgba(0.0, 0.0, 0.0, 0.8), ..default() }));
+                        });
+                    });
+                    card_box
+                        .spawn((
+                            Node { width: Val::Percent(100.0), flex_grow: 1.0, flex_direction: FlexDirection::Column, justify_content: JustifyContent::Center, row_gap: cx.px(5.0), padding: UiRect::horizontal(cx.px(10.0)), ..default() },
+                            BackgroundGradient::from(LinearGradient::to_right(vec![
+                                ColorStop::new(cx.pal.accent_a(0.85), Val::Percent(0.0)),
+                                ColorStop::new(cx.pal.accent_a(0.35), Val::Percent(70.0)),
+                                ColorStop::new(cx.pal.accent_a(0.15), Val::Percent(100.0)),
+                            ])),
+                        ))
+                        .with_children(|band| {
+                            let prestige = if card.prestige > 0 { format!("PRESTIGE {}  ·  ", card.prestige) } else { String::new() };
+                            band.spawn((Text::new(format!("{prestige}LEVEL {}  ·  {} XP", card.level, card.xp)), cx.bold(18.0), TextColor(WHITE)));
+                            band.spawn((Node { width: cx.px(w * 0.62), height: cx.px(4.0), ..default() }, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.45))))
+                                .with_child((Node { width: Val::Percent(card.xp_frac * 100.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(WHITE)));
+                        });
+                });
+            b.spawn(Node { position_type: PositionType::Absolute, right: cx.px(6.0), top: cx.px(-22.0), ..default() }).with_children(|e| {
+                emblem_bare(e, cx, &mark, 132.0);
+            });
+        });
+    });
+}
+
+/// An emblem with no plate behind it (the player card's, standing over the
+/// banner's end).
+pub(crate) fn emblem_bare(c: &mut Kids, cx: &mut Ctx, name: &str, size: f32) {
+    let pic = cx.pic(&[name.to_owned()]);
+    c.spawn(Node { width: cx.px(size), height: cx.px(size), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }).with_children(|b| {
+        if let Some(p) = pic {
+            let sz = cx.pic_size(&p);
+            let k = (size / sz.x.max(1.0)).min(size / sz.y.max(1.0));
+            let book = flipbook(cx, name);
+            let mut e = b.spawn((ImageNode::new(p), Node { width: cx.px(sz.x * k), height: cx.px(sz.y * k), ..default() }));
+            if let Some(book) = book {
+                e.insert(book);
+            }
+        }
     });
 }
 
@@ -281,34 +317,45 @@ pub(crate) fn hint(c: &mut Kids, cx: &mut Ctx, key: &str, pad: &str, what: &str)
     c.spawn(Node { column_gap: cx.px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|h| {
         match icon {
             Some(img) => {
-                h.spawn((ImageNode::new(img), Node { width: cx.px(26.0), height: cx.px(26.0), ..default() }));
+                h.spawn((ImageNode::new(img), Node { width: cx.px(30.0), height: cx.px(30.0), ..default() }));
             }
             None if !key.is_empty() => {
                 h.spawn((
-                    Node { padding: UiRect::axes(cx.px(7.0), cx.px(1.0)), ..default() },
-                    BackgroundColor(KEYCAP),
+                    Node { min_width: cx.px(30.0), height: cx.px(30.0), padding: UiRect::horizontal(cx.px(8.0)), justify_content: JustifyContent::Center, align_items: AlignItems::Center, border: UiRect::all(cx.px(2.0)), border_radius: BorderRadius::all(cx.px(15.0)), ..default() },
+                    BorderColor::all(WHITE.with_alpha(0.85)),
                 ))
-                .with_child((Text::new(key), cx.bold(17.0), TextColor(WHITE)));
+                .with_child((Text::new(key), cx.bold(16.0), TextColor(WHITE)));
             }
             None => {}
         }
-        h.spawn((Text::new(what), cx.bold(18.0), TextColor(DIM)));
+        h.spawn((Text::new(what), cx.regular(24.0), TextColor(TEXT.with_alpha(0.86))));
     });
 }
 
 fn footer(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, online: &OnlineInfo) {
+    // Infinite Warfare's foot: a thin lit band across the left of the
+    // screen, the keys under it on black, the server and friends at the right.
+    c.spawn((
+        Node { width: Val::Percent(62.0), height: cx.px(5.0), ..abs(Some(0.0), None, None, Some(66.0), cx) },
+        BackgroundGradient::from(LinearGradient::to_right(vec![
+            ColorStop::new(Color::srgba(0.55, 0.58, 0.62, 0.55), Val::Percent(0.0)),
+            ColorStop::new(cx.pal.accent_a(0.55), Val::Percent(70.0)),
+            ColorStop::new(Color::srgba(0.55, 0.58, 0.62, 0.0), Val::Percent(100.0)),
+        ])),
+    ));
     c.spawn((
         Node {
             width: Val::Percent(100.0),
-            height: cx.px(58.0),
-            padding: UiRect::horizontal(cx.px(72.0)),
+            height: cx.px(66.0),
+            padding: UiRect::horizontal(cx.px(108.0)),
             justify_content: JustifyContent::SpaceBetween,
             align_items: AlignItems::Center,
-            border: UiRect::top(Val::Px(1.0)),
             ..abs(Some(0.0), None, None, Some(0.0), cx)
         },
-        BackgroundColor(cx.pal.footer),
-        BorderColor::all(cx.pal.line),
+        BackgroundGradient::from(LinearGradient::to_bottom(vec![
+            ColorStop::new(Color::srgba(0.0, 0.0, 0.0, 0.70), Val::Percent(0.0)),
+            ColorStop::new(Color::srgba(0.0, 0.0, 0.0, 0.92), Val::Percent(100.0)),
+        ])),
     ))
     .with_children(|f| {
         f.spawn((Node { column_gap: cx.px(28.0), align_items: AlignItems::Center, ..default() }, Hit::Back, Button))
@@ -368,126 +415,80 @@ fn fmt_count(n: u32) -> String {
     out
 }
 
-/// A column of menu rows. `big`: the main menu's large rows.
+/// A column of menu rows, as Infinite Warfare's: each a white bar at its
+/// left and its name; the one in focus a band in the accent ending in a
+/// point. A selector's value sits at the row's right between arrows. The
+/// line about the row in focus goes under the column. `big`: taller rows.
 pub(crate) fn menu_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, width: f32, big: bool) {
-    let (h, px) = if big { (64.0, 40.0) } else { (56.0, 28.0) };
+    let (h, px) = if big { (50.0, 30.0) } else { (42.0, 25.0) };
+    let tip = h * 0.5;
     for (i, r) in rows.iter().enumerate() {
         let on = i == focus;
-        let mut e = c.spawn((
+        c.spawn((
             Hit::Row(i),
             Button,
-            Node {
+            Node { width: cx.px(width + tip), min_height: cx.px(h), flex_shrink: 0.0, ..default() },
+        ))
+        .with_children(|row| {
+            let mut band = row.spawn(Node {
                 width: cx.px(width),
                 min_height: cx.px(h),
-                padding: UiRect::new(cx.px(20.0), cx.px(18.0), cx.px(6.0), cx.px(6.0)),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                border: UiRect::left(cx.px(4.0)),
-                ..default()
-            },
-            BorderColor::all(if on { cx.pal.accent } else { Color::NONE }),
-        ));
-        if on {
-            e.insert(fade_right(cx.pal.accent_a(0.30), cx.pal.accent_a(0.0)));
-        } else if !big {
-            e.insert(BackgroundColor(cx.pal.panel_soft));
-        }
-        e.with_children(|row| {
-            row.spawn(Node {
-                justify_content: JustifyContent::SpaceBetween,
+                padding: UiRect::new(cx.px(18.0), cx.px(16.0), cx.px(3.0), cx.px(3.0)),
                 align_items: AlignItems::Center,
-                width: Val::Percent(100.0),
+                justify_content: JustifyContent::SpaceBetween,
+                border: UiRect::left(cx.px(6.0)),
                 ..default()
-            })
-            .with_children(|line| {
-                line.spawn((Text::new(r.label.clone()), cx.bold(px), TextColor(if on { WHITE } else { TEXT.with_alpha(0.72) })));
+            });
+            if on {
+                band.insert((
+                    BorderColor::all(cx.pal.accent),
+                    BackgroundGradient::from(LinearGradient::to_right(vec![
+                        ColorStop::new(cx.pal.accent, Val::Percent(0.0)),
+                        ColorStop::new(lift(cx.pal.accent, 0.10), Val::Percent(100.0)),
+                    ])),
+                ));
+            } else {
+                band.insert((BorderColor::all(WHITE.with_alpha(0.88)), BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.42))));
+            }
+            band.with_children(|line| {
+                let ink = if on { WHITE } else { TEXT.with_alpha(0.86) };
+                line.spawn((Text::new(r.label.clone()), if on { cx.bold(px) } else { cx.regular(px) }, TextColor(ink)));
                 match &r.value {
                     // (A value typed in, not stepped: no arrows.)
                     Some(v) if !matches!(r.act, Act::Cycle(_)) => {
-                        line.spawn((Text::new(v.clone()), cx.bold(px * 0.85), TextColor(if on { WHITE } else { DIM })));
+                        line.spawn((Text::new(v.clone()), cx.bold(px * 0.9), TextColor(if on { WHITE } else { DIM })));
                     }
                     Some(v) => {
-                        line.spawn(Node { column_gap: cx.px(14.0), align_items: AlignItems::Center, ..default() }).with_children(|sel| {
-                            sel.spawn((Hit::Step(i, -1), Button, Text::new("‹"), cx.bold(px), TextColor(if on { cx.pal.accent } else { FAINT })));
-                            sel.spawn((
-                                Node { min_width: cx.px(170.0), justify_content: JustifyContent::Center, ..default() },
-                            ))
-                            .with_child((Text::new(v.clone()), cx.bold(px * 0.85), TextColor(if on { WHITE } else { DIM })));
-                            sel.spawn((Hit::Step(i, 1), Button, Text::new("›"), cx.bold(px), TextColor(if on { cx.pal.accent } else { FAINT })));
+                        line.spawn(Node { column_gap: cx.px(12.0), align_items: AlignItems::Center, ..default() }).with_children(|sel| {
+                            sel.spawn((Hit::Step(i, -1), Button, Text::new("‹"), cx.bold(px), TextColor(if on { WHITE } else { FAINT })));
+                            sel.spawn(Node { min_width: cx.px(160.0), justify_content: JustifyContent::Center, ..default() })
+                                .with_child((Text::new(v.clone()), cx.bold(px * 0.9), TextColor(if on { WHITE } else { DIM })));
+                            sel.spawn((Hit::Step(i, 1), Button, Text::new("›"), cx.bold(px), TextColor(if on { WHITE } else { FAINT })));
                         });
-                    }
-                    None if !big => {
-                        line.spawn((Text::new("›"), cx.bold(px), TextColor(if on { cx.pal.accent } else { FAINT })));
                     }
                     None => {}
                 }
             });
-            if on && !r.sub.is_empty() {
-                row.spawn((Text::new(r.sub.clone()), cx.regular(19.0), TextColor(DIM)));
+            if on {
+                // The point: a square turned on its corner, half out past
+                // the band's end.
+                row.spawn(Node { width: cx.px(tip), height: cx.px(h), overflow: Overflow::clip(), ..default() }).with_child((
+                    Node { position_type: PositionType::Absolute, left: cx.px(-h * 0.355), top: cx.px(h * 0.145), width: cx.px(h * 0.71), height: cx.px(h * 0.71), ..default() },
+                    BackgroundColor(lift(cx.pal.accent, 0.10)),
+                    UiTransform { rotation: Rot2::degrees(45.0), ..UiTransform::IDENTITY },
+                ));
             }
         });
     }
+    if let Some(r) = rows.get(focus).filter(|r| !r.sub.is_empty()) {
+        c.spawn((Text::new(r.sub.clone()), cx.regular(23.0), TextColor(WHITE), Node { max_width: cx.px(width + 40.0), margin: UiRect::top(cx.px(10.0)), ..default() }));
+    }
 }
 
-/// The online panel: how many are on the server, and what they are doing.
-fn online_panel(c: &mut Kids, cx: &Ctx, online: &OnlineInfo) {
-    c.spawn((
-        Node {
-            width: cx.px(430.0),
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::all(cx.px(24.0)),
-            row_gap: cx.px(6.0),
-            border: UiRect::top(cx.px(3.0)),
-            ..abs(None, Some(176.0), Some(64.0), None, cx)
-        },
-        BackgroundColor(cx.pal.panel),
-        BorderColor::all(cx.pal.accent),
-    ))
-    .with_children(|p| {
-        let (dot, label) = match online.status {
-            Status::Online => (GREEN, "ONLINE"),
-            Status::Connecting => (GOLD, "CONNECTING"),
-            Status::Unreachable => (ENEMY, "UNREACHABLE"),
-            Status::Offline => (FAINT, "OFFLINE"),
-        };
-        p.spawn(Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() })
-            .with_children(|top| {
-                top.spawn((Text::new("PLAYERS ONLINE"), cx.bold(20.0), TextColor(DIM)));
-                top.spawn(Node { column_gap: cx.px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|s| {
-                    s.spawn((
-                        Node { width: cx.px(10.0), height: cx.px(10.0), border_radius: BorderRadius::all(Val::Percent(50.0)), ..default() },
-                        BackgroundColor(dot),
-                    ));
-                    s.spawn((Text::new(label), cx.bold(18.0), TextColor(dot)));
-                });
-            });
-        match online.status {
-            Status::Online => {
-                p.spawn((Text::new(fmt_count(online.players)), cx.bold(104.0), TextColor(WHITE)));
-            }
-            _ => {
-                p.spawn((Text::new("LOCAL"), cx.bold(84.0), TextColor(TEXT.with_alpha(0.5))));
-            }
-        }
-        p.spawn((Node { height: Val::Px(1.0), width: Val::Percent(100.0), margin: UiRect::vertical(cx.px(8.0)), ..default() }, BackgroundColor(cx.pal.line)));
-        let rows: Vec<(&str, String)> = match online.status {
-            Status::Online => vec![
-                ("IN LOBBIES", fmt_count(online.in_lobbies)),
-                ("IN MATCHES", fmt_count(online.in_matches)),
-                ("OPEN LOBBIES", fmt_count(online.open_lobbies)),
-                ("SERVER", online.server.clone()),
-            ],
-            Status::Connecting => vec![("SERVER", online.server.clone()), ("STATUS", "Reaching the master server...".to_owned())],
-            Status::Unreachable => vec![("SERVER", online.server.clone()), ("STATUS", "No answer. Retrying.".to_owned())],
-            Status::Offline => vec![("MODE", "LOCAL PLAY".to_owned()), ("BOTS", "UP TO 17".to_owned()), ("SERVER", "NOT SET".to_owned())],
-        };
-        for (k, v) in rows {
-            p.spawn(Node { justify_content: JustifyContent::SpaceBetween, ..default() }).with_children(|r| {
-                r.spawn((Text::new(k), cx.bold(19.0), TextColor(FAINT)));
-                r.spawn((Text::new(v), cx.bold(19.0), TextColor(TEXT)));
-            });
-        }
-    });
+/// A colour a little lighter.
+pub(crate) fn lift(c: Color, by: f32) -> Color {
+    let l = c.to_srgba();
+    Color::srgba((l.red + by).min(1.0), (l.green + by).min(1.0), (l.blue + by).min(1.0), l.alpha)
 }
 
 /// A picture cut to a box, covering it.
@@ -539,7 +540,7 @@ pub(crate) fn tabs(c: &mut Kids, cx: &mut Ctx, labels: &[String], on: usize, hit
     c.spawn(Node {
         column_gap: cx.px(8.0),
         align_items: AlignItems::Center,
-        ..abs(Some(72.0), Some(124.0), None, None, cx)
+        ..abs(Some(96.0), Some(132.0), None, None, cx)
     })
     .with_children(|t| {
         hint(t, cx, "Q", "xenonbutton_lb", "");
@@ -562,104 +563,174 @@ pub(crate) fn tabs(c: &mut Kids, cx: &mut Ctx, labels: &[String], on: usize, hit
     });
 }
 
-fn lobby(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row]) {
-    header(c, cx, &["CUSTOM GAME", "LOBBY"]);
-    let labels: Vec<String> = Tab::ALL.iter().map(|t| t.label().to_owned()).collect();
-    let on = Tab::ALL.iter().position(|t| *t == shell.tab).unwrap_or(0);
-    tabs(c, cx, &labels, on, Hit::Tab);
-    let map = cat.map(&shell.map);
-    let map_title = map.map_or_else(|| shell.map.to_uppercase(), |m| m.title.clone());
-    let mode_title = cat.mode(&shell.mode).map_or_else(|| shell.mode.to_uppercase(), |m| m.title.clone());
-    let pictures = map.map(|m| m.pictures.clone()).unwrap_or_default();
-    let starting = bridge::starting_in();
-    // The left column: the match card, then the tab's rows.
-    c.spawn(Node {
-        flex_direction: FlexDirection::Column,
-        row_gap: cx.px(8.0),
-        ..abs(Some(72.0), Some(196.0), None, None, cx)
-    })
-    .with_children(|col| {
-        col.spawn((
-            Node { width: cx.px(600.0), flex_direction: FlexDirection::Column, border: UiRect::left(cx.px(4.0)), margin: UiRect::bottom(cx.px(14.0)), ..default() },
-            BorderColor::all(cx.pal.accent),
-            BackgroundColor(cx.pal.panel),
-        ))
-        .with_children(|card| {
-            picture_box(card, cx, &pictures, 596.0, 236.0, ());
-            card.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::axes(cx.px(16.0), cx.px(12.0)), row_gap: cx.px(2.0), ..default() })
-                .with_children(|t| {
-                    let status = match starting {
-                        Some(ms) => format!("Match starting in {}", (ms / 1000.0).ceil() as i32),
-                        None => "Ready".to_owned(),
-                    };
-                    t.spawn((Text::new(status), cx.bold(28.0), TextColor(if starting.is_some() { GOLD } else { WHITE })));
-                    t.spawn((Text::new(format!("{mode_title} on {map_title}")), cx.regular(21.0), TextColor(DIM)));
-                });
+/// A small white point to the right (his own line in a list).
+pub(crate) fn pointer(c: &mut Kids, cx: &Ctx) {
+    c.spawn(Node { width: cx.px(10.0), height: cx.px(16.0), overflow: Overflow::clip(), ..default() }).with_child((
+        Node { position_type: PositionType::Absolute, left: cx.px(-6.0), top: cx.px(2.3), width: cx.px(11.3), height: cx.px(11.3), ..default() },
+        BackgroundColor(WHITE),
+        UiTransform { rotation: Rot2::degrees(45.0), ..UiTransform::IDENTITY },
+    ));
+}
+
+/// A player in a lobby's list.
+pub(crate) struct LobbyPlayer {
+    pub level: Option<i32>,
+    pub prestige: i32,
+    pub name: String,
+    pub me: bool,
+    pub host: bool,
+    /// His team's colour (a bar at the row's left), if teams are known.
+    pub team: Option<Color>,
+    /// His calling card (drawn as the banner at the row's right).
+    pub card: String,
+}
+
+/// The lobby's players, as Infinite Warfare's: a line each, his rank and
+/// level, his name, and his calling card as a banner at the right; empty
+/// places a faint line. `title`: the line over the list (players / max).
+pub(crate) fn player_list(c: &mut Kids, cx: &mut Ctx, players: &[LobbyPlayer], max: usize, title: &str, top: f32) {
+    c.spawn(Node { width: cx.px(640.0), flex_direction: FlexDirection::Column, ..abs(None, Some(top), Some(90.0), None, cx) }).with_children(|list| {
+        list.spawn(Node { justify_content: JustifyContent::SpaceBetween, margin: UiRect::bottom(cx.px(6.0)), ..default() }).with_children(|t| {
+            t.spawn((Text::new(title.to_owned()), cx.regular(24.0), TextColor(WHITE)));
+            t.spawn((Text::new(format!("{}/{max}", players.len().min(max))), cx.regular(24.0), TextColor(WHITE)));
         });
-        menu_rows(col, cx, rows, shell.focus, 600.0, false);
-        if shell.tab == Tab::Loadouts {
-            col.spawn((Text::new("These screens are still Black Ops II's for now."), cx.regular(18.0), TextColor(FAINT)));
-        }
-    });
-    // The right column: who is in.
-    let total = 1 + shell.friends + shell.enemies;
-    c.spawn(Node {
-        width: cx.px(560.0),
-        flex_direction: FlexDirection::Column,
-        row_gap: cx.px(4.0),
-        ..abs(None, Some(176.0), Some(64.0), None, cx)
-    })
-    .with_children(|list| {
-        list.spawn((Text::new(format!("{total} Players (18 Max)")), cx.regular(19.0), TextColor(DIM), Node { margin: UiRect::bottom(cx.px(6.0)), ..default() }));
-        let me = &cat.player;
-        let icon = cx.pic(&[me.rank_picture.clone()]);
-        let diff = DIFFICULTY[shell.difficulty.min(3) as usize];
-        // (level, name, team, his, calling card, emblem: a bot's by its name.)
-        // bo2mp: each bot by the name and level it plays the match under.
-        let _ = diff;
-        let bot = |n: u32, team: Color| {
-            let key = format!("Bot {n}");
-            let name = sim::lobby_bots::lobby_bot_name(n);
-            let level = sim::lobby_bots::level_for(&name);
-            (level.to_string(), name, team, false, cards::for_name(Kind::Card, &key), cards::for_name(Kind::Emblem, &key))
-        };
-        let mut people: Vec<(String, String, Color, bool, String, String)> =
-            vec![(me.level.to_string(), me.name.clone(), cx.pal.accent, true, cards::mine(Kind::Card, &me.card), cards::mine(Kind::Emblem, &me.emblem))];
-        for i in 0..shell.friends {
-            people.push(bot(i + 1, cx.pal.accent));
-        }
-        for i in 0..shell.enemies {
-            people.push(bot(shell.friends + i + 1, ENEMY));
-        }
-        for (level, name, team, mine, card, mark) in people {
+        for i in 0..max.max(players.len()) {
+            let p = players.get(i);
             list.spawn((
-                Node { height: cx.px(36.0), column_gap: cx.px(10.0), align_items: AlignItems::Center, padding: UiRect::new(cx.px(0.0), cx.px(10.0), cx.px(0.0), cx.px(0.0)), ..default() },
-                BackgroundColor(if mine { cx.pal.accent_a(0.14) } else { cx.pal.panel_soft }),
+                Node { height: cx.px(40.0), column_gap: cx.px(12.0), align_items: AlignItems::Center, border: UiRect::bottom(cx.px(1.0)), flex_shrink: 0.0, ..default() },
+                BorderColor::all(WHITE.with_alpha(if p.is_some() { 0.30 } else { 0.10 })),
+                BackgroundGradient::from(LinearGradient::to_right(vec![
+                    ColorStop::new(Color::srgba(0.0, 0.0, 0.0, if p.is_some_and(|p| p.me) { 0.62 } else { 0.48 }), Val::Percent(0.0)),
+                    ColorStop::new(Color::srgba(0.0, 0.0, 0.0, 0.12), Val::Percent(100.0)),
+                ])),
             ))
             .with_children(|r| {
-                r.spawn((Node { width: cx.px(4.0), height: cx.px(36.0), ..default() }, BackgroundColor(team)));
-                emblem(r, cx, &mark, 32.0);
-                match (&icon, mine) {
-                    (Some(h), true) => {
-                        r.spawn((ImageNode::new(h.clone()), Node { width: cx.px(26.0), height: cx.px(26.0), ..default() }));
+                let Some(p) = p else {
+                    r.spawn((Text::new("—"), cx.regular(20.0), TextColor(FAINT), Node { margin: UiRect::left(cx.px(30.0)), ..default() }));
+                    return;
+                };
+                r.spawn((Node { width: cx.px(4.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(p.team.unwrap_or(Color::NONE))));
+                r.spawn(Node { width: cx.px(14.0), ..default() }).with_children(|m| {
+                    if p.me {
+                        pointer(m, cx);
                     }
-                    _ => {
-                        r.spawn(Node { width: cx.px(26.0), ..default() });
+                });
+                let icon = p.level.and_then(|l| cx.pic(&[bo2_profile::progression::rank_picture(l, p.prestige)]));
+                match icon {
+                    Some(h) => {
+                        r.spawn((ImageNode::new(h), Node { width: cx.px(28.0), height: cx.px(28.0), ..default() }));
+                    }
+                    None => {
+                        r.spawn(Node { width: cx.px(28.0), ..default() });
                     }
                 }
-                r.spawn((Node { width: cx.px(34.0), ..default() },)).with_child((Text::new(level), cx.bold(20.0), TextColor(WHITE)));
-                r.spawn((Node { flex_grow: 1.0, ..default() },))
-                    .with_child((Text::new(name), cx.bold(21.0), TextColor(if mine { GOLD } else { TEXT })));
-                banner(r, cx, &card, 128.0, 30.0, None);
-                r.spawn((Node { width: cx.px(22.0), justify_content: JustifyContent::FlexEnd, ..default() },)).with_child((Text::new("0"), cx.bold(20.0), TextColor(DIM)));
+                r.spawn((Node { width: cx.px(46.0), ..default() },)).with_child((Text::new(p.level.map_or_else(String::new, |l| l.to_string())), cx.regular(23.0), TextColor(WHITE)));
+                r.spawn((Node { flex_grow: 1.0, column_gap: cx.px(10.0), align_items: AlignItems::Center, ..default() },)).with_children(|n| {
+                    n.spawn((Text::new(p.name.clone()), cx.regular(23.0), TextColor(if p.me { GOLD } else { WHITE })));
+                    if p.host {
+                        n.spawn((Text::new("HOST"), cx.bold(16.0), TextColor(cx.pal.accent)));
+                    }
+                });
+                banner(r, cx, &p.card, 176.0, 36.0, None);
             });
         }
     });
 }
 
-fn title_case(s: &str) -> String {
-    let mut c = s.chars();
-    c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c.flat_map(char::to_lowercase)).collect())
+/// A map in the lobby's panel at the bottom left, as Infinite Warfare's vote
+/// rows: its picture behind, a diamond mark, its name and mode, and a figure
+/// at the right (votes, or the countdown).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn map_tile(c: &mut Kids, cx: &mut Ctx, pictures: &[String], name: &str, mode: &str, right: (&str, &str), on: bool, hit: Option<Hit>) {
+    let (w, h) = (560.0, 86.0);
+    let mut e = c.spawn((
+        Node { width: cx.px(w), height: cx.px(h), border: UiRect::all(cx.px(if on { 2.0 } else { 1.0 })), flex_shrink: 0.0, ..default() },
+        BorderColor::all(if on { WHITE } else { WHITE.with_alpha(0.25) }),
+    ));
+    if let Some(hit) = hit {
+        e.insert((hit, Button));
+    }
+    e.with_children(|tile| {
+        picture_box(tile, cx, pictures, w - if on { 4.0 } else { 2.0 }, h - if on { 4.0 } else { 2.0 }, ());
+        tile.spawn((
+            Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), bottom: Val::Px(0.0), right: Val::Px(0.0), align_items: AlignItems::Center, column_gap: cx.px(16.0), padding: UiRect::horizontal(cx.px(18.0)), ..default() },
+            BackgroundGradient::from(LinearGradient::to_right(vec![
+                ColorStop::new(if on { cx.pal.accent_a(0.70) } else { Color::srgba(0.0, 0.0, 0.0, 0.72) }, Val::Percent(0.0)),
+                ColorStop::new(Color::srgba(0.0, 0.0, 0.0, 0.35), Val::Percent(62.0)),
+                ColorStop::new(Color::srgba(0.0, 0.0, 0.0, 0.70), Val::Percent(100.0)),
+            ])),
+        ))
+        .with_children(|bar| {
+            bar.spawn((
+                Node { width: cx.px(46.0), height: cx.px(46.0), border: UiRect::all(cx.px(3.0)), margin: UiRect::horizontal(cx.px(8.0)), ..default() },
+                BorderColor::all(WHITE.with_alpha(0.9)),
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+                UiTransform { rotation: Rot2::degrees(45.0), ..UiTransform::IDENTITY },
+            ));
+            bar.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, ..default() }).with_children(|t| {
+                t.spawn((Text::new(name.to_owned()), cx.bold(28.0), TextColor(WHITE)));
+                t.spawn((Text::new(mode.to_owned()), cx.bold(18.0), TextColor(TEXT.with_alpha(0.8))));
+            });
+            bar.spawn(Node { column_gap: cx.px(8.0), align_items: AlignItems::Baseline, ..default() }).with_children(|t| {
+                t.spawn((Text::new(right.0.to_owned()), cx.bold(20.0), TextColor(WHITE)));
+                t.spawn((Text::new(right.1.to_owned()), cx.bold(26.0), TextColor(GOLD)));
+            });
+        });
+    });
+}
+
+/// The private lobby (Custom Game), as Infinite Warfare's pre-match lobby:
+/// the mode as the title, its tabs, the rows at the left and the map under
+/// them, the players at the right.
+fn lobby(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row]) {
+    let map = cat.map(&shell.map);
+    let map_title = map.map_or_else(|| shell.map.to_uppercase(), |m| m.title.clone());
+    let mode_title = cat.mode(&shell.mode).map_or_else(|| shell.mode.to_uppercase(), |m| m.title.clone());
+    let pictures = map.map(|m| m.pictures.clone()).unwrap_or_default();
+    header(c, cx, &["MULTIPLAYER", "CUSTOM GAME", &mode_title]);
+    let labels: Vec<String> = Tab::ALL.iter().map(|t| t.label().to_owned()).collect();
+    let on = Tab::ALL.iter().position(|t| *t == shell.tab).unwrap_or(0);
+    tabs(c, cx, &labels, on, Hit::Tab);
+    let starting = bridge::starting_in();
+    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(6.0), ..abs(Some(126.0), Some(196.0), None, None, cx) })
+        .with_children(|col| menu_rows(col, cx, rows, shell.focus, 470.0, false));
+    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(4.0), ..abs(Some(126.0), None, None, Some(96.0), cx) }).with_children(|col| {
+        col.spawn((
+            Node { width: cx.px(560.0), height: cx.px(30.0), justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, padding: UiRect::horizontal(cx.px(10.0)), ..default() },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.75)),
+        ))
+        .with_children(|t| {
+            t.spawn((Text::new("• MATCH"), cx.bold(20.0), TextColor(WHITE)));
+            let when = starting.map_or_else(|| "READY".to_owned(), |ms| format!("STARTING  0:{:02}", (ms / 1000.0).ceil() as i32));
+            t.spawn((Text::new(when), cx.bold(20.0), TextColor(if starting.is_some() { GOLD } else { WHITE })));
+        });
+        map_tile(col, cx, &pictures, &map_title, &mode_title, ("BOTS", &(shell.friends + shell.enemies).to_string()), true, None);
+    });
+    let me = &cat.player;
+    let mut people = vec![LobbyPlayer {
+        level: Some(me.level),
+        prestige: me.prestige,
+        name: me.name.clone(),
+        me: true,
+        host: true,
+        team: Some(cx.pal.accent),
+        card: cards::mine(Kind::Card, &me.card),
+    }];
+    // bo2mp: each bot by the name and level it plays the match under.
+    for i in 0..shell.friends + shell.enemies {
+        let n = i + 1;
+        let name = sim::lobby_bots::lobby_bot_name(n);
+        people.push(LobbyPlayer {
+            level: Some(sim::lobby_bots::level_for(&name)),
+            prestige: 0,
+            card: cards::for_name(Kind::Card, &format!("Bot {n}")),
+            name,
+            me: false,
+            host: false,
+            team: Some(if i < shell.friends { cx.pal.accent } else { ENEMY }),
+        });
+    }
+    player_list(c, cx, &people, 18, "LOBBY", 196.0);
 }
 
 /// A grid that fits the screen: how many columns fit, and which tiles
@@ -1107,15 +1178,57 @@ fn main_menu(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row], online: &O
     });
 }
 
-fn multiplayer(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row], online: &OnlineInfo) {
-    header(c, cx, &["MULTIPLAYER"]);
-    c.spawn(Node {
-        flex_direction: FlexDirection::Column,
-        row_gap: cx.px(8.0),
-        ..abs(Some(72.0), Some(176.0), None, None, cx)
-    })
-    .with_children(|col| menu_rows(col, cx, rows, shell.focus, 540.0, false));
-    online_panel(c, cx, online);
+/// Multiplayer, as Infinite Warfare's MISSION SELECT: the title, the rows
+/// at the left with the line about the one in focus, a featured map framed
+/// at the bottom left, his card and his party at the right.
+fn multiplayer(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row]) {
+    header(c, cx, &["MULTIPLAYER", "MATCH SELECT"]);
+    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(6.0), ..abs(Some(126.0), Some(196.0), None, None, cx) })
+        .with_children(|col| menu_rows(col, cx, rows, shell.focus, 470.0, false));
+    featured(c, cx, cat);
+    party(c, cx, cat);
+}
+
+/// A map from the rotation, framed at the bottom left (the slot Infinite
+/// Warfare keeps for its Message of the Day), changing every few seconds.
+pub(crate) fn featured(c: &mut Kids, cx: &mut Ctx, cat: &Catalog) {
+    if cat.maps.is_empty() {
+        return;
+    }
+    let at = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) / 600) as usize % cat.maps.len();
+    let m = &cat.maps[at];
+    let (w, h) = (326.0, 196.0);
+    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(6.0), ..abs(Some(132.0), None, None, Some(96.0), cx) }).with_children(|col| {
+        col.spawn((Node { border: UiRect::all(cx.px(3.0)), ..default() }, BorderColor::all(WHITE))).with_children(|f| {
+            picture_box(f, cx, &m.pictures, w, h, ());
+        });
+        col.spawn(Node { column_gap: cx.px(10.0), align_items: AlignItems::Center, ..default() }).with_children(|t| {
+            t.spawn((Text::new("FEATURED MAP"), cx.regular(20.0), TextColor(DIM)));
+            t.spawn((Text::new(m.title.clone()), cx.bold(22.0), TextColor(WHITE)));
+            t.spawn((Text::new(m.origin.to_uppercase()), cx.regular(18.0), TextColor(cx.pal.accent)));
+        });
+    });
+}
+
+/// His party under his card: a line each (an arrow at his own), rank and
+/// level, then the name.
+fn party(c: &mut Kids, cx: &mut Ctx, cat: &Catalog) {
+    let me = &cat.player;
+    let icon = cx.pic(&[me.rank_picture.clone()]);
+    c.spawn(Node { width: cx.px(640.0), flex_direction: FlexDirection::Column, ..abs(None, Some(196.0), Some(90.0), None, cx) }).with_children(|list| {
+        list.spawn((
+            Node { height: cx.px(38.0), column_gap: cx.px(14.0), align_items: AlignItems::Center, border: UiRect::bottom(cx.px(1.0)), ..default() },
+            BorderColor::all(WHITE.with_alpha(0.35)),
+        ))
+        .with_children(|r| {
+            pointer(r, cx);
+            if let Some(h) = icon {
+                r.spawn((ImageNode::new(h), Node { width: cx.px(28.0), height: cx.px(28.0), ..default() }));
+            }
+            r.spawn((Node { width: cx.px(44.0), ..default() },)).with_child((Text::new(me.level.to_string()), cx.regular(24.0), TextColor(WHITE)));
+            r.spawn((Text::new(me.name.clone()), cx.regular(24.0), TextColor(WHITE)));
+        });
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1193,7 +1306,7 @@ pub(crate) fn shell_view(
         .with_children(|c| {
             match shell.screen {
                 Screen::Main => main_menu(c, &mut cx, &shell, &rows, &online),
-                Screen::Multiplayer => multiplayer(c, &mut cx, &shell, &rows, &online),
+                Screen::Multiplayer => multiplayer(c, &mut cx, &shell, &cat, &rows),
                 Screen::Lobby => lobby(c, &mut cx, &shell, &cat, &rows),
                 Screen::MapPick => map_picker(c, &mut cx, &shell, &cat),
                 Screen::ModePick => mode_picker(c, &mut cx, &shell, &cat, &rows),

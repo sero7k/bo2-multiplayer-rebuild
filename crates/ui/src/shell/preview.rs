@@ -636,6 +636,10 @@ fn step(
 /// `pictures`: stand-ins for map pictures (`stand_in_a`, `stand_in_b`).
 pub fn install(app: &mut App, pictures: Vec<(String, Image)>, out: PathBuf) {
     app.add_message::<frame::UiPlaySound>();
+    // (The loading screen's music system asks for these; the preview plays
+    // nothing.)
+    app.add_message::<frame::UiStopMusic>();
+    app.init_asset::<audio::PcmAudio>();
     super::register_shell(app);
     bridge::set_preview_catalog(stand_in_catalog());
     classes::set_preview_book(stand_in_book());

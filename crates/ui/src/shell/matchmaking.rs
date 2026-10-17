@@ -488,126 +488,63 @@ pub(crate) fn lobby_view(
     places: &[Place],
     max: usize,
 ) {
-    header(c, cx, &[title]);
-    // The left: the menus, then the two maps to vote between (or the
-    // playlist / map card).
-    let menu: Vec<Row> = rows.iter().filter(|r| !matches!(r.act, Act::Vote(_))).map(|r| Row { sub: String::new(), ..r.clone() }).collect();
+    header(c, cx, &["MULTIPLAYER", "PUBLIC MATCH", title]);
+    // The left: the menus, then the maps to vote between (or the playlist /
+    // map card) at the foot, as Infinite Warfare's vote panel.
+    let menu: Vec<Row> = rows.iter().filter(|r| !matches!(r.act, Act::Vote(_))).cloned().collect();
     let votes: Vec<(usize, &Row)> = rows.iter().enumerate().filter(|(_, r)| matches!(r.act, Act::Vote(_))).collect();
-    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(6.0), ..abs(Some(72.0), Some(176.0), None, None, cx) })
+    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(6.0), ..abs(Some(126.0), Some(196.0), None, None, cx) })
         .with_children(|col| {
-            menu_rows(col, cx, &menu, if shell.focus < menu.len() { shell.focus } else { usize::MAX }, 560.0, false);
-            if let Some(r) = rows.get(shell.focus).filter(|r| !r.sub.is_empty()) {
-                col.spawn((Text::new(r.sub.clone()), cx.regular(19.0), TextColor(DIM), Node { margin: UiRect::new(cx.px(4.0), Val::ZERO, cx.px(4.0), cx.px(14.0)), ..default() }));
-            }
-            if !votes.is_empty() {
-                for (k, (i, r)) in votes.iter().enumerate() {
-                    let on = shell.focus == *i;
-                    let mine = shell.vote == Some(k);
-                    let pics: Vec<String> = cat_pictures(shell, k);
-                    col.spawn((
-                        Hit::Row(*i),
-                        Button,
-                        Node { width: cx.px(560.0), height: cx.px(150.0), border: UiRect::all(cx.px(if on { 3.0 } else { 1.0 })), margin: UiRect::bottom(cx.px(6.0)), ..default() },
-                        BorderColor::all(if on { cx.pal.accent } else { cx.pal.line }),
-                    ))
-                    .with_children(|tile| {
-                        super::view::picture_box(tile, cx, &pics, 554.0, 144.0, ());
-                        tile.spawn((
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: Val::Px(0.0),
-                                right: Val::Px(0.0),
-                                bottom: Val::Px(0.0),
-                                padding: UiRect::axes(cx.px(14.0), cx.px(6.0)),
-                                justify_content: JustifyContent::SpaceBetween,
-                                align_items: AlignItems::Center,
-                                ..default()
-                            },
-                            BackgroundColor(cx.pal.strip),
-                        ))
-                        .with_children(|bar| {
-                            bar.spawn((Text::new(r.label.clone()), cx.bold(24.0), TextColor(if on { WHITE } else { TEXT })));
-                            let n = usize::from(mine);
-                            bar.spawn((Text::new(format!("{n} VOTE{}", if n == 1 { "" } else { "S" })), cx.bold(18.0), TextColor(if mine { GOLD } else { DIM })));
-                        });
-                    });
-                }
-                return;
-            }
-            col.spawn((
-                Node { width: cx.px(560.0), flex_direction: FlexDirection::Column, border: UiRect::left(cx.px(4.0)), ..default() },
-                BorderColor::all(cx.pal.accent),
-                BackgroundColor(cx.pal.panel),
-            ))
-            .with_children(|k| {
-                super::view::picture_box(k, cx, card.0, 556.0, 210.0, ());
-                k.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::axes(cx.px(16.0), cx.px(10.0)), row_gap: cx.px(2.0), ..default() })
-                    .with_children(|t| {
-                        t.spawn((Text::new(card.1.to_owned()), cx.bold(26.0), TextColor(WHITE)));
-                        t.spawn((Text::new(card.2.to_owned()), cx.regular(20.0), TextColor(DIM)));
-                    });
-            });
+            menu_rows(col, cx, &menu, if shell.focus < menu.len() { shell.focus } else { usize::MAX }, 470.0, false);
         });
-    // The right: what it is doing, then the places (by rank on the
-    // leaderboard).
+    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(4.0), ..abs(Some(126.0), None, None, Some(96.0), cx) }).with_children(|col| {
+        col.spawn((
+            Node { width: cx.px(560.0), height: cx.px(30.0), justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, padding: UiRect::horizontal(cx.px(10.0)), ..default() },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.75)),
+        ))
+        .with_children(|t| {
+            t.spawn((Text::new(if votes.is_empty() { "• MAP" } else { "• VOTE" }), cx.bold(20.0), TextColor(WHITE)));
+            t.spawn((Text::new(status.0.to_owned()), cx.bold(20.0), TextColor(GOLD)));
+        });
+        if votes.is_empty() {
+            super::view::map_tile(col, cx, card.0, card.1, card.2, ("", ""), true, None);
+            return;
+        }
+        for (k, (i, r)) in votes.iter().enumerate() {
+            let on = shell.focus == *i;
+            let mine = shell.vote == Some(k);
+            let pics: Vec<String> = cat_pictures(shell, k);
+            let n = usize::from(mine).to_string();
+            super::view::map_tile(col, cx, &pics, &r.label, card.2, ("VOTES:", &n), on, Some(Hit::Row(*i)));
+        }
+    });
+    // The right: the places (by rank on the leaderboard), under what it is
+    // doing.
     let mut sorted: Vec<&Place> = places.iter().collect();
     if shell.leaderboard {
         sorted.sort_by_key(|p| std::cmp::Reverse(p.level.unwrap_or(0)));
     }
-    c.spawn(Node { width: cx.px(780.0), flex_direction: FlexDirection::Column, row_gap: cx.px(4.0), ..abs(None, Some(176.0), Some(64.0), None, cx) })
-        .with_children(|list| {
-            if shell.leaderboard {
-                list.spawn((Text::new("LOBBY LEADERBOARD"), cx.bold(22.0), TextColor(FAINT)));
-            }
-            list.spawn((Text::new(status.0.to_owned()), cx.bold(30.0), TextColor(GOLD)));
-            if !status.1.is_empty() {
-                list.spawn((Text::new(status.1.to_owned()), cx.regular(19.0), TextColor(DIM)));
-            }
-            list.spawn(Node { height: cx.px(10.0), ..default() });
-            for i in 0..max {
-                let place = sorted.get(i).copied();
-                list.spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: cx.px(40.0),
-                        align_items: AlignItems::Center,
-                        column_gap: cx.px(18.0),
-                        padding: UiRect::horizontal(cx.px(16.0)),
-                        border: UiRect::left(cx.px(3.0)),
-                        ..default()
-                    },
-                    BackgroundColor(if place.is_some() { cx.pal.panel } else { cx.pal.panel.with_alpha(0.35) }),
-                    BorderColor::all(match place {
-                        Some(p) if p.me => GOLD,
-                        Some(_) => cx.pal.accent,
-                        None => Color::NONE,
-                    }),
-                ))
-                .with_children(|r| match place {
-                    Some(p) => {
-                        r.spawn((
-                            Text::new(p.level.map_or_else(String::new, |l| l.to_string())),
-                            cx.bold(22.0),
-                            TextColor(DIM),
-                            Node { width: cx.px(44.0), ..default() },
-                        ));
-                        r.spawn((Text::new(p.name.clone()), cx.bold(24.0), TextColor(if p.me { GOLD } else { WHITE }), Node { flex_grow: 1.0, ..default() }));
-                        if p.host {
-                            r.spawn((Text::new("HOST"), cx.bold(18.0), TextColor(cx.pal.accent)));
-                        }
-                    }
-                    None => {
-                        r.spawn((Text::new("· · ·"), cx.bold(20.0), TextColor(FAINT)));
-                    }
-                });
-            }
-            list.spawn((
-                Text::new(format!("{}/{max} PLAYERS", places.len().min(max))),
-                cx.bold(24.0),
-                TextColor(WHITE),
-                Node { margin: UiRect::top(cx.px(10.0)), align_self: AlignSelf::FlexEnd, ..default() },
-            ));
-        });
+    if !status.1.is_empty() {
+        c.spawn((Text::new(status.1.to_owned()), cx.regular(20.0), TextColor(TEXT), Node { max_width: cx.px(560.0), ..abs(Some(126.0), None, None, Some(230.0), cx) }));
+    }
+    let players: Vec<super::view::LobbyPlayer> = sorted
+        .iter()
+        .map(|p| super::view::LobbyPlayer {
+            level: p.level,
+            prestige: 0,
+            name: p.name.clone(),
+            me: p.me,
+            host: p.host,
+            team: None,
+            card: if p.me {
+                super::bridge::catalog().map_or_else(String::new, |c| super::cards::mine(super::cards::Kind::Card, &c.player.card))
+            } else {
+                super::cards::for_name(super::cards::Kind::Card, &p.name)
+            },
+        })
+        .collect();
+    let title = if shell.leaderboard { "LOBBY LEADERBOARD" } else { "LOBBY" };
+    super::view::player_list(c, cx, &players, max, title, 196.0);
 }
 
 /// The picture names of vote map `k` (from the catalog).
