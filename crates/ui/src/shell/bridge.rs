@@ -108,8 +108,8 @@ pub(crate) fn tricky_base(key: &str) -> Option<&'static str> {
     TRICKY.iter().find(|(_, k, _)| k.eq_ignore_ascii_case(key)).map(|(b, _, _)| *b)
 }
 
-/// Bots in a Tricky match: none with him, two against him.
-pub(crate) const TRICKY_BOTS: (u32, u32) = (0, 2);
+/// Bots in Tricky Search and Destroy: none with him, two against him.
+pub(crate) const TRICKY_SD_BOTS: (u32, u32) = (0, 2);
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Catalog {
@@ -356,7 +356,7 @@ fn build_catalog(host: &Host, mp: Option<&Mp>) -> Catalog {
             modes.push(ModeEntry {
                 key: (*key).to_owned(),
                 title: (*title).to_owned(),
-                desc: format!("{} Two bots, and your trickshot script runs.", m.desc).trim().to_owned(),
+                desc: format!("{} Your trickshot script runs{}.", m.desc, if *base == "sd" { ", two bots" } else { "" }).trim().to_owned(),
                 ..m
             });
         }
