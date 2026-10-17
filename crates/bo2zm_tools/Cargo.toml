@@ -18,10 +18,6 @@ name = "t6ipak"
 path = "src/bin/t6ipak.rs"
 
 [[bin]]
-name = "t6check"
-path = "src/bin/t6check.rs"
-
-[[bin]]
 name = "t6world"
 path = "src/bin/t6world.rs"
 
@@ -77,38 +73,3 @@ workspace = true
 name = "t6props"
 path = "src/bin/t6props.rs"
 
-[[bin]]
-name = "t6census"
-path = "src/bin/t6census.rs"
-
-[[bin]]
-name = "t6run"
-path = "src/bin/t6run.rs"
-
-[[bin]]
-name = "t6icon"
-path = "src/bin/t6icon.rs"
-
-[[bin]]
-name = "t6scope"
-path = "src/bin/t6scope.rs"
-
-[[bin]]
-name = "t6wicon"
-path = "src/bin/t6wicon.rs"
-
-[[bin]]
-name = "t6alt"
-path = "src/bin/t6alt.rs"
-
-[[bin]]
-name = "t6dups"
-path = "src/bin/t6dups.rs"
-
-[[bin]]
-name = "t6fxdump"
-path = "src/bin/t6fxdump.rs"
-
-[[bin]]
-name = "t6drop"
-path = "src/bin/t6drop.rs"

@@ -6,13 +6,11 @@ pub mod animated_models;
 pub mod damage_feedback;
 pub mod dd;
 pub mod dom;
-pub mod end_game;
 pub mod ffa;
 pub mod gamelogic;
 pub mod gaps;
 pub mod globallogic;
 pub mod kind;
-pub mod load;
 mod parse_scores;
 pub mod perks;
 pub mod phase;
@@ -24,7 +22,6 @@ mod score;
 pub mod stuck_in_client;
 pub mod suicide;
 pub mod teams;
-pub mod visuals;
 
 pub use animated_models::{
     FAN_BLADE_ROTATE_TIME, FanBladeRotateChannel, fan_blade_dots, fan_blade_right,

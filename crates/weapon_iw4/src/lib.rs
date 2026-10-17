@@ -24,7 +24,6 @@ mod sway;
 #[cfg(test)]
 mod bo2_rules_tests;
 mod tick;
-mod unlocated;
 mod view_bob;
 mod viewmodel;
 mod viewweapon;

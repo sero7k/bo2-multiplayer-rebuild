@@ -434,7 +434,7 @@ pub fn prepare(root: &Path, env: &Env, channel: Channel, profile: &str) -> Res<P
 const LEGAL_FILES: &[(&str, &str)] = &[
     ("LICENSE", "LICENSE"),
     ("NOTICE", "NOTICE"),
-    ("crates/ui/assets/OFL-Oxanium.txt", "OFL-Oxanium.txt"),
+    ("crates/ui/assets/OFL-BarlowCondensed.txt", "OFL-BarlowCondensed.txt"),
     (
         "crates/console/assets/COPYING-FreeFont.txt",
         "COPYING-FreeFont.txt",

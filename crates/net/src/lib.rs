@@ -5,7 +5,6 @@ mod observe;
 pub mod plugin;
 pub mod policy;
 pub mod reconciliation;
-pub mod role_matrix;
 pub mod schedule;
 pub mod session_core;
 pub mod signon;

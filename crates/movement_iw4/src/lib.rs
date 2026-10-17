@@ -17,7 +17,6 @@ mod events;
 mod feel; // bo2zm
 mod footstep;
 mod friction;
-mod gjk; // bo2zm
 mod ground;
 mod integrate;
 mod is_in_air;

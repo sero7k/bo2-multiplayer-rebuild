@@ -10,7 +10,7 @@ endif
 GOAL := $(firstword $(MAKECMDGOALS))
 ARGS := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
 
-.PHONY: map export-gltf play bench bench-load-session bench-live bench-overhead bench-perf menu menu-shots scenario chaos lifecycle-all lifecycle-swap lifecycle-replace lifecycle-play-in lifecycle-demo-out lifecycle-demo-map launcher deploy logs loc clean help
+.PHONY: map export-gltf play bench bench-load-session bench-live bench-overhead bench-perf menu scenario chaos lifecycle-all lifecycle-swap lifecycle-replace lifecycle-play-in lifecycle-demo-out lifecycle-demo-map launcher deploy logs loc clean help
 .PHONY: build-windows setup-windows release publish provision
 .PHONY: mr publish-check approved duo
 .PHONY: $(ARGS)
@@ -230,12 +230,6 @@ duo: require-games
 menu: require-games
 	cd $(ROOT) && $(CARGO) run $(PROFILE_ARG) -p launcher -- menu $(CMDS_ARG)
 
-menu-shots:
-	@test -n "$$IW4L_GAMES" -o -n "$(IW4L_GAMES)" || { echo "set IW4L_GAMES to the games root"; exit 1; }
-	@mkdir -p iw4l-artifacts/menu-shots
-	IW4L_GAMES="$(IW4L_GAMES)" IW4L_MENU_SHOT_DIR="$(CURDIR)/iw4l-artifacts/menu-shots" \
-		$(CARGO) run $(PROFILE_ARG) -p launcher -- menu
-
 # Every recipe below this line is `cargo xtask` — one Rust binary, no shell
 # scripts. `cargo xtask` alone lists them; PROFILE and RELEASE reach it through
 # the environment, the same way they reached the scripts.
@@ -356,7 +350,6 @@ help:
 	@echo "make menu         run the main-menu shell (Maps / Settings / Quit)"
 	@echo "make duo          two windows through the master; HOST_CMDS / CLIENT_CMDS, ZONE / MODE"
 	@echo "                  add CMDS='wait 2s; quit' to script it"
-	@echo "make menu-shots   2D UI pack under iw4l-artifacts/menu-shots (no map)"
 	@echo "make launcher windows  build password-protected dev + prod portable ZIPs"
 	@echo "make build-windows     local Windows bins only (PROFILE=play)"
 	@echo "make setup-windows     rustup target + cargo-xwin (once)"

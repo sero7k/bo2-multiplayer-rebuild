@@ -15,10 +15,9 @@ Both fonts below are compiled into the IW4L binary with `include_bytes!`, so
 they are redistributed with every build. Any archive that ships an IW4L binary
 ships these two licence texts with it.
 
-Oxanium (crates/ui/assets/Oxanium-Regular.ttf)
-  Copyright 2019 The Oxanium Project Authors
-  https://github.com/sevmeyer/oxanium
-  SIL Open Font License 1.1 — full text in crates/ui/assets/OFL-Oxanium.txt
+Barlow Condensed (crates/ui/assets/BarlowCondensed-*.ttf)
+  Copyright 2017 The Barlow Project Authors (https://github.com/jpt/barlow)
+  SIL Open Font License 1.1 — full text in crates/ui/assets/OFL-BarlowCondensed.txt
 
 GNU FreeFont (crates/console/assets/FreeMono.otf)
   Copyright (C) 2002-2012 Free Software Foundation, Inc.
