@@ -298,7 +298,13 @@ pub(crate) fn spawn_loading_screen(
         screen.title(),
         screen.mode_label()
     );
-    if let Some(source) = zone_ff.filter(|_| bo2_picture.is_none()) {
+    // bo2mp: the shell's loading screen covers this one for a match it
+    // started (multiplayer, or a Zombies map from its ZOMBIES screens): the
+    // map's preview would be read from its zone for nothing.
+    let shell_covers = crate::shell::enabled()
+        && front.is_none()
+        && (bo2mp.is_some() || crate::shell::zombies::loading().is_some_and(|z| title.contains(&z.map)));
+    if let Some(source) = zone_ff.filter(|_| bo2_picture.is_none() && !shell_covers) {
         let same = inflight_preview
             .as_deref()
             .is_some_and(|task| task.identity.matches(&source));

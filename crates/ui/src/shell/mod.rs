@@ -8,9 +8,8 @@
 //! the master server instead. The loading screen (`loading`) and the in-game
 //! HUD (`hud_modern`) share the look (`theme`).
 //!
-//! BO2's scripts still run underneath (`bridge`): the shell starts the match
-//! through them, and opens their Create-a-Class, Barracks and Options
-//! screens over itself until it has its own.
+//! BO2's scripts still run underneath (`bridge`): the shell reads its maps,
+//! modes, stats and classes from them and starts the match through them.
 //!
 //! ZOMBIES opens the same screens in red (`zombies`, `zombies_view`): a
 //! map, a start and mode, then START runs the Zombies rebuild
@@ -1060,7 +1059,7 @@ fn shell_input(
     if cursor.read().count() > 0 || mouse.get_just_pressed().next().is_some() {
         *mouse_leads = true;
     }
-    if !enabled() || front.is_none() || bridge::lui_open() || crate::game_folders::is_open() || zombies::running() {
+    if !enabled() || front.is_none() || crate::game_folders::is_open() || zombies::running() {
         typed.clear();
         return;
     }
@@ -1218,9 +1217,6 @@ fn shell_input(
     let now = time.elapsed_secs_f64();
     shell.now = now;
     classes::want(matches!(shell.screen, Screen::Classes | Screen::ClassEdit | Screen::ItemPick));
-    if let Some(n) = bridge::take_note() {
-        shell.note(&n, now);
-    }
     if shell.note.as_ref().is_some_and(|(_, until)| now > *until) {
         shell.note = None;
     }

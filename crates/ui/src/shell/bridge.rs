@@ -173,18 +173,12 @@ pub(crate) enum Request {
 struct Bridge {
     catalog: Option<Arc<Catalog>>,
     requests: Vec<Request>,
-    /// A BO2 screen he is in: the menus open before it (it is closed when
-    /// they are back), whether they have changed since.
-    lui: Option<(Vec<String>, bool)>,
     /// The match starts in this many ms (the private countdown).
     starting_in: Option<f64>,
-    /// A line for him (a BO2 screen that could not open).
-    note: Option<String>,
     built_at: f64,
 }
 
 static BRIDGE: Mutex<Option<Bridge>> = Mutex::new(None);
-static LUI_OPEN: AtomicBool = AtomicBool::new(false);
 static SHOWN: AtomicBool = AtomicBool::new(false);
 static LOADING_SHOWN: AtomicBool = AtomicBool::new(false);
 
@@ -201,7 +195,7 @@ pub(crate) fn enabled() -> bool {
 
 /// The shell's screens are up: BO2's menus are hidden and get no input.
 pub(crate) fn covers_lui() -> bool {
-    enabled() && SHOWN.load(Ordering::Relaxed) && !LUI_OPEN.load(Ordering::Relaxed)
+    enabled() && SHOWN.load(Ordering::Relaxed)
 }
 
 /// The shell's loading screen is up (BO2's is not opened).
@@ -215,11 +209,6 @@ pub(crate) fn set_shown(on: bool) {
 
 pub(crate) fn set_loading_shown(on: bool) {
     LOADING_SHOWN.store(on, Ordering::Relaxed);
-}
-
-/// One of BO2's screens is open over the shell.
-pub(crate) fn lui_open() -> bool {
-    LUI_OPEN.load(Ordering::Relaxed)
 }
 
 pub(crate) fn catalog() -> Option<Arc<Catalog>> {
@@ -242,10 +231,6 @@ pub(crate) fn request(r: Request) {
 
 pub(crate) fn starting_in() -> Option<f64> {
     with(|b| b.starting_in)
-}
-
-pub(crate) fn take_note() -> Option<String> {
-    with(|b| b.note.take())
 }
 
 fn text(v: &hks_t6::host::EngineValues, key: &str) -> String {
@@ -457,24 +442,6 @@ pub(crate) fn lui_side(host: &mut Host, mp: Option<&Mp>) {
     let starting = mp.and_then(|m| m.borrow().private_start_ms).map(|at| (at - now).max(0.0));
     let requested = mp.is_some_and(|m| m.borrow().start_requested);
     with(|b| b.starting_in = starting.or(requested.then_some(5000.0)));
-    // A BO2 screen he is in: done when the menus are back as they were.
-    let open = host.open_menus();
-    let back = with(|b| match b.lui.as_mut() {
-        Some((before, changed)) => {
-            if open != *before {
-                *changed = true;
-                false
-            } else {
-                *changed
-            }
-        }
-        None => false,
-    });
-    if back {
-        with(|b| b.lui = None);
-        LUI_OPEN.store(false, Ordering::Relaxed);
-        diag::info!(Ui, "bo2mp shell: back from BO2's screen");
-    }
     for r in with(|b| std::mem::take(&mut b.requests)) {
         match r {
             Request::Start(spec) => {

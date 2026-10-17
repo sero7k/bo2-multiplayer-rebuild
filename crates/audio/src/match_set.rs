@@ -219,7 +219,19 @@ fn queue_match_clips(
             request_named(clips, &bank.0, ns, &emitter.soundalias, &mut set);
         }
     }
-    if let Some(identity) = identity.as_deref() {
+    // bo2mp: a map from another game (MW2, MW3, Black Ops, CoD4) played by
+    // Black Ops II's rules runs BO2's scripts, which play BO2's sounds
+    // (`t6:` aliases): its hit sounds, interface and announcer are set up as
+    // on a BO2 map. Keyed off the map's sound namespace alone, those
+    // matches skipped this whole block and the BO1 announcer routes were
+    // never built (the voice went silent on every foreign map).
+    let t6_match = namespace.namespace == AssetNamespace::T6 || assets::t6_rules();
+    // (A Black Ops II match speaks with BO2's scripts' voices, set up below:
+    // Modern Warfare 2's team voices and death cries are not played.)
+    if t6_match {
+        *announcer = crate::match_voices::AnnouncerRoutes::default();
+    }
+    if let Some(identity) = identity.as_deref().filter(|_| !t6_match) {
         let (allies, axis) = crate::match_voices::voice_prefixes_for_zone(
             catalog.as_deref(),
             Some(bank.as_ref()),
@@ -256,7 +268,9 @@ fn queue_match_clips(
         aliases += 1;
         request_named(clips, &bank.0, namespace.namespace, alias, &mut set);
     }
-    if let Some(catalog) = catalog.as_deref() {
+    // (Modern Warfare 2's menu sounds: its menus are not up in a Black Ops
+    // II match.)
+    if let Some(catalog) = catalog.as_deref().filter(|_| !t6_match) {
         for alias in catalog.played_sound_aliases().into_iter().chain(MENU_CODE) {
             aliases += 1;
             request_named(clips, &bank.0, AssetNamespace::Iw4, alias, &mut set);
@@ -272,13 +286,6 @@ fn queue_match_clips(
         aliases += 1;
         request_named(clips, &bank.0, AssetNamespace::Iw4, alias, &mut set);
     }
-    // bo2mp: a map from another game (MW2, MW3, Black Ops, CoD4) played by
-    // Black Ops II's rules runs BO2's scripts, which play BO2's sounds
-    // (`t6:` aliases): its hit sounds, interface and announcer are set up as
-    // on a BO2 map. Keyed off the map's sound namespace alone, those
-    // matches skipped this whole block and the BO1 announcer routes were
-    // never built (the voice went silent on every foreign map).
-    let t6_match = namespace.namespace == AssetNamespace::T6 || assets::t6_rules();
     if t6_match {
         for alias in T6_HIT_SOUNDS {
             aliases += 1;

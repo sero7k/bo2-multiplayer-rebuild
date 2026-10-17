@@ -107,8 +107,6 @@ struct LuiHud {
     /// bo2mp: frames until CAMPAIGN's prompt is closed for him (as its NO
     /// closes it; not while its YES is still running).
     back_in: u8,
-    /// bo2mp: BO2's loading screen was opened for the match loading.
-    loading_open: bool,
     /// bo2mp: when each client was last seen firing (an
     /// enemy firing shows on the minimap for a moment).
     shots: std::collections::HashMap<u32, f64>,
@@ -789,7 +787,6 @@ fn take_kept_front(front: &crate::lui_frontend::Bo2mpFrontend, scripts: usize) -
     }
     FRONT_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     hud.opened = false;
-    hud.loading_open = false;
     hud.sent = None;
     hud.mouse_at = None;
     hud.binding = false;
@@ -912,7 +909,6 @@ fn build(ui: &assets::T6Ui, front: Option<&crate::lui_frontend::Bo2mpFrontend>, 
         end_rows_logged: false,
         scoreboard_bits: (false, false),
         back_in: 0,
-        loading_open: false,
         shots: std::collections::HashMap::new(),
         sweep: RadarSweep::default(),
     }
@@ -1409,8 +1405,9 @@ fn lui_hud(
     }
     // bo2mp: the front end has no game to read; its menus run alone.
     let front = io.front.as_deref().cloned();
-    // bo2mp: the match he started is loading: the front end's scripts run
-    // BO2's own loading screen until the match's HUD takes over.
+    // bo2mp: the match he started is loading (the shell draws the loading
+    // screen; the front end's scripts keep running under it until the
+    // match's HUD takes over).
     let bo2_loading = front.is_none()
         && io.loading.is_some()
         && io.setup.is_some()
@@ -1657,13 +1654,6 @@ fn lui_hud(
             hud.host.push_call(hks_t6::host::EngineCall::MenuResponse(menu, response));
         }
     }
-    if bo2_loading && !hud.loading_open {
-        hud.loading_open = true;
-        // (The shell draws its own loading screen.)
-        if let Some(setup) = io.setup.as_deref().filter(|_| !crate::shell::enabled()) {
-            crate::lui_frontend::open_loading(&mut hud.host, setup);
-        }
-    }
     if front.is_none() && !bo2_loading {
         send_changes(&mut hud.host, hud.sent.as_ref(), &values);
     }
@@ -1824,20 +1814,6 @@ fn lui_hud(
                     // `class`); `event:<name>` = that root event.
                     let name = c.next().unwrap_or("class");
                     hud.host.root_event("open_ingame_menu", &[("menuName", Value::str(name))]);
-                } else if kind == Some("loading") {
-                    // `loading` = BO2's loading screen for the lobby's map
-                    // and game type, over the front end (its load is too
-                    // quick to photograph).
-                    let setup = {
-                        let v = hud.host.values.borrow();
-                        let d = |k: &str, x: &str| v.dvars.get(k).cloned().unwrap_or_else(|| x.to_owned());
-                        session::Bo2mpMatchSetup {
-                            map: d("ui_mapname", "mp_nuketown_2020"),
-                            gametype: d("ui_gametype", "tdm"),
-                            ..Default::default()
-                        }
-                    };
-                    crate::lui_frontend::open_loading(&mut hud.host, &setup);
                 } else if kind == Some("event") {
                     hud.host.root_event(c.next().unwrap_or(""), &[]);
                 } else if kind == Some("shot") {
