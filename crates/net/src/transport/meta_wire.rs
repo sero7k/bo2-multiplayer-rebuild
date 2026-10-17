@@ -1112,13 +1112,14 @@ fn decode_entity_event_record(input: &mut WireReader<'_>) -> Result<EntityEventR
 }
 
 /// bo2zm: the movement rules (`SnapshotMeta::feel`): a flag byte (bit 0 =
-/// sent; then on, jump slowdown, zombies, dive, omni), then the numbers.
+/// sent; bit 1 always set; then jump slowdown, zombies, dive, omni), then
+/// the numbers.
 fn encode_feel(out: &mut WireWriter, feel: Option<&movement_iw4::Bo2Feel>) {
     let Some(f) = feel else {
         out.put_u8(0);
         return;
     };
-    let flags = [true, f.on, f.jump_slowdown, f.zombies, f.dive, f.omni]
+    let flags = [true, true, f.jump_slowdown, f.zombies, f.dive, f.omni]
         .into_iter()
         .enumerate()
         .fold(0u8, |acc, (bit, on)| acc | (u8::from(on) << bit));
@@ -1167,7 +1168,6 @@ fn decode_feel(input: &mut WireReader<'_>) -> Result<Option<movement_iw4::Bo2Fee
     }
     let bit = |b: u8| flags & (1 << b) != 0;
     Ok(Some(movement_iw4::Bo2Feel {
-        on: bit(1),
         sprint_strafe_speed_scale: n[0],
         jump_slowdown: bit(2),
         fall_damage_min_height: n[1],
@@ -3370,7 +3370,6 @@ mod feel_wire_tests {
     fn odd_feel(flags: u8) -> movement_iw4::Bo2Feel {
         let bit = |b: u8| flags & (1 << b) != 0;
         movement_iw4::Bo2Feel {
-            on: bit(0),
             sprint_strafe_speed_scale: 1.5,
             jump_slowdown: bit(1),
             fall_damage_min_height: 2.5,

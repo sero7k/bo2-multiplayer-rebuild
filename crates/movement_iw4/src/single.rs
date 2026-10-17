@@ -70,8 +70,73 @@ pub struct PmoveSingleContext {
     pub weapon_blocks_prone: bool,
 }
 
-#[allow(clippy::too_many_lines)]
+/// Longest stretch one step moves; a longer command runs as several steps.
+const PMOVE_MAX_STEP_MS: i32 = 66;
+
+/// A command older than this is moved only from this far back.
+const PMOVE_MAX_BEHIND_MS: i32 = 150;
+
+/// Moves the player from `ps.command_time` up to `cmd.server_time`: nothing
+/// when the command is older than the state, never more than 150 ms of it,
+/// in steps of at most 66 ms. Between steps the command (as the step left
+/// it, cleared buttons and all) becomes the previous command.
 pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
+    ps: &mut PlayerState,
+    cmd: &mut UserCmd,
+    mut context: PmoveSingleContext,
+    collision: &C,
+    lengths: &L,
+    root: &R,
+) -> PmoveResult {
+    let server_time = cmd.server_time;
+    let mut result = PmoveResult {
+        pml: Pml {
+            forward: [0.0; 3],
+            right: [0.0; 3],
+            up: [0.0; 3],
+            frametime: 0.0,
+            msec: 0,
+            walking: 0,
+            ground_plane: 0,
+            almost_ground_plane: 0,
+            ground_trace: [0; 11],
+            previous_origin: ps.origin,
+            previous_velocity: ps.velocity,
+            holdrand: 0,
+        },
+        bounds: context.bounds,
+        stance_event: None,
+        reset_torso: false,
+        view_change: 0.0,
+    };
+    if ps.command_time > server_time {
+        return result;
+    }
+    if ps.command_time + PMOVE_MAX_BEHIND_MS < server_time {
+        ps.command_time = server_time - PMOVE_MAX_BEHIND_MS;
+    }
+    let mut view_change = 0.0;
+    let mut stance_event = None;
+    let mut reset_torso = false;
+    while ps.command_time != server_time {
+        let step = (server_time - ps.command_time).min(PMOVE_MAX_STEP_MS);
+        cmd.server_time = ps.command_time + step;
+        result = pmove_single(ps, cmd, context, collision, lengths, root);
+        view_change += result.view_change;
+        stance_event = result.stance_event.or(stance_event);
+        reset_torso |= result.reset_torso;
+        context.old_buttons = cmd.buttons;
+        context.walk.old_buttons = cmd.buttons;
+        context.old_move = [cmd.forwardmove, cmd.rightmove];
+    }
+    result.view_change = view_change;
+    result.stance_event = stance_event;
+    result.reset_torso = reset_torso;
+    result
+}
+
+#[allow(clippy::too_many_lines)]
+pub fn pmove_single<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     ps: &mut PlayerState,
     cmd: &mut UserCmd,
     context: PmoveSingleContext,
@@ -86,7 +151,6 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         cmd,
         context.old_move,
         crate::ads_intent::sniper_scope_raised(ps, context.ads_intent),
-        context.walk.feel,
     );
     ps.command_time = cmd.server_time;
 
@@ -107,10 +171,8 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
 
     let old_yaw = ps.viewangles[1];
     update_view_angles(ps, cmd, context.view_angles);
-    if context.walk.feel.on {
-        // bo2zm: lying down, the view is held to the body's turn.
-        crate::prone_turn::bo2_prone_view(ps, cmd, msec, collision, context.walk.feel.zombies, old_yaw);
-    }
+    // Lying down, the view is held to the body's turn.
+    crate::prone_turn::bo2_prone_view(ps, cmd, msec, collision, context.walk.feel.zombies, old_yaw);
 
     let (forward, right, up) = math_iw4::angle_vectors(ps.viewangles);
     pml.forward = forward;
@@ -179,12 +241,12 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         update_sprint(
             ps,
             &sprint_cmd,
-            crate::feel::sprint_old_buttons(context.old_buttons, context.walk.feel),
+            crate::feel::sprint_old_buttons(context.old_buttons),
             sprint,
         )
     };
-    crate::feel::update_walking_flag(ps, cmd, context.walk.feel); // bo2zm
-    crate::feel::jump_out_of_sprint(ps, cmd, context.walk.feel, sprint_before, sprint_change); // bo2zm
+    crate::feel::update_walking_flag(ps, cmd);
+    crate::feel::jump_out_of_sprint(ps, cmd, sprint_before, sprint_change);
     let previous_stance = ps.pm_flags & 3;
     // bo2zm: from the frame after take-off to the end of the still moment,
     // the view drops to prone; a get-up pressed meanwhile is kept.
@@ -243,21 +305,12 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         // bo2zm: through a dive the body shrinks as the view drops.
         bounds.maxs[2] = crate::dive::hull_height(ps);
     }
-    if context.walk.feel.on {
-        // bo2zm: a dive's push does not drop the aim on lying down (the gun
-        // aims through a dive, by request).
-        crate::stance::bo2_lie_down(
-            ps,
-            &ads_cmd,
-            collision,
-            bounds,
-            previous_stance & pm_flags::PRONE != 0,
-        );
-    }
-
-    update_ads_frac(ps, pml.msec, context.ads_frac);
+    // A dive's push does not drop the aim on lying down (the gun aims
+    // through a dive).
+    crate::stance::bo2_lie_down(ps, &ads_cmd, collision, bounds, previous_stance & pm_flags::PRONE != 0);
 
     if ps.pm_type == PM_TYPE_NORMAL_LINKED {
+        update_ads_frac(ps, pml.msec, context.ads_frac);
         // The trigger link owns the origin: no walk, no air move, no jump, and
         // velocity zeroed every pmove. Viewangles and stance stay live above,
         // and the weapon ticks separately.
@@ -316,6 +369,8 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     if (ps.pm_flags & pm_flags::MANTLE) != 0 {
         mantle::cap_view(ps, MantleCapViewContext::default());
         mantle::advance(ps, pml.msec, MantleMoveContext::default(), lengths, root);
+        // The aim blends with the gun, after the move.
+        update_ads_frac(ps, pml.msec, context.ads_frac);
         return PmoveResult {
             pml,
             bounds,
@@ -325,10 +380,8 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         };
     }
 
-    if context.walk.feel.on {
-        // bo2zm: the body's slope pitches follow this tick's ground.
-        crate::prone_turn::bo2_prone_pitch(ps, &pml, collision, context.walk.feel.zombies);
-    }
+    // The body's slope pitches follow this tick's ground.
+    crate::prone_turn::bo2_prone_pitch(ps, &pml, collision, context.walk.feel.zombies);
 
     drop_timers(ps, &pml);
 
@@ -368,7 +421,6 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
                 jump: context.walk.jump,
                 old_buttons: context.old_buttons,
                 player_spectate_speed_scale: context.air.player_spectate_speed_scale,
-                bo2: context.walk.feel.on,
                 zombies: context.walk.feel.zombies,
             },
             bounds,
@@ -384,7 +436,6 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
                 bounds.maxs,
                 bounds.tracemask,
                 collision,
-                context.walk.feel.on,
                 context.walk.feel.zombies,
             )
         } else if pml.walking == 0 {
@@ -395,7 +446,6 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
                 context.air,
                 bounds,
                 collision,
-                context.walk.feel.on,
                 context.walk.feel.zombies,
             )
         } else {
@@ -406,12 +456,11 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
     complete_ground_trace(ps, &mut pml, bounds, collision, context.walk.feel);
 
     if (ps.pm_flags & pm_flags::LADDER) != 0 {
-        ladder_footsteps(ps, pml.msec, cmd.server_time, context.walk.feel);
+        ladder_footsteps(ps, pml.msec, cmd.server_time);
     } else {
         let old_bob = ps.bob_cycle as u8;
         // bo2zm: a dive runs the rhythm without footsteps.
-        let dive_rhythm = context.walk.feel.on
-            && (ps.pm_flags & (crate::dive::PMF_DIVE | crate::dive::PMF_DIVE_SLIDE)) != 0;
+        let dive_rhythm = (ps.pm_flags & (crate::dive::PMF_DIVE | crate::dive::PMF_DIVE_SLIDE)) != 0;
         footsteps_bob_cycle(
             ps,
             pml.msec,
@@ -433,6 +482,9 @@ pub fn pmove<C: CollisionBackend, L: MantleXAnimLength, R: MantleRootDelta>(
         }
     }
 
+    // The aim blends with the gun, after the move: the move read last
+    // frame's aim.
+    update_ads_frac(ps, pml.msec, context.ads_frac);
     end_tick_velocity(ps, &pml);
     PmoveResult {
         pml,
@@ -513,7 +565,7 @@ impl<C: CollisionBackend> LadderAttachBackend for CollisionLadderBackend<'_, C> 
     }
 }
 
-pub use pmove as PmoveSingle;
+pub use pmove_single as PmoveSingle;
 
 fn clamped_msec(delta: i32) -> i32 {
     delta.clamp(1, 200)

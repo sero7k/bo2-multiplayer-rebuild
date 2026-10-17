@@ -3,7 +3,7 @@ use playerstate_iw4::{PlayerState, pm_flags};
 use crate::{Bo2Feel, Pml};
 
 pub fn friction(ps: &mut PlayerState, pml: &Pml, feel: Bo2Feel) {
-    friction_scaled(ps, pml, feel.on, !feel.on || feel.jump_slowdown, |_| 1.0);
+    friction_scaled(ps, pml, feel.jump_slowdown, |_| 1.0);
 }
 
 /// bo2zm: `ground_scale` scales the ground's friction (a dive's slide); it
@@ -14,12 +14,11 @@ pub fn friction(ps: &mut PlayerState, pml: &Pml, feel: Bo2Feel) {
 pub(crate) fn friction_scaled(
     ps: &mut PlayerState,
     pml: &Pml,
-    bo2: bool,
     jump_slowdown: bool,
     ground_scale: impl FnOnce(&mut PlayerState) -> f32,
 ) {
-    // bo2zm: Black Ops II measures the speed along the ground while walking.
-    let speed = if bo2 && pml.walking != 0 {
+    // Walking, the speed is measured along the ground.
+    let speed = if pml.walking != 0 {
         velocity_speed(&[ps.velocity[0], ps.velocity[1], 0.0])
     } else {
         velocity_speed(&ps.velocity)
@@ -38,23 +37,18 @@ pub(crate) fn friction_scaled(
             }
 
             if (flags & 0x80) != 0 {
-                // bo2zm: a hard landing slides in Black Ops II instead of
-                // stopping dead.
-                control *= if bo2 {
-                    crate::feel::HARD_LANDING_FRICTION_SCALE
-                } else {
-                    2.0
-                };
+                // A hard landing slides instead of stopping dead.
+                control *= crate::feel::HARD_LANDING_FRICTION_SCALE;
             } else if (flags & 0x2000) != 0 {
-                control *= walking_scale(ps, bo2, jump_slowdown);
+                control *= walking_scale(ps, jump_slowdown);
             }
             control *= ground_scale(ps);
 
             drop = control * 5.5;
             drop = drop * pml.frametime + 0.0;
         }
-        // bo2zm: slick ground still slows you in Black Ops II.
-        if bo2 && (pml.ground_trace[4] & 2) != 0 {
+        // Slick ground still slows you.
+        if (pml.ground_trace[4] & 2) != 0 {
             drop += crate::feel::SLIDING_FRICTION * speed * pml.frametime;
         }
     } else {
@@ -75,17 +69,10 @@ pub(crate) fn friction_scaled(
     ps.velocity[2] = scale * ps.velocity[2];
 }
 
-fn walking_scale(ps: &mut PlayerState, bo2: bool, jump_slowdown: bool) -> f32 {
+fn walking_scale(ps: &mut PlayerState, jump_slowdown: bool) -> f32 {
     if ps.pm_time < 0x709 {
-        // bo2zm: Black Ops II grips only while its jump slowdown is on
-        // (Jump_GetSlowdownFriction); it has no dive exception, and the
-        // bit MW2 used for one is last stand here.
-        let grips = if bo2 {
-            jump_slowdown
-        } else {
-            (ps.pm_flags & 0x400000) == 0
-        };
-        if grips {
+        // A landed jump grips harder only while the jump slowdown is on.
+        if jump_slowdown {
             if ps.pm_time > 0x6a3 {
                 return 2.5;
             }
@@ -93,8 +80,7 @@ fn walking_scale(ps: &mut PlayerState, bo2: bool, jump_slowdown: bool) -> f32 {
             return (ps.pm_time as f32 * 1.5 * 0.0005882352706976235) + 1.0;
         }
     } else {
-        // bo2zm: Black Ops II ends only the jump (Jump_ReduceFriction).
-        ps.pm_flags &= if bo2 { !pm_flags::JUMPING } else { 0xffbfdfff };
+        ps.pm_flags &= !pm_flags::JUMPING;
         ps.jump_origin_z = 0.0;
     }
     1.0

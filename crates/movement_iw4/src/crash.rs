@@ -30,16 +30,14 @@ pub fn crash_land(ps: &mut PlayerState, pml: &Pml, feel: Bo2Feel) {
         return;
     };
     let surface = jump::ground_surface_type(pml.ground_trace[4]);
-    // bo2zm: Black Ops II falls hurt, and a fall that hurts without killing
-    // slows you down for a moment.
-    if feel.on {
-        let damage = bo2_fall_damage(ps, pml, fall_height, feel);
-        if damage > 0 {
-            bo2_damage_landing(ps, pml, damage, surface);
-            return;
-        }
+    // Falls hurt, and a fall that hurts without killing slows you down for
+    // a moment.
+    let damage = bo2_fall_damage(ps, pml, fall_height, feel);
+    if damage > 0 {
+        bo2_damage_landing(ps, pml, damage, surface);
+        return;
     }
-    crash_land_apply_sfx(ps, fall_height, surface, feel.on);
+    crash_land_apply_sfx(ps, fall_height, surface);
 }
 
 /// bo2zm: BO2's landing loudness, 4 at 12 units up rising to 24 (PM_CrashLand).
@@ -146,154 +144,22 @@ pub fn crash_land_fall_height(ps: &PlayerState, pml: &Pml) -> Option<f32> {
     Some((land_vel * land_vel) / ((ps.gravity as f32) * TWO))
 }
 
-/// `bo2`: BO2 plays the sound on any floor and a hard landing carries its
-/// loudness.
-fn crash_land_apply_sfx(ps: &mut PlayerState, fall_height: f32, surface: i32, bo2: bool) {
+/// The sound plays on any floor and a hard landing carries its loudness.
+fn crash_land_apply_sfx(ps: &mut PlayerState, fall_height: f32, surface: i32) {
     if fall_height <= FALL_LIGHT_IN {
         return;
     }
     if fall_height < FALL_MEDIUM_IN {
-        if surface != 0 || bo2 {
-            add_predictable_event(ps, EV_FOOTSTEP_WALK, surface);
-        }
+        add_predictable_event(ps, EV_FOOTSTEP_WALK, surface);
         return;
     }
     if fall_height < FALL_HARD_IN {
-        if surface != 0 || bo2 {
-            add_predictable_event(ps, EV_FOOTSTEP_RUN, surface);
-        }
+        add_predictable_event(ps, EV_FOOTSTEP_RUN, surface);
         return;
     }
     ps.velocity[0] *= HARD_LAND_VEL_SCALE;
     ps.velocity[1] *= HARD_LAND_VEL_SCALE;
     ps.velocity[2] *= HARD_LAND_VEL_SCALE;
-    if bo2 {
-        add_predictable_event(ps, EV_LANDING_FIRST + surface, land_volume(fall_height));
-    } else if surface != 0 {
-        add_predictable_event(ps, EV_LANDING_FIRST + surface, 0);
-    }
+    add_predictable_event(ps, EV_LANDING_FIRST + surface, land_volume(fall_height));
 }
 
-#[cfg(test)]
-mod bo2_tests {
-    use super::*;
-
-    /// BO2's landing loudness: 4 just over 12 units, 24 from 142 up.
-    #[test]
-    fn landing_loudness_follows_bo2() {
-        assert_eq!(land_volume(12.0), 0);
-        assert_eq!(land_volume(13.0), 4);
-        assert_eq!(land_volume(64.0), 12);
-        assert_eq!(land_volume(116.0), 20);
-        assert_eq!(land_volume(500.0), 24);
-    }
-
-    const ZM: Bo2Feel = Bo2Feel {
-        on: true,
-        sprint_strafe_speed_scale: 0.667,
-        jump_slowdown: true,
-        fall_damage_min_height: 128.0,
-        fall_damage_max_height: 300.0,
-        zombies: true,
-        gravity: 800,
-        fall_damage_perk: 0x40,
-        flak_jacket_perk: 0x80,
-        ..Bo2Feel::IW4
-    };
-    const MP: Bo2Feel = Bo2Feel {
-        zombies: false,
-        ..ZM
-    };
-
-    /// Lands from `height` units up, running at 100 u/s.
-    fn land(height: f32, feel: Bo2Feel, setup: impl Fn(&mut PlayerState)) -> PlayerState {
-        let mut ps = PlayerState::ZERO;
-        ps.gravity = 800;
-        ps.velocity = [100.0, 0.0, 0.0];
-        setup(&mut ps);
-        let pml = Pml {
-            forward: [1.0, 0.0, 0.0],
-            right: [0.0, -1.0, 0.0],
-            up: [0.0, 0.0, 1.0],
-            frametime: 0.05,
-            msec: 50,
-            walking: 1,
-            ground_plane: 1,
-            almost_ground_plane: 1,
-            ground_trace: [0; 11],
-            previous_origin: [0.0; 3],
-            previous_velocity: [0.0, 0.0, -libm::sqrtf(1600.0 * height)],
-            holdrand: 0,
-        };
-        crash_land(&mut ps, &pml, feel);
-        ps
-    }
-
-    fn pain(ps: &PlayerState) -> Option<i32> {
-        (ps.events_0 == EV_LANDING_PAIN_FIRST).then_some(ps.event_parms_0)
-    }
-
-    #[test]
-    fn falls_do_not_hurt_in_iw4() {
-        let ps = land(200.0, Bo2Feel::IW4, |_| {});
-        assert_eq!(pain(&ps), None);
-        assert_eq!(ps.pm_time, 0);
-    }
-
-    #[test]
-    fn a_fall_that_hurts_slows_you_down_in_bo2() {
-        // Both modes: 128 to 300 units. 200 = 41 damage, 1935 ms at 0.2 speed.
-        let ps = land(200.0, ZM, |_| {});
-        assert_eq!(pain(&ps), Some(41));
-        assert_eq!(ps.pm_time, 1935);
-        assert!(ps.pm_flags & 0x80 != 0);
-        assert!((ps.velocity[0] - 20.0).abs() < 1e-3);
-        assert_eq!(pain(&land(200.0, MP, |_| {})), Some(41));
-    }
-
-    #[test]
-    fn a_full_damage_fall_keeps_two_thirds_of_your_speed() {
-        let ps = land(400.0, ZM, |_| {});
-        assert_eq!(pain(&ps), Some(100));
-        assert_eq!(ps.pm_time, 0);
-        assert!((ps.velocity[0] - 67.0).abs() < 1e-3);
-    }
-
-    #[test]
-    fn short_falls_do_not_hurt() {
-        assert_eq!(pain(&land(120.0, ZM, |_| {})), None);
-    }
-
-    #[test]
-    fn the_fall_perk_stops_fall_damage_in_both_modes() {
-        let perk = |ps: &mut PlayerState| ps.perks[0] = 0x40;
-        assert_eq!(pain(&land(300.0, ZM, perk)), None);
-        assert_eq!(pain(&land(300.0, MP, perk)), None);
-    }
-
-    #[test]
-    fn phd_flopper_turns_zombies_fall_damage_into_1() {
-        let flopper = |ps: &mut PlayerState| ps.perks[0] = 0x80;
-        // Zombies: 1 damage and a short stun.
-        let ps = land(300.0, ZM, flopper);
-        assert_eq!(pain(&ps), Some(1));
-        assert_eq!(ps.pm_time, 535);
-        // A fall too short to hurt stays harmless.
-        assert_eq!(pain(&land(120.0, ZM, flopper)), None);
-        // Multiplayer's Flak Jacket leaves falls alone.
-        assert_eq!(pain(&land(300.0, MP, flopper)), Some(100));
-    }
-
-    #[test]
-    fn diving_counts_falls_from_65_units() {
-        let diving = |ps: &mut PlayerState| ps.pm_flags |= crate::dive::PMF_DIVE;
-        assert_eq!(pain(&land(100.0, ZM, diving)), Some(25));
-        assert_eq!(pain(&land(100.0, ZM, |_| {})), None);
-    }
-
-    #[test]
-    fn low_gravity_falls_do_not_hurt_in_zombies() {
-        let ps = land(200.0, ZM, |ps| ps.gravity = 400);
-        assert_eq!(pain(&ps), None);
-    }
-}

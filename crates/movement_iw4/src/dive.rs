@@ -258,7 +258,7 @@ pub fn advance<C: CollisionBackend>(
     }
     // A dive never happens in last stand, the only time Zombies' prone check
     // differs.
-    crate::air::air_move_with(ps, pml, cmd, air, bounds, collision, true, false, |ps| {
+    crate::air::air_move_with(ps, pml, cmd, air, bounds, collision, false, |ps| {
         slide_friction(ps, now, collision, bounds)
     })
 }

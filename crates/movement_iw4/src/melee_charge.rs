@@ -74,7 +74,6 @@ pub fn melee_charge_move<C: CollisionBackend>(
     maxs: [f32; 3],
     tracemask: u32,
     collision: &C,
-    bo2: bool,
     zombies: bool,
 ) -> f32 {
     let speed = {
@@ -103,10 +102,10 @@ pub fn melee_charge_move<C: CollisionBackend>(
 
     project_to_ground(&mut ps.velocity, &pml.ground_trace);
 
-    // bo2zm: a stair step's height, for the camera.
+    // A stair step's height, for the camera.
     let mut view_change = 0.0;
     if ps.velocity[0] != 0.0 || ps.velocity[1] != 0.0 {
-        view_change = step_slide_move(ps, pml, collision, mins, maxs, tracemask, None, bo2, zombies);
+        view_change = step_slide_move(ps, pml, collision, mins, maxs, tracemask, None, zombies);
     }
 
     ps.velocity[0] = new_speed * dir[0];

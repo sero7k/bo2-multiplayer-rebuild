@@ -26,6 +26,8 @@ fn round_ties_even(x: f32) -> f32 {
     libm::copysignf(rounded, x)
 }
 
+/// The velocity left by a move: no faster than the distance moved, when that
+/// is well short of it, then cut to whole units toward zero.
 pub fn end_tick_velocity(ps: &mut PlayerState, pml: &Pml) {
     let dt = pml.frametime;
     if dt > 0.0 {
@@ -43,5 +45,9 @@ pub fn end_tick_velocity(ps: &mut PlayerState, pml: &Pml) {
             ps.velocity = [mv[0] * inv, mv[1] * inv, mv[2] * inv];
         }
     }
-    snap_vector(&mut ps.velocity);
+    ps.velocity = [
+        ps.velocity[0] as i32 as f32,
+        ps.velocity[1] as i32 as f32,
+        ps.velocity[2] as i32 as f32,
+    ];
 }
