@@ -1790,34 +1790,85 @@ isAimbotWeapon(weapon)
     if( !isDefined(weapon) || weapon == "none" )
         return false;
 
-    return isSubStr(weapon, "svu_")
-        || isSubStr(weapon, "dsr50_")
-        || isSubStr(weapon, "ballista_")
-        || isSubStr(weapon, "xpr_")
-        || isSubStr(weapon, "koshka_mp")
-        || isSubStr(weapon, "svg_mp")
-        || isSubStr(weapon, "katt_mp")
-        || isSubStr(weapon, "k98_mp")
-        || isSubStr(weapon, "halo_sniper_mp")
-        || isSubStr(weapon, "scav_mp")
-        || isSubStr(weapon, "iw5_as50_mp")
-        || isSubStr(weapon, "usr_mp")
-        || isSubStr(weapon, "ebr_mp")
-        || isSubStr(weapon, "m40a3_mp")
-        || isSubStr(weapon, "awp_mp")
-        || isSubStr(weapon, "psg_mp")
-        || isSubStr(weapon, "barret_mp")
-        || isSubStr(weapon, "barrett_mp")
-        || isSubStr(weapon, "drag_mp")
-        || isSubStr(weapon, "cheytac_mp")
-        || isSubStr(weapon, "msr_mp")
-        || isSubStr(weapon, "l96a_mp")
-        || isSubStr(weapon, "locus_mp")
-        || isSubStr(weapon, "lynx_mp")
-        || isSubStr(weapon, "ksb_mp")
-        || isSubStr(weapon, "wa2000_mp")
-        || isSubStr(weapon, "mors_mp")
-        || isSubStr(weapon, "ptrs_mp");
+    // Every sniper in the game: Black Ops II's own (the XPR-50 is as50_mp),
+    // the ones ported from the other games, and the mod's.
+    snipers = [];
+    snipers[snipers.size] = "svu_";
+    snipers[snipers.size] = "dsr50_";
+    snipers[snipers.size] = "ballista_";
+    snipers[snipers.size] = "as50_";
+    snipers[snipers.size] = "xpr_";
+    snipers[snipers.size] = "bo1_dragunov_mp";
+    snipers[snipers.size] = "bo1_wa2000_mp";
+    snipers[snipers.size] = "bo1_l96a1_mp";
+    snipers[snipers.size] = "bo1_psg1_mp";
+    snipers[snipers.size] = "mw2_cheytac_mp";
+    snipers[snipers.size] = "mw2_barrett_mp";
+    snipers[snipers.size] = "mw2_wa2000_mp";
+    snipers[snipers.size] = "mw2_m21_mp";
+    snipers[snipers.size] = "gh_vks_mp";
+    snipers[snipers.size] = "gh_gm6_mp";
+    snipers[snipers.size] = "gh_usr_mp";
+    snipers[snipers.size] = "gh_l115a3_mp";
+    snipers[snipers.size] = "gh_imbel_mp";
+    snipers[snipers.size] = "gh_svu_mp";
+    snipers[snipers.size] = "gh_g28_mp";
+    snipers[snipers.size] = "gh_mk14_mp";
+    snipers[snipers.size] = "mw3_barrett_mp";
+    snipers[snipers.size] = "mw3_l96a1_mp";
+    snipers[snipers.size] = "mw3_dragunov_mp";
+    snipers[snipers.size] = "mw3_as50_mp";
+    snipers[snipers.size] = "mw3_rsass_mp";
+    snipers[snipers.size] = "mw3_msr_mp";
+    snipers[snipers.size] = "waw_springfield_mp";
+    snipers[snipers.size] = "waw_kar98k_mp";
+    snipers[snipers.size] = "waw_mosinrifle_mp";
+    snipers[snipers.size] = "waw_type99rifle_mp";
+    snipers[snipers.size] = "waw_ptrs41_mp";
+    snipers[snipers.size] = "cod4_m40a3_mp";
+    snipers[snipers.size] = "cod4_m21_mp";
+    snipers[snipers.size] = "cod4_dragunov_mp";
+    snipers[snipers.size] = "cod4_remington700_mp";
+    snipers[snipers.size] = "cod4_barrett_mp";
+    snipers[snipers.size] = "aw_mors_mp";
+    snipers[snipers.size] = "aw_thor_mp";
+    snipers[snipers.size] = "aw_gm6_mp";
+    snipers[snipers.size] = "aw_m990_mp";
+    snipers[snipers.size] = "bo3_sniper_fastbolt_mp";
+    snipers[snipers.size] = "bo3_sniper_fastsemi_mp";
+    snipers[snipers.size] = "bo3_sniper_powerbolt_mp";
+    snipers[snipers.size] = "bo3_sniper_chargeshot_mp";
+    snipers[snipers.size] = "koshka_mp";
+    snipers[snipers.size] = "svg_mp";
+    snipers[snipers.size] = "katt_mp";
+    snipers[snipers.size] = "k98_mp";
+    snipers[snipers.size] = "halo_sniper_mp";
+    snipers[snipers.size] = "scav_mp";
+    snipers[snipers.size] = "iw5_as50_mp";
+    snipers[snipers.size] = "usr_mp";
+    snipers[snipers.size] = "ebr_mp";
+    snipers[snipers.size] = "m40a3_mp";
+    snipers[snipers.size] = "awp_mp";
+    snipers[snipers.size] = "psg_mp";
+    snipers[snipers.size] = "barret_mp";
+    snipers[snipers.size] = "drag_mp";
+    snipers[snipers.size] = "cheytac_mp";
+    snipers[snipers.size] = "msr_mp";
+    snipers[snipers.size] = "l96a_mp";
+    snipers[snipers.size] = "locus_mp";
+    snipers[snipers.size] = "lynx_mp";
+    snipers[snipers.size] = "kbs_mp";
+    snipers[snipers.size] = "wa2000_mp";
+    snipers[snipers.size] = "mors_mp";
+    snipers[snipers.size] = "ptrs_mp";
+    snipers[snipers.size] = "barrett_mp";
+    snipers[snipers.size] = "ksb_mp";
+    foreach( sniper in snipers )
+    {
+        if( isSubStr(weapon, sniper) )
+            return true;
+    }
+    return false;
 }
 
 isOnCrosshair(victim) //Credits to @BillinAssDoctor

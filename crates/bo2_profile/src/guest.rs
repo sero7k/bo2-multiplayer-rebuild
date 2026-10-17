@@ -655,11 +655,10 @@ pub const MOD: &[GuestGun] = &[
 /// The first statstable index of the mod's guns.
 pub const MOD_FIRST_INDEX: i32 = 1100;
 
-/// bo2mp: the mod's guns that are not Call of Duty's (Fortnite's SCAR and
-/// tactical shotgun, Halo's sniper, Counter-Strike's skins, Minecraft's
-/// pickaxe): kept in its numbering so saved classes stay put, never listed,
-/// boxed or given to bots.
-pub const MOD_HIDDEN: &[&str] = &["fn_scar", "fn_tacshotty", "halo_sniper", "awp", "karambit", "m9", "bk", "diamond_pickaxe"];
+/// bo2mp: the mod's Fortnite guns (its SCAR and tactical shotgun): kept in
+/// its numbering so saved classes stay put, never listed, boxed or given
+/// to bots.
+pub const MOD_HIDDEN: &[&str] = &["fn_scar", "fn_tacshotty"];
 
 /// Whether a mod gun is one of `MOD_HIDDEN`.
 fn mod_hidden(gun: &GuestGun) -> bool {
