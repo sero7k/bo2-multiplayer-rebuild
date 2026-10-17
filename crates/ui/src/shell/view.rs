@@ -852,8 +852,9 @@ pub(crate) fn grid_more(c: &mut Kids, cx: &Ctx, first: usize, last: usize, n: us
     if first == 0 && last >= n {
         return;
     }
-    let up = if first > 0 { "▲ " } else { "" };
-    let down = if last < n { " ▼" } else { "" };
+    // (The font has no arrow glyphs: plain words.)
+    let up = if first > 0 { "MORE ABOVE  ·  " } else { "" };
+    let down = if last < n { "  ·  MORE BELOW" } else { "" };
     c.spawn((
         Node { position_type: PositionType::Absolute, left: cx.px(left), top: cx.px(top), ..default() },
         Text::new(format!("{up}{}-{} OF {n}{down}", first + 1, last)),
@@ -1425,7 +1426,7 @@ pub(crate) fn shell_view(
             // calling card and emblem pickers show his card in their middle.)
             if shell.screen.is_zombies() {
                 super::zombies_view::zm_card(c, &mut cx, &cat.player);
-            } else if !matches!(shell.screen, Screen::Main | Screen::CardPick | Screen::EmblemPick) {
+            } else if !matches!(shell.screen, Screen::Main | Screen::CardPick | Screen::EmblemPick | Screen::ClassEdit | Screen::ItemPick) {
                 player_card(c, &mut cx, &cat.player);
             }
             if shell.screen != Screen::Main {
