@@ -135,7 +135,7 @@ pub(crate) struct HudWords {
 pub(crate) const OTHER_SQUAD: Color = Color::srgb(0.52, 0.54, 0.50);
 
 /// The first word of every WARZONE screen's header.
-pub(crate) const HEADER: &str = "WARZONE";
+pub(crate) const HEADER: &str = "DROP ZONE";
 
 /// WARZONE's menu: (label, line under it in focus).
 pub(crate) const QUICK_PLAY: (&str, &str) = ("QUICK PLAY", "Pick a playlist and deploy at once with bot squads.");

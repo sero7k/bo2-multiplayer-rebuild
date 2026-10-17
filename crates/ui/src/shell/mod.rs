@@ -223,7 +223,7 @@ pub(crate) enum Act {
     WzPickMode,
 }
 
-/// The main menu's modes still to come (SPEC OPS).
+/// The main menu's modes still to come (SURVIVAL).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Soon {
     SpecOps,
@@ -416,8 +416,8 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
         Screen::Main => vec![
             Row::new("MULTIPLAYER", "Find a match, or a custom game with bots on every map.", Act::Multiplayer),
             Row::new("OUTBREAK", "Zombies: hold out against the undead, round after round.", Act::Zombies),
-            Row::new("WARZONE", "Resurgence on Rebirth Island: squads, the gas, redeploys.", Act::Warzone),
-            Row::new("SPEC OPS", "Coming soon.", Act::Soon(Soon::SpecOps)),
+            Row::new("DROP ZONE", "Resurgence on Rebirth Island: squads, the gas, redeploys.", Act::Warzone),
+            Row::new("SURVIVAL", "Coming soon.", Act::Soon(Soon::SpecOps)),
             Row::new("OPTIONS", "Graphics, sound and controls.", Act::Options),
             Row::new("FRIENDS", "Add friends by their code and see where they are.", Act::Friends),
             Row::new("QUIT", "Back to the desktop.", Act::Quit),
@@ -563,7 +563,7 @@ impl Ask {
     pub(crate) fn text(self) -> (&'static str, &'static str) {
         match self {
             Ask::Prestige => ("ENTER PRESTIGE?", "You go back to level 1 with the next prestige icon. Your unlocks start over."),
-            Ask::Soon(Soon::SpecOps) => ("SPEC OPS", "Coming soon."),
+            Ask::Soon(Soon::SpecOps) => ("SURVIVAL", "Coming soon."),
         }
     }
 
