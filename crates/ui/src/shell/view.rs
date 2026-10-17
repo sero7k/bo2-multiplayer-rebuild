@@ -1303,35 +1303,13 @@ fn main_menu(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row], online: &O
 }
 
 /// Multiplayer, as Infinite Warfare's MISSION SELECT: the title, the rows
-/// at the left with the line about the one in focus, a featured map framed
-/// at the bottom left, his card and his party at the right.
+/// at the left with the line about the one in focus, his card and his party
+/// at the right.
 fn multiplayer(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row]) {
     header(c, cx, &["MULTIPLAYER", "MATCH SELECT"]);
     c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(6.0), ..abs(Some(126.0), Some(196.0), None, None, cx) })
         .with_children(|col| menu_rows(col, cx, rows, shell.focus, 470.0, false));
-    featured(c, cx, cat);
     party(c, cx, cat);
-}
-
-/// A map from the rotation, framed at the bottom left (the slot Infinite
-/// Warfare keeps for its Message of the Day), changing every few seconds.
-pub(crate) fn featured(c: &mut Kids, cx: &mut Ctx, cat: &Catalog) {
-    if cat.maps.is_empty() {
-        return;
-    }
-    let at = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) / 600) as usize % cat.maps.len();
-    let m = &cat.maps[at];
-    let (w, h) = (326.0, 196.0);
-    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(6.0), ..abs(Some(132.0), None, None, Some(96.0), cx) }).with_children(|col| {
-        col.spawn((Node { border: UiRect::all(cx.px(3.0)), ..default() }, BorderColor::all(WHITE))).with_children(|f| {
-            picture_box(f, cx, &m.pictures, w, h, ());
-        });
-        col.spawn(Node { column_gap: cx.px(10.0), align_items: AlignItems::Center, ..default() }).with_children(|t| {
-            t.spawn((Text::new("FEATURED MAP"), cx.regular(20.0), TextColor(DIM)));
-            t.spawn((Text::new(m.title.clone()), cx.bold(22.0), TextColor(WHITE)));
-            t.spawn((Text::new(m.origin.to_uppercase()), cx.regular(18.0), TextColor(cx.pal.accent)));
-        });
-    });
 }
 
 /// His party under his card: a line each (an arrow at his own), rank and
