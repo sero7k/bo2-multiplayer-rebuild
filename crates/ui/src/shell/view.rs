@@ -775,6 +775,32 @@ pub(crate) fn map_card(c: &mut Kids, cx: &mut Ctx, pictures: &[String], map: &st
     });
 }
 
+/// The lobby's countdown to its match, as Ghosts' pre-game lobby shows it:
+/// MATCH STARTS IN over the time in large thin numerals, and a line under
+/// them that drains as it runs out (gold in the last ten seconds). Above the
+/// map card at the bottom left.
+pub(crate) fn lobby_countdown(c: &mut Kids, cx: &Ctx, left: f64, total: f64) {
+    let secs = left.ceil().max(0.0) as u32;
+    let last = secs <= 10;
+    let ink = if last { GOLD } else { WHITE };
+    let frac = if total > 0.0 { (left / total).clamp(0.0, 1.0) as f32 } else { 0.0 };
+    c.spawn(Node { width: cx.px(470.0), flex_direction: FlexDirection::Column, row_gap: cx.px(2.0), ..abs(Some(126.0), None, None, Some(392.0), cx) }).with_children(|col| {
+        col.spawn(Node { column_gap: cx.px(10.0), align_items: AlignItems::Center, ..default() }).with_children(|t| {
+            t.spawn((Node { width: cx.px(4.0), height: cx.px(20.0), ..default() }, BackgroundColor(cx.pal.accent)));
+            t.spawn((Text::new("MATCH STARTS IN"), cx.bold(22.0), TextColor(TEXT)));
+        });
+        col.spawn((
+            Text::new(format!("{}:{:02}", secs / 60, secs % 60)),
+            cx.light(108.0),
+            TextColor(ink),
+            TextShadow { offset: Vec2::splat(2.0 * cx.s), color: Color::srgba(0.0, 0.0, 0.0, 0.7), ..default() },
+            Node { margin: UiRect::vertical(cx.px(-14.0)), ..default() },
+        ));
+        col.spawn((Node { width: Val::Percent(100.0), height: cx.px(4.0), ..default() }, BackgroundColor(WHITE.with_alpha(0.18))))
+            .with_child((Node { width: Val::Percent(frac * 100.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(if last { GOLD } else { cx.pal.accent })));
+    });
+}
+
 /// `NUKETOWN 2025` -> `Nuketown 2025` (the card's small map name).
 fn title_word(s: &str) -> String {
     s.split(' ')
@@ -1355,7 +1381,8 @@ pub(crate) fn shell_view(
     let online = online.as_deref().cloned().unwrap_or_default();
     let (area, s) = super::window_scale(&windows);
     let pad = crate::pad_glyphs::pad_active();
-    let starting = bridge::starting_in().map(|ms| (ms / 1000.0).ceil() as i32);
+    // (The lobby's countdown in tenths: its line drains smoothly.)
+    let starting = super::matchmaking::countdown(&shell).map(|(left, _)| (left * 10.0).ceil() as i32);
     // (While pictures are still being read the view looks again twice a
     // second.)
     let tick = if pics.pending() { (time.elapsed_secs() * 2.0) as u64 } else { 0 };
@@ -1425,6 +1452,12 @@ pub(crate) fn shell_view(
                     super::zombies_view::view(c, &mut cx, &shell, &rows);
                 }
                 Screen::WzMenu | Screen::WzLobby | Screen::WzModePick => super::wz_view::view(c, &mut cx, &shell, &cat, &rows),
+            }
+            // The countdown to the match, in the lobbies before one.
+            if matches!(shell.screen, Screen::Lobby | Screen::Lobbies | Screen::Room)
+                && let Some((left, total)) = super::matchmaking::countdown(&shell)
+            {
+                lobby_countdown(c, &cx, left, total);
             }
             // (The main menu has its own foot, and no player card; the
             // calling card and emblem pickers show his card in their middle.)

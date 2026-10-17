@@ -211,9 +211,23 @@ fn play_ui_sound_messages(
     bank: Option<Res<SoundBank>>,
     iwd: Option<Res<SoundIwd>>,
     epoch: Res<crate::backend::MatchEpoch>,
+    settings: Option<Res<frame::GameSettings>>,
 ) {
+    // bo2mp: the lobby's countdown ticks with Ghosts' sound, as the match's
+    // does (`playback`), when Ghosts is installed.
+    let ghosts_tick = crate::ghosts_countdown::clip();
+    let volume = settings.as_deref().map_or(1.0, |s| s.master_volume) * crate::bus_gain::sfx();
+    let mut tick = |commands: &mut Commands, pcm_assets: &mut Assets<PcmAudio>, alias: &str| -> bool {
+        let Some(clip) = ghosts_tick.clone().filter(|_| crate::ghosts_countdown::is_countdown(alias)) else { return false };
+        let handle = pcm_assets.add(clip);
+        crate::backend::spawn_oneshot(commands, handle, bevy::audio::Volume::Linear(volume.max(0.0)), 1.0, epoch.0, crate::backend::AudioScope::Menu);
+        true
+    };
     let Some(bank) = bank else {
         for event in events.read().filter(|_| !crate::AudioSilent::active()) {
+            if tick(&mut commands, &mut pcm_assets, &event.alias) {
+                continue;
+            }
             diag::warn!(
                 Audio,
                 "audio: UiPlaySound `{}` dropped — no SoundBank (typed gap)",
@@ -224,7 +238,7 @@ fn play_ui_sound_messages(
     };
     let iwd = iwd.as_ref().map(|s| &s.0);
     for event in events.read() {
-        if event.alias.is_empty() {
+        if event.alias.is_empty() || tick(&mut commands, &mut pcm_assets, &event.alias) {
             continue;
         }
         let (namespace, alias) = match crate::ui_sounds::ui_sound(&bank.0, &event.alias) {

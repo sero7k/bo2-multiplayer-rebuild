@@ -413,6 +413,29 @@ pub(crate) fn tick(shell: &mut Shell, now: f64) {
     }
 }
 
+/// The lobby's countdown to its match, if one runs: (seconds left, how
+/// long it was). A Custom Game's START MATCH countdown, the public lobby's
+/// between matches, or, while searching with no game found, the time until
+/// it starts its own.
+pub(crate) fn countdown(shell: &Shell) -> Option<(f64, f64)> {
+    if let Some(ms) = super::bridge::starting_in() {
+        return Some((ms / 1000.0, (super::bridge::starting_total() / 1000.0).max(ms / 1000.0)));
+    }
+    let searching = shell.screen == super::Screen::Lobbies && shell.searching && crate::online_match::room().is_none();
+    let since = shell.now - shell.search_started;
+    (searching && candidates(shell).is_empty() && since >= LOOK_S).then(|| ((OWN_MATCH_S - since).max(0.0), OWN_MATCH_S - LOOK_S))
+}
+
+/// The countdown's tick: once a second through its last ten (Ghosts'
+/// `match_countdown_tick` when Ghosts is installed: `uin_start_count_down`
+/// is routed to it).
+pub(crate) fn countdown_tick(shell: &Shell) -> Option<&'static str> {
+    static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(-1);
+    let left = countdown(shell).map_or(-1, |(s, _)| s.ceil() as i64);
+    let before = LAST.swap(left, std::sync::atomic::Ordering::Relaxed);
+    (left != before && (1..=10).contains(&left)).then_some("uin_start_count_down")
+}
+
 /// The search's status line, and a line under it.
 pub(crate) fn search_status(shell: &Shell, now: f64) -> (String, String) {
     let found = candidates(shell);

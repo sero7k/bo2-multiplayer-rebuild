@@ -1089,6 +1089,9 @@ fn shell_input(
         _ => {}
     }
     matchmaking::tick(&mut shell, now_s);
+    if let Some(alias) = matchmaking::countdown_tick(&shell) {
+        sounds.write(frame::UiPlaySound { alias: alias.to_owned() });
+    }
     // FRIENDS > ADD FRIEND: digits (8 at most); Enter adds the friend,
     // Esc leaves the list as it was.
     if let Some(mut t) = shell.code_entry.clone() {

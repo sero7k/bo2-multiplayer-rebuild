@@ -173,8 +173,10 @@ pub(crate) enum Request {
 struct Bridge {
     catalog: Option<Arc<Catalog>>,
     requests: Vec<Request>,
-    /// The match starts in this many ms (the private countdown).
+    /// The match starts in this many ms (a Custom Game's countdown, or the
+    /// public lobby's between matches), and how long that countdown was.
     starting_in: Option<f64>,
+    starting_total: f64,
     built_at: f64,
 }
 
@@ -231,6 +233,11 @@ pub(crate) fn request(r: Request) {
 
 pub(crate) fn starting_in() -> Option<f64> {
     with(|b| b.starting_in)
+}
+
+/// How long the running countdown was (ms).
+pub(crate) fn starting_total() -> f64 {
+    with(|b| b.starting_total)
 }
 
 fn text(v: &hks_t6::host::EngineValues, key: &str) -> String {
@@ -438,10 +445,22 @@ pub(crate) fn lui_side(host: &mut Host, mp: Option<&Mp>) {
             b.built_at = now;
         });
     }
-    // The private countdown.
-    let starting = mp.and_then(|m| m.borrow().private_start_ms).map(|at| (at - now).max(0.0));
+    // The private countdown, else the public lobby's.
+    let starting = mp
+        .and_then(|m| {
+            let m = m.borrow();
+            m.private_start_ms.or(m.public_start_ms)
+        })
+        .map(|at| (at - now).max(0.0));
     let requested = mp.is_some_and(|m| m.borrow().start_requested);
-    with(|b| b.starting_in = starting.or(requested.then_some(5000.0)));
+    with(|b| {
+        let next = starting.or(requested.then_some(5000.0));
+        // (A countdown's length: what it read when it began.)
+        if b.starting_in.is_none() || next.is_some_and(|n| n > b.starting_total) {
+            b.starting_total = next.unwrap_or(0.0);
+        }
+        b.starting_in = next;
+    });
     for r in with(|b| std::mem::take(&mut b.requests)) {
         match r {
             Request::Start(spec) => {
