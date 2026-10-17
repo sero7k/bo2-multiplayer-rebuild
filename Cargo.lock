@@ -2103,6 +2103,7 @@ name = "call_of_claude"
 version = "0.1.0"
 dependencies = [
  "asset_transport",
+ "fastfile_iw7",
 ]
 
 [[package]]
@@ -3773,6 +3774,7 @@ version = "0.1.0"
 dependencies = [
  "asset_transport",
  "bootstrap",
+ "call_of_claude",
  "diag",
 ]
 

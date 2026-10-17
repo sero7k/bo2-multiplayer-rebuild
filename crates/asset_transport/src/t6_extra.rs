@@ -22,7 +22,8 @@ pub fn extra_roots() -> &'static [PathBuf] {
                     .filter(|p| p.is_dir())
                     .collect()
             })
-            .unwrap_or_default()
+            // (Unset: the folder set in the game's folders.)
+            .unwrap_or_else(|| crate::game_paths::get("bo2extra").filter(|p| p.is_dir()).into_iter().collect())
     })
 }
 

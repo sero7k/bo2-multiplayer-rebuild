@@ -6,6 +6,11 @@ use asset_transport::{ensure_artifacts_dir, games_root_from_env};
 static PROCESS_ALLOCATOR: diag::ProcessCountingAllocator = diag::ProcessCountingAllocator;
 
 fn main() {
+    // `iw4l call-of-claude pack <folder>`: makes the Call of Claude folder
+    // (the files the game reads, out of the installed games) and exits.
+    if std::env::args().nth(1).as_deref() == Some("call-of-claude") {
+        std::process::exit(call_of_claude::run(std::env::args().skip(2).collect()));
+    }
     bootstrap::bench::arm();
     prepare_process_root().unwrap_or_else(|e| {
         diag::exit_launch_error(&e);

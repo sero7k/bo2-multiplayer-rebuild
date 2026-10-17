@@ -38,6 +38,12 @@ pub fn root() -> Option<&'static Path> {
     ROOT.get_or_init(|| {
         crate::discover::load_dotenv();
         let setting = std::env::var(ENV).ok();
+        // (Unset: the folder set in the game's folders, else the default.)
+        if setting.is_none()
+            && let Some(set) = crate::game_paths::get("bo2mod").filter(|p| p.is_dir())
+        {
+            return Some(set);
+        }
         folder_from(setting.as_deref(), Path::is_dir)
     })
     .as_deref()

@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 
 /// (key, title, needed) for every game the rebuild reads.
-pub const GAMES: [(&str, &str, bool); 10] = [
+pub const GAMES: [(&str, &str, bool); 13] = [
     ("bo2", "Call of Duty: Black Ops II", true),
     ("bo1", "Call of Duty: Black Ops", false),
     ("mw2", "Call of Duty: Modern Warfare 2", false),
@@ -25,7 +25,19 @@ pub const GAMES: [(&str, &str, bool); 10] = [
     ("bo3", "Call of Duty: Black Ops III", false),
     // bo2mp: its multiplayer maps and Rebirth Island (`zone/mp_jup_*.ff`).
     ("jup", "Call of Duty: Modern Warfare III (2023)", false),
+    // bo2mp: its maps and Zombies (`ui.ff`, `mp_*` / `cp_*` zones).
+    ("iw", "Call of Duty: Infinite Warfare", false),
+    // bo2mp: Black Ops II's mods - the @leetinservers mod's folder
+    // (`mod.ff`, `mod.json`; `IW4L_T6_MOD` overrides) and the DLC5 Zombies
+    // pack's (`IW4L_T6_EXTRA` overrides). Not searched as game folders:
+    // each is read by its own code.
+    ("bo2mod", "the @leetinservers Black Ops II mod", false),
+    ("bo2extra", "the Black Ops II DLC5 Zombies mod", false),
 ];
+
+/// The keys whose folders are mods, read by their own code rather than
+/// searched for zones with the games'.
+pub const MOD_KEYS: [&str; 2] = ["bo2mod", "bo2extra"];
 
 /// Where the folders are kept.
 pub fn config_path() -> PathBuf {
@@ -113,6 +125,7 @@ pub fn looks_valid(folder: &Path) -> bool {
 pub(crate) fn search_folders() -> Vec<PathBuf> {
     load()
         .into_iter()
+        .filter(|(k, _)| !MOD_KEYS.contains(&k.as_str()))
         .map(|(_, p)| p)
         .filter(|p| p.is_dir())
         .collect()
