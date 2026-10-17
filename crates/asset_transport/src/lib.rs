@@ -1,4 +1,5 @@
 pub mod artifact_cache;
+pub mod call_of_claude;
 pub mod discover;
 pub mod iwd;
 pub mod load_jobs;

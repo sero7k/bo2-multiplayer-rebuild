@@ -30,6 +30,7 @@ members = [
     "crates/assets",
     "crates/bo2_profile", # bo2mp
     "crates/bootstrap",
+    "crates/call_of_claude", # the trimmed games folder
     "crates/bo2zm_tools", # bo2zm
     "crates/audio",
     "crates/bots",
