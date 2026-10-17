@@ -372,6 +372,10 @@ fn footer(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, online: &Onl
                 match shell.screen {
                     Screen::Lobby | Screen::WzLobby | Screen::Options | Screen::MatchFilter => hint(l, cx, "Q / E", "xenonbutton_lb", "TABS"),
                     Screen::MapPick => hint(l, cx, "Q / E", "xenonbutton_lb", "SECTIONS"),
+                    Screen::ItemPick if super::cac::weapon_picker(shell) => {
+                        hint(l, cx, "Q / E", "xenonbutton_lb", "GAMES");
+                        hint(l, cx, "W / S", "xenonbutton_dpad_ud", "CATEGORIES");
+                    }
                     Screen::ItemPick => hint(l, cx, "Q / E", "xenonbutton_lb", "CATEGORIES"),
                     Screen::CardPick | Screen::EmblemPick => hint(l, cx, "Q / E", "xenonbutton_lb", "PAGES"),
                     Screen::ZmMapPick if super::zombies::pages(super::zombies::state().bo1()).len() > 1 => hint(l, cx, "Q / E", "xenonbutton_lb", "SECTIONS"),

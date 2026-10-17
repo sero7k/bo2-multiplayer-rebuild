@@ -1362,7 +1362,14 @@ fn shell_input(
     }
     // Moving.
     if n > 0 && dir != (0, 0) {
-        if matches!(shell.screen, Screen::MapPick | Screen::ItemPick | Screen::ZmMapPick | Screen::CardPick | Screen::EmblemPick) {
+        // bo2mp: the weapon picker goes a category at a time (left / right
+        // its guns, up / down the categories), as Black Ops II's.
+        let weapon_move = (shell.screen == Screen::ItemPick && cac::weapon_picker(&shell))
+            .then(|| classes::book().and_then(|b| cac::weapon_step(&shell, &b, dir)))
+            .flatten();
+        if let Some(k) = weapon_move {
+            shell.focus = k;
+        } else if matches!(shell.screen, Screen::MapPick | Screen::ItemPick | Screen::ZmMapPick | Screen::CardPick | Screen::EmblemPick) {
             let f = shell.focus as i32;
             let picker = matches!(shell.screen, Screen::CardPick | Screen::EmblemPick);
             let cols = if picker {

@@ -279,6 +279,39 @@ pub(crate) fn picks(s: &Shell, book: &ClassBook) -> (Vec<String>, Vec<Pick>) {
     (tabs, out)
 }
 
+/// The weapon picker's categories: the runs of one kind in its list
+/// (start, end) (NONE, alone, first for a slot that may be empty).
+pub(crate) fn categories(picks: &[Pick]) -> Vec<(usize, usize)> {
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    for (i, p) in picks.iter().enumerate() {
+        match out.last_mut() {
+            Some((start, end)) if picks[*start].group == p.group => *end = i + 1,
+            _ => out.push((i, i + 1)),
+        }
+    }
+    out
+}
+
+/// Whether the slot open in the picker takes a weapon (the picker is then
+/// a category at a time, as Black Ops II's).
+pub(crate) fn weapon_picker(s: &Shell) -> bool {
+    matches!(EDIT_SLOTS[s.slot.min(EDIT_SLOTS.len() - 1)].0, "primary" | "secondary")
+}
+
+/// A move in the weapon picker: left / right through the category's guns,
+/// up / down to the first of the category before or after (round).
+pub(crate) fn weapon_step(s: &Shell, book: &ClassBook, dir: (i32, i32)) -> Option<usize> {
+    let picks = picks(s, book).1;
+    let cats = categories(&picks);
+    let at = cats.iter().position(|(a, b)| (*a..*b).contains(&s.focus))?;
+    let (a, b) = cats[at];
+    if dir.1 != 0 {
+        let n = cats.len() as i32;
+        return Some(cats[(at as i32 + dir.1).rem_euclid(n) as usize].0);
+    }
+    Some((s.focus as i32 + dir.0).clamp(a as i32, b as i32 - 1) as usize)
+}
+
 /// The picker opens on the tab and tile of what the slot holds.
 pub(crate) fn open_pick(s: &mut Shell, book: &ClassBook, slot_index: usize) {
     s.slot = slot_index;
@@ -777,6 +810,9 @@ fn pick10_top(c: &mut Kids, cx: &mut Ctx, title: &str, spent: i32) {
 /// the one in focus large with what it does; for attachments and camos the
 /// gun at the bottom right. Weapons are in a tab per game (top right).
 fn pick_view(c: &mut Kids, cx: &mut Ctx, s: &Shell, book: &ClassBook, class: &ClassView) {
+    if weapon_picker(s) {
+        return weapon_view(c, cx, s, book, class);
+    }
     let pal = cx.pal;
     let (slot, label) = EDIT_SLOTS[s.slot.min(EDIT_SLOTS.len() - 1)];
     let gun = book.item(class.get(weapon_of(slot)));
@@ -876,6 +912,144 @@ fn pick_view(c: &mut Kids, cx: &mut Ctx, s: &Shell, book: &ClassBook, class: &Cl
     }
 }
 
+/// The weapon picker, as Black Ops II's: the slot's title with the games as
+/// a toggle under it (Q / E) and the points; one category at a time, the
+/// gun in focus a large tile and the rest of its category smaller beside
+/// it; under them a dot per gun, what the gun in focus is, and the
+/// categories (this one large in the accent, the rest after it).
+fn weapon_view(c: &mut Kids, cx: &mut Ctx, s: &Shell, book: &ClassBook, class: &ClassView) {
+    let pal = cx.pal;
+    let slot = EDIT_SLOTS[s.slot.min(EDIT_SLOTS.len() - 1)].0;
+    let title = match slot {
+        "secondary" if has_card(book, class, "overkill") => "SECOND PRIMARY",
+        "secondary" => "SECONDARY",
+        _ => "PRIMARY",
+    };
+    let (l, r) = (126.0, 1794.0);
+    // The title, the games' toggle, the points.
+    c.spawn((Text::new(class.name.to_uppercase()), cx.regular(20.0), TextColor(TEXT), abs(Some(l), Some(22.0), None, None, cx)));
+    c.spawn((Text::new(title), cx.regular(60.0), TextColor(WHITE), abs(Some(l - 3.0), Some(40.0), None, None, cx)));
+    let (tabs, picks) = picks(s, book);
+    let tab = s.page.min(tabs.len().saturating_sub(1));
+    c.spawn(Node { column_gap: cx.px(26.0), align_items: AlignItems::FlexEnd, ..abs(Some(l), Some(104.0), None, None, cx) }).with_children(|t| {
+        if tabs.len() > 1 {
+            super::view::hint(t, cx, "Q", "xenonbutton_lb", "");
+        }
+        for (i, name) in tabs.iter().enumerate() {
+            let sel = i == tab;
+            t.spawn((Hit::Page(i), Button, Node { flex_direction: FlexDirection::Column, row_gap: cx.px(3.0), ..default() })).with_children(|b| {
+                b.spawn((Text::new(name.clone()), if sel { cx.black(22.0) } else { cx.bold(21.0) }, TextColor(if sel { WHITE } else { DIM })));
+                b.spawn((Node { width: Val::Percent(100.0), height: cx.px(3.0), ..default() }, BackgroundColor(if sel { pal.accent } else { Color::NONE })));
+            });
+        }
+        if tabs.len() > 1 {
+            super::view::hint(t, cx, "E", "xenonbutton_rb", "");
+        }
+    });
+    c.spawn((Text::new(format!("{}/{POINTS}", class.spent)), cx.bold(54.0), TextColor(if class.spent > POINTS { ENEMY } else { pal.accent }), abs(None, Some(64.0), Some(cx.w - r), None, cx)));
+    c.spawn(Node { width: cx.px(r - l), height: cx.px(12.0), column_gap: cx.px(8.0), ..abs(Some(l), Some(146.0), None, None, cx) }).with_children(|b| {
+        for k in 0..POINTS {
+            b.spawn((Node { flex_grow: 1.0, ..default() }, BackgroundColor(if k < class.spent { pal.accent } else { pal.accent_a(0.22) })));
+        }
+    });
+    let cats = categories(&picks);
+    let Some(at) = cats.iter().position(|(a, b)| (*a..*b).contains(&s.focus)) else { return };
+    let (a, b) = cats[at];
+    let have = class.get(slot);
+    // The row: the gun in focus large, then up to three after it.
+    let (big_w, big_h, w, h, gap) = (600.0, 380.0, 330.0, 252.0, 20.0);
+    let first = s.focus.saturating_sub(0).max(a);
+    let shown_after: Vec<usize> = (first + 1..b).take(3).collect();
+    let before: Vec<usize> = (a..first).rev().take(3usize.saturating_sub(shown_after.len())).collect::<Vec<_>>().into_iter().rev().collect();
+    c.spawn(Node { column_gap: cx.px(gap), align_items: AlignItems::Center, ..abs(Some(l), Some(176.0), None, None, cx) }).with_children(|row| {
+        for k in before.iter().copied().chain(std::iter::once(s.focus)).chain(shown_after.iter().copied()) {
+            let p = &picks[k];
+            let on = k == s.focus;
+            let (tw, th) = if on { (big_w, big_h) } else { (w, h) };
+            row.spawn((
+                Hit::Row(k),
+                Button,
+                Node { width: cx.px(tw), height: cx.px(th), flex_direction: FlexDirection::Column, border: UiRect::all(cx.px(2.0)), ..default() },
+                BorderColor::all(if on { pal.accent } else { WHITE.with_alpha(0.07) }),
+                tile_fill(cx, false),
+            ))
+            .with_children(|tile| {
+                tile.spawn(Node { flex_grow: 1.0, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }).with_children(|pic| {
+                    if p.locked {
+                        lock(pic, cx);
+                    } else if !p.image.is_empty() {
+                        picture_contain(pic, cx, std::slice::from_ref(&p.image), tw * 0.86, th - 70.0);
+                    }
+                });
+                tile.spawn((
+                    Node { height: cx.px(if on { 50.0 } else { 44.0 }), padding: UiRect::horizontal(cx.px(10.0)), align_items: AlignItems::Center, justify_content: JustifyContent::SpaceBetween, ..default() },
+                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.72)),
+                ))
+                .with_children(|bar| {
+                    bar.spawn((Text::new(p.name.clone()), cx.bold(if on { 34.0 } else { 30.0 }), TextColor(if on { pal.accent } else if p.locked { DIM } else { WHITE })));
+                    let tag = if p.locked {
+                        format!("LV {}", p.level)
+                    } else if p.value == have && p.value != 0 {
+                        "EQUIPPED".to_owned()
+                    } else {
+                        String::new()
+                    };
+                    if !tag.is_empty() {
+                        bar.spawn((Text::new(tag), cx.bold(16.0), TextColor(if p.locked { GOLD } else { pal.accent })));
+                    }
+                });
+            });
+        }
+    });
+    // Under the row, at the left: a dot per gun, what it is, the categories.
+    let p = &picks[s.focus];
+    c.spawn(Node { width: cx.px(big_w), flex_direction: FlexDirection::Column, row_gap: cx.px(8.0), ..abs(Some(l), Some(176.0 + big_h + 16.0), None, None, cx) }).with_children(|col| {
+        col.spawn(Node { column_gap: cx.px(10.0), ..default() }).with_children(|d| {
+            for k in a..b {
+                let on = k == s.focus;
+                d.spawn((
+                    Node { width: cx.px(if on { 10.0 } else { 7.0 }), height: cx.px(if on { 10.0 } else { 7.0 }), ..default() },
+                    BackgroundColor(if on { pal.accent } else { WHITE.with_alpha(0.4) }),
+                    UiTransform { rotation: Rot2::degrees(45.0), ..UiTransform::IDENTITY },
+                ));
+            }
+        });
+        col.spawn(Node { column_gap: cx.px(12.0), align_items: AlignItems::FlexStart, ..default() }).with_children(|t| {
+            super::view::pointer(t, cx);
+            let line = if p.locked { format!("Unlocks at level {}.", p.level) } else { p.desc.clone() };
+            t.spawn((Text::new(line), cx.regular(28.0), TextColor(DIM), Node { max_width: cx.px(big_w - 30.0), ..default() }));
+        });
+        col.spawn(Node { height: cx.px(30.0), ..default() });
+        // The categories: this one large, the rest after it in turn.
+        let name = |k: usize| {
+            let g = &picks[cats[k].0].group;
+            if g.is_empty() { "NONE".to_owned() } else { g.clone() }
+        };
+        col.spawn((Text::new(name(at)), cx.bold(64.0), TextColor(pal.accent)));
+        col.spawn((Node { width: Val::Percent(100.0), height: cx.px(1.0), margin: UiRect::bottom(cx.px(6.0)), ..default() }, BackgroundColor(WHITE.with_alpha(0.25))));
+        for i in 1..cats.len() {
+            let k = (at + i) % cats.len();
+            col.spawn((Text::new(name(k)), cx.regular(30.0), TextColor(WHITE)));
+        }
+    });
+    // At the right: what the gun is, in a few lines.
+    c.spawn(Node { width: cx.px(640.0), flex_direction: FlexDirection::Column, row_gap: cx.px(10.0), ..abs(Some(l + big_w + 260.0), Some(176.0 + big_h + 60.0), None, None, cx) }).with_children(|col| {
+        let game = if p.value > 0 { game_tab(p.value).1 } else { "" };
+        let lines = [
+            ("GAME", game.to_owned()),
+            ("POINTS", if p.cost > 0 { p.cost.to_string() } else { String::new() }),
+            ("UNLOCKS", if p.level > 1 { format!("LEVEL {}", p.level) } else { String::new() }),
+            ("IN THIS CLASS", if p.value == have && p.value != 0 { "EQUIPPED".to_owned() } else { String::new() }),
+        ];
+        for (k, v) in lines.into_iter().filter(|(_, v)| !v.is_empty()) {
+            col.spawn(Node { column_gap: cx.px(20.0), ..default() }).with_children(|r| {
+                r.spawn((Text::new(k), cx.regular(28.0), TextColor(DIM), Node { width: cx.px(220.0), ..default() }));
+                r.spawn((Text::new(v), cx.bold(28.0), TextColor(WHITE)));
+            });
+        }
+    });
+}
+
 /// A padlock, drawn: its shackle a ring, its body a rounded block.
 fn lock(c: &mut Kids, cx: &Ctx) {
     c.spawn(Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, ..default() }).with_children(|l| {
@@ -916,4 +1090,20 @@ fn game_tabs(c: &mut Kids, cx: &mut Ctx, labels: &[String], on: usize) {
         }
         super::view::hint(t, cx, "E", "xenonbutton_rb", "");
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Pick, categories};
+
+    fn pick(group: &str) -> Pick {
+        Pick { value: 1, name: String::new(), desc: String::new(), image: String::new(), cost: 1, locked: false, level: 1, group: group.to_owned() }
+    }
+
+    #[test]
+    fn categories_are_runs_of_one_kind() {
+        let picks = [pick(""), pick("SMG"), pick("SMG"), pick("AR"), pick("SNIPER"), pick("SNIPER")];
+        assert_eq!(categories(&picks), vec![(0, 1), (1, 3), (3, 4), (4, 6)]);
+        assert!(categories(&[]).is_empty());
+    }
 }
