@@ -74,7 +74,7 @@ fn ask_source() -> Source {
     let text = format!(
         "Do you have the games installed?\n\n\
          Yes: I have Black Ops II and the other Call of Duty games installed. You will be asked where each one is.\n\n\
-         No: I only have the required files (the \"{}\" folder). You will be asked where it is.",
+         No: I only have the required files (the \"{}\" folder). You will be asked where it is; without it, you will be asked for each game instead.",
         call_of_claude::FOLDER_NAME
     );
     match ask_yes_no(&text) {
@@ -84,10 +84,22 @@ fn ask_source() -> Source {
 }
 
 /// Asks for the Call of Claude folder and points every game into it; false
-/// when he cancels or it is not one (then each game is asked for).
+/// when he cancels or it is not one: then he is told each game will be
+/// asked for instead.
 fn pick_pack() -> bool {
+    let found = pick_pack_folder();
+    if !found {
+        message(&format!(
+            "No {} folder was chosen, so the game will ask for each game's folder instead: Black Ops II, Black Ops, Modern Warfare 2, Modern Warfare 3, Black Ops III, Advanced Warfare and Modern Warfare III (2023), then the optional ones. Press Cancel on any game you do not have.",
+            call_of_claude::FOLDER_NAME
+        ));
+    }
+    found
+}
+
+fn pick_pack_folder() -> bool {
     for _ in 0..2 {
-        let Some(folder) = game_paths::pick_folder(&format!("Where is the {} folder?", call_of_claude::FOLDER_NAME)) else {
+        let Some(folder) = game_paths::pick_folder(&format!("Where is the {} folder? (Cancel if you do not have it)", call_of_claude::FOLDER_NAME)) else {
             return false;
         };
         match call_of_claude::adopt(&folder) {

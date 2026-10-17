@@ -11,20 +11,22 @@
 
 use std::path::{Path, PathBuf};
 
-/// (key, title, needed) for every game the rebuild reads.
+/// (key, title, needed) for every game the rebuild reads, in the order the
+/// first launch asks: the seven games the project is built on first, then
+/// the ones it borrows maps from, then Black Ops II's mods.
 pub const GAMES: [(&str, &str, bool); 13] = [
     ("bo2", "Call of Duty: Black Ops II", true),
     ("bo1", "Call of Duty: Black Ops", false),
-    ("mw2", "Call of Duty: Modern Warfare 2", false),
-    ("mw3", "Call of Duty: Modern Warfare 3", false),
+    ("mw2", "Call of Duty: Modern Warfare 2 (2009)", false),
+    ("mw3", "Call of Duty: Modern Warfare 3 (2011)", false),
+    // bo2mp: its maps and guest guns (`zone/core_common.ff`, `mp_common.ff`).
+    ("bo3", "Call of Duty: Black Ops III", false),
+    ("aw", "Call of Duty: Advanced Warfare", false),
+    // bo2mp: its multiplayer maps and Rebirth Island (`zone/mp_jup_*.ff`).
+    ("jup", "Call of Duty: Modern Warfare III (2023)", false),
     ("waw", "Call of Duty: World at War", false),
     ("cod4", "Call of Duty 4: Modern Warfare", false),
     ("ghosts", "Call of Duty: Ghosts", false),
-    ("aw", "Call of Duty: Advanced Warfare", false),
-    // bo2mp: its maps and guest guns (`zone/core_common.ff`, `mp_common.ff`).
-    ("bo3", "Call of Duty: Black Ops III", false),
-    // bo2mp: its multiplayer maps and Rebirth Island (`zone/mp_jup_*.ff`).
-    ("jup", "Call of Duty: Modern Warfare III (2023)", false),
     // bo2mp: its maps and Zombies (`ui.ff`, `mp_*` / `cp_*` zones).
     ("iw", "Call of Duty: Infinite Warfare", false),
     // bo2mp: Black Ops II's mods - the @leetinservers mod's folder
