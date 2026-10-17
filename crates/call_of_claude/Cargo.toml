@@ -14,4 +14,3 @@ path = "src/main.rs"
 
 [dependencies]
 asset_transport.workspace = true
-fastfile_iw7.workspace = true

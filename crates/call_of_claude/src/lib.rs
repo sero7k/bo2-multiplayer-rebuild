@@ -16,7 +16,6 @@
 
 mod glob;
 mod rules;
-mod streams;
 
 use std::path::{Path, PathBuf};
 
@@ -54,18 +53,12 @@ fn usage() -> String {
     "usage: iw4l call-of-claude pack <destination folder> [--dry-run] [--from <game>=<folder> ...]".to_owned()
 }
 
-/// One file to copy: where from, where to, its size (what is copied of
-/// it), and, for a picture pack, only these parts of it.
+/// One file to copy: where from, where to, its size.
 struct Item {
     from: PathBuf,
     to: PathBuf,
     size: u64,
-    parts: Option<Vec<(u64, u64)>>,
 }
-
-/// The games whose picture packs are trimmed to the parts their kept zones
-/// stream (`streams`).
-const TRIMMED_PACKS: [&str; 3] = ["aw", "ghosts", "iw"];
 
 /// Every file under `dir`, as (path, path relative to `dir` with `/`).
 fn walk(dir: &Path) -> Vec<(PathBuf, String)> {
@@ -136,34 +129,10 @@ pub fn run(argv: Vec<String>) -> i32 {
         for (path, rel) in walk(dir) {
             let size = std::fs::metadata(&path).map_or(0, |m| m.len());
             if rules.keeps(&rel) {
-                items.push(Item { to: a.dest.join(key).join(&rel), from: path, size, parts: None });
+                items.push(Item { to: a.dest.join(key).join(&rel), from: path, size });
             } else {
                 dropped += size;
             }
-        }
-        if TRIMMED_PACKS.contains(&key.as_str()) {
-            let mut ranges = streams::Ranges::new();
-            for it in items.iter().filter(|i| i.from.extension().is_some_and(|x| x.eq_ignore_ascii_case("ff"))) {
-                streams::add(&mut ranges, streams::of_zone(&it.from, key == "iw"));
-            }
-            let streamed: std::collections::HashSet<(PathBuf, &str)> = ranges.keys().map(|(d, k, _)| (d.clone(), *k)).collect();
-            items.retain_mut(|it| {
-                // (A pack in a folder no kept zone streams from: whole.)
-                let Some(pack) = streams::pack_of(&it.from).filter(|(d, k, _)| streamed.contains(&(d.clone(), *k))) else { return true };
-                match ranges.get(&pack) {
-                    Some(parts) => {
-                        let used: u64 = parts.iter().map(|(s, e)| e.min(&it.size).saturating_sub(*s)).sum();
-                        dropped += it.size - used.min(it.size);
-                        it.size = used;
-                        it.parts = Some(parts.clone());
-                        true
-                    }
-                    None => {
-                        dropped += it.size;
-                        false
-                    }
-                }
-            });
         }
         let size: u64 = items.iter().map(|i| i.size).sum();
         println!("{key:>7}: keep {:>10} in {:>6} files, leave {:>10}   ({})", gb(size), items.len(), gb(dropped), dir.display());
@@ -190,11 +159,7 @@ pub fn run(argv: Vec<String>) -> i32 {
             if let Some(parent) = it.to.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            let copy = match &it.parts {
-                Some(parts) => streams::copy_parts(&it.from, &it.to, parts),
-                None => std::fs::copy(&it.from, &it.to),
-            };
-            match copy {
+            match std::fs::copy(&it.from, &it.to) {
                 Ok(n) => copied += n,
                 Err(e) => {
                     failed += 1;

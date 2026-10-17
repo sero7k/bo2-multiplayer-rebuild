@@ -109,11 +109,11 @@ const GHOSTS: Rules = Rules {
     drop: &["zone/mp_alien_*"],
 };
 
-/// Advanced Warfare: only its guns (common_mp, the guns' view and world
-/// zones) and its packs; no maps.
+/// Advanced Warfare: its multiplayer zones and maps (its maps are coming;
+/// its guns today), the guns' view and world zones, and every pack.
 const AW: Rules = Rules {
-    keep: &["zone/common_mp.ff", "zone/code_post_gfx_mp.ff", "zone/mp_vm_*.ff", "zone/mp_wm_*.ff", "zone/imagefile*.pak", "zone/soundfile*.pak", "zone/english/eng_soundfile*.pak"],
-    drop: &[],
+    keep: &["zone/*_mp.ff", "zone/mp_*.ff", "zone/imagefile*.pak", "zone/soundfile*.pak", "zone/english/*.ff", "zone/english/eng_soundfile*.pak"],
+    drop: &["zone/*_zm_mp.ff", "zone/mp_zombie_*"],
 };
 
 /// Black Ops III: its common zones, its multiplayer maps, every package
@@ -211,7 +211,8 @@ mod tests {
         assert!(!for_game("bo3").keeps("zone/cp_mi_eth_prologue.ff"));
         assert!(for_game("iw").keeps("ui.ff") && for_game("iw").keeps("zone/mp_breakneck.ff"));
         assert!(!for_game("iw").keeps("english/soundfile1.pak"));
-        assert!(!for_game("aw").keeps("zone/mp_venus.ff"));
+        assert!(for_game("aw").keeps("zone/mp_venus.ff"));
+        assert!(for_game("aw").keeps("zone/imagefile36.pak"));
         assert!(for_game("aw").keeps("zone/mp_vm_bal27_tr.ff"));
         assert!(for_game("jup").keeps("oo2core_8_win64.dll"));
         assert!(!for_game("bo2mod").keeps("sub/notes.txt"));
