@@ -3,7 +3,9 @@
 //! `game_paths.cfg` beside the game (`IW4L_GAME_PATHS` overrides where):
 //! one `key=folder` line per game, for Black Ops II (needed), Black Ops,
 //! Modern Warfare 2, Modern Warfare 3, World at War, Call of Duty 4, Ghosts,
-//! Advanced Warfare, Black Ops III and Modern Warfare III (2023).
+//! Advanced Warfare, Black Ops III, Modern Warfare III (2023), Infinite
+//! Warfare, and Black Ops Cold War, Vanguard and Modern Warfare Remastered
+//! (their banners, for now).
 //! Every folder set here is searched for zones and archives as if it were
 //! under `IW4L_GAMES`, so no links or copies are needed. The first launch
 //! asks for each game's folder; the front end's Game Folders panel changes
@@ -14,7 +16,7 @@ use std::path::{Path, PathBuf};
 /// (key, title, needed) for every game the rebuild reads, in the order the
 /// first launch asks: the seven games the project is built on first, then
 /// the ones it borrows maps from, then Black Ops II's mods.
-pub const GAMES: [(&str, &str, bool); 13] = [
+pub const GAMES: [(&str, &str, bool); 16] = [
     ("bo2", "Call of Duty: Black Ops II", true),
     ("bo1", "Call of Duty: Black Ops", false),
     ("mw2", "Call of Duty: Modern Warfare 2 (2009)", false),
@@ -29,6 +31,11 @@ pub const GAMES: [(&str, &str, bool); 13] = [
     ("ghosts", "Call of Duty: Ghosts", false),
     // bo2mp: its maps and Zombies (`ui.ff`, `mp_*` / `cp_*` zones).
     ("iw", "Call of Duty: Infinite Warfare", false),
+    // bo2mp: games whose weapons are coming: their banners only for now
+    // (`banner.png` in the folder), not searched for zones.
+    ("cw", "Call of Duty: Black Ops Cold War", false),
+    ("vg", "Call of Duty: Vanguard", false),
+    ("mwr", "Call of Duty: Modern Warfare Remastered", false),
     // bo2mp: Black Ops II's mods - the @leetinservers mod's folder
     // (`mod.ff`, `mod.json`; `IW4L_T6_MOD` overrides) and the DLC5 Zombies
     // pack's (`IW4L_T6_EXTRA` overrides). Not searched as game folders:
@@ -40,6 +47,12 @@ pub const GAMES: [(&str, &str, bool); 13] = [
 /// The keys whose folders are mods, read by their own code rather than
 /// searched for zones with the games'.
 pub const MOD_KEYS: [&str; 2] = ["bo2mod", "bo2extra"];
+
+/// The games set only for their banners (no zones read from them yet).
+pub const BANNER_ONLY_KEYS: [&str; 3] = ["cw", "vg", "mwr"];
+
+/// Each banner-only game's program, which a folder of it holds.
+const BANNER_ONLY_EXES: [&str; 4] = ["BlackOpsColdWar.exe", "Vanguard.exe", "h1_mp64_ship.exe", "h1-mod.exe"];
 
 /// Where the folders are kept.
 pub fn config_path() -> PathBuf {
@@ -118,6 +131,7 @@ pub fn set(key: &str, folder: Option<PathBuf>) -> Result<(), String> {
 /// (where these games keep their fast files), or fast files of its own.
 pub fn looks_valid(folder: &Path) -> bool {
     folder.join("zone").is_dir()
+        || BANNER_ONLY_EXES.iter().any(|exe| folder.join(exe).is_file())
         || std::fs::read_dir(folder).is_ok_and(|d| {
             d.flatten().any(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("ff")))
         })
@@ -127,7 +141,7 @@ pub fn looks_valid(folder: &Path) -> bool {
 pub(crate) fn search_folders() -> Vec<PathBuf> {
     load()
         .into_iter()
-        .filter(|(k, _)| !MOD_KEYS.contains(&k.as_str()))
+        .filter(|(k, _)| !MOD_KEYS.contains(&k.as_str()) && !BANNER_ONLY_KEYS.contains(&k.as_str()))
         .map(|(_, p)| p)
         .filter(|p| p.is_dir())
         .collect()

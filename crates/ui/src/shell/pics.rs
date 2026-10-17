@@ -52,6 +52,11 @@ impl ShellPics {
             self.found.insert(name.to_owned(), h.clone());
             return Some(h);
         }
+        // (The banners of the games whose weapons are coming.)
+        if super::coming::is_banner(name) {
+            let img = super::coming::picture(name);
+            return self.keep(name, img, images);
+        }
         // (The Zombies screens' pictures: Black Ops II's Zombies zones, the
         // Zombies rebuild's screenshots. While the zones are first read the
         // wait does not count towards giving up.)

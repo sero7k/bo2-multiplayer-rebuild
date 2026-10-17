@@ -266,10 +266,19 @@ pub(crate) fn picks(s: &Shell, book: &ClassBook) -> (Vec<String>, Vec<Pick>) {
         games.dedup();
         tabs = games.into_iter().map(|(_, t)| t.to_owned()).collect();
     }
+    // bo2mp: the games whose weapons are coming, a tab each after the rest.
+    if weapons {
+        for g in &super::coming::COMING {
+            tabs.push(g.tab.to_owned());
+        }
+    }
     if tabs.is_empty() {
         tabs.push(EDIT_SLOTS[s.slot.min(EDIT_SLOTS.len() - 1)].1.split(" ·").next().unwrap_or("").to_owned() + "S");
     }
     let tab = s.page.min(tabs.len() - 1);
+    if weapons && let Some(i) = super::coming::by_tab(&tabs[tab]) {
+        return (tabs, vec![super::coming::placeholder(i)]);
+    }
     let mut out = Vec::new();
     // (A slot that may be empty: NONE first.)
     if !matches!(slot, "primary") {
@@ -352,6 +361,10 @@ pub(crate) fn open_pick(s: &mut Shell, book: &ClassBook, slot_index: usize) {
 pub(crate) fn choose(s: &mut Shell, book: &ClassBook, k: usize, now: f64) -> bool {
     let Some(c) = book.classes.get(s.class as usize) else { return false };
     let Some(p) = picks(s, book).1.get(k).cloned() else { return false };
+    if let Some(g) = super::coming::of_value(p.value) {
+        s.note = Some((format!("{} weapons are coming soon.", g.title), now + 3.0));
+        return false;
+    }
     if p.locked {
         s.note = Some((format!("{} unlocks at level {}.", p.name, p.level), now + 3.0));
         return false;
@@ -992,7 +1005,9 @@ fn weapon_view(c: &mut Kids, cx: &mut Ctx, s: &Shell, book: &ClassBook, class: &
             ))
             .with_children(|tile| {
                 tile.spawn(Node { flex_grow: 1.0, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }).with_children(|pic| {
-                    if p.locked {
+                    if let Some(g) = super::coming::of_value(p.value) {
+                        super::coming::banner(pic, cx, g, tw - 4.0, th - 4.0 - if on { 50.0 } else { 44.0 });
+                    } else if p.locked {
                         lock(pic, cx);
                     } else if !p.image.is_empty() {
                         picture_contain(pic, cx, std::slice::from_ref(&p.image), tw * 0.86, th - 70.0);
@@ -1051,7 +1066,11 @@ fn weapon_view(c: &mut Kids, cx: &mut Ctx, s: &Shell, book: &ClassBook, class: &
     });
     // At the right: what the gun is, in a few lines.
     c.spawn(Node { width: cx.px(640.0), flex_direction: FlexDirection::Column, row_gap: cx.px(10.0), ..abs(Some(l + big_w + 260.0), Some(176.0 + big_h + 60.0), None, None, cx) }).with_children(|col| {
-        let game = if p.value > 0 { game_full(p.value) } else { "" };
+        let game = match super::coming::of_value(p.value) {
+            Some(g) => g.title,
+            None if p.value > 0 => game_full(p.value),
+            None => "",
+        };
         let lines = [
             ("GAME", game.to_owned()),
             ("POINTS", if p.cost > 0 { p.cost.to_string() } else { String::new() }),

@@ -174,9 +174,9 @@ fn game_folders_panel(
             root.spawn((
                 BackgroundColor(Color::srgba(0.05, 0.06, 0.07, 0.95)),
                 Node {
-                    width: Val::Px(900.0),
+                    width: Val::Px(1100.0),
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(10.0),
+                    row_gap: Val::Px(6.0),
                     padding: UiRect::all(Val::Px(28.0)),
                     ..default()
                 },
@@ -204,29 +204,27 @@ fn game_folders_panel(
                             Color::srgba(1.0, 1.0, 1.0, 0.04)
                         }),
                         Node {
-                            flex_direction: FlexDirection::Column,
-                            padding: UiRect::axes(Val::Px(14.0), Val::Px(8.0)),
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(16.0),
+                            padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
                             ..default()
                         },
                     ))
-                    .with_children(|row| {
-                        row.spawn(Node {
-                            justify_content: JustifyContent::SpaceBetween,
-                            ..default()
-                        })
-                        .with_children(|line| {
-                            line.spawn((
-                                Text::new(title.to_uppercase()),
-                                f(20.0),
-                                TextColor(if selected { Color::srgb(1.0, 0.75, 0.25) } else { Color::WHITE }),
-                            ));
-                            line.spawn((Text::new(status), f(16.0), TextColor(color)));
-                        });
-                        row.spawn((
-                            Text::new(path.map_or_else(|| "-".to_owned(), |p| p.display().to_string())),
-                            f(15.0),
-                            TextColor(Color::srgba(1.0, 1.0, 1.0, 0.6)),
+                    .with_children(|line| {
+                        // (One line a game: sixteen of them fit on a 1080 screen.)
+                        line.spawn((
+                            Text::new(title.to_uppercase()),
+                            f(18.0),
+                            TextColor(if selected { Color::srgb(1.0, 0.75, 0.25) } else { Color::WHITE }),
+                            Node { width: Val::Px(470.0), flex_shrink: 0.0, ..default() },
                         ));
+                        line.spawn((
+                            Text::new(path.map_or_else(|| "-".to_owned(), |p| p.display().to_string())),
+                            f(14.0),
+                            TextColor(Color::srgba(1.0, 1.0, 1.0, 0.6)),
+                            Node { flex_grow: 1.0, overflow: Overflow::clip(), ..default() },
+                        ));
+                        line.spawn((Text::new(status), f(15.0), TextColor(color)));
                     });
                 }
                 if !state.note.is_empty() {

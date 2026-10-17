@@ -24,6 +24,7 @@
 mod background;
 pub(crate) mod bridge;
 mod cac;
+mod coming; // bo2mp: Cold War, Vanguard and MWR: banners and placeholders in Create-a-Class
 pub(crate) mod cards;
 pub(crate) mod classes;
 pub(crate) mod ingame;

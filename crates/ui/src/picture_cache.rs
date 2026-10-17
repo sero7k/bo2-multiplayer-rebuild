@@ -50,7 +50,7 @@ fn key_of(picture: &str) -> String {
 /// Whether pictures under `key` are worth keeping (Modern Warfare III's
 /// come from an index of their own already, in a moment).
 pub(crate) fn kept(key: &str) -> bool {
-    !key.starts_with("jup:") && std::env::var("BO2MP_PICTURE_CACHE").map_or(true, |v| v.trim() != "0")
+    !key.starts_with("jup:") && !key.starts_with("gamebanner:") && std::env::var("BO2MP_PICTURE_CACHE").map_or(true, |v| v.trim() != "0")
 }
 
 /// What the cache holds for `picture`: `Some(Some(_))` its pixels,
