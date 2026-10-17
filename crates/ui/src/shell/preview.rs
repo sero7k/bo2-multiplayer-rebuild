@@ -118,6 +118,11 @@ fn stand_in_book() -> ClassBook {
         ("iw4", ["ACR", "Intervention", "UMP45"]),
         ("iw5", ["ACR 6.8", "MSR", "MP5"]),
         ("jup", ["MCW", "Holger 556", "Striker"]),
+        ("t7", ["KN-44", "ICR-1", "Kuda"]),
+        ("s1", ["Bal-27", "AK-12", "ASM1"]),
+        ("iw6", ["Honey Badger", "SC-2010", "Vector CRB"]),
+        ("t4", ["STG-44", "Thompson", "PPSh-41"]),
+        ("iw3", ["M4A1", "AK-47", "G3"]),
     ] {
         let mut found = (bo2_profile::guest::FIRST_INDEX..bo2_profile::guest::FIRST_INDEX + 4000).filter(|&i| bo2_profile::guest::game_for_index(i) == Some(game));
         for n in names {

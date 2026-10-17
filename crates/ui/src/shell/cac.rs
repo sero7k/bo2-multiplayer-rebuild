@@ -182,20 +182,37 @@ pub(crate) struct Pick {
 /// The game a weapon comes from, as its tab in the picker: (order, name).
 pub(crate) fn game_tab(index: i32) -> (usize, &'static str) {
     if index < bo2_profile::guest::FIRST_INDEX {
-        return (0, "BLACK OPS II");
+        return (0, "BO2");
     }
     match bo2_profile::guest::game_for_index(index) {
-        Some("t5") => (1, "BLACK OPS"),
-        Some("t7") => (2, "BLACK OPS III"),
-        Some("iw3") => (3, "COD 4"),
-        Some("t4") => (4, "WORLD AT WAR"),
+        Some("t5") => (1, "BO1"),
+        Some("t7") => (2, "BO3"),
+        Some("iw3") => (3, "COD4"),
+        Some("t4") => (4, "WAW"),
         Some("iw4") => (5, "MW2"),
         Some("iw5") => (6, "MW3"),
         Some("iw6") => (7, "GHOSTS"),
-        Some("s1") => (8, "ADVANCED WARFARE"),
+        Some("s1") => (8, "AW"),
         Some("jup") => (9, "MWIII"),
         Some(bo2_profile::guest::MOD_GAME) => (10, "MOD"),
         _ => (11, "OTHER"),
+    }
+}
+
+/// The game a weapon comes from, in full (the picker's GAME line).
+fn game_full(index: i32) -> &'static str {
+    match game_tab(index).1 {
+        "BO2" => "BLACK OPS II",
+        "BO1" => "BLACK OPS",
+        "BO3" => "BLACK OPS III",
+        "COD4" => "CALL OF DUTY 4",
+        "WAW" => "WORLD AT WAR",
+        "MW2" => "MODERN WARFARE 2",
+        "MW3" => "MODERN WARFARE 3",
+        "GHOSTS" => "GHOSTS",
+        "AW" => "ADVANCED WARFARE",
+        "MWIII" => "MODERN WARFARE III",
+        other => other,
     }
 }
 
@@ -1034,7 +1051,7 @@ fn weapon_view(c: &mut Kids, cx: &mut Ctx, s: &Shell, book: &ClassBook, class: &
     });
     // At the right: what the gun is, in a few lines.
     c.spawn(Node { width: cx.px(640.0), flex_direction: FlexDirection::Column, row_gap: cx.px(10.0), ..abs(Some(l + big_w + 260.0), Some(176.0 + big_h + 60.0), None, None, cx) }).with_children(|col| {
-        let game = if p.value > 0 { game_tab(p.value).1 } else { "" };
+        let game = if p.value > 0 { game_full(p.value) } else { "" };
         let lines = [
             ("GAME", game.to_owned()),
             ("POINTS", if p.cost > 0 { p.cost.to_string() } else { String::new() }),
