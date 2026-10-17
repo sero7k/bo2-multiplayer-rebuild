@@ -497,7 +497,10 @@ pub(crate) fn lobby_view(
         .with_children(|col| {
             menu_rows(col, cx, &menu, if shell.focus < menu.len() { shell.focus } else { usize::MAX }, 470.0, false);
         });
-    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(4.0), ..abs(Some(126.0), None, None, Some(96.0), cx) }).with_children(|col| {
+    if votes.is_empty() {
+        super::view::map_card(c, cx, card.0, card.1, card.2, status.0, true);
+    }
+    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(4.0), display: if votes.is_empty() { Display::None } else { Display::Flex }, ..abs(Some(126.0), None, None, Some(96.0), cx) }).with_children(|col| {
         col.spawn((
             Node { width: cx.px(560.0), height: cx.px(30.0), justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, padding: UiRect::horizontal(cx.px(10.0)), ..default() },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.75)),
@@ -507,7 +510,6 @@ pub(crate) fn lobby_view(
             t.spawn((Text::new(status.0.to_owned()), cx.bold(20.0), TextColor(GOLD)));
         });
         if votes.is_empty() {
-            super::view::map_tile(col, cx, card.0, card.1, card.2, ("", ""), true, None);
             return;
         }
         for (k, (i, r)) in votes.iter().enumerate() {
@@ -525,7 +527,7 @@ pub(crate) fn lobby_view(
         sorted.sort_by_key(|p| std::cmp::Reverse(p.level.unwrap_or(0)));
     }
     if !status.1.is_empty() {
-        c.spawn((Text::new(status.1.to_owned()), cx.regular(20.0), TextColor(TEXT), Node { max_width: cx.px(560.0), ..abs(Some(126.0), None, None, Some(230.0), cx) }));
+        c.spawn((Text::new(status.1.to_owned()), cx.regular(20.0), TextColor(TEXT), Node { max_width: cx.px(560.0), ..abs(Some(126.0), None, None, Some(392.0), cx) }));
     }
     let players: Vec<super::view::LobbyPlayer> = sorted
         .iter()

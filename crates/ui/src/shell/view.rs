@@ -679,6 +679,53 @@ pub(crate) fn map_tile(c: &mut Kids, cx: &mut Ctx, pictures: &[String], name: &s
     });
 }
 
+/// The lobby's map, as Infinite Warfare's pre-match lobby shows it at the
+/// bottom left: the map's name over a framed picture of it, the mode's mark
+/// and name across the picture's foot; what the lobby is doing at the right
+/// of the name (the countdown, the players it waits for).
+pub(crate) fn map_card(c: &mut Kids, cx: &mut Ctx, pictures: &[String], map: &str, mode: &str, status: &str, gold: bool) {
+    let (w, h) = (470.0, 250.0);
+    c.spawn(Node { width: cx.px(w), flex_direction: FlexDirection::Column, row_gap: cx.px(4.0), ..abs(Some(126.0), None, None, Some(96.0), cx) }).with_children(|col| {
+        col.spawn(Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() }).with_children(|t| {
+            t.spawn(Node { column_gap: cx.px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|n| {
+                n.spawn((Node { width: cx.px(6.0), height: cx.px(6.0), ..default() }, BackgroundColor(WHITE)));
+                n.spawn((Text::new(title_word(map)), cx.regular(22.0), TextColor(WHITE)));
+            });
+            t.spawn((Text::new(status.to_owned()), cx.regular(20.0), TextColor(if gold { GOLD } else { TEXT })));
+        });
+        col.spawn((Node { width: cx.px(w), height: cx.px(h), border: UiRect::all(cx.px(2.0)), ..default() }, BorderColor::all(WHITE.with_alpha(0.9)))).with_children(|f| {
+            picture_box(f, cx, pictures, w - 4.0, h - 4.0, ());
+            f.spawn((
+                Node { position_type: PositionType::Absolute, left: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), height: cx.px(92.0), align_items: AlignItems::Center, column_gap: cx.px(18.0), padding: UiRect::horizontal(cx.px(22.0)), ..default() },
+                BackgroundGradient::from(LinearGradient::to_bottom(vec![
+                    ColorStop::new(Color::srgba(0.0, 0.0, 0.0, 0.0), Val::Percent(0.0)),
+                    ColorStop::new(Color::srgba(0.0, 0.0, 0.0, 0.82), Val::Percent(100.0)),
+                ])),
+            ))
+            .with_children(|bar| {
+                bar.spawn((
+                    Node { width: cx.px(44.0), height: cx.px(44.0), border: UiRect::all(cx.px(3.0)), margin: UiRect::horizontal(cx.px(6.0)), ..default() },
+                    BorderColor::all(WHITE),
+                    BackgroundColor(cx.pal.accent_a(0.55)),
+                    UiTransform { rotation: Rot2::degrees(45.0), ..UiTransform::IDENTITY },
+                ));
+                bar.spawn((Text::new(mode.to_uppercase()), cx.bold(34.0), TextColor(WHITE), TextShadow { offset: Vec2::splat(2.0 * cx.s), color: Color::srgba(0.0, 0.0, 0.0, 0.8), ..default() }));
+            });
+        });
+    });
+}
+
+/// `NUKETOWN 2025` -> `Nuketown 2025` (the card's small map name).
+fn title_word(s: &str) -> String {
+    s.split(' ')
+        .map(|w| {
+            let mut c = w.chars();
+            c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c.flat_map(char::to_lowercase)).collect())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// The private lobby (Custom Game), as Infinite Warfare's pre-match lobby:
 /// the mode as the title, its tabs, the rows at the left and the map under
 /// them, the players at the right.
@@ -694,18 +741,8 @@ fn lobby(c: &mut Kids, cx: &mut Ctx, shell: &Shell, cat: &Catalog, rows: &[Row])
     let starting = bridge::starting_in();
     c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(6.0), ..abs(Some(126.0), Some(196.0), None, None, cx) })
         .with_children(|col| menu_rows(col, cx, rows, shell.focus, 470.0, false));
-    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(4.0), ..abs(Some(126.0), None, None, Some(96.0), cx) }).with_children(|col| {
-        col.spawn((
-            Node { width: cx.px(560.0), height: cx.px(30.0), justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, padding: UiRect::horizontal(cx.px(10.0)), ..default() },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.75)),
-        ))
-        .with_children(|t| {
-            t.spawn((Text::new("• MATCH"), cx.bold(20.0), TextColor(WHITE)));
-            let when = starting.map_or_else(|| "READY".to_owned(), |ms| format!("STARTING  0:{:02}", (ms / 1000.0).ceil() as i32));
-            t.spawn((Text::new(when), cx.bold(20.0), TextColor(if starting.is_some() { GOLD } else { WHITE })));
-        });
-        map_tile(col, cx, &pictures, &map_title, &mode_title, ("BOTS", &(shell.friends + shell.enemies).to_string()), true, None);
-    });
+    let when = starting.map_or_else(|| format!("{} BOTS  ·  READY", shell.friends + shell.enemies), |ms| format!("STARTING IN 0:{:02}", (ms / 1000.0).ceil() as i32));
+    map_card(c, cx, &pictures, &map_title, &mode_title, &when, starting.is_some());
     let me = &cat.player;
     let mut people = vec![LobbyPlayer {
         level: Some(me.level),

@@ -8,7 +8,7 @@ use bevy::prelude::*;
 
 use super::classes::{self, ClassBook, ClassItem, ClassView, Edit, POINTS, group_label, slot_kind};
 use super::theme::*;
-use super::view::{Ctx, Kids, header, picture_contain};
+use super::view::{Ctx, Kids, abs, header, picture_contain};
 use super::{Act, Hit, Row, Screen, Setting, Shell};
 
 /// A class's slots as the edit screen lists them: (slot, label).
@@ -175,6 +175,28 @@ pub(crate) struct Pick {
     pub cost: i32,
     pub locked: bool,
     pub level: i32,
+    /// A weapon's kind (ASSAULT RIFLES...), shown on its tile.
+    pub group: String,
+}
+
+/// The game a weapon comes from, as its tab in the picker: (order, name).
+pub(crate) fn game_tab(index: i32) -> (usize, &'static str) {
+    if index < bo2_profile::guest::FIRST_INDEX {
+        return (0, "BLACK OPS II");
+    }
+    match bo2_profile::guest::game_for_index(index) {
+        Some("t5") => (1, "BLACK OPS"),
+        Some("t7") => (2, "BLACK OPS III"),
+        Some("iw3") => (3, "COD 4"),
+        Some("t4") => (4, "WORLD AT WAR"),
+        Some("iw4") => (5, "MW2"),
+        Some("iw5") => (6, "MW3"),
+        Some("iw6") => (7, "GHOSTS"),
+        Some("s1") => (8, "ADVANCED WARFARE"),
+        Some("jup") => (9, "MWIII"),
+        Some(bo2_profile::guest::MOD_GAME) => (10, "MOD"),
+        _ => (11, "OTHER"),
+    }
 }
 
 /// The picker's tabs (weapon groups) and the choices on the tab he is on.
@@ -183,7 +205,7 @@ pub(crate) fn picks(s: &Shell, book: &ClassBook) -> (Vec<String>, Vec<Pick>) {
     let slot = EDIT_SLOTS[s.slot.min(EDIT_SLOTS.len() - 1)].0;
     // bo2mp: Black Ops II's camos for the gun (Personalize Weapon's list).
     if slot.ends_with("camo") {
-        let mut v = vec![Pick { value: 0, name: "NONE".to_owned(), desc: "The gun as it comes.".to_owned(), image: String::new(), cost: 0, locked: false, level: 1 }];
+        let mut v = vec![Pick { value: 0, name: "NONE".to_owned(), desc: "The gun as it comes.".to_owned(), image: String::new(), cost: 0, locked: false, level: 1, group: String::new() }];
         for (n, name, image) in camo_choices(book, c.get(weapon_of(slot))).unwrap_or_default() {
             v.push(Pick {
                 value: n,
@@ -193,15 +215,16 @@ pub(crate) fn picks(s: &Shell, book: &ClassBook) -> (Vec<String>, Vec<Pick>) {
                 cost: 0,
                 locked: false,
                 level: 1,
+                group: String::new(),
             });
         }
         return (vec!["CAMOS".to_owned()], v);
     }
     if slot.contains("attachment") {
-        let mut v = vec![Pick { value: 0, name: "NONE".to_owned(), desc: "No attachment.".to_owned(), image: String::new(), cost: 0, locked: false, level: 1 }];
+        let mut v = vec![Pick { value: 0, name: "NONE".to_owned(), desc: "No attachment.".to_owned(), image: String::new(), cost: 0, locked: false, level: 1, group: String::new() }];
         if let Some(w) = book.item(c.get(weapon_of(slot))) {
             for (n, name, image) in &w.attachments {
-                v.push(Pick { value: *n, name: name.to_uppercase(), desc: String::new(), image: image.clone(), cost: 1, locked: false, level: 1 });
+                v.push(Pick { value: *n, name: name.to_uppercase(), desc: String::new(), image: image.clone(), cost: 1, locked: false, level: 1, group: String::new() });
             }
         }
         return (vec!["ATTACHMENTS".to_owned()], v);
@@ -217,14 +240,14 @@ pub(crate) fn picks(s: &Shell, book: &ClassBook) -> (Vec<String>, Vec<Pick>) {
         items.extend(book.for_slot("primary"));
     }
     let weapons = matches!(slot_kind(slot).as_str(), "primary" | "secondary");
+    // bo2mp: weapons by the game they come from (a tab each, Black Ops II's
+    // own first), as Modern Warfare III's Create-a-Class lists its games'.
     let mut tabs: Vec<String> = Vec::new();
     if weapons {
-        for i in &items {
-            let g = group_label(&i.group).to_owned();
-            if !g.is_empty() && !tabs.contains(&g) {
-                tabs.push(g);
-            }
-        }
+        let mut games: Vec<(usize, &str)> = items.iter().map(|i| game_tab(i.index)).collect();
+        games.sort_unstable();
+        games.dedup();
+        tabs = games.into_iter().map(|(_, t)| t.to_owned()).collect();
     }
     if tabs.is_empty() {
         tabs.push(EDIT_SLOTS[s.slot.min(EDIT_SLOTS.len() - 1)].1.split(" ·").next().unwrap_or("").to_owned() + "S");
@@ -233,10 +256,10 @@ pub(crate) fn picks(s: &Shell, book: &ClassBook) -> (Vec<String>, Vec<Pick>) {
     let mut out = Vec::new();
     // (A slot that may be empty: NONE first.)
     if !matches!(slot, "primary") {
-        out.push(Pick { value: 0, name: "NONE".to_owned(), desc: "Leave this slot empty.".to_owned(), image: String::new(), cost: 0, locked: false, level: 1 });
+        out.push(Pick { value: 0, name: "NONE".to_owned(), desc: "Leave this slot empty.".to_owned(), image: String::new(), cost: 0, locked: false, level: 1, group: String::new() });
     }
     for i in items {
-        if weapons && group_label(&i.group) != tabs[tab] {
+        if weapons && game_tab(i.index).1 != tabs[tab] {
             continue;
         }
         out.push(Pick {
@@ -247,6 +270,7 @@ pub(crate) fn picks(s: &Shell, book: &ClassBook) -> (Vec<String>, Vec<Pick>) {
             cost: i.cost,
             locked: i.locked,
             level: i.level,
+            group: group_label(&i.group).to_owned(),
         });
     }
     if weapons && tab != 0 {
@@ -340,129 +364,204 @@ fn apply(s: &mut Shell, book: &ClassBook, c: &ClassView, set: Vec<(String, i32)>
     true
 }
 
-/// The ten points as ten bars, the spent ones lit.
-fn points_bar(c: &mut Kids, cx: &Ctx, spent: i32) {
-    c.spawn(Node { column_gap: cx.px(6.0), align_items: AlignItems::Center, ..default() }).with_children(|b| {
+/// Points: ten bars, the spent ones lit, and the count.
+fn points_bar(c: &mut Kids, cx: &Ctx, spent: i32, width: f32) {
+    c.spawn((
+        Node { width: cx.px(width), height: cx.px(34.0), column_gap: cx.px(5.0), align_items: AlignItems::Center, padding: UiRect::horizontal(cx.px(10.0)), ..default() },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.62)),
+    ))
+    .with_children(|b| {
+        b.spawn((Text::new("POINTS:"), cx.regular(19.0), TextColor(TEXT), Node { margin: UiRect::right(cx.px(14.0)), ..default() }));
         for k in 0..POINTS {
-            b.spawn((
-                Node { width: cx.px(46.0), height: cx.px(6.0), ..default() },
-                BackgroundColor(if k < spent { cx.pal.accent } else { KEYCAP }),
-            ));
+            b.spawn((Node { flex_grow: 1.0, height: cx.px(5.0), ..default() }, BackgroundColor(if k < spent { WHITE } else { WHITE.with_alpha(0.18) })));
         }
         b.spawn((
-            Node { margin: UiRect::left(cx.px(12.0)), ..default() },
+            Node { margin: UiRect::left(cx.px(10.0)), ..default() },
             Text::new(format!("{spent}/{POINTS}")),
-            cx.bold(30.0),
+            cx.regular(19.0),
             TextColor(if spent > POINTS { ENEMY } else { WHITE }),
         ));
     });
 }
 
-/// An item with its picture, its slot's label and its name.
-fn item_cell(c: &mut Kids, cx: &mut Ctx, label: &str, item: Option<&ClassItem>, extra: &str, w: f32, pic_w: f32, pic_h: f32) {
-    c.spawn(Node {
-        width: cx.px(w),
-        column_gap: cx.px(14.0),
-        align_items: AlignItems::Center,
-        padding: UiRect::axes(cx.px(12.0), cx.px(8.0)),
-        ..default()
-    })
-    .insert(BackgroundColor(cx.pal.panel_soft))
-    .with_children(|r| {
-        let names = item.map(|i| vec![i.image.clone()]).unwrap_or_default();
-        picture_contain(r, cx, &names, pic_w, pic_h);
-        r.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(2.0), flex_shrink: 1.0, ..default() }).with_children(|t| {
-            t.spawn((Text::new(label), cx.bold(17.0), TextColor(FAINT)));
-            t.spawn((
-                Text::new(item.map_or_else(|| "EMPTY".to_owned(), |i| i.name.to_uppercase())),
-                cx.bold(24.0),
-                TextColor(if item.is_some() { WHITE } else { DIM }),
-            ));
-            if !extra.is_empty() {
-                t.spawn((Text::new(extra), cx.regular(17.0), TextColor(DIM)));
-            }
-        });
-    });
+/// Where the loadout's boxes answer to: the edit screen's row for a slot
+/// (a click on the box opens it), and the slot in focus (lit).
+struct Focus<'a> {
+    rows: &'a [Row],
+    focus_slot: Option<&'a str>,
 }
 
-/// A class at a glance: its weapons with their attachments, perks,
-/// grenades and wildcards.
-pub(crate) fn class_card(c: &mut Kids, cx: &mut Ctx, book: &ClassBook, class: &ClassView, left: f32, top: f32, width: f32) {
-    let attach = |weapon: &str| -> String {
-        let names: Vec<String> = (1..=3)
-            .filter_map(|k| {
-                let n = class.get(&format!("{weapon}attachment{k}"));
-                book.item(class.get(weapon))?.attachments.iter().find(|(x, ..)| *x == n).map(|(_, name, _)| name.clone())
-            })
-            .collect();
-        names.join("  ·  ")
-    };
-    // (And the gun's camo after its attachments.)
-    let with_camo = |weapon: &str, line: String| -> String {
-        let n = class.get(&format!("{weapon}camo"));
-        let name = camo_choices(book, class.get(weapon)).and_then(|l| l.into_iter().find(|(k, ..)| *k == n)).map(|(_, name, _)| name);
-        match name {
-            Some(k) if line.is_empty() => k,
-            Some(k) => format!("{line}  ·  {k}"),
-            None => line,
-        }
-    };
-    let pa = with_camo("primary", attach("primary"));
-    let sa = with_camo("secondary", attach("secondary"));
+impl Focus<'_> {
+    fn row(&self, slot: &str) -> Option<usize> {
+        let at = EDIT_SLOTS.iter().position(|(s, _)| *s == slot)?;
+        self.rows.iter().position(|r| r.act == Act::EditSlot(at))
+    }
+
+    fn lit(&self, slot: &str) -> bool {
+        self.focus_slot == Some(slot)
+    }
+}
+
+/// A box of the loadout: dark, lit in the accent when its slot is in
+/// focus, a click opening the slot (on the edit screen).
+fn slot_box<'a>(c: &'a mut Kids, cx: &Ctx, f: &Focus, slot: &str, node: Node) -> EntityCommands<'a> {
+    let lit = f.lit(slot);
+    let mut e = c.spawn((
+        Node { border: UiRect::all(cx.px(if lit { 2.0 } else { 0.0 })), ..node },
+        BorderColor::all(if lit { cx.pal.accent } else { Color::NONE }),
+        BackgroundColor(if lit { cx.pal.accent_a(0.30) } else { Color::srgba(0.12, 0.13, 0.15, 0.72) }),
+    ));
+    if let Some(r) = f.row(slot) {
+        e.insert((Hit::Row(r), Button));
+    }
+    e
+}
+
+/// The small dash under a box (Infinite Warfare's: lit when filled).
+fn dash(c: &mut Kids, cx: &Ctx, filled: bool) {
     c.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: cx.px(left),
-            top: cx.px(top),
-            width: cx.px(width),
-            flex_direction: FlexDirection::Column,
-            row_gap: cx.px(8.0),
-            padding: UiRect::all(cx.px(18.0)),
-            border: UiRect::top(cx.px(3.0)),
-            ..default()
-        },
-        BackgroundColor(cx.pal.panel),
-        BorderColor::all(cx.pal.accent),
-    ))
-    .with_children(|p| {
-        p.spawn(Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() }).with_children(|h| {
-            h.spawn((Text::new(class.name.to_uppercase()), cx.bold(36.0), TextColor(WHITE)));
-            points_bar(h, cx, class.spent);
+        Node { position_type: PositionType::Absolute, right: cx.px(10.0), bottom: cx.px(6.0), width: cx.px(28.0), height: cx.px(3.0), ..default() },
+        BackgroundColor(WHITE.with_alpha(if filled { 0.85 } else { 0.25 })),
+    ));
+}
+
+/// A weapon's panel: its slot's name, the gun's name and picture, then its
+/// attachment and camo boxes.
+#[allow(clippy::too_many_arguments)]
+fn weapon_panel(c: &mut Kids, cx: &mut Ctx, book: &ClassBook, class: &ClassView, f: &Focus, weapon: &str, title: &str, width: f32) {
+    let gun = book.item(class.get(weapon));
+    let attach_slots: Vec<String> = (1..=3)
+        .map(|k| format!("{weapon}attachment{k}"))
+        .filter(|s| shown(book, class, s) || class.get(s) > 0)
+        .chain(std::iter::once(format!("{weapon}camo")).filter(|s| shown(book, class, s)))
+        .collect();
+    c.spawn((Node { width: cx.px(width), flex_direction: FlexDirection::Column, ..default() }, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.50)))).with_children(|p| {
+        p.spawn((Node { padding: UiRect::axes(cx.px(10.0), cx.px(4.0)), ..default() }, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55))))
+            .with_child((Text::new(title), cx.bold(18.0), TextColor(TEXT)));
+        p.spawn(Node { column_gap: cx.px(4.0), padding: UiRect::all(cx.px(4.0)), ..default() }).with_children(|row| {
+            let main_w = width * 0.52;
+            slot_box(row, cx, f, weapon, Node { width: cx.px(main_w), height: cx.px(166.0), flex_direction: FlexDirection::Column, padding: UiRect::all(cx.px(8.0)), ..default() })
+                .with_children(|b| {
+                    b.spawn((Text::new(gun.map_or_else(|| "EMPTY".to_owned(), |g| g.name.to_uppercase())), cx.regular(21.0), TextColor(WHITE)));
+                    let names = gun.map(|g| vec![g.image.clone()]).unwrap_or_default();
+                    b.spawn(Node { flex_grow: 1.0, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() })
+                        .with_children(|pic| picture_contain(pic, cx, &names, main_w - 30.0, 110.0));
+                    dash(b, cx, gun.is_some());
+                });
+            let cell = 78.0;
+            row.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: cx.px(4.0), row_gap: cx.px(4.0), width: cx.px(width - main_w - 12.0), align_content: AlignContent::FlexStart, ..default() })
+                .with_children(|grid| {
+                    for slot in &attach_slots {
+                        let value = class.get(slot);
+                        let pic = if slot.ends_with("camo") {
+                            camo_choices(book, class.get(weapon)).and_then(|l| l.into_iter().find(|(n, ..)| *n == value)).map(|(_, _, p)| p)
+                        } else {
+                            gun.and_then(|g| g.attachments.iter().find(|(n, ..)| *n == value)).map(|(_, _, p)| p.clone())
+                        };
+                        slot_box(grid, cx, f, slot, Node { width: cx.px(cell), height: cx.px(cell), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() })
+                            .with_children(|b| {
+                                match pic.filter(|p| !p.is_empty() && value > 0) {
+                                    Some(p) => picture_contain(b, cx, &[p], cell - 18.0, cell - 18.0),
+                                    None => {
+                                        // (An empty slot: a ring with a plus.)
+                                        b.spawn((
+                                            Node { width: cx.px(28.0), height: cx.px(28.0), border: UiRect::all(cx.px(2.0)), border_radius: BorderRadius::all(cx.px(14.0)), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
+                                            BorderColor::all(WHITE.with_alpha(0.45)),
+                                        ))
+                                        .with_child((Text::new("+"), cx.regular(20.0), TextColor(WHITE.with_alpha(0.6))));
+                                    }
+                                }
+                                dash(b, cx, value > 0);
+                            });
+                    }
+                });
         });
-        let half = (width - 36.0 - 8.0) / 2.0;
-        p.spawn(Node { column_gap: cx.px(8.0), ..default() }).with_children(|row| {
-            item_cell(row, cx, "PRIMARY", book.item(class.get("primary")), &pa, half, 200.0, 90.0);
-            item_cell(row, cx, "SECONDARY", book.item(class.get("secondary")), &sa, half, 200.0, 90.0);
+    });
+}
+
+/// A small box: its label at the top, the item's picture, a line under it.
+#[allow(clippy::too_many_arguments)]
+fn small_box(c: &mut Kids, cx: &mut Ctx, book: &ClassBook, class: &ClassView, f: &Focus, slot: &str, label: &str, extra: &str, w: f32) {
+    let item = book.item(class.get(slot));
+    slot_box(c, cx, f, slot, Node { width: cx.px(w), height: cx.px(120.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, padding: UiRect::all(cx.px(6.0)), ..default() })
+        .with_children(|b| {
+            b.spawn((Text::new(label), cx.regular(17.0), TextColor(TEXT)));
+            let names = item.map(|i| vec![i.image.clone()]).unwrap_or_default();
+            b.spawn(Node { flex_grow: 1.0, justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() })
+                .with_children(|pic| picture_contain(pic, cx, &names, w - 30.0, 58.0));
+            b.spawn((Text::new(item.map_or_else(String::new, |i| i.name.to_uppercase()) + extra), cx.regular(14.0), TextColor(DIM)));
+            dash(b, cx, item.is_some());
         });
-        let third = (width - 36.0 - 16.0) / 3.0;
-        p.spawn(Node { column_gap: cx.px(8.0), ..default() }).with_children(|row| {
+}
+
+/// The loadout, as Infinite Warfare's: the points, the primary's and the
+/// secondary's panels, then lethal, tactical and the three perks, then the
+/// wildcards (each box lit when its slot is in focus).
+fn loadout(c: &mut Kids, cx: &mut Ctx, book: &ClassBook, class: &ClassView, f: &Focus, left: f32, top: f32, width: f32) {
+    c.spawn(Node { width: cx.px(width), flex_direction: FlexDirection::Column, row_gap: cx.px(4.0), ..abs(Some(left), Some(top), None, None, cx) }).with_children(|col| {
+        points_bar(col, cx, class.spent, width);
+        weapon_panel(col, cx, book, class, f, "primary", "PRIMARY WEAPON", width);
+        weapon_panel(col, cx, book, class, f, "secondary", "SECONDARY WEAPON", width);
+        let count = |slot: &str| {
+            let n = class.get(&format!("{slot}count"));
+            if n > 1 { format!(" x{n}") } else { String::new() }
+        };
+        let fifth = (width - 16.0) / 5.0;
+        col.spawn(Node { column_gap: cx.px(4.0), ..default() }).with_children(|row| {
+            small_box(row, cx, book, class, f, "primarygrenade", "LETHAL", &count("primarygrenade"), fifth);
+            small_box(row, cx, book, class, f, "specialgrenade", "TACTICAL", &count("specialgrenade"), fifth);
             for k in 1..=3 {
-                let greed = book.item(class.get(&format!("specialty{}", k + 3))).map(|i| format!("+ {}", i.name.to_uppercase())).unwrap_or_default();
-                item_cell(row, cx, &format!("PERK {k}"), book.item(class.get(&format!("specialty{k}"))), &greed, third, 64.0, 64.0);
+                // (Perk Greed's extra perk under its perk.)
+                let greed = format!("specialty{}", k + 3);
+                let slot = if f.lit(&greed) { greed } else { format!("specialty{k}") };
+                let extra = book.item(class.get(&format!("specialty{}", k + 3))).filter(|_| !slot.ends_with(&(k + 3).to_string())).map(|i| format!(" + {}", i.name.to_uppercase())).unwrap_or_default();
+                small_box(row, cx, book, class, f, &slot, &format!("PERK {k}"), &extra, fifth);
             }
         });
-        p.spawn(Node { column_gap: cx.px(8.0), ..default() }).with_children(|row| {
-            let count = |slot: &str| {
-                let n = class.get(&format!("{slot}count"));
-                if n > 1 { format!("x{n}") } else { String::new() }
-            };
-            item_cell(row, cx, "LETHAL", book.item(class.get("primarygrenade")), &count("primarygrenade"), half, 64.0, 64.0);
-            item_cell(row, cx, "TACTICAL", book.item(class.get("specialgrenade")), &count("specialgrenade"), half, 64.0, 64.0);
-        });
-        p.spawn(Node { column_gap: cx.px(8.0), ..default() }).with_children(|row| {
+        let third = (width - 8.0) / 3.0;
+        col.spawn(Node { column_gap: cx.px(4.0), ..default() }).with_children(|row| {
             for k in 1..=3 {
-                item_cell(row, cx, &format!("WILDCARD {k}"), book.item(class.get(&format!("bonuscard{k}"))), "", third, 56.0, 56.0);
+                small_box(row, cx, book, class, f, &format!("bonuscard{k}"), &format!("WILDCARD {k}"), "", third);
             }
         });
     });
 }
 
-/// Compact rows: a label on the left, its value on the right.
+/// A class at a glance (the in-game Choose Class shows it too).
+pub(crate) fn class_card(c: &mut Kids, cx: &mut Ctx, book: &ClassBook, class: &ClassView, left: f32, top: f32, width: f32) {
+    loadout(c, cx, book, class, &Focus { rows: &[], focus_slot: None }, left, top, width.min(640.0));
+}
+
+/// A dark strip with a name (the left column's headings).
+fn strip(c: &mut Kids, cx: &Ctx, text: &str, width: f32) {
+    c.spawn((Node { width: cx.px(width), height: cx.px(38.0), align_items: AlignItems::Center, padding: UiRect::horizontal(cx.px(14.0)), border: UiRect::left(cx.px(6.0)), ..default() }, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.78)), BorderColor::all(WHITE)))
+        .with_child((Text::new(text.to_owned()), cx.regular(23.0), TextColor(WHITE)));
+}
+
+/// The class's scorestreaks: their pictures side by side, their names under.
+fn streaks(c: &mut Kids, cx: &mut Ctx, book: &ClassBook, class: &ClassView, width: f32) {
+    strip(c, cx, "SCORESTREAKS", width);
+    let third = (width - 8.0) / 3.0;
+    c.spawn(Node { column_gap: cx.px(4.0), ..default() }).with_children(|row| {
+        for k in 1..=3 {
+            let item = book.item(class.get(&format!("killstreak{k}")));
+            row.spawn((Node { width: cx.px(third), height: cx.px(92.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, justify_content: JustifyContent::Center, row_gap: cx.px(2.0), ..default() }, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55))))
+                .with_children(|b| {
+                    let names = item.map(|i| vec![i.image.clone()]).unwrap_or_default();
+                    picture_contain(b, cx, &names, third - 40.0, 50.0);
+                    b.spawn((Text::new(item.map_or_else(|| "—".to_owned(), |i| i.name.to_uppercase())), cx.regular(15.0), TextColor(TEXT)));
+                });
+        }
+    });
+}
+
+/// The edit screen's slots: compact rows, each a white bar and its name with
+/// what it holds at the right; the one in focus a band in the accent.
 fn slot_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, width: f32) {
-    // (The rows share the height from the header to the footer: a class
-    // with every wildcard slot open still fits.)
-    let height = (870.0 / rows.len().max(1) as f32 - 3.0).clamp(26.0, 38.0);
-    let text = if height < 34.0 { 18.0 } else { 21.0 };
+    // (The rows share the height down to the foot: a class with every
+    // wildcard slot open still fits.)
+    let height = (720.0 / rows.len().max(1) as f32 - 3.0).clamp(24.0, 36.0);
+    let text = if height < 30.0 { 17.0 } else { 20.0 };
     for (i, r) in rows.iter().enumerate() {
         let on = i == focus;
         let mut e = c.spawn((
@@ -471,25 +570,26 @@ fn slot_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, width: f32) {
             Node {
                 width: cx.px(width),
                 height: cx.px(height),
-                padding: UiRect::horizontal(cx.px(16.0)),
+                padding: UiRect::horizontal(cx.px(14.0)),
                 justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,
-                border: UiRect::left(cx.px(4.0)),
+                border: UiRect::left(cx.px(5.0)),
+                flex_shrink: 0.0,
                 ..default()
             },
-            BorderColor::all(if on { cx.pal.accent } else { Color::NONE }),
+            BorderColor::all(if on { cx.pal.accent } else { WHITE.with_alpha(0.85) }),
         ));
         if on {
-            e.insert(fade_right(cx.pal.accent_a(0.30), cx.pal.accent_a(0.06)));
+            e.insert(BackgroundColor(cx.pal.accent));
         } else {
-            e.insert(BackgroundColor(cx.pal.panel_soft));
+            e.insert(BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.50)));
         }
         e.with_children(|line| {
-            line.spawn((Text::new(r.label.clone()), cx.bold(text), TextColor(if on { WHITE } else { DIM })));
+            line.spawn((Text::new(r.label.clone()), cx.regular(text), TextColor(if on { WHITE } else { TEXT })));
             if let Some(v) = &r.value {
                 let selector = matches!(r.act, Act::Cycle(_));
-                let shown = if selector { format!("‹  {v}  ›") } else { format!("{v}  ›") };
-                line.spawn((Text::new(shown), cx.bold(text), TextColor(if on { WHITE } else { TEXT })));
+                let shown = if selector { format!("‹  {v}  ›") } else { v.clone() };
+                line.spawn((Text::new(shown), cx.bold(text), TextColor(if on { WHITE } else { DIM })));
             }
         });
     }
@@ -497,56 +597,62 @@ fn slot_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, width: f32) {
 
 pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, s: &Shell, book: &ClassBook, rows: &[Row]) {
     let pal = cx.pal;
+    let (left, col_w, mid) = (126.0, 400.0, 560.0);
     match s.screen {
         Screen::Classes => {
-            header(c, cx, &[super::view::section(s), "CREATE A CLASS"]);
-            c.spawn(Node {
-                position_type: PositionType::Absolute,
-                left: cx.px(72.0),
-                top: cx.px(176.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: cx.px(8.0),
-                ..default()
-            })
-            .with_children(|col| super::view::menu_rows(col, cx, rows, s.focus, 440.0, false));
-            if let Some(class) = book.classes.get(s.focus) {
-                class_card(c, cx, book, class, 560.0, 176.0, 1288.0);
+            header(c, cx, &[super::view::section(s), "LOADOUT SELECT"]);
+            let class = book.classes.get(s.focus);
+            c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(4.0), ..abs(Some(left), Some(196.0), None, None, cx) }).with_children(|col| {
+                strip(col, cx, "SELECT CLASS", col_w);
+                let shown: Vec<Row> = rows.iter().map(|r| Row { sub: String::new(), ..r.clone() }).collect();
+                super::view::menu_rows(col, cx, &shown, s.focus, col_w - 21.0, false);
+                if let Some(class) = class {
+                    col.spawn(Node { height: cx.px(10.0), ..default() });
+                    streaks(col, cx, book, class, col_w);
+                    col.spawn((Text::new(format!("{} / {POINTS} points.  Create a loadout of weapons, equipment and perks to bring into battle.", class.spent)), cx.regular(21.0), TextColor(WHITE), Node { max_width: cx.px(col_w), margin: UiRect::top(cx.px(8.0)), ..default() }));
+                }
+            });
+            if let Some(class) = class {
+                loadout(c, cx, book, class, &Focus { rows: &[], focus_slot: None }, mid, 196.0, 640.0);
             }
         }
         Screen::ClassEdit => {
             let Some(class) = book.classes.get(s.class as usize) else { return };
-            header(c, cx, &["CREATE A CLASS", &class.name.to_uppercase()]);
-            c.spawn(Node {
-                position_type: PositionType::Absolute,
-                left: cx.px(72.0),
-                top: cx.px(140.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: cx.px(3.0),
-                ..default()
-            })
-            .with_children(|col| slot_rows(col, cx, rows, s.focus, 560.0));
-            class_card(c, cx, book, class, 680.0, 176.0, 1168.0);
+            header(c, cx, &["LOADOUT SELECT", &class.name.to_uppercase()]);
+            c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(3.0), ..abs(Some(left), Some(196.0), None, None, cx) }).with_children(|col| {
+                strip(col, cx, &class.name.to_uppercase(), col_w);
+                slot_rows(col, cx, rows, s.focus, col_w);
+            });
+            let focus_slot = rows.get(s.focus).and_then(|r| match r.act {
+                Act::EditSlot(i) => Some(EDIT_SLOTS[i].0),
+                Act::Cycle(Setting::LethalCount) => Some("primarygrenade"),
+                Act::Cycle(Setting::TacticalCount) => Some("specialgrenade"),
+                _ => None,
+            });
+            loadout(c, cx, book, class, &Focus { rows, focus_slot }, mid, 196.0, 640.0);
         }
         Screen::ItemPick => {
             let Some(class) = book.classes.get(s.class as usize) else { return };
             let (slot, label) = EDIT_SLOTS[s.slot.min(EDIT_SLOTS.len() - 1)];
-            header(c, cx, &[&class.name.to_uppercase(), label]);
+            let title = match slot {
+                "primary" => "PRIMARY WEAPON".to_owned(),
+                "secondary" => "SECONDARY WEAPON".to_owned(),
+                _ => label.to_owned(),
+            };
+            header(c, cx, &[&class.name.to_uppercase(), &title]);
             let (tabs, picks) = picks(s, book);
             let tab = s.page.min(tabs.len().saturating_sub(1));
-            super::view::tabs(c, cx, &tabs, tab, Hit::Page);
+            game_tabs(c, cx, &tabs, tab);
             let have = class.get(slot);
-            let (tw, th, gap) = (280.0, 168.0, 14.0);
+            let (tw, th, gap) = (270.0, 162.0, 10.0);
             let (cols, first, last) = super::view::grid_window(cx, picks.len(), s.focus, tw, th, gap, 196.0, 230.0);
-            super::view::grid_more(c, cx, first, last, picks.len(), 72.0 + cols as f32 * (tw + gap) - 220.0, 160.0);
+            super::view::grid_more(c, cx, first, last, picks.len(), left + cols as f32 * (tw + gap) - 220.0, 168.0);
             c.spawn(Node {
-                position_type: PositionType::Absolute,
-                left: cx.px(72.0),
-                top: cx.px(196.0),
                 width: cx.px(cols as f32 * (tw + gap)),
                 flex_wrap: FlexWrap::Wrap,
                 column_gap: cx.px(gap),
                 row_gap: cx.px(gap),
-                ..default()
+                ..abs(Some(left), Some(196.0), None, None, cx)
             })
             .with_children(|grid| {
                 for (k, p) in picks.iter().enumerate().take(last).skip(first) {
@@ -559,62 +665,73 @@ pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, s: &Shell, book: &ClassBook, rows
                             height: cx.px(th),
                             flex_direction: FlexDirection::Column,
                             justify_content: JustifyContent::SpaceBetween,
-                            padding: UiRect::all(cx.px(10.0)),
-                            border: UiRect::all(cx.px(if on { 3.0 } else { 1.0 })),
+                            padding: UiRect::all(cx.px(8.0)),
+                            border: UiRect::all(cx.px(if on { 2.0 } else { 0.0 })),
                             ..default()
                         },
-                        BorderColor::all(if on { pal.accent } else { pal.line }),
-                        BackgroundColor(if on { pal.accent_a(0.16) } else { pal.panel }),
+                        BorderColor::all(if on { pal.accent } else { Color::NONE }),
+                        BackgroundColor(if on { pal.accent_a(0.30) } else { Color::srgba(0.12, 0.13, 0.15, 0.72) }),
                     ))
                     .with_children(|tile| {
+                        tile.spawn(Node { justify_content: JustifyContent::SpaceBetween, ..default() }).with_children(|top| {
+                            top.spawn((Text::new(p.name.clone()), cx.regular(20.0), TextColor(if p.locked { FAINT } else { WHITE })));
+                            let tag = if p.locked {
+                                format!("LV {}", p.level)
+                            } else if p.value == have && p.value != 0 {
+                                "EQUIPPED".to_owned()
+                            } else {
+                                String::new()
+                            };
+                            if !tag.is_empty() {
+                                top.spawn((Node { padding: UiRect::axes(cx.px(5.0), cx.px(1.0)), ..default() }, BackgroundColor(if p.locked { GOLD } else { pal.accent })))
+                                    .with_child((Text::new(tag), cx.bold(14.0), TextColor(if p.locked { Color::BLACK } else { WHITE })));
+                            }
+                        });
                         tile.spawn(Node { justify_content: JustifyContent::Center, flex_grow: 1.0, align_items: AlignItems::Center, ..default() })
                             .with_children(|pic| {
                                 if p.image.is_empty() {
                                     pic.spawn((Text::new("—"), cx.bold(40.0), TextColor(FAINT)));
                                 } else {
-                                    picture_contain(pic, cx, std::slice::from_ref(&p.image), tw - 30.0, th - 60.0);
+                                    picture_contain(pic, cx, std::slice::from_ref(&p.image), tw - 30.0, th - 62.0);
                                 }
                             });
-                        tile.spawn(Node { justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() })
-                            .with_children(|bar| {
-                                bar.spawn((Text::new(p.name.clone()), cx.bold(20.0), TextColor(if p.locked { FAINT } else if on { WHITE } else { TEXT })));
-                                let tag = if p.locked {
-                                    format!("LV {}", p.level)
-                                } else if p.value == have && p.value != 0 {
-                                    "●".to_owned()
-                                } else if p.cost > 0 {
-                                    format!("{}", p.cost)
-                                } else {
-                                    String::new()
-                                };
-                                bar.spawn((Text::new(tag), cx.bold(18.0), TextColor(if p.locked { GOLD } else { pal.accent })));
-                            });
+                        tile.spawn(Node { justify_content: JustifyContent::SpaceBetween, ..default() }).with_children(|bar| {
+                            bar.spawn((Text::new(p.group.clone()), cx.regular(14.0), TextColor(DIM)));
+                            if p.cost > 0 {
+                                bar.spawn((Text::new(format!("{} PT", p.cost)), cx.regular(14.0), TextColor(DIM)));
+                            }
+                        });
                     });
                 }
             });
             // The one in focus, in words.
             if let Some(p) = picks.get(s.focus) {
-                c.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        right: cx.px(72.0),
-                        bottom: cx.px(86.0),
-                        width: cx.px(620.0),
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::FlexEnd,
-                        row_gap: cx.px(4.0),
-                        ..default()
-                    },
-                ))
-                .with_children(|t| {
-                    t.spawn((Text::new(p.name.clone()), cx.bold(54.0), TextColor(WHITE)));
-                    if !p.desc.is_empty() {
-                        t.spawn((Text::new(p.desc.clone()), cx.regular(21.0), TextColor(DIM), TextLayout::justify(Justify::Right)));
-                    }
-                    t.spawn((Text::new(format!("{} / {POINTS} POINTS IN THIS CLASS", class.spent)), cx.bold(18.0), TextColor(pal.accent)));
-                });
+                c.spawn(Node { width: cx.px(620.0), flex_direction: FlexDirection::Column, align_items: AlignItems::FlexEnd, row_gap: cx.px(4.0), ..abs(None, None, Some(96.0), Some(96.0), cx) })
+                    .with_children(|t| {
+                        t.spawn((Text::new(p.name.clone()), cx.regular(56.0), TextColor(WHITE)));
+                        if !p.desc.is_empty() {
+                            t.spawn((Text::new(p.desc.clone()), cx.regular(21.0), TextColor(TEXT), TextLayout::justify(Justify::Right)));
+                        }
+                        t.spawn((Text::new(format!("{} / {POINTS} POINTS IN THIS CLASS", class.spent)), cx.regular(18.0), TextColor(pal.accent)));
+                    });
             }
         }
         _ => {}
     }
+}
+
+/// The picker's tabs as Modern Warfare III's game tabs: the names side by
+/// side under the title, the one he is on bright with a line under it.
+fn game_tabs(c: &mut Kids, cx: &mut Ctx, labels: &[String], on: usize) {
+    c.spawn(Node { column_gap: cx.px(22.0), align_items: AlignItems::FlexEnd, ..abs(Some(100.0), Some(130.0), None, None, cx) }).with_children(|t| {
+        super::view::hint(t, cx, "Q", "xenonbutton_lb", "");
+        for (i, l) in labels.iter().enumerate() {
+            let sel = i == on;
+            t.spawn((Hit::Page(i), Button, Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: cx.px(4.0), ..default() })).with_children(|b| {
+                b.spawn((Text::new(l.clone()), if sel { cx.black(26.0) } else { cx.bold(24.0) }, TextColor(if sel { WHITE } else { DIM })));
+                b.spawn((Node { width: Val::Percent(100.0), height: cx.px(3.0), ..default() }, BackgroundColor(if sel { cx.pal.accent } else { Color::NONE })));
+            });
+        }
+        super::view::hint(t, cx, "E", "xenonbutton_rb", "");
+    });
 }
