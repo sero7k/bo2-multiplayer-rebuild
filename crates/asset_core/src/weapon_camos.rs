@@ -24,12 +24,34 @@ pub struct MaterialCamo {
 }
 
 /// A pattern camo on one of a gun's materials: the pattern picture (a
-/// texture slot) and how many times it repeats across the gun.
+/// texture slot) and how many times it repeats across the gun. `full`: it
+/// covers the whole material (another game's gun, whose colour map's alpha
+/// is no camo mask).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PatternCamo {
     pub image: u32,
     pub scale: f32,
+    pub full: bool,
 }
+
+impl PatternCamo {
+    /// Instance slot 22's value for its surfaces: 3000 + its repeat laid
+    /// under the gun's colour by the colour map's alpha, as Black Ops II's
+    /// gun shaders do; 5000 + its repeat over the whole surface.
+    #[must_use]
+    pub fn slot(&self) -> f32 {
+        let repeat = if self.scale > 0.0 { self.scale.min(900.0) } else { 1.0 };
+        if self.full { 5000.0 + repeat } else { 3000.0 + repeat }
+    }
+}
+
+/// The camo numbers of the other games' camos (Black Ops II's are its own
+/// weapon options, below 100): Modern Warfare 2's slot `n` is
+/// `MW2_FIRST + n`, Modern Warfare 3's `MW3_FIRST + n`, Black Ops' camo
+/// `n` (counted from 1) `BO1_FIRST + n`. All fit a class's camo byte.
+pub const MW2_FIRST: u32 = 100;
+pub const MW3_FIRST: u32 = 120;
+pub const BO1_FIRST: u32 = 140;
 
 /// The match's camos: per material camo option, each gun material it
 /// replaces (catalog index) and what it draws instead; per pattern camo
@@ -42,47 +64,107 @@ pub struct CamoTable {
     pub options: HashMap<u32, String>,
 }
 
-impl CamoTable {
-    /// Each material camo's most used material (and its tiling): what it
-    /// draws on another game's gun, which has no camo material set of its
-    /// own (see `install_wrap`).
-    fn representatives(&self) -> HashMap<u32, MaterialCamo> {
-        let mut counts: HashMap<(u32, u32, u32), usize> = HashMap::new();
-        for (&(option, _), c) in &self.swaps {
-            *counts.entry((option, c.material, c.tile.to_bits())).or_default() += 1;
-        }
-        let mut best: HashMap<u32, ((u32, u32), usize)> = HashMap::new();
-        for ((option, material, tile), n) in counts {
-            let e = best.entry(option).or_insert(((material, tile), n));
-            if n > e.1 || (n == e.1 && (material, tile) < e.0) {
-                *e = ((material, tile), n);
-            }
-        }
-        best.into_iter()
-            .map(|(o, ((material, tile), _))| (o, MaterialCamo { material, tile: f32::from_bits(tile) }))
-            .collect()
+/// Each material camo's most used material (and its tiling): what it
+/// draws on a gun that has no camo material set of its own for it.
+fn representatives(swaps: &HashMap<(u32, u32), MaterialCamo>) -> HashMap<u32, MaterialCamo> {
+    let mut counts: HashMap<(u32, u32, u32), usize> = HashMap::new();
+    for (&(option, _), c) in swaps {
+        *counts.entry((option, c.material, c.tile.to_bits())).or_default() += 1;
     }
+    let mut best: HashMap<u32, ((u32, u32), usize)> = HashMap::new();
+    for ((option, material, tile), n) in counts {
+        let e = best.entry(option).or_insert(((material, tile), n));
+        if n > e.1 || (n == e.1 && (material, tile) < e.0) {
+            *e = ((material, tile), n);
+        }
+    }
+    best.into_iter().map(|(o, ((material, tile), _))| (o, MaterialCamo { material, tile: f32::from_bits(tile) })).collect()
+}
+
+/// Each pattern camo's most used pattern, laid over a whole material.
+fn pattern_representatives(patterns: &HashMap<(u32, u32), PatternCamo>) -> HashMap<u32, PatternCamo> {
+    let mut counts: HashMap<(u32, u32, u32), usize> = HashMap::new();
+    for (&(option, _), p) in patterns {
+        *counts.entry((option, p.image, p.scale.to_bits())).or_default() += 1;
+    }
+    let mut best: HashMap<u32, ((u32, u32), usize)> = HashMap::new();
+    for ((option, image, scale), n) in counts {
+        let e = best.entry(option).or_insert(((image, scale), n));
+        if n > e.1 || (n == e.1 && (image, scale) < e.0) {
+            *e = ((image, scale), n);
+        }
+    }
+    best.into_iter().map(|(o, ((image, scale), _))| (o, PatternCamo { image, scale: f32::from_bits(scale), full: true })).collect()
+}
+
+/// Every camo for a gun material with no camo of its own for it: material
+/// camos (Black Ops II's, Modern Warfare 2's and 3's) as one material, the
+/// pattern camos (Black Ops II's, Black Ops') as one pattern over it all.
+#[derive(Default)]
+struct Anywhere {
+    materials: HashMap<u32, MaterialCamo>,
+    patterns: HashMap<u32, PatternCamo>,
+    /// Black Ops II's guns' camo-ready materials (the others' camos draw
+    /// there on its guns).
+    ready: std::collections::HashSet<u32>,
+    /// Modern Warfare 2's and 3's camos, and the gun materials their own
+    /// camo models change (where only their own swap draws).
+    guest_options: std::collections::HashSet<u32>,
+    guest_bases: std::collections::HashSet<u32>,
+}
+
+static ANYWHERE: RwLock<Option<Anywhere>> = RwLock::new(None);
+
+fn rebuild_anywhere() {
+    let mut a = Anywhere::default();
+    if let Some(t) = table() {
+        a.materials.extend(representatives(&t.swaps));
+        a.patterns.extend(pattern_representatives(&t.patterns));
+        a.ready.extend(t.swaps.keys().map(|k| k.1));
+        a.ready.extend(t.patterns.keys().map(|k| k.1));
+    }
+    if let Some(g) = GUEST.read().ok().and_then(|g| g.clone()) {
+        a.materials.extend(representatives(&g));
+        a.guest_options.extend(g.keys().map(|k| k.0));
+        a.guest_bases.extend(g.keys().map(|k| k.1));
+    }
+    if let Some(e) = EXTRA.read().ok().and_then(|e| e.clone()) {
+        a.patterns.extend(e);
+    }
+    if let Ok(mut w) = ANYWHERE.write() {
+        *w = Some(a);
+    }
+}
+
+/// The other games' pattern camos (Black Ops' camo pictures), by camo
+/// number, each over a whole material.
+static EXTRA: RwLock<Option<HashMap<u32, PatternCamo>>> = RwLock::new(None);
+
+pub fn install_extra_patterns(patterns: HashMap<u32, PatternCamo>) {
+    if let Ok(mut e) = EXTRA.write() {
+        *e = (!patterns.is_empty()).then_some(patterns);
+    }
+    rebuild_anywhere();
+}
+
+/// Whether another game's camo draws on this gun material: any game's gun
+/// material in the wrap set, or one of Black Ops II's camo-ready ones.
+fn camo_ready(material: u32) -> bool {
+    wraps(material) || ANYWHERE.read().ok().is_some_and(|a| a.as_ref().is_some_and(|a| a.ready.contains(&material)))
 }
 
 static TABLE: RwLock<Option<Arc<CamoTable>>> = RwLock::new(None);
 
 /// The match load's camos (None: no camos this match).
 pub fn install(table: Option<CamoTable>) {
-    if let Ok(mut r) = REPRESENTATIVE.write() {
-        *r = table.as_ref().map(CamoTable::representatives).filter(|m| !m.is_empty());
-    }
     if let Ok(mut t) = TABLE.write() {
         *t = table.map(Arc::new);
     }
+    rebuild_anywhere();
 }
 
-/// Each Black Ops II material camo's material for another game's gun.
-static REPRESENTATIVE: RwLock<Option<HashMap<u32, MaterialCamo>>> = RwLock::new(None);
-
-/// bo2mp: the materials of the other games' guns that have no camos of
-/// their own (Black Ops, World at War, CoD4, Ghosts, Advanced Warfare):
-/// Black Ops II's material camos (Gold, Diamond, Carbon Fiber and the DLC
-/// ones) draw over them whole, as on its own guns.
+/// bo2mp: the materials of every other game's guns (glass, sights and hands
+/// left out): every game's camos draw over them whole.
 static WRAP: RwLock<Option<std::collections::HashSet<u32>>> = RwLock::new(None);
 
 pub fn install_wrap(materials: std::collections::HashSet<u32>) {
@@ -110,6 +192,7 @@ pub fn install_guest(swaps: HashMap<(u32, u32), MaterialCamo>) {
     if let Ok(mut g) = GUEST.write() {
         *g = (!swaps.is_empty()).then_some(swaps);
     }
+    rebuild_anywhere();
 }
 
 /// bo2mp: Black Ops II's Pack-a-Punch camo on other games' guns in
@@ -152,10 +235,21 @@ pub fn swap(option: u32, material: u32) -> Option<MaterialCamo> {
         return Some(camo);
     }
     let own = TABLE.read().ok().and_then(|t| t.as_ref()?.swaps.get(&(option, material)).copied());
-    own.or_else(|| GUEST.read().ok()?.as_ref()?.get(&(option, material)).copied())
-        .or_else(|| {
-            wraps(material).then(|| REPRESENTATIVE.read().ok()?.as_ref()?.get(&option).copied()).flatten()
-        })
+    own.or_else(|| GUEST.read().ok()?.as_ref()?.get(&(option, material)).copied()).or_else(|| {
+        if own_pattern(option, material).is_some() || !camo_ready(material) {
+            return None;
+        }
+        let a = ANYWHERE.read().ok()?;
+        let a = a.as_ref()?;
+        if a.guest_options.contains(&option) && a.guest_bases.contains(&material) {
+            return None;
+        }
+        a.materials.get(&option).copied()
+    })
+}
+
+fn own_pattern(option: u32, material: u32) -> Option<PatternCamo> {
+    TABLE.read().ok()?.as_ref()?.patterns.get(&(option, material)).copied()
 }
 
 /// The pattern `option` lays on a gun's `material`, if it is camo-ready.
@@ -164,16 +258,12 @@ pub fn pattern(option: u32, material: u32) -> Option<PatternCamo> {
     if option == 0 {
         return None;
     }
-    TABLE.read().ok()?.as_ref()?.patterns.get(&(option, material)).copied()
-}
-
-/// Instance slot 22's value for a pattern camo surface: 3000 + the
-/// pattern's repeat (the model shader lays the pattern, read from the
-/// surface's specular map slot, under the gun's colour where its alpha is
-/// low, as Black Ops II's gun shaders do).
-#[must_use]
-pub fn pattern_slot(scale: f32) -> f32 {
-    3000.0 + if scale > 0.0 { scale.min(900.0) } else { 1.0 }
+    own_pattern(option, material).or_else(|| {
+        if !camo_ready(material) {
+            return None;
+        }
+        ANYWHERE.read().ok()?.as_ref()?.patterns.get(&option).copied()
+    })
 }
 
 /// Each player's camos as the server sent them: client number -> (weapon,

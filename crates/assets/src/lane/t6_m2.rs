@@ -2649,7 +2649,7 @@ pub(crate) fn load_t6_combat(
                     }) as u32)
                 });
                 if let Some(image) = slot {
-                    table.patterns.insert((option, b), asset_core::weapon_camos::PatternCamo { image, scale: *scale });
+                    table.patterns.insert((option, b), asset_core::weapon_camos::PatternCamo { image, scale: *scale, full: false });
                 }
             }
         }
@@ -2665,6 +2665,43 @@ pub(crate) fn load_t6_combat(
             camo_plan.len()
         ));
         asset_core::weapon_camos::install((!table.swaps.is_empty() || !table.patterns.is_empty()).then_some(table));
+        // bo2mp: Black Ops' camos, its camo pictures from its IWDs, each a
+        // pattern over a whole gun material of every game's guns.
+        let mut extra = HashMap::new();
+        for (n, _, image, _) in asset_game::weapon_camo_models::BO1_CAMOS {
+            let Some(img) = asset_t6::legacy_images::legacy_iwd_mains()
+                .iter()
+                .find_map(|main| asset_material::decode_iwd_colour_image(main, image).and_then(Result::ok))
+            else {
+                continue;
+            };
+            let (width, height) = (img.width() as u16, img.height() as u16);
+            let slot = materials.link_image(asset_material::AuthoredImage {
+                namespace: asset_core::AssetNamespace::T5,
+                name: asset_core::AssetRef::Real(format!("t5:{image}")),
+                map_type: 0,
+                semantic: asset_material::TS_COLOR_MAP,
+                category: 0,
+                use_srgb_reads: true,
+                width,
+                height,
+                depth: 1,
+                level_count: img.texture_descriptor.mip_level_count as u8,
+                format: 0,
+                payload: std::sync::Arc::new(Vec::new()),
+                decoded: Some(std::sync::Arc::new(img)),
+                common_owned: false,
+                decoded_variant: None,
+                decoded_by: None,
+                pending_decode: None,
+            }) as u32;
+            extra.insert(
+                asset_core::weapon_camos::BO1_FIRST + u32::from(n),
+                asset_core::weapon_camos::PatternCamo { image: slot, scale: 2.0, full: true },
+            );
+        }
+        report.push(format!("bo1 camos: {} of {} pictures read", extra.len(), asset_game::weapon_camo_models::BO1_CAMOS.len()));
+        asset_core::weapon_camos::install_extra_patterns(extra);
         // bo2mp: the guest guns' Pack-a-Punch upgrades wear the map's
         // Pack-a-Punch camo: the camo material its upgraded guns' camo
         // set swaps in most, at its tiling.

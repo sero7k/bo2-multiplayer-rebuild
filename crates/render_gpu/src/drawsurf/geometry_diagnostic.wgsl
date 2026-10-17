@@ -1741,11 +1741,16 @@ fn fragment_prop(in: PropOut) -> @location(0) vec4<f32> {
     // pattern rides in the specular map's slot here; the camo areas shine as
     // painted metal. (Sampled either way: texture reads stay in uniform
     // control flow.)
+    // (5000 + its repeat: the pattern over the whole surface, another game's
+    // gun, shaded by the gun's own colour.)
     let camo_on = in.primary.z >= 3000.0;
-    let camo_uv = (in.uv - vec2(0.5)) * max(in.primary.z - 3000.0, 0.0001) + vec2(0.5);
+    let camo_full = in.primary.z >= 5000.0;
+    let camo_repeat = in.primary.z - select(3000.0, 5000.0, camo_full);
+    let camo_uv = (in.uv - vec2(0.5)) * max(camo_repeat, 0.0001) + vec2(0.5);
     let camo_pat = textureSample(specular_map, colour_sampler, camo_uv);
     if (camo_on) {
-        let camo_mixed = mix(raw_texel(camo_pat.rgb), texel, albedo.a) * in.color.rgb;
+        let shade = clamp(dot(texel, vec3(0.299, 0.587, 0.114)) * 2.2, 0.35, 1.25);
+        let camo_mixed = select(mix(raw_texel(camo_pat.rgb), texel, albedo.a), raw_texel(camo_pat.rgb) * shade, camo_full) * in.color.rgb;
         base = camo_mixed * camo_mixed;
     }
     // bo2zm: Black Ops II's lit model shader (`mc_lit_sm_r0c0n0s0`, its

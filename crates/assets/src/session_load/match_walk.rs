@@ -1179,7 +1179,7 @@ fn guest_camo_swaps(fpv: &FpvMeshBuild, world: &WorldWeaponBuild, report: &mut V
     use asset_core::weapon_camos::MaterialCamo;
     let mut swaps: std::collections::HashMap<(u32, u32), MaterialCamo> = std::collections::HashMap::new();
     let (mut guns, mut camos, mut refused) = (0usize, 0usize, 0usize);
-    let mut pair = |slot: u8, base: Option<(&asset_model::ModelSkel, &[asset_core::AssetEdge<asset_model::MaterialSpace>])>,
+    let mut pair = |option: u32, base: Option<(&asset_model::ModelSkel, &[asset_core::AssetEdge<asset_model::MaterialSpace>])>,
                     camo: Option<(&asset_model::ModelSkel, &[asset_core::AssetEdge<asset_model::MaterialSpace>])>|
      -> bool {
         let (Some((bs, be)), Some((cs, ce))) = (base, camo) else { return false };
@@ -1191,21 +1191,26 @@ fn guest_camo_swaps(fpv: &FpvMeshBuild, world: &WorldWeaponBuild, report: &mut V
             if let (Some(b), Some(c)) = (b.bound_index(), c.bound_index())
                 && b != c
             {
-                swaps.insert((u32::from(slot), b as u32), MaterialCamo { material: c as u32, tile: 1.0 });
+                swaps.insert((option, b as u32), MaterialCamo { material: c as u32, tile: 1.0 });
                 any = true;
             }
         }
         any
     };
     for (ns, gun, gun_world, list) in asset_game::weapon_camo_models::all() {
+        // (A camo's number: its game's first number and its slot.)
+        let first = match ns {
+            asset_core::AssetNamespace::Iw5 => asset_core::weapon_camos::MW3_FIRST,
+            _ => asset_core::weapon_camos::MW2_FIRST,
+        };
         guns += 1;
         let view_base = fpv.get(ns, &gun).map(|e| (&*e.skel, e.material_edges.as_slice()));
         let world_base = gun_world.as_deref().and_then(|w| world.get(ns, w)).map(|e| (&*e.skel, e.material_edges.as_slice()));
         for (slot, view, world_name) in list {
             let v = view.as_deref().and_then(|n| fpv.get(ns, n)).map(|e| (&*e.skel, e.material_edges.as_slice()));
             let w = world_name.as_deref().and_then(|n| world.get(ns, n)).map(|e| (&*e.skel, e.material_edges.as_slice()));
-            let a = pair(slot, view_base, v);
-            let b = pair(slot, world_base, w);
+            let a = pair(first + u32::from(slot), view_base, v);
+            let b = pair(first + u32::from(slot), world_base, w);
             if a || b {
                 camos += 1;
             } else {
@@ -1216,11 +1221,10 @@ fn guest_camo_swaps(fpv: &FpvMeshBuild, world: &WorldWeaponBuild, report: &mut V
     report.push(format!("guest camos: {camos} camos of {guns} guns as {} material swaps ({refused} not paired)", swaps.len()));
     asset_core::weapon_camos::install_guest(swaps);
 
-    // The other games' guns with no camos of their own wear Black Ops II's
-    // material camos: every material of their gun models but glass, sights
-    // and hands.
+    // Every other game's guns wear every game's camos: every material of
+    // their gun models but glass, sights and hands.
     use asset_core::AssetNamespace as Ns;
-    let wears = |ns: Ns| matches!(ns, Ns::T5 | Ns::T4 | Ns::Iw3 | Ns::Iw6 | Ns::S1);
+    let wears = |ns: Ns| ns != Ns::T6;
     let skip = |name: &str| {
         let n = name.to_ascii_lowercase();
         ["lens", "glass", "reticle", "reflex", "holo", "scope_overlay", "red_dot", "dot_", "hand", "glove", "sleeve", "arm_", "_arms", "emissive", "_glow", "screen", "display", "decal", "sticker", "laser", "flash", "muzzle"]
@@ -1250,7 +1254,7 @@ fn guest_camo_swaps(fpv: &FpvMeshBuild, world: &WorldWeaponBuild, report: &mut V
             models += 1;
         }
     }
-    report.push(format!("guest camos: Black Ops II's material camos on {} materials of {models} other games' gun models", wrap.len()));
+    report.push(format!("guest camos: every game's camos on {} materials of {models} other games' gun models", wrap.len()));
     asset_core::weapon_camos::install_wrap(wrap);
     // bo2mp: Zombies' Pack-a-Punch camo on the guest guns' upgrades draws
     // over every other game's gun, Modern Warfare 2's and 3's as well.

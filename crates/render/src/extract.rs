@@ -1551,7 +1551,7 @@ fn t6_camo_instance(
     }
     let mats = || item.materials.iter().flatten();
     let tiled = mats().find_map(|&m| camos::swap(item.camo, m)).map_or(instance, |c| push(camos::tile_slot(c.tile)));
-    let patterned = mats().find_map(|&m| camos::pattern(item.camo, m)).map_or(instance, |p| push(camos::pattern_slot(p.scale)));
+    let patterned = mats().find_map(|&m| camos::pattern(item.camo, m)).map_or(instance, |p| push(p.slot()));
     (tiled, patterned)
 }
 
@@ -1851,7 +1851,7 @@ pub fn extract_t6_dynamic(
             // camo's tiling in slot 22).
             let camo_option = asset_core::weapon_camos::viewmodel();
             let mut camo_tile: Option<f32> = None;
-            let mut pattern_scale: Option<f32> = None;
+            let mut pattern_camo: Option<asset_core::weapon_camos::PatternCamo> = None;
             let draws = rows
                 .draws
                 .iter()
@@ -1869,7 +1869,7 @@ pub fn extract_t6_dynamic(
                         .then(|| asset_core::weapon_camos::pattern(camo_option, material.unwrap_or(u32::MAX)))
                         .flatten();
                     if let Some(p) = pattern {
-                        pattern_scale.get_or_insert(p.scale);
+                        pattern_camo.get_or_insert(p);
                     }
                     let material = swap.map_or(material?, |c| c.material);
                     let m = catalog.derived(assets::MaterialIndex::from_order(material as usize))?;
@@ -1907,11 +1907,11 @@ pub fn extract_t6_dynamic(
             instance[23] = asset_world::t6_nearest_probe(eye).map_or(0.0, |p| p as f32 + 1.0);
             // (Rows: the gun's own, its material camo's, its pattern's.)
             let mut instances = vec![instance];
-            if camo_tile.is_some() || pattern_scale.is_some() {
+            if camo_tile.is_some() || pattern_camo.is_some() {
                 let mut tiled = instance;
                 tiled[22] = asset_core::weapon_camos::tile_slot(camo_tile.unwrap_or(1.0));
                 let mut patterned = instance;
-                patterned[22] = asset_core::weapon_camos::pattern_slot(pattern_scale.unwrap_or(1.0));
+                patterned[22] = pattern_camo.map_or(3001.0, |p| p.slot());
                 instances.push(tiled);
                 instances.push(patterned);
             }
