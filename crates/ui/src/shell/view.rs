@@ -420,6 +420,9 @@ fn fmt_count(n: u32) -> String {
 /// point. A selector's value sits at the row's right between arrows. The
 /// line about the row in focus goes under the column. `big`: taller rows.
 pub(crate) fn menu_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, width: f32, big: bool) {
+    if cx.pal == Palette::ZOMBIES {
+        return outbreak_rows(c, cx, rows, focus, width);
+    }
     let (h, px) = if big { (50.0, 30.0) } else { (42.0, 25.0) };
     let tip = h * 0.5;
     for (i, r) in rows.iter().enumerate() {
@@ -482,6 +485,59 @@ pub(crate) fn menu_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, widt
     }
     if let Some(r) = rows.get(focus).filter(|r| !r.sub.is_empty()) {
         c.spawn((Text::new(r.sub.clone()), cx.regular(23.0), TextColor(WHITE), Node { max_width: cx.px(width + 40.0), margin: UiRect::top(cx.px(10.0)), ..default() }));
+    }
+}
+
+/// OUTBREAK's rows, as Infinite Warfare's Zombies menu: each a dark box with
+/// a thin rim; the one in focus a red band running out past its box.
+fn outbreak_rows(c: &mut Kids, cx: &Ctx, rows: &[Row], focus: usize, width: f32) {
+    let (h, px) = (36.0, 22.0);
+    for (i, r) in rows.iter().enumerate() {
+        let on = i == focus;
+        let mut e = c.spawn((
+            Hit::Row(i),
+            Button,
+            Node {
+                width: cx.px(width),
+                min_height: cx.px(h),
+                padding: UiRect::axes(cx.px(16.0), cx.px(2.0)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::SpaceBetween,
+                border: UiRect::all(cx.px(1.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BorderColor::all(if on { Color::NONE } else { WHITE.with_alpha(0.28) }),
+        ));
+        if on {
+            e.insert(BackgroundGradient::from(LinearGradient::to_right(vec![
+                ColorStop::new(cx.pal.accent_a(0.95), Val::Percent(0.0)),
+                ColorStop::new(cx.pal.accent_a(0.85), Val::Percent(75.0)),
+                ColorStop::new(cx.pal.accent_a(0.0), Val::Percent(100.0)),
+            ])));
+        } else {
+            e.insert(BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.62)));
+        }
+        e.with_children(|line| {
+            line.spawn((Text::new(r.label.clone()), cx.regular(px), TextColor(if on { WHITE } else { TEXT.with_alpha(0.86) })));
+            match &r.value {
+                Some(v) if !matches!(r.act, Act::Cycle(_)) => {
+                    line.spawn((Text::new(v.clone()), cx.bold(px * 0.9), TextColor(if on { WHITE } else { DIM })));
+                }
+                Some(v) => {
+                    line.spawn(Node { column_gap: cx.px(12.0), align_items: AlignItems::Center, ..default() }).with_children(|sel| {
+                        sel.spawn((Hit::Step(i, -1), Button, Text::new("‹"), cx.bold(px), TextColor(if on { WHITE } else { FAINT })));
+                        sel.spawn(Node { min_width: cx.px(120.0), justify_content: JustifyContent::Center, ..default() })
+                            .with_child((Text::new(v.clone()), cx.bold(px * 0.9), TextColor(if on { WHITE } else { DIM })));
+                        sel.spawn((Hit::Step(i, 1), Button, Text::new("›"), cx.bold(px), TextColor(if on { WHITE } else { FAINT })));
+                    });
+                }
+                None => {}
+            }
+        });
+    }
+    if let Some(r) = rows.get(focus).filter(|r| !r.sub.is_empty()) {
+        c.spawn((Text::new(r.sub.clone()), cx.regular(21.0), TextColor(TEXT), Node { max_width: cx.px(width + 40.0), margin: UiRect::top(cx.px(6.0)), ..default() }));
     }
 }
 

@@ -711,7 +711,7 @@ fn poll() -> Option<String> {
         Some(st) if !st.success() && secs < 30.0 => {
             format!("Zombies closed after {secs:.0} s (exit code {}). Its log is in {}.", st.code().map_or_else(|| "none".to_owned(), |c| c.to_string()), logs.display())
         }
-        _ => "Back from Zombies.".to_owned(),
+        _ => "Back from Outbreak.".to_owned(),
     })
 }
 

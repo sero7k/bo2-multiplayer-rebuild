@@ -415,7 +415,7 @@ pub(crate) fn rows(s: &Shell, c: &Catalog) -> Vec<Row> {
     match s.screen {
         Screen::Main => vec![
             Row::new("MULTIPLAYER", "Find a match, or a custom game with bots on every map.", Act::Multiplayer),
-            Row::new("ZOMBIES", "Survive the undead.", Act::Zombies),
+            Row::new("OUTBREAK", "Zombies: hold out against the undead, round after round.", Act::Zombies),
             Row::new("WARZONE", "Resurgence on Rebirth Island: squads, the gas, redeploys.", Act::Warzone),
             Row::new("SPEC OPS", "Coming soon.", Act::Soon(Soon::SpecOps)),
             Row::new("OPTIONS", "Graphics, sound and controls.", Act::Options),

@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use super::theme::*;
 use super::bridge::PlayerCard;
 use super::cards::{self, Kind};
-use super::view::{Ctx, Kids, banner, emblem, grid_more, grid_window, header, menu_rows, picture_box, short_section, tabs};
+use super::view::{Ctx, Kids, emblem, grid_more, grid_window, header, menu_rows, picture_box, short_section, tabs};
 use super::zm_record::{self, Record};
 use super::zombies::{self, MAPS, ZmKind, ZmState, chosen, game_line, pages, start_name};
 use super::{Hit, Row, Screen, Shell};
@@ -27,69 +27,58 @@ pub(crate) fn view(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row]) {
 /// his Zombies rank (BO2's symbol, its step and how far to the next) in
 /// place of his Multiplayer level.
 pub(crate) fn zm_card(c: &mut Kids, cx: &mut Ctx, card: &PlayerCard) {
+    // As Infinite Warfare's Zombies menu: his line at the top right (rank,
+    // name), his rank's progress under it.
     let r = zm_record::get();
     let (sym, step, frac) = zm_record::rank(&r);
     let icon = cx.pic(&[zm_record::icon(&r), format!("menu_zm_rank_{sym}")]);
-    let (title, mark) = (cards::mine(Kind::Card, &card.card), cards::mine(Kind::Emblem, &card.emblem));
-    c.spawn((
-        Node {
-            width: cx.px(540.0),
-            padding: UiRect::all(cx.px(10.0)),
-            column_gap: cx.px(12.0),
-            align_items: AlignItems::Center,
-            border: UiRect::left(cx.px(3.0)),
-            ..abs(None, Some(36.0), Some(64.0), None, cx)
-        },
-        BackgroundColor(cx.pal.panel),
-        BorderColor::all(cx.pal.accent),
-    ))
-    .with_children(|p| {
-        emblem(p, cx, &mark, 84.0);
-        p.spawn(Node { flex_direction: FlexDirection::Column, flex_grow: 1.0, row_gap: cx.px(6.0), ..default() }).with_children(|col| {
-            banner(col, cx, &title, 300.0, 56.0, Some((card.name.as_str(), 28.0)));
-            col.spawn((Text::new(format!("{}  ·  {step} OF 5", zm_record::rank_title(sym))), cx.regular(18.0), TextColor(DIM)));
-            col.spawn((Node { width: cx.px(300.0), height: cx.px(4.0), ..default() }, BackgroundColor(KEYCAP)))
-                .with_child((Node { width: Val::Percent(frac * 100.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(cx.pal.accent)));
+    let mark = cards::mine(Kind::Emblem, &card.emblem);
+    c.spawn(Node { width: cx.px(560.0), flex_direction: FlexDirection::Column, row_gap: cx.px(6.0), ..abs(None, Some(40.0), Some(90.0), None, cx) }).with_children(|p| {
+        p.spawn((
+            Node { height: cx.px(40.0), column_gap: cx.px(14.0), align_items: AlignItems::Center, padding: UiRect::horizontal(cx.px(12.0)), ..default() },
+            BackgroundGradient::from(LinearGradient::to_right(vec![
+                ColorStop::new(Color::srgba(0.0, 0.0, 0.0, 0.85), Val::Percent(0.0)),
+                ColorStop::new(Color::srgba(0.0, 0.0, 0.0, 0.55), Val::Percent(100.0)),
+            ])),
+        ))
+        .with_children(|l| {
+            match icon {
+                Some(h) => {
+                    l.spawn((ImageNode::new(h), Node { width: cx.px(30.0), height: cx.px(30.0), ..default() }));
+                }
+                None => {
+                    l.spawn((Text::new(sym.to_string()), cx.bold(24.0), TextColor(cx.pal.accent)));
+                }
+            }
+            emblem(l, cx, &mark, 30.0);
+            l.spawn((Text::new(card.name.clone()), cx.regular(24.0), TextColor(WHITE)));
         });
-        match icon {
-            Some(h) => {
-                p.spawn((ImageNode::new(h), Node { width: cx.px(72.0), height: cx.px(72.0), ..default() }));
-            }
-            None => {
-                p.spawn((Node { width: cx.px(72.0), height: cx.px(72.0), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }, BackgroundColor(KEYCAP)))
-                    .with_child((Text::new(sym.to_string()), cx.bold(36.0), TextColor(WHITE)));
-            }
-        }
+        p.spawn((Text::new(format!("{}  ·  {step} OF 5", zm_record::rank_title(sym))), cx.regular(19.0), TextColor(TEXT)));
+        p.spawn((Node { width: cx.px(300.0), height: cx.px(4.0), ..default() }, BackgroundColor(KEYCAP)))
+            .with_child((Node { width: Val::Percent(frac * 100.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(cx.pal.accent)));
     });
 }
 
-/// The Zombies menu: the rows on the left, his rank and record at a glance
-/// on the right (the backdrop's survivors take turns behind).
+/// OUTBREAK's menu, as Infinite Warfare's Zombies menu (without its big
+/// logo): the title, the rows in their boxes at the left, his best round
+/// and record in a dark box at the right under his line.
 fn menu(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row]) {
-    header(c, cx, &["ZOMBIES"]);
-    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(8.0), ..abs(Some(72.0), Some(176.0), None, None, cx) })
-        .with_children(|col| menu_rows(col, cx, rows, shell.focus, 540.0, false));
+    header(c, cx, &["OUTBREAK"]);
+    c.spawn(Node { flex_direction: FlexDirection::Column, row_gap: cx.px(5.0), ..abs(Some(126.0), Some(196.0), None, None, cx) })
+        .with_children(|col| menu_rows(col, cx, rows, shell.focus, 300.0, false));
     let r = zm_record::get();
     c.spawn((
-        Node {
-            width: cx.px(430.0),
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::all(cx.px(24.0)),
-            row_gap: cx.px(6.0),
-            border: UiRect::top(cx.px(3.0)),
-            ..abs(None, Some(176.0), Some(64.0), None, cx)
-        },
-        BackgroundColor(cx.pal.panel),
-        BorderColor::all(cx.pal.accent),
+        Node { width: cx.px(300.0), flex_direction: FlexDirection::Column, padding: UiRect::all(cx.px(18.0)), row_gap: cx.px(4.0), border: UiRect::all(cx.px(1.0)), ..abs(None, Some(196.0), Some(350.0), None, cx) },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.62)),
+        BorderColor::all(WHITE.with_alpha(0.28)),
     ))
     .with_children(|p| {
-        p.spawn((Text::new("BEST ROUND"), cx.bold(20.0), TextColor(DIM)));
-        p.spawn((Text::new(if r.best_round == 0 { "—".to_owned() } else { r.best_round.to_string() }), cx.bold(104.0), TextColor(if r.best_round == 0 { TEXT.with_alpha(0.5) } else { WHITE })));
-        p.spawn((Node { height: Val::Px(1.0), width: Val::Percent(100.0), margin: UiRect::vertical(cx.px(8.0)), ..default() }, BackgroundColor(cx.pal.line)));
+        p.spawn((Text::new("BEST ROUND"), cx.regular(19.0), TextColor(TEXT)));
+        p.spawn((Text::new(if r.best_round == 0 { "—".to_owned() } else { r.best_round.to_string() }), cx.bold(76.0), TextColor(if r.best_round == 0 { TEXT.with_alpha(0.5) } else { WHITE })));
         for (k, v) in [("GAMES", r.games.to_string()), ("KILLS", r.kills.to_string()), ("REVIVES", r.revives.to_string()), ("DOWNS", r.downs.to_string())] {
             p.spawn(Node { justify_content: JustifyContent::SpaceBetween, ..default() }).with_children(|row| {
-                row.spawn((Text::new(k), cx.bold(19.0), TextColor(FAINT)));
-                row.spawn((Text::new(v), cx.bold(19.0), TextColor(TEXT)));
+                row.spawn((Text::new(k), cx.regular(19.0), TextColor(DIM)));
+                row.spawn((Text::new(v), cx.regular(19.0), TextColor(WHITE)));
             });
         }
     });
@@ -97,7 +86,7 @@ fn menu(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row]) {
 
 /// COMBAT RECORD: his rank, large, and every number the rank is made from.
 fn record(c: &mut Kids, cx: &mut Ctx) {
-    header(c, cx, &["ZOMBIES", "COMBAT RECORD"]);
+    header(c, cx, &["OUTBREAK", "COMBAT RECORD"]);
     let r: Record = zm_record::get();
     let (sym, step, frac) = zm_record::rank(&r);
     let icon = cx.pic(&[zm_record::icon(&r), format!("menu_zm_rank_{sym}")]);
@@ -187,7 +176,7 @@ fn abs(left: Option<f32>, top: Option<f32>, right: Option<f32>, bottom: Option<f
 /// the rows on the left; the map, its starts and the Zombies game's state
 /// on the right.
 fn lobby(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row], st: &ZmState) {
-    header(c, cx, &["ZOMBIES", shell.zm_kind.title()]);
+    header(c, cx, &["OUTBREAK", shell.zm_kind.title()]);
     let (m, z) = chosen(shell);
     let pictures = zombies::pictures(m, shell.zm_start);
     let round = zombies::ROUNDS[shell.zm_round.min(zombies::ROUNDS.len() - 1)];
@@ -207,7 +196,7 @@ fn lobby(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row], st: &ZmState) 
             card.spawn(Node { flex_direction: FlexDirection::Column, padding: UiRect::axes(cx.px(16.0), cx.px(12.0)), row_gap: cx.px(2.0), ..default() })
                 .with_children(|t| {
                     let (status, colour) = match (&st.running, st.problem()) {
-                        (Some(_), _) => ("IN ZOMBIES", GOLD),
+                        (Some(_), _) => ("IN OUTBREAK", GOLD),
                         (None, Some(_)) => ("Zombies is not installed", cx.pal.accent),
                         (None, None) if shell.zm_kind == ZmKind::Public => ("Public game", WHITE),
                         (None, None) if shell.zm_kind == ZmKind::Custom && shell.zm_bots > 0 => ("Custom game, with bots", WHITE),
@@ -257,7 +246,7 @@ fn lobby(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row], st: &ZmState) 
         p.spawn((Node { height: Val::Px(1.0), width: Val::Percent(100.0), margin: UiRect::vertical(cx.px(10.0)), ..default() }, BackgroundColor(cx.pal.line)));
         match st.problem() {
             Some(problem) => {
-                p.spawn((Text::new("ZOMBIES IS NOT INSTALLED"), cx.bold(22.0), TextColor(cx.pal.accent)));
+                p.spawn((Text::new("OUTBREAK IS NOT INSTALLED"), cx.bold(22.0), TextColor(cx.pal.accent)));
                 p.spawn((Text::new(problem.to_owned()), cx.regular(20.0), TextColor(TEXT)));
             }
             None => {
@@ -277,7 +266,7 @@ fn lobby(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row], st: &ZmState) 
 fn map_pick(c: &mut Kids, cx: &mut Ctx, shell: &Shell, st: &ZmState) {
     let p = pages(st.bo1());
     let page = shell.page.min(p.len() - 1);
-    header(c, cx, &["ZOMBIES", "SELECT MAP", p[page].0]);
+    header(c, cx, &["OUTBREAK", "SELECT MAP", p[page].0]);
     if p.len() > 1 {
         let labels: Vec<String> = p.iter().map(|(t, _)| short_section(t)).collect();
         tabs(c, cx, &labels, page, Hit::Page);
@@ -354,7 +343,7 @@ fn map_pick(c: &mut Kids, cx: &mut Ctx, shell: &Shell, st: &ZmState) {
 /// The start picker: the map's starts and modes, and the one in focus.
 fn start_pick(c: &mut Kids, cx: &mut Ctx, shell: &Shell, rows: &[Row]) {
     let (m, _) = chosen(shell);
-    header(c, cx, &["ZOMBIES", m.title, "SELECT START"]);
+    header(c, cx, &["OUTBREAK", m.title, "SELECT START"]);
     c.spawn(Node {
         flex_direction: FlexDirection::Column,
         row_gap: cx.px(6.0),

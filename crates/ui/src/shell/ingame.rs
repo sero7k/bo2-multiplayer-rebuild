@@ -458,7 +458,7 @@ pub(crate) fn ingame_view(
         ))
         .with_children(|c| {
             header(c, &cx, &[match up {
-                1 | 4 if zm => "ZOMBIES",
+                1 | 4 if zm => "OUTBREAK",
                 1 | 4 => "PAUSED",
                 3 => "OPTIONS",
                 _ => "CHOOSE CLASS",
