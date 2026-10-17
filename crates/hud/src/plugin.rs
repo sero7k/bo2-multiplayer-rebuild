@@ -108,28 +108,33 @@ impl Plugin for HudPlugin {
                             update_iris,
                             crate::sight::update_sight,
                             hud_stage_close::<1>,
-                            update_blood_overlay,
+                            update_blood_overlay.run_if(mw2_hud),
                             hud_stage_close::<2>,
                             update_flash_whiteout,
                             hud_stage_close::<3>,
-                            update_compass,
+                            update_compass.run_if(mw2_hud),
+                            drain_fire_pings.run_if(not(mw2_hud)),
                             hud_stage_close::<4>,
-                            update_playercard,
-                            update_weaponbar,
+                            update_playercard.run_if(mw2_hud),
+                            update_weaponbar.run_if(mw2_hud),
                             hud_stage_close::<5>,
                         )
                             .chain(),
                         (
-                            update_scorebar,
-                            update_splash,
-                            update_killfeed,
-                            update_scoreboard,
-                            update_killcam_skip,
-                            update_mantle_hint,
-                            crate::use_hint::update,
-                            update_hud_elems,
-                            update_targetmap,
-                            crate::menus::update_script_menus,
+                            (
+                                update_scorebar,
+                                update_splash,
+                                update_killfeed,
+                                update_scoreboard,
+                                update_killcam_skip,
+                                update_mantle_hint,
+                                crate::use_hint::update,
+                                update_hud_elems,
+                                update_targetmap,
+                                crate::menus::update_script_menus,
+                            )
+                                .chain()
+                                .run_if(mw2_hud),
                             hud_stage_close::<7>,
                         )
                             .chain(),
@@ -169,6 +174,23 @@ impl Plugin for HudPlugin {
                     .in_set(LifeFrontPublished),
             );
     }
+}
+
+/// bo2mp: Modern Warfare 2's match HUD (score bar, weapon bar, compass,
+/// player card, splashes, killfeed, scoreboard, hints, script HUD elements,
+/// its script menus) runs only outside Black Ops II's rules (the `menu` and
+/// `play` launch modes). A Black Ops II match draws BO2's HUD and the Modern
+/// HUD; there these read an empty menu catalog and drew nothing. The
+/// reticle, scope, sight, flash whiteout and guest guns' kill icons stay
+/// on in every match.
+fn mw2_hud() -> bool {
+    !assets::t6_rules()
+}
+
+/// The compass takes the gunfire pings the FX side posts; with it off they
+/// are let go each frame (Black Ops II's minimap reads its own).
+fn drain_fire_pings(mut bus: ResMut<net::WeaponFirePingBus>) {
+    bus.pings.clear();
 }
 
 fn hud_root_should_show(screen: AppScreen, ui_draw: bool) -> bool {
