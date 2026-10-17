@@ -111,6 +111,21 @@ fn stand_in_book() -> ClassBook {
     for (i, n) in ["SVU-AS", "DSR 50", "Ballista", "XPR-50"].iter().enumerate() {
         add(50 + i as i32, n, "primary", "weapon_sniper", 1, 1, "stand_in_c", &att);
     }
+    // Guns from other games (the picker's game toggle): the first statstable
+    // numbers the guest list gives each game.
+    for (game, names) in [
+        ("t5", ["AK-74u", "Galil", "Commando"]),
+        ("iw4", ["ACR", "Intervention", "UMP45"]),
+        ("iw5", ["ACR 6.8", "MSR", "MP5"]),
+        ("jup", ["MCW", "Holger 556", "Striker"]),
+    ] {
+        let mut found = (bo2_profile::guest::FIRST_INDEX..bo2_profile::guest::FIRST_INDEX + 4000).filter(|&i| bo2_profile::guest::game_for_index(i) == Some(game));
+        for n in names {
+            if let Some(i) = found.next() {
+                add(i, n, "primary", "weapon_assault", 1, 1, "stand_in_c", &att);
+            }
+        }
+    }
     for (i, n) in ["Five-seven", "Tac-45", "B23R", "Executioner", "KAP-40"].iter().enumerate() {
         add(60 + i as i32, n, "secondary", "weapon_pistol", 1, 1, "stand_in_c", &att[..4]);
     }

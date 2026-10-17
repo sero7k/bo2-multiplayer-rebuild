@@ -931,14 +931,14 @@ fn weapon_view(c: &mut Kids, cx: &mut Ctx, s: &Shell, book: &ClassBook, class: &
     c.spawn((Text::new(title), cx.regular(60.0), TextColor(WHITE), abs(Some(l - 3.0), Some(40.0), None, None, cx)));
     let (tabs, picks) = picks(s, book);
     let tab = s.page.min(tabs.len().saturating_sub(1));
-    c.spawn(Node { column_gap: cx.px(26.0), align_items: AlignItems::FlexEnd, ..abs(Some(l), Some(104.0), None, None, cx) }).with_children(|t| {
+    c.spawn(Node { column_gap: cx.px(30.0), align_items: AlignItems::FlexEnd, ..abs(Some(l), Some(100.0), None, None, cx) }).with_children(|t| {
         if tabs.len() > 1 {
             super::view::hint(t, cx, "Q", "xenonbutton_lb", "");
         }
         for (i, name) in tabs.iter().enumerate() {
             let sel = i == tab;
             t.spawn((Hit::Page(i), Button, Node { flex_direction: FlexDirection::Column, row_gap: cx.px(3.0), ..default() })).with_children(|b| {
-                b.spawn((Text::new(name.clone()), if sel { cx.black(22.0) } else { cx.bold(21.0) }, TextColor(if sel { WHITE } else { DIM })));
+                b.spawn((Text::new(name.clone()), if sel { cx.black(27.0) } else { cx.bold(25.0) }, TextColor(if sel { WHITE } else { DIM })));
                 b.spawn((Node { width: Val::Percent(100.0), height: cx.px(3.0), ..default() }, BackgroundColor(if sel { pal.accent } else { Color::NONE })));
             });
         }
