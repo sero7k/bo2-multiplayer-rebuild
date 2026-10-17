@@ -43,35 +43,60 @@ fn has_card(book: &ClassBook, c: &ClassView, part: &str) -> bool {
     (1..=3).any(|k| book.item(c.get(&format!("bonuscard{k}"))).is_some_and(|i| i.reference.contains(part)))
 }
 
-/// bo2mp: the camos a gun takes: Black Ops II's for its own guns, Modern
-/// Warfare 2's or 3's for theirs (their slot numbers, their menu swatches);
-/// (number, name, picture). None: no camos for this gun.
+/// A camo in the picker: (number, name, picture).
+type CamoChoice = (i32, String, String);
+
+/// bo2mp: every game's camos, which every gun takes, by game: Black Ops
+/// II's (its weapon options), Modern Warfare 3's, 2's and Black Ops' (their
+/// camo numbers, `asset_core::weapon_camos`), a camo of the same name kept
+/// once, from the first game that has it; (tab, [(number, name, picture)]).
+fn camo_tabs(book: &ClassBook) -> Vec<(&'static str, Vec<CamoChoice>)> {
+    use asset_core::weapon_camos::{BO1_FIRST, MW2_FIRST, MW3_FIRST};
+    use asset_game::weapon_camo_models::{BO1_CAMOS, MW2_CAMOS, MW3_CAMOS};
+    let mut seen = std::collections::HashSet::new();
+    let mut keep = |name: &str| seen.insert(camo_key(name));
+    let mut out = Vec::new();
+    let bo2: Vec<_> = book.camos.iter().filter(|k| keep(&k.name)).map(|k| (k.index, k.name.to_uppercase(), k.image.clone())).collect();
+    out.push(("BLACK OPS II", bo2));
+    for (tab, game, first, list) in [("MODERN WARFARE 3", "iw5", MW3_FIRST, &MW3_CAMOS[..]), ("MODERN WARFARE 2", "iw4", MW2_FIRST, &MW2_CAMOS[..])] {
+        let v = list
+            .iter()
+            .filter(|(_, name, _)| keep(name))
+            .map(|(n, name, pic)| ((first + u32::from(*n)) as i32, name.to_uppercase(), format!("{game}:{pic}")))
+            .collect();
+        out.push((tab, v));
+    }
+    let bo1 = BO1_CAMOS
+        .iter()
+        .filter(|(_, name, ..)| keep(name))
+        .map(|(n, name, _, pic)| ((BO1_FIRST + u32::from(*n)) as i32, name.to_uppercase(), format!("t5:{pic}")))
+        .collect();
+    out.push(("BLACK OPS", bo1));
+    out.retain(|(_, v)| !v.is_empty());
+    out
+}
+
+/// A camo's name as one key across games (`Blue Tiger` and `Tiger Blue`,
+/// `Jungle Tiger` and `Tiger` alike).
+fn camo_key(name: &str) -> String {
+    let mut words: Vec<String> = name
+        .to_ascii_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty() && *w != "camo" && *w != "jungle")
+        .map(str::to_owned)
+        .collect();
+    words.sort();
+    words.concat()
+}
+
+/// bo2mp: the camos a gun takes (every game's, see `camo_tabs`); (number,
+/// name, picture). None: no gun.
 fn camo_choices(book: &ClassBook, gun: i32) -> Option<Vec<(i32, String, String)>> {
-    use asset_game::weapon_camo_models::{MW2_CAMOS, MW3_CAMOS};
     if gun <= 0 {
         return None;
     }
-    // (The mod's guns are Black Ops II weapons with camo sets of their own.)
-    if gun < bo2_profile::guest::FIRST_INDEX || bo2_profile::guest::game_for_index(gun) == Some(bo2_profile::guest::MOD_GAME) {
-        return (!book.camos.is_empty()).then(|| book.camos.iter().map(|k| (k.index, k.name.to_uppercase(), k.image.clone())).collect());
-    }
-    let list: &[(u8, &str, &str)] = match bo2_profile::guest::game_for_index(gun)? {
-        "iw4" => &MW2_CAMOS,
-        "iw5" => &MW3_CAMOS,
-        // (The other games' guns have no camo models: Black Ops II's
-        // material camos draw over them whole.)
-        _ => {
-            let list: Vec<_> = book
-                .camos
-                .iter()
-                .filter(|k| k.material)
-                .map(|k| (k.index, k.name.to_uppercase(), k.image.clone()))
-                .collect();
-            return (!list.is_empty()).then_some(list);
-        }
-    };
-    let game = bo2_profile::guest::game_for_index(gun)?;
-    Some(list.iter().map(|(n, name, pic)| (i32::from(*n), name.to_uppercase(), format!("{game}:{pic}"))).collect())
+    let all: Vec<_> = camo_tabs(book).into_iter().flat_map(|(_, v)| v).collect();
+    (!all.is_empty()).then_some(all)
 }
 
 /// Whether the edit screen lists this slot for the class.
@@ -222,8 +247,17 @@ pub(crate) fn picks(s: &Shell, book: &ClassBook) -> (Vec<String>, Vec<Pick>) {
     let slot = EDIT_SLOTS[s.slot.min(EDIT_SLOTS.len() - 1)].0;
     // bo2mp: Black Ops II's camos for the gun (Personalize Weapon's list).
     if slot.ends_with("camo") {
-        let mut v = vec![Pick { value: 0, name: "NONE".to_owned(), desc: "The gun as it comes.".to_owned(), image: String::new(), cost: 0, locked: false, level: 1, group: String::new() }];
-        for (n, name, image) in camo_choices(book, c.get(weapon_of(slot))).unwrap_or_default() {
+        if c.get(weapon_of(slot)) <= 0 {
+            return (vec!["CAMOS".to_owned()], Vec::new());
+        }
+        let tabs = camo_tabs(book);
+        let tab = s.page.min(tabs.len().saturating_sub(1));
+        let mut v = Vec::new();
+        // (NONE on the first tab.)
+        if tab == 0 {
+            v.push(Pick { value: 0, name: "NONE".to_owned(), desc: "The gun as it comes.".to_owned(), image: String::new(), cost: 0, locked: false, level: 1, group: String::new() });
+        }
+        for (n, name, image) in tabs.get(tab).map_or_else(Vec::new, |(_, l)| l.clone()) {
             v.push(Pick {
                 value: n,
                 name,
@@ -235,7 +269,8 @@ pub(crate) fn picks(s: &Shell, book: &ClassBook) -> (Vec<String>, Vec<Pick>) {
                 group: String::new(),
             });
         }
-        return (vec!["CAMOS".to_owned()], v);
+        let names = if tabs.is_empty() { vec!["CAMOS".to_owned()] } else { tabs.iter().map(|(t, _)| (*t).to_owned()).collect() };
+        return (names, v);
     }
     if slot.contains("attachment") {
         let mut v = vec![Pick { value: 0, name: "NONE".to_owned(), desc: "No attachment.".to_owned(), image: String::new(), cost: 0, locked: false, level: 1, group: String::new() }];
