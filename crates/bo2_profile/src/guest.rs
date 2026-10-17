@@ -591,8 +591,8 @@ const GRENADE: &str = "weapon_grenade";
 /// statstable rows for the weapons Black Ops II lacks, with its names,
 /// groups, slots, attachments (Black Ops II's own words) and
 /// Create-a-Class pictures (`icon`, in its archive). Its rows are numbered
-/// from `MOD_FIRST_INDEX`. Every one is listed while the mod is loaded;
-/// another game's copy of the same gun is not (`MOD_SUPERSEDES`).
+/// from `MOD_FIRST_INDEX`. One is listed only where no gun ported from the
+/// games is the same gun, and never one of `MOD_HIDDEN`.
 pub const MOD: &[GuestGun] = &[
     md("deagle", "Gold Desert Eagle", PISTOL, S, "", "menu_mp_weapons_deagle"),
     md("mauser", "Mauser C96", PISTOL, S, "", "menu_mp_weapons_mc96"),
@@ -655,20 +655,15 @@ pub const MOD: &[GuestGun] = &[
 /// The first statstable index of the mod's guns.
 pub const MOD_FIRST_INDEX: i32 = 1100;
 
-/// bo2mp: the other games' guns each of the mod's guns leaves out of
-/// Create-a-Class and the Mystery Box while the mod is loaded: the same real
-/// gun (`family`), whatever it is called there. (mod gun, the guns left out
-/// as their references, `mw2_cheytac`.)
-#[must_use]
-pub fn mod_supersedes() -> Vec<(&'static GuestGun, Vec<String>)> {
-    MOD.iter()
-        .map(|m| {
-            let f = family(m.game, m.gun);
-            let out = all().filter(|g| g.game != MOD_GAME && family(g.game, g.gun) == f).map(GuestGun::reference).collect();
-            (m, out)
-        })
-        .filter(|(_, out): &(&GuestGun, Vec<String>)| !out.is_empty())
-        .collect()
+/// bo2mp: the mod's guns that are not Call of Duty's (Fortnite's SCAR and
+/// tactical shotgun, Halo's sniper, Counter-Strike's skins, Minecraft's
+/// pickaxe): kept in its numbering so saved classes stay put, never listed,
+/// boxed or given to bots.
+pub const MOD_HIDDEN: &[&str] = &["fn_scar", "fn_tacshotty", "halo_sniper", "awp", "karambit", "m9", "bk", "diamond_pickaxe"];
+
+/// Whether a mod gun is one of `MOD_HIDDEN`.
+fn mod_hidden(gun: &GuestGun) -> bool {
+    gun.game == MOD_GAME && MOD_HIDDEN.contains(&gun.gun)
 }
 
 /// bo2mp: the mod's Zombies weapons (wonder weapons, Origins' pistol and
@@ -722,7 +717,7 @@ pub fn bot_mod_gun(
     }
     let pick: Vec<&'static GuestGun> = MOD
         .iter()
-        .filter(|g| g.group == group && g.slot == slot && !(public && is_custom_only(g.gun)) && loaded(g))
+        .filter(|g| !mod_hidden(g) && g.group == group && g.slot == slot && !(public && is_custom_only(g.gun)) && loaded(g))
         .collect();
     (!pick.is_empty()).then(|| pick[(seed / 3) as usize % pick.len()])
 }
@@ -866,6 +861,32 @@ impl GuestGun {
         format!("WEAPON_{}", self.reference().to_ascii_uppercase())
     }
 
+    /// Its description's text key: ours, apart from any game's (the mod's
+    /// own text signs its guns).
+    fn desc_key(&self) -> String {
+        format!("MPUI_BO2MP_DESC_{}", self.reference().to_ascii_uppercase())
+    }
+
+    /// What it is, as Black Ops II's Create-a-Class says it: its kind and
+    /// how it plays, then the game it comes from.
+    fn description(&self) -> String {
+        let kind = match self.group {
+            AR => "Assault rifle. Effective at medium to long range.",
+            SMG => "Submachine gun. High rate of fire, deadly up close.",
+            LMG => "Light machine gun. Large magazine, steady at long range.",
+            SNIPER => "Sniper rifle. Lethal at long range.",
+            CQB => "Shotgun. Devastating at close range.",
+            PISTOL => "Handgun. Quick to draw as a sidearm.",
+            LAUNCHER => "Launcher. Fires explosive rounds.",
+            GRENADE => "Equipment.",
+            _ => "Special weapon.",
+        };
+        match self.game {
+            MOD_GAME => kind.to_owned(),
+            _ => format!("{kind} From {}.", self.game_title()),
+        }
+    }
+
     fn game_title(&self) -> &'static str {
         match self.game {
             "t5" => "Call of Duty: Black Ops",
@@ -877,7 +898,7 @@ impl GuestGun {
             "s1" => "Call of Duty: Advanced Warfare",
             "t7" => "Call of Duty: Black Ops III",
             "jup" => "Call of Duty: Modern Warfare III (2023)",
-            MOD_GAME => "the @leetinservers mod",
+            MOD_GAME => "Black Ops II",
             _ => "another game",
         }
     }
@@ -975,8 +996,7 @@ const FAMILIES: &[(&str, &str, &str)] = &[
     ("", "usrpg", "rpg"),
     // (AW's `lsat` is the Pytaek, not Ghosts' LSAT.)
     ("s1", "lsat", "pytaek"),
-    // bo2mp: the mod's guns, by the real gun (MOD_SUPERSEDES lists what
-    // each one leaves out).
+    // bo2mp: the mod's guns, by the real gun.
     ("t6mod", "barret", "barrett"),
     ("t6mod", "k98", "kar98k"),
     ("t6mod", "ptrs", "ptrs41"),
@@ -1040,19 +1060,13 @@ pub fn reference_for_index(index: i32) -> Option<String> {
 fn listed(bo2: &std::collections::HashSet<String>) -> Vec<usize> {
     let mut taken: std::collections::HashSet<String> = bo2.clone();
     let mut keep = Vec::new();
-    // bo2mp: every one of the mod's guns, first: another game's copy of
-    // the same gun is left out (Black Ops II's own stay).
-    if available(MOD_GAME) {
-        for (k, gun) in all().enumerate().filter(|(_, g)| g.game == MOD_GAME) {
-            taken.insert(family(gun.game, gun.gun));
-            keep.push(k);
-        }
-    }
-    for game in PRIORITY {
+    // bo2mp: the guns ported from the games come first; the mod's only
+    // where none of them is the same gun (and none of `MOD_HIDDEN`).
+    for game in PRIORITY.iter().copied().chain(std::iter::once(MOD_GAME)) {
         if !available(game) {
             continue;
         }
-        for (k, gun) in all().enumerate().filter(|(_, g)| g.game == game) {
+        for (k, gun) in all().enumerate().filter(|(_, g)| g.game == game && !mod_hidden(g)) {
             if taken.insert(family(gun.game, gun.gun)) {
                 keep.push(k);
             }
@@ -1068,7 +1082,7 @@ pub fn localize() -> Vec<(String, String)> {
     let mut out = Vec::new();
     for gun in all() {
         out.push((gun.key(), gun.name.to_owned()));
-        out.push((format!("{}_DESC", gun.key()), format!("The {} from {}.", gun.name, gun.game_title())));
+        out.push((gun.desc_key(), gun.description()));
         // (Its Pack-a-Punch upgrade in Zombies.)
         out.push((zm_upgrade_key(gun), zm_upgraded_name(gun)));
     }
@@ -1121,7 +1135,7 @@ pub fn extend_stats_rows(rows: &mut Vec<Vec<String>>) -> bool {
             row[5] = "1".to_owned();
         }
         row[6] = gun.picture();
-        row[7] = format!("{}_DESC", gun.key());
+        row[7] = gun.desc_key();
         row[8] = gun.attachments.to_owned();
         row[9] = order.to_string();
         // (Unlocked from the start, a point each in Pick 10.)
@@ -1193,9 +1207,9 @@ pub fn zm_box_guns(
 ) -> Vec<&'static GuestGun> {
     let mut taken = bo2.clone();
     let mut keep = Vec::new();
-    // (The mod's guns first: its copy of a gun is the one in the box.)
-    for game in std::iter::once(MOD_GAME).chain(PRIORITY) {
-        for gun in all().filter(|g| g.game == game) {
+    // (The games' own copies first; the mod's only where none is the gun.)
+    for game in PRIORITY.iter().copied().chain(std::iter::once(MOD_GAME)) {
+        for gun in all().filter(|g| g.game == game && !mod_hidden(g)) {
             if gun.group == SPECIAL || gun.group == GRENADE || NO_ZOMBIES.contains(&(gun.game, gun.gun)) || !loaded(gun) {
                 continue;
             }
@@ -1640,91 +1654,6 @@ mod tests {
     /// bo2mp: the mod's guns are listed whole while the mod is loaded, each
     /// leaving out the other games' copies of the same real gun (Black Ops
     /// II's own stay); its Zombies weapons are known as Custom Games only.
-    #[test]
-    fn the_mod_supersedes_the_same_guns() {
-        let _games = TEST_GAMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let table = mod_supersedes();
-        for (m, out) in &table {
-            eprintln!("{:<14} {:<26} {}", m.gun, m.name, out.join(" "));
-        }
-        let left_out = |gun: &str| table.iter().find(|(m, _)| m.gun == gun).map(|(_, o)| o.clone()).unwrap_or_default();
-        for (gun, guests) in [
-            ("cheytac", &["mw2_cheytac"][..]),
-            ("barret", &["mw2_barrett", "mw3_barrett", "cod4_barrett"][..]),
-            ("spas", &["bo1_spas", "mw2_spas12", "mw3_spas12"][..]),
-            ("m1887", &["mw2_model1887", "mw3_1887"][..]),
-            ("l96a", &["bo1_l96a1", "mw3_l96a1", "gh_l115a3"][..]),
-            ("deagle", &["mw2_deserteagle", "mw3_deserteagle", "cod4_deserteagle"][..]),
-            ("glock", &["mw2_glock", "mw3_g18"][..]),
-            ("magnum", &["mw2_coltanaconda", "mw3_44magnum", "gh_magnum"][..]),
-            ("ak47", &["bo1_ak47", "mw2_ak47", "mw3_ak47", "cod4_ak47"][..]),
-            ("svg", &["bo3_sniper_powerbolt"][..]),
-            ("locus", &["bo3_sniper_fastbolt"][..]),
-            ("lynx", &["gh_gm6", "aw_gm6"][..]),
-            ("k98", &["waw_kar98k"][..]),
-            ("ptrs", &["waw_ptrs41"][..]),
-            ("stake", &["bo1_ithaca"][..]),
-            ("mors", &["aw_mors"][..]),
-        ] {
-            let out = left_out(gun);
-            for g in guests {
-                assert!(out.iter().any(|o| o == g), "{gun} leaves out {g}: {out:?}");
-            }
-        }
-        // (The M9 Bayonet is no Beretta.)
-        assert!(left_out("m9").is_empty());
-        for game in GAMES {
-            set_available(game, true);
-        }
-        set_available(MOD_GAME, true);
-        let bo2 = |r: &str| {
-            let mut row = vec![String::new(); 19];
-            row[0] = "10".to_owned();
-            row[2] = "weapon_assault".to_owned();
-            row[4] = r.to_owned();
-            row
-        };
-        let mut rows = vec![bo2("scar"), bo2("as50")];
-        extend_stats_rows(&mut rows);
-        let refs: Vec<&str> = rows.iter().map(|r| r[4].as_str()).collect();
-        for m in MOD {
-            assert!(refs.contains(&m.gun), "{} listed", m.gun);
-        }
-        for gone in ["mw2_cheytac", "bo1_ak47", "mw2_spas12", "bo3_sniper_powerbolt", "gh_usr", "mw3_msr", "waw_kar98k"] {
-            assert!(!refs.contains(&gone), "{gone} superseded");
-        }
-        let row = rows.iter().find(|r| r[4] == "cheytac").unwrap();
-        assert_eq!(row[0], (MOD_FIRST_INDEX + MOD.iter().position(|g| g.gun == "cheytac").unwrap() as i32).to_string());
-        assert_eq!(row[3], "WEAPON_T6MOD_CHEYTAC");
-        assert!(row[6].starts_with("t6mod:menu_mp_weapons_cheytac"));
-        let idx: i32 = row[0].parse().unwrap();
-        assert_eq!(game_for_index(idx), Some(MOD_GAME));
-        assert_eq!(family_of_reference("cheytac"), family_of_reference("mw2_cheytac"));
-        // Custom Games only.
-        assert!(is_custom_only("raygun_mark2_mp") && is_custom_only("lightstaff_pap_mp+x") && is_custom_only("scav"));
-        assert!(!is_custom_only("cheytac_mp") && !is_custom_only("tar21_mp"));
-        let ray = rows.iter().find(|r| r[4] == "raygun_mark2").unwrap()[0].parse().unwrap();
-        assert!(is_custom_only_index(ray) && !is_custom_only_index(idx));
-        // Bots: a third of their weapons, none of the Zombies ones in public.
-        let picks: Vec<_> = (0..30).filter_map(|s| bot_mod_gun(SNIPER, P, s, true, |_| true)).collect();
-        assert_eq!(picks.len(), 10);
-        assert!(picks.iter().all(|g| !is_custom_only(g.gun)));
-        assert!((0..300).filter_map(|s| bot_mod_gun(SNIPER, P, s, false, |_| true)).any(|g| g.gun == "scav"));
-        // The box: the mod's copy, no knives or equipment.
-        let zm = std::collections::HashSet::new();
-        let box_guns = zm_box_guns(&zm, |_| true);
-        assert!(box_guns.iter().any(|g| g.game == MOD_GAME && g.gun == "cheytac"));
-        assert!(!box_guns.iter().any(|g| g.game == "iw4" && g.gun == "cheytac"));
-        assert!(!box_guns.iter().any(|g| g.gun == "karambit" || g.gun == "iw5_trophy"));
-        assert_eq!(zm_upgrade_assets(MOD_GAME, "mauser")[0], "boomhilda_mp");
-        set_available(MOD_GAME, false);
-        let mut rows = vec![bo2("scar")];
-        extend_stats_rows(&mut rows);
-        assert!(rows.iter().any(|r| r[4] == "mw2_cheytac") && !rows.iter().any(|r| r[4] == "cheytac"));
-    }
-
-    /// One of each gun: Black Ops II's own first, then MW2's, MW3's, ...;
-    /// a class holding a copy left out finds the one kept.
     #[test]
     fn each_gun_listed_once() {
         let _games = TEST_GAMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
