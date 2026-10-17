@@ -88,6 +88,9 @@ pub(super) fn sync(world: &mut World) {
             let p = world.resource_mut::<Zm>().players.remove(&n);
             if let Some(p) = p {
                 with_vm(world, |vm, world| {
+                    // The engine's "disconnect" on him first, as Black Ops II
+                    // sends it: what waits for it cleans up (his menus, HUD).
+                    vm.notify_str(world, p.obj, "disconnect", &[]);
                     let cb = super::mp::callbacks(world);
                     vm.spawn_named(
                         world,

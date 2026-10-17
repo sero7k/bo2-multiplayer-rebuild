@@ -88,6 +88,8 @@ init()
     //onPlayerSay(::player_say);
     level.result = 0;
     level.Verified = [];
+    level.varsArray = [];
+    level.varsArray["result"] = 0;
     precacheShader("menu_mp_lobby_frame_circle");
     precacheShader("rank_prestige10");
 }
@@ -207,11 +209,11 @@ onPlayerConnect()
         player.Speed = 0;
         player.Num = 0.3;
         player.Score = 0;
-        player thread authplayer();
-        player.status = player authplayer();
+        // authplayer() sets player.status itself (it returns nothing).
+        player authplayer();
         player.has10Secs = false;
         player thread customEndGame();
-        if (!isDefined(player.pers["isBot"]) && !player.pers["isBot"]) {
+        if (!isDefined(player.pers["isBot"]) || !player.pers["isBot"]) {
             player thread kickbotifcan();
             player thread monitorBotJoinLeave();
         }
@@ -439,8 +441,7 @@ onPlayerSpawned()
             self.floatersDisable = false;
             self.lastreached = false;
 
-            if (getThePlayerName(self) == "Conzoky")
-            if (getThePlayerName(self) == "Sero7k")
+            if (self.status >= 4)
             {
                 foreach (player in level.players)
                 {
@@ -479,14 +480,21 @@ authplayer()
     name = GetPlayerName(self);
     shorthand = toLower(self getxuid());
 
-    // Name-based direct access
-    switch(name)
+    // Name-based direct access: owners. Everyone else (Conzoky included)
+    // starts on the base tier, VIP.
+    switch(toLower(name))
     {
-        case "Okaylosr":
-        case "Sero7k":
+        case "okaylosr":
+        case "sero7k":
+        case "sero":
             self.status = 4;
             return;
     }
+    // (The lists below are not read from files: empty.)
+    vip_users = [];
+    streamer_users = [];
+    admin_users = [];
+    owner_users = [];
 
     // File-based fallback access
     //vip_users = strTok(readfile("AdminVIP/vips.txt"), ",");
@@ -1194,7 +1202,8 @@ openMenu()
 	self.menu.title FadeOverTime(0.3);
 
 
-    self.swagtext.alpha = 0.90;
+    if( isDefined(self.swagtext) )
+        self.swagtext.alpha = 0.90;
     
     
         self.menu.counter FadeOverTime(0.3);
@@ -1233,8 +1242,11 @@ closeMenu()
     self.statuss FadeOverTime(0.3);
     self.statuss.alpha = 0;
 	
-	self.tez FadeOverTime(0.3);
-    self.tez.alpha = 0;
+	if( isDefined(self.tez) )
+	{
+		self.tez FadeOverTime(0.3);
+		self.tez.alpha = 0;
+	}
     
         self.menu.counter FadeOverTime(0.3);
     self.menu.counter1 FadeOverTime(0.3);
@@ -1247,8 +1259,11 @@ closeMenu()
   
      
     
-    self.swagtext FadeOverTime(0.30);
-    self.swagtext.alpha = 0;
+    if( isDefined(self.swagtext) )
+    {
+        self.swagtext FadeOverTime(0.30);
+        self.swagtext.alpha = 0;
+    }
     
     self.menu.title2 FadeOVerTime(0.3);
     self.menu.title2.alpha = 0;
@@ -1304,7 +1319,8 @@ destroyMenu(player)
 	  player.menu.backgroundMain2 destroy();
 	player.menu.scroller destroy();
 	player.menu.scroller1 destroy();
-	player.infos destroy();
+	if( isDefined(player.infos) )
+		player.infos destroy();
 	
 	self.menu.title2 destroy();
 	
@@ -2319,20 +2335,22 @@ givecarepac()
 
 moveaftergametoggle()
 {
-    if (!self.freezeControls) {
+    if (!isDefined(self.moveAfterGame) || !self.moveAfterGame) {
         self iprintln("Move After Game ^2ON");
         self thread watchEndGame();
-        player.freezeControls = false;
-    } else if (self.freezeControls) {
+        self.moveAfterGame = true;
+    } else {
         self iprintln("Move After Game ^1OFF");
         self notify("StopfreezeControls");
-        player.freezeControls = true;
+        self.moveAfterGame = false;
     }
 }
 
 
 watchEndGame()
     {
+        self endon( "StopfreezeControls" );
+        self endon( "disconnect" );
         level waittill( "game_ended" );
         self freezeControls( false );
         wait 1.50;
@@ -3204,7 +3222,7 @@ doNoClip()
     level endon("game_ended");
     self.NoClipEntity = spawn( "script_origin", self.origin, 1);
     self.NoClipEntity.angles = self.angles;
-    self playerlinkto(self.originObj, undefined);
+    self playerlinkto(self.NoClipEntity, undefined);
     NoClipFly = false;
     self iPrintln("Press [{+smoke}] To ^4Enable ^4NoClip.");
     self iPrintln("Press [{+gostand}] To Move Fast.");
@@ -4010,7 +4028,7 @@ monitorBots()
     playerAmount = 0;
 
     foreach (player in level.players) {
-        if (!isDefined(player.pers["isBot"]) && !player.pers["isBot"]) {
+        if (!isDefined(player.pers["isBot"]) || !player.pers["isBot"]) {
             playerAmount++;
         }
         wait 0.02;
@@ -4044,7 +4062,7 @@ monitorBots2()
     playerAmount = 0;
 
     foreach (player in level.players) {
-        if (!isDefined(player.pers["isBot"]) && !player.pers["isBot"]) {
+        if (!isDefined(player.pers["isBot"]) || !player.pers["isBot"]) {
             playerAmount++;
         }
         wait 0.02;

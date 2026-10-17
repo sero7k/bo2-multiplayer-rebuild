@@ -19,6 +19,35 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             vm.bind($name, true, $body);
         };
     }
+    // Nothing is restricted in a match of ours (Black Ops II's ranked
+    // playlists' bans): every item a class names may be given.
+    f!("isitemrestricted", |_, _, _, _| Ok(Value::Int(0)));
+    // Two lethals at once is a Black Ops II console perk the game never
+    // turns on in multiplayer.
+    m!("dualgrenadesactive", |_, _, _, _| Ok(Value::Int(0)));
+    // A vehicle's share of an explosion (`_globallogic_vehicle`): its health
+    // goes down by the damage; at none it dies, as the engine's own damage
+    // kills it.
+    m!("finishvehicleradiusdamage", |vm, world, s, a| {
+        let Some(obj) = s.as_obj() else { return Ok(Value::Undefined) };
+        let damage = match arg(a, 2) {
+            Value::Int(n) => *n,
+            Value::Float(f) => *f as i32,
+            _ => 0,
+        };
+        let hf = vm.intern("health");
+        let health = match vm.get_field(world, obj, hf) {
+            Value::Int(n) => n,
+            Value::Float(f) => f as i32,
+            _ => return Ok(Value::Undefined),
+        };
+        let left = (health - damage.max(0)).max(0);
+        vm.set_field(world, obj, hf, Value::Int(left));
+        if left == 0 && health > 0 {
+            vm.notify_str(world, obj, "death", &[arg(a, 0).clone()]);
+        }
+        Ok(Value::Undefined)
+    });
     // A round over (Search and Destroy, half time): the level starts again
     // at the next frame, `pers[]` kept when asked (`map_restart( 1 )`).
     f!("map_restart", |_, world, _, a| {
