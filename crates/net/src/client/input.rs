@@ -194,8 +194,13 @@ pub fn build_usercmd(input: &mut ClientActionInput, look: &LookState, server_tim
         *units = whole as i32;
     }
     let [pad_pitch, pad_yaw] = pad_units;
-    let forward = (axes.forward + input.pad_move[0]).clamp(-1.0, 1.0);
-    let right = (axes.right + input.pad_move[1]).clamp(-1.0, 1.0);
+    // (The move stick's circle stretched to the square: full over to a
+    // diagonal is full forward and full strafe.)
+    let [pf, pr] = input.pad_move;
+    let (major, minor) = if pf.abs() >= pr.abs() { (pf.abs(), pr.abs()) } else { (pr.abs(), pf.abs()) };
+    let square = if major > 0.0 { (1.0 + (minor / major) * (minor / major)).sqrt() } else { 1.0 };
+    let forward = (axes.forward + pf * square).clamp(-1.0, 1.0);
+    let right = (axes.right + pr * square).clamp(-1.0, 1.0);
 
     create_cmd(&CreateCmdInput {
         server_time,

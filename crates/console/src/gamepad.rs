@@ -10,12 +10,15 @@ pub(crate) struct Sticks {
     pub look: Vec2,
 }
 
+/// The outer dead zone: a stick this close to the rim is all the way over.
+const OUTER_DEADZONE: f32 = 0.01;
+
 fn radial(stick: Vec2, deadzone: f32) -> Vec2 {
     let length = stick.length();
     if length <= deadzone || length <= f32::EPSILON {
         return Vec2::ZERO;
     }
-    let scaled = ((length - deadzone) / (1.0 - deadzone).max(0.01)).min(1.0);
+    let scaled = ((length - deadzone) / (1.0 - deadzone - OUTER_DEADZONE).max(0.01)).min(1.0);
     stick / length * scaled
 }
 
