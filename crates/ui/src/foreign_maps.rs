@@ -960,6 +960,10 @@ pub(crate) fn read_game_image(prefix: &str, names: &[String]) -> Option<(u32, u3
         }
         return crate::jup_cards::read_picture(names);
     }
+    // bo2mp: Black Ops II's own calling cards and emblems, from its packs.
+    if prefix == crate::bo_cards::BO2 {
+        return names.iter().find_map(|n| crate::bo_cards::read_bo2(n));
+    }
     // bo2mp: Ghosts' pictures are in its zones (ui_mp), not in IWDs.
     if prefix == "iw6" {
         let install = ghosts_install(asset_transport::games_root_from_env().ok().as_ref())?;
@@ -1083,6 +1087,8 @@ pub(crate) fn prestige_picture(name: &str) -> Option<std::sync::Arc<bevy::prelud
     let key = name.to_owned();
     picture_async(name, true, move || {
         let found = names.iter().find_map(|n| read_game_image(game, std::slice::from_ref(n)).map(|img| (n, img)));
+        // (Black Ops' and Black Ops II's emblems are shapes.)
+        let found = found.map(|(n, img)| (n, if game == crate::bo_cards::BO1 || game == crate::bo_cards::BO2 { crate::bo_cards::shape_to_cover(img) } else { img }));
         match &found {
             Some((n, _)) => diag::info!(Ui, "bo2mp progression: `{key}` is {game}'s `{n}`"),
             None => diag::warn!(Ui, "bo2mp progression: `{key}`: {game} has none of {}", names.join(", ")),

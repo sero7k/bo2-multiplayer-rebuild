@@ -6562,6 +6562,7 @@ dependencies = [
  "asset_core",
  "asset_game",
  "asset_material",
+ "asset_t6",
  "asset_transport",
  "asset_world",
  "assets",

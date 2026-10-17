@@ -11,8 +11,9 @@
 //! names stands in.
 //!
 //! Modern Warfare III's (2023) emblems and calling cards come after them
-//! (`jup:<name>`, `crate::jup_cards`), many of them flipbooks. The pickers
-//! show one game at a time, its own category ([`GAMES`]).
+//! (`jup:<name>`, `crate::jup_cards`), many of them flipbooks, then Black
+//! Ops II's and Black Ops' own (`t6:` / `t5:`, `crate::bo_cards`). The
+//! pickers show one game at a time, its own category ([`GAMES`]).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -90,12 +91,21 @@ fn read_lists() -> Lists {
     let (cards, emblems) = crate::jup_cards::names();
     lists.cards.extend(cards);
     lists.emblems.extend(emblems);
+    for (cards, emblems) in [crate::bo_cards::bo2_names(), crate::bo_cards::bo1_names()] {
+        lists.cards.extend(cards);
+        lists.emblems.extend(emblems);
+    }
     lists
 }
 
 /// The games the pickers group them by, in order: (prefix, tab).
-pub(crate) const GAMES: [(&str, &str); 3] =
-    [("iw4", "MODERN WARFARE 2"), ("iw5", "MODERN WARFARE 3"), (crate::jup_cards::PREFIX, "MODERN WARFARE III")];
+pub(crate) const GAMES: [(&str, &str); 5] = [
+    (crate::bo_cards::BO2, "BLACK OPS II"),
+    (crate::bo_cards::BO1, "BLACK OPS"),
+    ("iw4", "MODERN WARFARE 2"),
+    ("iw5", "MODERN WARFARE 3"),
+    (crate::jup_cards::PREFIX, "MODERN WARFARE III"),
+];
 
 fn game_of(name: &str) -> &str {
     name.split_once(':').map_or("", |(g, _)| g)
@@ -130,7 +140,11 @@ pub(crate) fn category_tabs(kind: Kind) -> Vec<String> {
 
 /// How many frames a name's picture has (1: a still one, or not read yet).
 pub(crate) fn frames(name: &str) -> u32 {
-    if game_of(name) == crate::jup_cards::PREFIX { crate::jup_cards::frames(name) } else { 1 }
+    match game_of(name) {
+        g if g == crate::jup_cards::PREFIX => crate::jup_cards::frames(name),
+        g if g == crate::bo_cards::BO2 => crate::bo_cards::frames(name),
+        _ => 1,
+    }
 }
 
 /// The shell name of a frame of a flipbook.
@@ -343,12 +357,21 @@ pub(crate) fn label(name: &str) -> String {
         "iw4" => "MW2",
         "iw5" => "MW3",
         "jup" => "MWIII",
+        "t6" => "BO2",
+        "t5" => "BO1",
         _ => "",
     };
     if game == "MWIII" {
         return format!("{game} · {}", title(name).to_uppercase());
     }
-    let rest = material.trim_start_matches("cardtitle_").trim_start_matches("cardicon_").replace('_', " ").to_uppercase();
+    let material = material.split('#').next().unwrap_or(material);
+    let rest = ["cardtitle_", "cardicon_", "emblem_bg_", "em_bg_ani_", "em_bg_", "em_"]
+        .iter()
+        .find_map(|p| material.strip_prefix(p))
+        .unwrap_or(material)
+        .trim_end_matches("_full")
+        .replace('_', " ")
+        .to_uppercase();
     if game.is_empty() { rest } else { format!("{game} · {rest}") }
 }
 

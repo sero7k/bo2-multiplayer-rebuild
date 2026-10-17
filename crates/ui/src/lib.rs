@@ -1,4 +1,5 @@
 mod bo2_font;
+mod bo_cards; // bo2mp: Black Ops' and Black Ops II's calling cards and emblems
 mod bo2_globe;
 mod cheat_menu; // bo2zm: the solo cheat menu (Num 1)
 pub mod classes;

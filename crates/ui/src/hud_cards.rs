@@ -43,7 +43,7 @@ pub(crate) fn look_of(name: &str, mine: Option<&(String, String)>) -> (String, S
     look
 }
 
-/// A calling card's or emblem's picture (`iw4:` / `iw5:` material), read
+/// A calling card's or emblem's picture (`iw4:` / `iw5:` / `t5:` / `t6:` material), read
 /// off the main thread from its game: `None` while it is read, and for good
 /// when the game lacks it (the reader logs which).
 pub(crate) fn picture(material: &str) -> Option<Arc<Image>> {
@@ -52,7 +52,10 @@ pub(crate) fn picture(material: &str) -> Option<Arc<Image>> {
         return None;
     }
     let (game, name) = (game.to_owned(), name.to_owned());
-    let img = crate::foreign_maps::picture_async(material, true, move || crate::foreign_maps::read_game_image(&game, &[name]))?;
+    let img = crate::foreign_maps::picture_async(material, true, move || {
+        let img = crate::foreign_maps::read_game_image(&game, &[name])?;
+        Some(if game == crate::bo_cards::BO1 || game == crate::bo_cards::BO2 { crate::bo_cards::shape_to_cover(img) } else { img })
+    })?;
     // (Once per material: the first time it is in.)
     static READ: Mutex<Option<HashSet<String>>> = Mutex::new(None);
     if let Ok(mut read) = READ.lock()
@@ -67,6 +70,7 @@ pub(crate) fn picture(material: &str) -> Option<Arc<Image>> {
 pub(crate) fn is_look(material: &str) -> bool {
     material.split_once(':').is_some_and(|(g, n)| matches!(g, "iw4" | "iw5") && (n.starts_with("cardtitle_") || n.starts_with("cardicon_")))
         || crate::jup_cards::is_look(material)
+        || crate::bo_cards::is_look(material)
 }
 
 #[cfg(test)]
