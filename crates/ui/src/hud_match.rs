@@ -1786,6 +1786,68 @@ pub(crate) fn spawn_killcam_frame(commands: &mut Commands, faces: &Faces, m: &Ki
         .id()
 }
 
+/// The killer's banner in the killcam, as Modern Warfare III (2023) draws
+/// it: his emblem in a round plate at the left, his name small over his
+/// calling card, his rank icon and level at the right. Its middle sits over
+/// the bottom bar's edge.
+pub(crate) fn spawn_mw3_banner(commands: &mut Commands, faces: &Faces, m: &BannerModel, size: Vec2) -> Entity {
+    let k = card_scale(size) * 1.1;
+    let px = |v: f32| Val::Px((v * k).round());
+    let (cw, ch) = (420.0, 105.0);
+    let emblem = 104.0;
+    commands
+        .spawn((
+            BannerRoot { start: m.start },
+            KillcamCardRoot,
+            UiLayer::Hud,
+            UiLayerVisibility,
+            GlobalZIndex(110),
+            Node {
+                position_type: PositionType::Absolute,
+                // (The calling card's middle on the bottom bar's edge.)
+                bottom: Val::Px((KILLCAM_FOOT_MIDDLE * card_scale(size) - ch * k * 0.5).round()),
+                width: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::FlexEnd,
+                column_gap: px(14.0),
+                ..default()
+            },
+            UiTransform::IDENTITY,
+        ))
+        .with_children(|row| {
+            // The emblem, round.
+            row.spawn((
+                Node { width: px(emblem), height: px(emblem), border: UiRect::all(px(2.0)), border_radius: BorderRadius::all(Val::Percent(50.0)), overflow: Overflow::clip(), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
+                BorderColor::all(Color::srgba(1.0, 1.0, 1.0, 0.30)),
+                BackgroundColor(Color::srgba(0.05, 0.05, 0.06, 0.92)),
+            ))
+            .with_children(|e| {
+                if let Some(em) = &m.emblem {
+                    e.spawn((ImageNode::new(em.clone()), Node { width: Val::Percent(84.0), height: Val::Percent(84.0), ..default() }));
+                }
+            });
+            // The name over the calling card.
+            row.spawn(Node { flex_direction: FlexDirection::Column, row_gap: px(3.0), ..default() }).with_children(|col| {
+                col.spawn((Text::new(m.name.clone()), font(&faces.bold, 24.0 * k), TextColor(WHITE), shadow(24.0 * k), TextLayout::linebreak(bevy::text::LineBreak::NoWrap)));
+                col.spawn((Node { width: px(cw), height: px(ch), overflow: Overflow::clip(), ..default() }, BackgroundColor(CARD_FOOT))).with_children(|b| {
+                    if let Some((pic, sz)) = &m.card {
+                        let (w, h) = (cw * k, ch * k);
+                        let s = (w / sz.x.max(1.0)).max(h / sz.y.max(1.0));
+                        b.spawn((ImageNode::new(pic.clone()), Node { position_type: PositionType::Absolute, width: Val::Px(sz.x * s), height: Val::Px(sz.y * s), left: Val::Px((w - sz.x * s) * 0.5), top: Val::Px((h - sz.y * s) * 0.5), ..default() }));
+                    }
+                });
+            });
+            // The rank icon and level.
+            row.spawn(Node { height: px(ch), column_gap: px(8.0), align_items: AlignItems::Center, ..default() }).with_children(|r| {
+                if let Some(icon) = &m.rank {
+                    r.spawn((ImageNode::new(icon.clone()), Node { width: px(46.0), height: px(46.0), ..default() }));
+                }
+                r.spawn((Text::new(m.level.to_string()), font(&faces.bold, 40.0 * k), TextColor(WHITE), shadow(40.0 * k)));
+            });
+        })
+        .id()
+}
+
 /// The killer's card and the killcam's frame (see above).
 #[allow(clippy::too_many_arguments)]
 fn killcam_card(
@@ -1900,17 +1962,8 @@ fn killcam_card(
     clear(&mut commands);
     let slant = slant.get_or_insert_with(|| images.add(slant_image())).clone();
     spawn_killcam_frame(&mut commands, &faces, &frame, &slant, size);
-    let e = spawn_banner(&mut commands, &faces, &model, size);
     // (Its middle over the bottom bar's edge, as BO2's NamePlate.)
-    let h = (CARD_H * card_scale(size) * KILLCAM_CARD_SCALE).round();
-    commands.entity(e).insert((KillcamCardRoot, Node {
-        position_type: PositionType::Absolute,
-        top: Val::Px((size.y - KILLCAM_FOOT_MIDDLE * card_scale(size) - h * 0.5).round()),
-        width: Val::Percent(100.0),
-        flex_direction: FlexDirection::Column,
-        align_items: AlignItems::Center,
-        ..default()
-    }));
+    spawn_mw3_banner(&mut commands, &faces, &model, size);
     *st = Some((killer, model, key));
 }
 
@@ -2828,16 +2881,7 @@ pub mod preview {
                 let slant = images.add(slant_image());
                 let e = spawn_killcam_frame(&mut commands, &faces, &frame, &slant, size);
                 mark(&mut commands, e);
-                let e = spawn_banner(&mut commands, &faces, &model, size);
-                let h = (CARD_H * card_scale(size) * KILLCAM_CARD_SCALE).round();
-                commands.entity(e).insert(Node {
-                    position_type: PositionType::Absolute,
-                    top: Val::Px((size.y - KILLCAM_FOOT_MIDDLE * card_scale(size) - h * 0.5).round()),
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    ..default()
-                });
+                let e = spawn_mw3_banner(&mut commands, &faces, &model, size);
                 mark(&mut commands, e);
                 let e = commands.spawn((BackgroundColor(Color::srgb(0.42, 0.40, 0.36)), Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, GlobalZIndex(-1))).id();
                 mark(&mut commands, e);

@@ -990,21 +990,40 @@ pub(crate) fn read_game_image(prefix: &str, names: &[String]) -> Option<(u32, u3
         let install = fastfile_s1::install::find_install(root.as_ref().map(|r| r.0.as_path()), &extra)?;
         return fastfile_s1::ui_image::read_ui_image(&install, names);
     }
-    let root = asset_transport::games_root_from_env().ok()?;
-    let main = match asset_transport::legacy_version(prefix) {
-        // Call of Duty 4 / World at War: the `main` beside their zones.
-        Some(version) => {
-            let common = asset_transport::find_zone_file_version(&root, "common_mp", version).ok()?;
-            asset_transport::game_root_for_zone(&common.path).ok()?.join("main")
-        }
-        None => {
-            let trees = asset_transport::NamespaceTrees::discover(&root);
-            trees.main_for(namespace_of(prefix)?)?.to_path_buf()
-        }
-    };
+    let main = game_main(prefix)?;
     names
         .iter()
         .find_map(|n| asset_material::decode_ui_image_from_main(&main, n).ok().flatten())
+}
+
+/// A game's `main` folder (its IWDs), found once and kept: finding it walks
+/// the games' folders (every game's zones), which made each of Modern
+/// Warfare 2's and 3's calling cards and emblems slow to come in (a picker's
+/// page asks for dozens at once, each walking them again).
+fn game_main(prefix: &str) -> Option<std::path::PathBuf> {
+    static MAINS: std::sync::Mutex<Option<std::collections::HashMap<String, Option<std::path::PathBuf>>>> = std::sync::Mutex::new(None);
+    // (Held while it is found: pictures asked for together wait for the one
+    // walk rather than each walking.)
+    let mut mains = MAINS.lock().ok()?;
+    let mains = mains.get_or_insert_with(Default::default);
+    if let Some(found) = mains.get(prefix) {
+        return found.clone();
+    }
+    let root = asset_transport::games_root_from_env().ok()?;
+    let main = match asset_transport::legacy_version(prefix) {
+        // Call of Duty 4 / World at War: the `main` beside their zones.
+        Some(version) => asset_transport::find_zone_file_version(&root, "common_mp", version)
+            .ok()
+            .and_then(|common| asset_transport::game_root_for_zone(&common.path).ok())
+            .map(|r| r.join("main")),
+        None => {
+            let trees = asset_transport::NamespaceTrees::discover(&root);
+            namespace_of(prefix).and_then(|ns| trees.main_for(ns)).map(std::path::Path::to_path_buf)
+        }
+    };
+    diag::info!(Ui, "picture: {prefix}'s main is {main:?}");
+    mains.insert(prefix.to_owned(), main.clone());
+    main
 }
 
 /// bo2mp shell: the names of every image a game's own IWDs hold that start
@@ -1012,9 +1031,7 @@ pub(crate) fn read_game_image(prefix: &str, names: &[String]) -> Option<(u32, u3
 /// Slow the first time (the archives are indexed): call it off the main
 /// thread.
 pub(crate) fn game_image_names(prefix: &str, starts: &str) -> Vec<String> {
-    let Some(root) = asset_transport::games_root_from_env().ok() else { return Vec::new() };
-    let trees = asset_transport::NamespaceTrees::discover(&root);
-    let Some(main) = namespace_of(prefix).and_then(|ns| trees.main_for(ns)).map(std::path::Path::to_path_buf) else {
+    let Some(main) = game_main(prefix) else {
         return Vec::new();
     };
     let Ok(index) = asset_transport::IwdIndex::open(&main) else { return Vec::new() };
