@@ -80,7 +80,6 @@ pub use melee::{
 };
 pub use offhand::{
     BUTTON_FRAG, BUTTON_SMOKE, CURSOR_HINT_NONE, OFFHAND_INV_SLOTS, OffhandCmd, OffhandInvRow,
-    bo2_switch_rules, set_bo2_switch_rules,
     get_first_available_offhand, weapon_advance_offhand, weapon_check_for_offhand,
     weapon_enter_offhand, weapon_offhand_end, weapon_offhand_hold, weapon_offhand_prepare,
     weapon_offhand_start, weapon_offhand_throw, weapon_update_grenade_throw,

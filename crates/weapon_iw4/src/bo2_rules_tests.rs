@@ -6,7 +6,6 @@
 
 use std::vec::Vec;
 
-use crate::offhand::with_test_rules;
 use crate::tick::{
     BUTTON_ATTACK, BUTTON_RELOAD, WeaponCmd, WeaponCombatFacts, WeaponHandState, WeaponTickEvent,
     weapon_ordinary,
@@ -244,7 +243,7 @@ impl Player {
 /// before the drop, and it plays when the 870 next comes up.
 #[test]
 fn a_pump_skipped_by_a_quick_swap_plays_on_the_next_draw() {
-    with_test_rules(true, || {
+    {
         let mut p = Player::new(SHOTGUN, &[SNIPER]);
         p.tap_fire();
         assert_eq!(p.gun(SHOTGUN).clip, 7);
@@ -259,7 +258,7 @@ fn a_pump_skipped_by_a_quick_swap_plays_on_the_next_draw() {
         p.run_until(120, |p| p.hand.weapon == SHOTGUN && p.state() == WeaponState::Rechambering);
         p.run_until(120, |p| p.state() == WeaponState::Ready);
         assert!(!p.gun(SHOTGUN).needs_rechamber);
-    });
+    }
 }
 
 /// The Moni NAC: swap during the 870's pump and back before the drop ends:
@@ -267,7 +266,7 @@ fn a_pump_skipped_by_a_quick_swap_plays_on_the_next_draw() {
 /// it can be chained.
 #[test]
 fn swapping_away_mid_pump_and_back_restarts_the_pump() {
-    with_test_rules(true, || {
+    {
         let mut p = Player::new(SHOTGUN, &[SNIPER]);
         p.tap_fire();
         p.run_until(30, |p| p.state() == WeaponState::Rechambering);
@@ -287,14 +286,14 @@ fn swapping_away_mid_pump_and_back_restarts_the_pump() {
         // Left alone it finishes and clears.
         p.run_until(60, |p| p.state() == WeaponState::Ready);
         assert!(!p.gun(SHOTGUN).needs_rechamber);
-    });
+    }
 }
 
 /// Past the bolt the pump still counts as not done: a swap there and back
 /// replays it (Infinity Ward's rules cleared the mark at the bolt).
 #[test]
 fn the_mark_stays_until_the_whole_pump_has_played() {
-    with_test_rules(true, || {
+    {
         let mut p = Player::new(SHOTGUN, &[SNIPER]);
         p.tap_fire();
         p.run_until(30, |p| p.state() == WeaponState::Rechambering);
@@ -305,7 +304,7 @@ fn the_mark_stays_until_the_whole_pump_has_played() {
         p.swap_to(SHOTGUN);
         p.step();
         assert_eq!(p.state(), WeaponState::Rechambering);
-    });
+    }
 }
 
 /// The instaswap: the sniper is going down (swapped off it), the trigger is
@@ -313,7 +312,7 @@ fn the_mark_stays_until_the_whole_pump_has_played() {
 /// same frame, with no raise.
 #[test]
 fn a_swap_back_with_the_trigger_held_fires_at_once() {
-    with_test_rules(true, || {
+    {
         let mut p = Player::new(SNIPER, &[SHOTGUN]);
         p.swap_to(SHOTGUN);
         p.frames(12);
@@ -326,14 +325,14 @@ fn a_swap_back_with_the_trigger_held_fires_at_once() {
         p.step();
         assert_eq!(p.shots_since(f), 1, "fires on the swap-back frame");
         assert_eq!(p.gun(SNIPER).clip, 4);
-    });
+    }
 }
 
 /// Footage: shotgun fired, swap to the sniper, swap back off it while it is
 /// still up, then swap to it again holding fire: it fires 1 frame later.
 #[test]
 fn fire_swap_swap_fire_chain() {
-    with_test_rules(true, || {
+    {
         let mut p = Player::new(SHOTGUN, &[SNIPER]);
         p.tap_fire();
         p.frames(4);
@@ -347,14 +346,14 @@ fn fire_swap_swap_fire_chain() {
         let f = p.frame;
         p.step();
         assert_eq!(p.shots_since(f), 1);
-    });
+    }
 }
 
 /// Without the swap-back, a trigger held through a raise does not fire:
 /// the semi-automatic waits for it to come up and go down again.
 #[test]
 fn a_trigger_held_through_a_raise_does_not_fire() {
-    with_test_rules(true, || {
+    {
         let mut p = Player::new(SHOTGUN, &[SNIPER]);
         p.buttons |= BUTTON_ATTACK;
         p.step();
@@ -369,51 +368,51 @@ fn a_trigger_held_through_a_raise_does_not_fire() {
         let f = p.frame;
         p.frames(2);
         assert_eq!(p.shots_since(f), 1, "a fresh pull fires");
-    });
+    }
 }
 
 /// Semi-automatic rate stays one shot per pull under the new fire rule.
 #[test]
 fn a_held_trigger_fires_a_semi_automatic_once() {
-    with_test_rules(true, || {
+    {
         let mut p = Player::new(SHOTGUN, &[]);
         p.buttons |= BUTTON_ATTACK;
         p.frames(200);
         assert_eq!(p.shots_since(0), 1);
-    });
+    }
 }
 
 /// Select Fire in full-auto: a swap pressed while the trigger is held
 /// starts the drop between two shots.
 #[test]
 fn an_automatic_swaps_between_shots() {
-    with_test_rules(true, || {
+    {
         let mut p = Player::new(SMG, &[SNIPER]);
         p.buttons |= BUTTON_ATTACK;
         p.frames(20);
         p.swap_to(SNIPER);
         let n = p.run_until(10, |p| p.state() == WeaponState::Dropping);
         assert!(n <= 5, "drop within one shot's time, took {n} frames");
-    });
+    }
 }
 
 /// In burst the swap waits for the burst to finish: nothing is checked
 /// while a burst is going out.
 #[test]
 fn a_burst_finishes_before_the_swap() {
-    with_test_rules(true, || {
+    {
         let mut p = Player::new(SMG_BURST, &[SNIPER]);
         p.tap_fire();
         p.swap_to(SNIPER);
         p.run_until(30, |p| p.state() == WeaponState::Dropping);
         assert_eq!(p.gun(SMG_BURST).clip, 37, "the whole burst went out first");
-    });
+    }
 }
 
 /// A burst gun needs a fresh pull after its cooldown.
 #[test]
 fn a_held_burst_trigger_fires_one_burst() {
-    with_test_rules(true, || {
+    {
         let mut p = Player::new(SMG_BURST, &[]);
         p.buttons |= BUTTON_ATTACK;
         p.frames(120);
@@ -423,14 +422,14 @@ fn a_held_burst_trigger_fires_one_burst() {
         p.buttons |= BUTTON_ATTACK;
         p.frames(40);
         assert_eq!(p.shots_since(0), 6);
-    });
+    }
 }
 
 /// Reload pressed after a swap-back: the 870 reloads that frame (the change
 /// check comes before the reload check).
 #[test]
 fn reload_right_after_a_swap_back() {
-    with_test_rules(true, || {
+    {
         let mut p = Player::new(SNIPER, &[SHOTGUN]);
         p.gun(SNIPER).clip = 3;
         p.hand.clip = 3;
@@ -440,30 +439,14 @@ fn reload_right_after_a_swap_back() {
         p.buttons |= BUTTON_RELOAD;
         let ev = p.step();
         assert_eq!(ev, Some(WeaponTickEvent::ReloadStarted));
-    });
-}
-
-/// Infinity Ward's rules are unchanged.
-#[test]
-fn infinity_ward_rules_unchanged() {
-    with_test_rules(false, || {
-        let mut p = Player::new(SNIPER, &[SHOTGUN]);
-        p.swap_to(SHOTGUN);
-        p.frames(12);
-        p.buttons |= BUTTON_ATTACK;
-        p.step();
-        p.swap_to(SNIPER);
-        let f = p.frame;
-        p.step();
-        assert_eq!(p.shots_since(f), 0, "needs a fresh pull");
-    });
+    }
 }
 
 /// The SRM-1216 fires its 4 shots and then rechambers (it used to pump
 /// after every shot).
 #[test]
 fn the_srm_rechambers_after_four_shots() {
-    with_test_rules(true, || {
+    {
         let mut p = Player::new(SRM, &[]);
         p.buttons |= BUTTON_ATTACK;
         p.run_until(120, |p| p.state() == WeaponState::Rechambering);
@@ -472,5 +455,5 @@ fn the_srm_rechambers_after_four_shots() {
         p.run_until(120, |p| p.state() == WeaponState::Firing);
         p.frames(1);
         assert_eq!(p.shots_since(0), 5, "fires again after the rechamber");
-    });
+    }
 }

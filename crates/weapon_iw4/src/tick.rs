@@ -1081,9 +1081,6 @@ pub fn weapon_ordinary(
     };
     let attack = cmd.buttons & fire_mask != 0;
     let was_attack = cmd.old_buttons & fire_mask != 0;
-    // bo2mp: Black Ops II's weapon rules (its own PM_Weapon order and
-    // timer-expiry rule; see `bo2_timer_expired`).
-    let bo2 = crate::offhand::bo2_switch_rules();
     let time_before = hand.weapon_time;
     let delay_before = hand.weapon_delay;
     let decay_ms = weapon_time_adjust(hand, facts, cmd);
@@ -1092,11 +1089,7 @@ pub fn weapon_ordinary(
     }
 
     if time_before != 0 && hand.weapon_time < 1 {
-        if bo2 {
-            bo2_timer_expired(hand, fire_ty, cmd, attack, facts.unlimited_ammo);
-        } else {
-            weapon_decay_hold_interrupt(hand, fire_ty, cmd, attack, facts.unlimited_ammo);
-        }
+        timer_expired(hand, fire_ty, cmd, attack, facts.unlimited_ammo);
     }
     if hand.weapon_delay > 0 {
         hand.weapon_delay = (hand.weapon_delay - decay_ms).max(0);
@@ -1110,8 +1103,7 @@ pub fn weapon_ordinary(
     // bo2mp: while a burst is still going out Black Ops II skips its whole
     // check block (sprint, offhand, weapon change, reload ...): the burst
     // finishes first. This is why a burst-mode gun's swap is never clean.
-    let burst_busy = bo2
-        && burst_pending(hand, fire_ty)
+    let burst_busy = burst_pending(hand, fire_ty)
         && (hand.clip > 0 || hand.stock > 0 || facts.unlimited_ammo);
     if !burst_busy {
         crate::sprint::weapon_check_for_sprint(hand, facts, cmd.pm_flags, cmd.perks0);
@@ -1161,11 +1153,7 @@ pub fn weapon_ordinary(
     }
 
     if event.is_none() {
-        event = if bo2 {
-            bo2_check_for_rechamber(hand, facts, &mut *cmd, delayed_action)
-        } else {
-            weapon_check_for_rechamber(hand, facts, cmd, delayed_action)
-        };
+        event = check_for_rechamber(hand, facts, &mut *cmd, delayed_action);
     }
 
     match WeaponState::from_i32(hand.weaponstate) {
@@ -1207,11 +1195,6 @@ pub fn weapon_ordinary(
                         );
                         hand.weaponstate = WeaponState::Ready as i32;
                         hand.weapon_time = facts.burst_cooldown().max(1);
-                        // bo2mp: Black Ops II keeps the count; it clears
-                        // when a timer runs out with the trigger up.
-                        if !bo2 {
-                            hand.shot_count = 0;
-                        }
                     }
                 } else {
                     if !attack && !hand.burst_latch {
@@ -1318,7 +1301,7 @@ pub fn weapon_ordinary(
     // bo2mp: a gun still needing its rechamber does not fire: it waits in
     // ready for the rechamber (an automatic bolt gun held down, the
     // SRM-1216, rechambers after its cylinder instead of firing on).
-    let needs_rechamber = bo2 && facts.bolt_action && hand.rechamber_pending && !delayed_fire;
+    let needs_rechamber = facts.bolt_action && hand.rechamber_pending && !delayed_fire;
     if (ready_idle || mid_burst_continue || delayed_fire) && !needs_rechamber {
         let trigger = match fire_ty {
             FireType::FullAuto => attack || delayed_fire,
@@ -1326,8 +1309,7 @@ pub fn weapon_ordinary(
             // is down and the gun is free; "let go first" comes from the
             // timer-expiry rule holding the gun at 1 ms. So a swap-back
             // that frees the gun with the trigger held fires at once.
-            FireType::SingleShot if bo2 => attack || delayed_fire,
-            FireType::SingleShot => (attack && !was_attack) || delayed_fire,
+            FireType::SingleShot => attack || delayed_fire,
             FireType::BurstFire2 | FireType::BurstFire3 | FireType::BurstFire4 => {
                 attack || pending || delayed_fire
             }
@@ -1399,7 +1381,7 @@ pub fn weapon_ordinary(
                     if fire_ty.is_burst() && hand.shot_count == 0 {
                         hand.burst_latch = false;
                     }
-                    hand.shot_count = hand.shot_count.saturating_add(1).min(if bo2 { 7 } else { 4 });
+                    hand.shot_count = hand.shot_count.saturating_add(1).min(7);
                 } else if intro {
                     hand.shot_count = hand.shot_count.saturating_add(1);
                 }
@@ -1417,7 +1399,7 @@ pub fn weapon_ordinary(
             };
             hand.clip -= used;
             if facts.bolt_action {
-                if bo2 && facts.shots_before_rechamber > 0 {
+                if facts.shots_before_rechamber > 0 {
                     // bo2mp: the SRM-1216 rechambers after its cylinder's shots.
                     cmd.rechamber_shot_count = cmd.rechamber_shot_count.saturating_add(1);
                     if i32::from(cmd.rechamber_shot_count) >= facts.shots_before_rechamber {
@@ -1457,59 +1439,6 @@ fn weapon_finish_rechamber(hand: &mut WeaponHandState, pm_type: i32) {
     hand.weaponstate = WeaponState::Ready as i32;
 }
 
-fn weapon_check_for_rechamber(
-    hand: &mut WeaponHandState,
-    facts: &WeaponCombatFacts,
-    cmd: &WeaponCmd,
-    delayed_action: bool,
-) -> Option<WeaponTickEvent> {
-    if !facts.bolt_action {
-        return None;
-    }
-
-    let mut delayed_brass = None;
-    if delayed_action
-        && hand.rechamber_pending
-        && hand.weaponstate == WeaponState::Rechambering as i32
-    {
-        hand.rechamber_pending = false;
-        delayed_brass = Some(WeaponTickEvent::EjectBrass);
-        if hand.weapon_time != 0 {
-            return delayed_brass;
-        }
-    }
-    if !hand.rechamber_pending {
-        if hand.weaponstate == WeaponState::Rechambering as i32
-            && hand.weapon_time == 0
-            && hand.weapon_delay == 0
-        {
-            weapon_finish_rechamber(hand, cmd.pm_type);
-        }
-        return delayed_brass;
-    }
-    if hand.weaponstate != WeaponState::Ready as i32 || hand.weapon_time > 0 {
-        return None;
-    }
-    let rechamber = if cmd.last_weapon_hand == 1 {
-        facts.rechamber_bolt_time_ms
-    } else {
-        facts.rechamber_time_ms
-    };
-    let rechamber = if rechamber > 0 { rechamber } else { 1 };
-    hand.weaponstate = WeaponState::Rechambering as i32;
-    hand.weapon_time = rechamber;
-
-    let bolt = facts.rechamber_bolt_delay_ms;
-    hand.weapon_delay = if bolt != 0 && bolt < rechamber {
-        bolt
-    } else {
-        1
-    };
-    crate::weap_anim::set_rechamber_anim(&mut hand.weap_anim, cmd.f_weapon_pos_frac > 0.0);
-
-    Some(WeaponTickEvent::RechamberWeapon)
-}
-
 /// bo2mp: Black Ops II's rule for the frame a weapon timer runs out. If
 /// the shot limit is reached (one for a semi-automatic, the burst for a
 /// burst gun, never for an automatic), the trigger is still down and the
@@ -1522,7 +1451,7 @@ fn weapon_check_for_rechamber(
 /// raising until the trigger comes up, a burst gun needs a fresh pull after
 /// its cooldown, and only a timer that never ran out (the swap-back reset)
 /// frees the gun with the trigger held.
-fn bo2_timer_expired(
+fn timer_expired(
     hand: &mut WeaponHandState,
     fire_ty: FireType,
     cmd: &WeaponCmd,
@@ -1604,7 +1533,7 @@ fn bo2_timer_expired(
 /// when the gun is next ready, and swapping away mid-pump and back restarts
 /// it from the start (the Moni NAC). It starts from ready whenever the gun's
 /// delay is clear, the frame of a swap-back included.
-fn bo2_check_for_rechamber(
+fn check_for_rechamber(
     hand: &mut WeaponHandState,
     facts: &WeaponCombatFacts,
     cmd: &mut WeaponCmd,
@@ -1640,49 +1569,6 @@ fn bo2_check_for_rechamber(
     hand.weapon_delay = if bolt != 0 && bolt < rechamber { bolt } else { 1 };
     crate::weap_anim::set_rechamber_anim(&mut hand.weap_anim, cmd.f_weapon_pos_frac > 0.0);
     Some(WeaponTickEvent::RechamberWeapon)
-}
-
-fn weapon_decay_hold_interrupt(
-    hand: &mut WeaponHandState,
-    fire_ty: FireType,
-    cmd: &WeaponCmd,
-    attack: bool,
-    unlimited_ammo: bool,
-) {
-    let ws = hand.weaponstate;
-    let rechamber = ws == WeaponState::Rechambering as i32;
-    let firing = ws == WeaponState::Firing as i32;
-    if firing && fire_ty.is_burst() && !burst_pending(hand, fire_ty) {
-        return;
-    }
-    if !rechamber && !firing {
-        return;
-    }
-
-    if !fire_ty.shot_limit_reached(hand.shot_count) {
-        return;
-    }
-    if !attack {
-        return;
-    }
-    if u32::from(cmd.cmd_weapon) != hand.weapon {
-        return;
-    }
-
-    if hand.clip <= 0 && !unlimited_ammo {
-        return;
-    }
-    hand.weapon_time = 1;
-    if rechamber {
-        weapon_finish_rechamber(hand, cmd.pm_type);
-    } else {
-        crate::weap_anim::continue_weapon_anim(
-            &mut hand.weap_anim,
-            crate::weap_anim::weap_anim_event::IDLE,
-            cmd.pm_type,
-        );
-        hand.weaponstate = WeaponState::Ready as i32;
-    }
 }
 
 fn begin_weapon_reload(hand: &mut WeaponHandState, facts: &WeaponCombatFacts) -> bool {
