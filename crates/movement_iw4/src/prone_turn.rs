@@ -66,7 +66,7 @@ fn wrap(degrees: f32) -> f32 {
 }
 
 fn rules(ps: &PlayerState, zombies: bool) -> ProneRules {
-    ProneRules::for_player(ps, true, zombies)
+    ProneRules::for_player(ps, zombies)
 }
 
 /// The body fits lying along `yaw`, the turn's longer feet.

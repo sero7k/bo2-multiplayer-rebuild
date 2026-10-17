@@ -189,8 +189,6 @@ pub struct LadderMoveContext {
     pub jump: crate::JumpLaunchContext,
     pub old_buttons: u32,
     pub player_spectate_speed_scale: f32,
-    /// bo2zm: Black Ops II's slide.
-    pub bo2: bool,
     /// bo2zm: Zombies (its prone check differs in last stand).
     pub zombies: bool,
 }
@@ -226,7 +224,6 @@ pub fn ladder_move<C: crate::CollisionBackend>(
             },
             bounds,
             collision,
-            context.bo2,
             context.zombies,
         );
     }
@@ -289,7 +286,6 @@ pub fn ladder_move<C: crate::CollisionBackend>(
         bounds.maxs,
         bounds.tracemask,
         None,
-        context.bo2,
         context.zombies,
     )
 }

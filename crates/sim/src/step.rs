@@ -346,9 +346,7 @@ fn run_players_system(ecs: &mut World) {
                 // Every snapshot carries the rules to the other PCs.
                 world.set_feel(feel);
             }
-            if feel.on
-                && let Some(f) = facts
-            {
+            if let Some(f) = facts {
                 // The gun in hand sets its own footstep rhythm scales.
                 feel.sprint_cycle_scale = f.sprint_cycle_scale;
                 feel.ducked_sprint_cycle_scale = f.ducked_sprint_cycle_scale;
@@ -359,12 +357,7 @@ fn run_players_system(ecs: &mut World) {
                     let mut allow = f.ads_allow_facts();
 
                     allow.clip_index = weapon_iw4::clip_table_key(allow.clip_index, weapon);
-                    let allowed = if feel.on {
-                        weapon_iw4::is_ads_allowed_bo2
-                    } else {
-                        weapon_iw4::is_ads_allowed
-                    };
-                    allowed(&ps, &allow, &ps.ammoclip, ps.last_weapon_hand.min(1) as u8)
+                    weapon_iw4::is_ads_allowed_bo2(&ps, &allow, &ps.ammoclip, ps.last_weapon_hand.min(1) as u8)
                 }
             });
             let (ads_in_rate, ads_out_rate) = movement_iw4::quickdraw_ads_rates(
@@ -397,7 +390,6 @@ fn run_players_system(ecs: &mut World) {
                         movement_iw4::shellshock_walk_scale(
                             shock.movement,
                             shock.movement_scale,
-                            feel,
                         )
                     }),
                 feel,
@@ -500,9 +492,7 @@ fn run_players_system(ecs: &mut World) {
                     unstick_log(&backend, stuck_at, ps.origin);
                 }
                 // bo2zm: BO2 sets the walk speed every frame (move-faster +7%).
-                if let Some(speed) = movement_iw4::player_speed(ps, feel) {
-                    ps.speed = speed;
-                }
+                ps.speed = movement_iw4::player_speed(ps, feel);
                 let moved_from = ps.origin;
                 let result = pmove(
                     ps,
@@ -583,7 +573,7 @@ fn run_players_system(ecs: &mut World) {
             // prediction alike (the rules come with every snapshot); a flag
             // set once by the host's script install left a joiner predicting
             // MW2's switches, and stayed on into later non-BO2 matches.
-            weapon_iw4::set_bo2_switch_rules(feel.on);
+            weapon_iw4::set_bo2_switch_rules(true);
             let shots = advance_weapon_command(&mut world, tick, *id, cmd, delta.min(200));
             for shot in shots {
                 crate::missile::fire_accepted_shot(&mut world, tick, &shot);
@@ -2537,7 +2527,6 @@ fn bo2_feel_with<S: std::hash::BuildHasher>(
         .get("mapname")
         .is_some_and(|m| m.starts_with("zm_") || crate::is_foreign_zm_map(m));
     movement_iw4::Bo2Feel {
-        on: true,
         sprint_strafe_speed_scale: number("player_sprintStrafeSpeedScale", 0.667),
         // BO2 turns the repeated-jump slowdown off in Zombies and on in
         // multiplayer, unless a script sets the dvar.
@@ -2612,15 +2601,8 @@ fn pmove_context(
                 weapon_ads_move_speed_scale: weapon_scales.1,
 
                 shellshock_movement_scale,
-                // BO2 feel M10b: going prone takes 600 ms (MW2 400).
-                prone_lerp_ms: if feel.on {
-                    movement_iw4::PRONE_LERP_MS
-                } else {
-                    0
-                },
-                // BO2 feel M10c: no 0.4 prone-aim slow; sprint speed only
-                // while standing.
-                bo2: feel.on,
+                // Going prone takes 600 ms.
+                prone_lerp_ms: movement_iw4::PRONE_LERP_MS,
             },
             weapon_move_scale: 1.0,
             old_buttons,
@@ -2658,7 +2640,6 @@ fn pmove_context(
             ads_allowed,
             weapon_def_scope: overlay_reticle != 0,
             sprint_hold_ads: false,
-            bo2: feel.on,
         },
         ads_frac: movement_iw4::AdsFracContext {
             aim_down_sight,
@@ -2666,7 +2647,6 @@ fn pmove_context(
             ads_out_rate,
             rechamber_while_ads,
             ads_fire_only,
-            bo2: feel.on,
             reload_lowers_ads: ads_reload.0,
             position_reload_trans_ms: ads_reload.1,
             segmented_reload: ads_reload.2,
@@ -2734,10 +2714,9 @@ mod sent_feel_tests {
 
     fn zombies_feel() -> movement_iw4::Bo2Feel {
         movement_iw4::Bo2Feel {
-            on: true,
             zombies: true,
             g_speed: 175.0,
-            ..movement_iw4::Bo2Feel::IW4
+            ..movement_iw4::Bo2Feel::DEFAULTS
         }
     }
 

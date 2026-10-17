@@ -72,27 +72,6 @@ const EV_FOOTSTEP_PRONE: i32 = 0x6e;
 
 const SURF_NOSTEPS: u32 = 0x2000;
 
-const LADDER_CLIMB_REF: f32 = 95.25;
-
-const LADDER_CLIMB_BOB: f32 = 0.45;
-
-const LADDER_STRAFE_REF: f32 = 38.1;
-
-const LADDER_STRAFE_BOB: f32 = 0.35;
-
-const BOB_FACTOR_TABLE: [[f32; 2]; 6] = [
-    [0.335, 0.305],
-    [0.25, 0.24],
-    [0.34, 0.315],
-    [0.25, 0.24],
-    [0.36, 0.325],
-    [0.25, 0.24],
-];
-
-const PLAYER_MOVE_THRESHHOLD: f32 = 10.0;
-
-const PLAYER_SPRINT_CAMERA_BOB: f32 = 0.5;
-
 const EFLAGS_TURRET: u32 = 0xc00;
 
 const ANIM_MT_IDLE: u8 = 1;
@@ -161,13 +140,13 @@ pub fn footsteps_bob_cycle(
     almost_ground_plane: bool,
     server_time: i32,
     scales: CmdScaleWalkContext,
-    feel: crate::Bo2Feel, // bo2zm
+    feel: crate::Bo2Feel,
 ) {
     if ps.pm_type >= 8 {
         return;
     }
-    // bo2zm: a dive keeps its own rhythm, in the air too.
-    if feel.on && crate::feel::dive_bob_cycle(ps, msec, feel) {
+    // A dive keeps its own rhythm, in the air too.
+    if crate::feel::dive_bob_cycle(ps, msec, feel) {
         return;
     }
     let xyspeed = libm::sqrtf(ps.velocity[0] * ps.velocity[0] + ps.velocity[1] * ps.velocity[1]);
@@ -181,60 +160,13 @@ pub fn footsteps_bob_cycle(
     if airborne {
         return;
     }
-    let still = if feel.on {
-        xyspeed < crate::feel::PLAYER_MOVE_THRESHHOLD
-    } else {
-        xyspeed <= PLAYER_MOVE_THRESHHOLD
-    };
-    if still || ps.pm_type == 1 {
+    if xyspeed < crate::feel::PLAYER_MOVE_THRESHHOLD || ps.pm_type == 1 {
         return;
     }
     if forwardmove == 0 && rightmove == 0 {
         return;
     }
-    if feel.on {
-        crate::feel::bob_cycle(
-            ps,
-            msec,
-            forwardmove,
-            rightmove,
-            xyspeed,
-            server_time,
-            scales,
-            feel,
-        );
-        return;
-    }
-
-    let stance = match ps.view_height_target {
-        0x16 => 3,
-        0x28 => 2,
-        0x0b => 1,
-        _ => 0,
-    };
-    let walking = (ps.pm_flags & pm_flags::WALKING) != 0 || ps.leanf != 0.0;
-    let sprinting = (ps.pm_flags & pm_flags::SPRINTING) != 0;
-    let bob_factor = if stance == 0 && sprinting {
-        PLAYER_SPRINT_CAMERA_BOB
-    } else {
-        BOB_FACTOR_TABLE[stance][usize::from(walking)]
-    };
-    let max_speed = get_bob_max_speed(
-        ps,
-        forwardmove,
-        rightmove,
-        walking,
-        sprinting,
-        server_time,
-        scales,
-    );
-    if max_speed <= 0.0 {
-        return;
-    }
-    let bobmove = (xyspeed / max_speed) * bob_factor;
-    let old = ps.bob_cycle as u8;
-    let new = libm::roundf(old as f32 + msec as f32 * bobmove) as i32 as u8;
-    ps.bob_cycle = i32::from(new);
+    crate::feel::bob_cycle(ps, msec, forwardmove, rightmove, xyspeed, server_time, scales, feel);
 }
 
 pub fn footsteps_anim_move_type(
@@ -263,7 +195,7 @@ pub fn footsteps_anim_move_type(
         ps.damage_duration,
         PLAYER_DMGTIMER_STUMBLE_TIME_MS,
     );
-    if xyspeed <= PLAYER_MOVE_THRESHHOLD || ps.pm_type == 1 {
+    if xyspeed < crate::feel::PLAYER_MOVE_THRESHHOLD || ps.pm_type == 1 {
         let flinching = damage_window_open(
             ps.damage_timer,
             ps.damage_duration,
@@ -380,7 +312,6 @@ pub fn ladder_footsteps(
     ps: &mut PlayerState,
     msec: i32,
     server_time: i32,
-    feel: crate::Bo2Feel, // bo2zm
 ) -> bool {
     if (ps.pm_flags & pm_flags::LADDER) == 0 {
         return false;
@@ -390,11 +321,7 @@ pub fn ladder_footsteps(
     }
 
     let old = ps.bob_cycle as u8;
-    if feel.on {
-        crate::feel::ladder_bob_cycle(ps, msec);
-    } else {
-        ladder_bob_cycle_iw4(ps, msec);
-    }
+    crate::feel::ladder_bob_cycle(ps, msec);
     let new = ps.bob_cycle as u8;
 
     if !bob_cycle_wrapped(old, new) {
@@ -407,16 +334,3 @@ pub fn ladder_footsteps(
     true
 }
 
-fn ladder_bob_cycle_iw4(ps: &mut PlayerState, msec: i32) {
-    let vz = libm::fabsf(ps.velocity[2]);
-    let vxy = libm::sqrtf(ps.velocity[0] * ps.velocity[0] + ps.velocity[1] * ps.velocity[1]);
-    let bobmove = if vz >= vxy {
-        (vz / LADDER_CLIMB_REF) * LADDER_CLIMB_BOB
-    } else {
-        (vxy / LADDER_STRAFE_REF) * LADDER_STRAFE_BOB
-    };
-
-    let old = ps.bob_cycle as u8;
-    let new = libm::roundf(old as f32 + msec as f32 * bobmove) as i32 as u8;
-    ps.bob_cycle = i32::from(new);
-}

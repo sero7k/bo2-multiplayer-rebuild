@@ -15,16 +15,12 @@ pub fn complete_ground_trace<C: CollisionBackend>(
     pml: &mut Pml,
     bounds: MoveBounds,
     collision: &C,
-    feel: crate::Bo2Feel, // bo2zm
+    feel: crate::Bo2Feel,
 ) {
     let origin = ps.origin;
     let on_turret = (ps.e_flags & 0xc00) != 0;
-    let (above, below) = match (on_turret, feel.on) {
-        (false, _) => (0.25, 0.25),
-        // bo2zm: on a turret Black Ops II still probes 1 unit down.
-        (true, true) => (0.0, 1.0),
-        (true, false) => (0.0, 0.0),
-    };
+    // On a turret the probe still goes 1 unit down.
+    let (above, below) = if on_turret { (0.0, 1.0) } else { (0.25, 0.25) };
     let input = GroundTraceInput {
         start: [origin[0], origin[1], origin[2] + above],
         end: [origin[0], origin[1], origin[2] - below],
@@ -56,26 +52,18 @@ pub fn complete_ground_trace<C: CollisionBackend>(
         };
         trace = collision.trace(retry);
         if trace.startsolid != 0 {
-            if feel.on {
-                // bo2zm: BO2 keeps a player stuck in the floor on it.
-                ps.ground_entity_num = trace_entity_id(&trace);
-                pml.ground_plane = 1;
-                pml.almost_ground_plane = 1;
-                pml.walking = u32::from(trace.walkable);
-                return;
-            }
-            clear_ground_state(ps, pml);
+            // A player stuck in the floor is kept on it.
+            ps.ground_entity_num = trace_entity_id(&trace);
+            pml.ground_plane = 1;
+            pml.almost_ground_plane = 1;
+            pml.walking = u32::from(trace.walkable);
             return;
         }
         copy_ground_trace(pml, &trace);
     }
 
     if trace.fraction == 1.0 {
-        if feel.on {
-            ground_trace_missed(ps, pml, bounds, collision);
-            return;
-        }
-        clear_ground_state(ps, pml);
+        ground_trace_missed(ps, pml, bounds, collision);
         return;
     }
 
