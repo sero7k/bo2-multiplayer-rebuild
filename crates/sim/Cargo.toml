@@ -23,6 +23,7 @@ fx_iw4.workspace = true
 xmodel_runtime.workspace = true
 glam.workspace = true
 gsc_t6.workspace = true # bo2zm
+miniz_oxide.workspace = true # bo2mp: Bot Warfare's waypoint packs
 bo2_profile.workspace = true # bo2mp
 perf.workspace = true
 asset_world.workspace = true # bo2mp: visionsetnaked

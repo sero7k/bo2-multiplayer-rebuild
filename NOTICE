@@ -95,6 +95,22 @@ vendored or linked, and the computed layouts were verified against the 32-bit
 MSVC compiler.
 
 --------------------------------------------------------------------------------
+Bot Warfare
+--------------------------------------------------------------------------------
+
+The bot waypoints in assets/bot_waypoints (Call of Duty 4, World at War,
+Modern Warfare 2 and Modern Warfare 3 maps, repacked) and the bot behaviour
+in crates/sim/src/t6/scripts/bot_warfare.gsc come from Bot Warfare by
+INeedGames (INeedBots, ineedbots@outlook.com; http://www.moddb.com/mods/bot-warfare,
+https://github.com/ineedbots), released with: "Feel free to use code, host
+on other sites, host on servers, mod it and merge mods with it, just give
+credit where credit is due!" Its own credits: the PeZBot team
+(http://www.moddb.com/mods/pezbot), tinkie101, apdonato
+(http://rsebots.blogspot.ca/), Ability, Salvation, iAmThatMichael (T4M), the
+CoD4x Team, the IW4x Team and the Plutonium Team. Its in-game menus and
+waypoint editor are not included.
+
+--------------------------------------------------------------------------------
 Game content
 --------------------------------------------------------------------------------
 
