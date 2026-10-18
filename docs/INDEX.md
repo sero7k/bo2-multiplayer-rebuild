@@ -11,6 +11,7 @@ game. Keep them this short: nobody opens a long file twice.
 | [`DEPLOY.md`](DEPLOY.md) | `make release` / `publish` / `deploy`: the play profile, hashed `.zst`, master by SHA, provision kept separate | shipping a release, "why is the player on an old version" |
 | [`DUO.md`](DUO.md) | `make duo`: two windows, fresh lobby ID, per-client console commands | reproducing multiplayer bugs locally |
 | [`MASTER.md`](MASTER.md) | your own master over ssh from the machine with the clone: `cargo xtask master install`, a self-signed certificate with no domain, what to hand players | standing up a relay for yourself or your friends |
+| [`SERVER.md`](SERVER.md) | a small dedicated server: `iw4l pack` server packs (collision, spawns, entities), what a headless match reads, `IW4L_SERVER_PACKS` | hosting maps from games the server does not have |
 | [`PERF.md`](PERF.md) | native `.pftrace` — the only runtime truth; picking a UUID, the manifest, `IW4L_PERF`, SQL | traces, scenario SQL, why a frame took 80 ms |
 | [`BENCH.md`](BENCH.md) | `make bench`: the map-load waterfall and stage `exclusive` time, frame time as a span tree, the render/GPU/work counters, and the run package (`manifest.json`, `summary.json`); in-process, no trace needed | "where did this run spend its time" |
 | [`RENDER.md`](RENDER.md) | the nine crates of the island, the frame path `IR → cull → one drawsurf list → tess → material → SM3 → wgpu`, GPU-side ownership, the `d3d9_*` border | touching the picture, techsets, lighting |
