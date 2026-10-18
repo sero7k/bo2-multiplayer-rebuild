@@ -102,6 +102,30 @@ pub struct SeatSample {
     pub rebase_ms: i32,
 }
 
+/// bo2mp: a replay between two archived frames (slow motion moves it on by
+/// less than a frame a tick): the older frame and how far from it toward the
+/// one `lookup` found (0..1); none when it sits on a frame.
+fn between_frames<'a>(archive: &'a FrameArchive, lookup: &ArchiveLookup, requested_ms: i32) -> Option<(&'a sim::Snapshot, f32)> {
+    let tick = lookup.tick?;
+    let behind = requested_ms - lookup.attained_ms;
+    if behind <= 0 || behind >= ARCHIVE_TICK_MS || tick.0 == 0 {
+        return None;
+    }
+    let older = archive.frame(sim::Tick(tick.0 - 1))?;
+    Some((&older.snapshot, 1.0 - behind as f32 / ARCHIVE_TICK_MS as f32))
+}
+
+/// A player's state blended from the older frame toward `ps` by `t`: where he
+/// stands and looks (the rest is the newer frame's).
+fn blend_player(older: &sim::Snapshot, id: ClientId, ps: &mut PlayerState, t: f32) {
+    let Some((_, old)) = older.players.iter().find(|(o, _)| *o == id) else { return };
+    for i in 0..3 {
+        ps.origin[i] = old.origin[i] + (ps.origin[i] - old.origin[i]) * t;
+        let d = (ps.viewangles[i] - old.viewangles[i] + 540.0).rem_euclid(360.0) - 180.0;
+        ps.viewangles[i] = old.viewangles[i] + d * t;
+    }
+}
+
 pub fn sample_killcam_seat(
     archive: &FrameArchive,
     snapshot_now: &Snapshot,
@@ -136,6 +160,9 @@ pub fn sample_killcam_seat(
     let rebase_ms = now_ms.saturating_sub(frame_base_ms);
 
     let mut remapped = archived;
+    if let Some((older, t)) = between_frames(archive, &lookup, session.archivetime_ms) {
+        blend_player(older, session.focus_client, &mut remapped, t);
+    }
     rebase_archived_timers(&mut remapped, rebase_ms);
     let player_state = apply_killcam_seat(&viewer_ps, &remapped, session.focus);
 
@@ -290,6 +317,11 @@ fn seat_snapshot(
         Some(frame) => overlay_archived_world(live, &frame.snapshot, viewer, session.focus_client),
         None => live.clone(),
     };
+    if let Some((older, t)) = between_frames(archive, &lookup, session.archivetime_ms) {
+        for (id, ps) in out.players.iter_mut().filter(|(id, _)| *id != viewer) {
+            blend_player(older, *id, ps, t);
+        }
+    }
     let sample = apply_seat_to_snapshot(archive, &mut out, viewer, session, now_ms);
     let archived = lookup.tick.and_then(|tick| archive.frame(tick));
     overlay_killcam_hud(
