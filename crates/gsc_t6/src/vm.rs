@@ -203,6 +203,10 @@ pub struct Vm<H> {
     pub trace: FxHashMap<u32, u32>,
     /// Script functions whose calls are logged (`trace_functions`).
     pub ftrace: FxHashSet<u32>,
+    /// Plutonium's `replacefunc`: a call to the key runs the value instead;
+    /// `detour_skip` lets the next call to a key run the original once.
+    redirects: FxHashMap<u32, u32>,
+    detour_skip: FxHashSet<u32>,
 }
 
 /// Hang watch (read from another thread when the sim stops ticking): the
@@ -314,6 +318,8 @@ impl<H> Vm<H> {
             rng: 0x2545_f491_4f6c_dd1d,
             trace: FxHashMap::default(),
             ftrace: FxHashSet::default(),
+            redirects: FxHashMap::default(),
+            detour_skip: FxHashSet::default(),
         };
         vm.level = vm.alloc_object(ObjKind::Level);
         vm.anim = vm.alloc_object(ObjKind::Anim);
@@ -562,7 +568,27 @@ impl<H> Vm<H> {
 
     // ---- threads --------------------------------------------------------
 
+    /// Every call to script function `from` runs `to` instead.
+    pub fn replace_function(&mut self, from: u32, to: u32) {
+        if from != to {
+            self.redirects.insert(from, to);
+        }
+    }
+
+    /// The next call to `func` runs it, not what replaced it.
+    pub fn skip_detour_once(&mut self, func: u32) {
+        self.detour_skip.insert(func);
+    }
+
+    fn detour(&mut self, func: u32) -> u32 {
+        if self.redirects.is_empty() || self.detour_skip.remove(&func) {
+            return func;
+        }
+        self.redirects.get(&func).copied().unwrap_or(func)
+    }
+
     fn new_thread(&mut self, func: u32, self_: Value, args: Vec<Value>) -> ThreadId {
+        let func = self.detour(func);
         let th = Box::new(Thread {
             frames: vec![Frame {
                 func,
@@ -2188,6 +2214,7 @@ impl<H> Vm<H> {
                         return None;
                     }
                     let base = th.stack.len() as u32;
+                    let fi = self.detour(fi);
                     th.frames.push(Frame {
                         func: fi,
                         pc: 0,

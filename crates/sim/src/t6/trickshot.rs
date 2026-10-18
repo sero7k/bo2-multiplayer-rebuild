@@ -63,6 +63,11 @@ pub(super) struct PlayerCommands {
 }
 
 /// Plutonium's button command names, as our commands carry them.
+/// A button's bits by its command name (`melee`, `gostand`, `prone`).
+pub(super) fn button_bits(name: &str) -> Option<u32> {
+    button_commands().iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, b)| *b)
+}
+
 fn button_commands() -> &'static [(&'static str, u32)] {
     use playerstate_iw4::buttons::*;
     &[

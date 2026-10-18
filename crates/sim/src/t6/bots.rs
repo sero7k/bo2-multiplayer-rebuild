@@ -119,6 +119,12 @@ pub(crate) struct Bot {
     /// tick, to tell whether the trigger pull before it let a shot out.
     fire_dbg: Option<(u32, i32)>,
     pub classes: BTreeMap<i32, BotClass>,
+    /// Bot Warfare's overrides (`botbuttonoverride`, `botmovementoverride`,
+    /// `botaimoverride`): buttons a script holds down until it lets go, a
+    /// stick it sets, and whether a script turns the view itself.
+    held: u32,
+    stick: Option<(i8, i8)>,
+    script_aims: bool,
 }
 
 impl Bot {
@@ -1090,6 +1096,56 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         }
         Ok(Value::Undefined)
     });
+    // Bot Warfare's overrides. `+melee` holds a button down until `~melee`.
+    m!("botbuttonoverride", |vm, world, s, a| {
+        let n = entnum(vm, s).unwrap_or(u32::MAX);
+        let cmd = text(vm, a, 0);
+        let (on, name) = match cmd.split_at_checked(1) {
+            Some(("+", rest)) => (true, rest),
+            Some(("~" | "-", rest)) => (false, rest),
+            _ => return Ok(Value::Undefined),
+        };
+        let Some(bits) = super::trickshot::button_bits(name) else { return Ok(Value::Undefined) };
+        if let Some(mut zm) = bot_mut(world, n) {
+            let b = zm.bots.get_mut(&n).unwrap();
+            b.held = if on { b.held | bits } else { b.held & !bits };
+        }
+        Ok(Value::Undefined)
+    });
+    // Its stick (forward, right), or `false` to give it back.
+    m!("botmovementoverride", |vm, world, s, a| {
+        let n = entnum(vm, s).unwrap_or(u32::MAX);
+        let axis = |v: &Value| match v {
+            Value::Int(i) => Some((*i).clamp(-127, 127) as i8),
+            Value::Float(f) => Some(f.clamp(-127.0, 127.0) as i8),
+            _ => None,
+        };
+        let stick = if a.len() >= 2 { axis(arg(a, 0)).zip(axis(arg(a, 1))) } else { None };
+        if let Some(mut zm) = bot_mut(world, n) {
+            zm.bots.get_mut(&n).unwrap().stick = stick;
+        }
+        Ok(Value::Undefined)
+    });
+    m!("botaimoverride", |vm, world, s, a| {
+        let n = entnum(vm, s).unwrap_or(u32::MAX);
+        let on = gsc_t6::truthy(arg(a, 0));
+        if let Some(mut zm) = bot_mut(world, n) {
+            zm.bots.get_mut(&n).unwrap().script_aims = on;
+        }
+        Ok(Value::Undefined)
+    });
+    m!("botclearoverride", |vm, world, s, _| {
+        let n = entnum(vm, s).unwrap_or(u32::MAX);
+        if let Some(mut zm) = bot_mut(world, n) {
+            let b = zm.bots.get_mut(&n).unwrap();
+            (b.held, b.stick, b.script_aims) = (0, None, false);
+        }
+        Ok(Value::Undefined)
+    });
+    // (The weapon a bot holds is already the one its scripts switched to,
+    // and its knife lunges at the threat it faces: nothing to override.)
+    m!("botweaponoverride", |_, _, _, _| Ok(Value::Undefined));
+    m!("botmeleeparamsoverride", |_, _, _, _| Ok(Value::Undefined));
     // A grenade at a point: look there and throw.
     m!("throwgrenade", |vm, world, s, a| {
         let n = entnum(vm, s).unwrap_or(u32::MAX);
@@ -2069,6 +2125,19 @@ pub(super) fn drive(world: &mut World, now: i64) {
                 .is_some_and(|ids| ids.split(',').any(|i| i.trim().parse::<u32>() == Ok(n)));
             let attack = if firing && (now / 100) % 2 == 0 { buttons::ATTACK } else { 0 };
             (forward, right, press, want) = (0, 0, attack, view);
+        }
+        // Bot Warfare's overrides on top of what it chose.
+        {
+            let zm = world.resource::<Zm>();
+            if let Some(b) = zm.bots.get(&n) {
+                press |= b.held;
+                if let Some((f, r)) = b.stick {
+                    (forward, right) = (f, r);
+                }
+                if b.script_aims {
+                    want = view;
+                }
+            }
         }
         if let Some((allow, delay_until, looking)) = fire_dbg {
             let line = FireLog {

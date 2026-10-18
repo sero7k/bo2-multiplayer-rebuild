@@ -19,6 +19,25 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             vm.bind($name, true, $body);
         };
     }
+    // Plutonium's function detours (Bot Warfare replaces a few of Black Ops
+    // II's own): a script function by path and name, and every call to one
+    // running another instead.
+    f!("getfunction", |vm, _, _, a| {
+        let (script, name) = (text(vm, a, 0), text(vm, a, 1));
+        Ok(vm.program.find(&vm.strings, &script, &name).map_or(Value::Undefined, |fi| Value::Func(gsc_t6::FuncRef::Script(fi))))
+    });
+    f!("replacefunc", |vm, _, _, a| {
+        if let (Value::Func(gsc_t6::FuncRef::Script(from)), Value::Func(gsc_t6::FuncRef::Script(to))) = (arg(a, 0), arg(a, 1)) {
+            vm.replace_function(*from, *to);
+        }
+        Ok(Value::Undefined)
+    });
+    f!("disabledetouronce", |vm, _, _, a| {
+        if let Value::Func(gsc_t6::FuncRef::Script(f)) = arg(a, 0) {
+            vm.skip_detour_once(*f);
+        }
+        Ok(Value::Undefined)
+    });
     // Nothing is restricted in a match of ours (Black Ops II's ranked
     // playlists' bans): every item a class names may be given.
     f!("isitemrestricted", |_, _, _, _| Ok(Value::Int(0)));

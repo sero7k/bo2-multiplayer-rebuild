@@ -1469,6 +1469,12 @@ pub(crate) fn start(world: &mut World) {
             // bo2mp: the optional M.O.A.B. (off unless scr_moab 1).
             calls.push(("bo2mp/moab".to_owned(), "main", false));
             calls.push(("bo2mp/resurgence".to_owned(), "main", false));
+            // bo2mp: Bot Warfare, as Plutonium runs it: `main` before the
+            // level loads, `init` once the game type has started.
+            if vm.program.scripts.iter().any(|s| s.name == mp::BOT_WARFARE_NAME) {
+                calls.insert(0, (mp::BOT_WARFARE_NAME.to_owned(), "main", false));
+                calls.push((mp::BOT_WARFARE_NAME.to_owned(), "init", false));
+            }
             // bo2mp: his trickshot script, as Plutonium runs a custom
             // script: `main` before the level loads, `init` once the game
             // type has started (TRICKSHOT MODE only).
