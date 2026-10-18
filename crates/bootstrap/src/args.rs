@@ -30,6 +30,9 @@ pub enum LaunchMode {
     /// `iw4l check-ghosts [zone]` - a Ghosts zone's assets and sounds, and
     /// Ghosts' menu music checked in its sound pak (no window).
     CheckGhosts(Option<String>),
+    /// bo2mp: `iw4l pack <folder>` - a server pack (gameplay half) of every
+    /// multiplayer map from the other games, for a dedicated server.
+    Pack(PathBuf),
 }
 
 pub fn parse_cli(
@@ -86,7 +89,7 @@ fn parse_acceptance_flag(
     Ok((out, acceptance))
 }
 
-const USAGE: &str = "usage: iw4l [--cmds '<script>'] map <zone> | serve <zone> | menu | play <demo>\n       iw4l export-gltf <zone>\n       iw4l --help";
+const USAGE: &str = "usage: iw4l [--cmds '<script>'] map <zone> | serve <zone> | menu | play <demo>\n       iw4l export-gltf <zone>\n       iw4l pack <folder>\n       iw4l --help";
 
 pub fn parse_launch_args(mut args: impl Iterator<Item = String>) -> Result<LaunchMode, String> {
     match args.next().as_deref() {
@@ -128,6 +131,10 @@ pub fn parse_launch_args(mut args: impl Iterator<Item = String>) -> Result<Launc
         }
         Some("play") => parse_play_args(args),
         Some("check-maps") => Ok(LaunchMode::CheckMaps),
+        Some("pack") => match args.next().filter(|d| !d.is_empty()) {
+            Some(dir) => Ok(LaunchMode::Pack(PathBuf::from(dir))),
+            None => Err("usage: iw4l pack <folder>".into()),
+        },
         Some("check-guns") => Ok(LaunchMode::CheckGuns),
         Some("check-ghosts") => Ok(LaunchMode::CheckGhosts(args.next().filter(|z| !z.is_empty()))),
         Some(other) => Err(format!(

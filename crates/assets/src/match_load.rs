@@ -181,7 +181,14 @@ fn approve_map_load(
             .as_ref()
             .map(|zone| zone.zone_name.clone())
             .unwrap_or_else(|_| request.zone.clone());
-        let zone_ff = found.map(|zone| zone.path);
+        // bo2mp: a dedicated server without the map's game installed hosts
+        // it from its pack (IW4L_SERVER_PACKS).
+        let zone_ff = match (found, server_pack::find_pack(&request.zone)) {
+            (Err(_), Some(pack)) => Ok(pack),
+            (found, _) => found.map(|zone| zone.path),
+        };
+        let packed = zone_ff.as_ref().is_ok_and(|path| server_pack::is_pack_path(path));
+        let zone = if packed { server_pack::split_key(&request.zone).1 } else { zone };
         let common_mp = match &zone_ff {
             Ok(path) => asset_transport::find_runtime_common_mp(&games, path).map(|zone| zone.path),
             Err(error) => Err(error.clone()),
@@ -199,7 +206,9 @@ fn approve_map_load(
                 .as_ref()
                 .ok()
                 .and_then(|path| asset_transport::legacy_game_for_path(path))
-                .is_some();
+                .is_some()
+            // bo2mp: so does a map from a server pack.
+            || packed;
         // A Black Ops II map never takes MW2's common zone, even when MW2 is
         // installed beside it (its guns, scripts and UI are BO2's own).
         let common_mp = if t6 {

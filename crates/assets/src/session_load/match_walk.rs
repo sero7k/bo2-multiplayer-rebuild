@@ -21,8 +21,10 @@ pub(super) async fn walk_prepared_match(
         .as_ref()
         .ok()
         .and_then(|path| asset_transport::legacy_game_for_path(path));
+    // bo2mp: a dedicated server's map from its pack (no zone to open).
+    let packed = zone_ff.as_ref().ok().filter(|path| server_pack::is_pack_path(path)).cloned();
     let map_open = {
-        let zone_ff = if legacy.is_some() {
+        let zone_ff = if legacy.is_some() || packed.is_some() {
             Err("legacy map zone: read by its own reader".to_owned())
         } else {
             zone_ff.clone()
@@ -138,6 +140,42 @@ pub(super) async fn walk_prepared_match(
         return (MatchLoadOutcome::Canceled, None);
     }
     let (loaded, map_namespace) = match (legacy, zone_ff.as_ref(), opened_map) {
+        _ if packed.is_some() => {
+            drop(shared_surfaces);
+            drop(iw5_shared_surfaces);
+            drop(material_seed);
+            let path = packed.as_deref().unwrap_or(Path::new(""));
+            match server_pack::MapPack::read(path) {
+                Ok(pack) => {
+                    let game = pack.game.clone();
+                    crate::set_map_game(asset_core::AssetNamespace::parse(&game));
+                    let mut loaded = crate::server_pack_io::loaded_world_from_pack(pack);
+                    let stage = progress.begin_scoped(StageId::MapAssets, "black ops ii rules", None);
+                    crate::lane::t6_surface_list(&mut loaded, &zone_name, matches!(game.as_str(), "iw3" | "iw6" | "iw4" | "iw5"));
+                    if (game == "iw7" || game == "t7") && crate::lane::is_iw7_zombies_map(&zone_name) {
+                        crate::lane::attach_t6_zm_rules(&mut loaded, &zone_name);
+                    } else {
+                        let source = if matches!(game.as_str(), "t5" | "t7") {
+                            asset_world::ForeignEntityGame::Treyarch
+                        } else {
+                            asset_world::ForeignEntityGame::InfinityWard
+                        };
+                        crate::lane::attach_t6_rules(&mut loaded, &zone_name, source);
+                    }
+                    stage.done();
+                    (loaded, Some(asset_core::AssetNamespace::T6))
+                }
+                Err(error) => (
+                    LoadedWorld::with_gap(
+                        WorldDrawPolicy::default(),
+                        PreparedCapability::PreparedWorld,
+                        error,
+                        Some("assets::session_load::load_prepared_match/server_pack"),
+                    ),
+                    None,
+                ),
+            }
+        }
         (Some(game), Ok(path), _) => {
             crate::set_map_game(asset_core::AssetNamespace::parse(game));
             drop(shared_surfaces);
