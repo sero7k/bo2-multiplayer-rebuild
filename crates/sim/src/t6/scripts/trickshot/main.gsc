@@ -4024,17 +4024,19 @@ monitorBots()
     }
     wait 1;
 
-    botAmount = 15;
-    playerAmount = 0;
+    // The lobby's bot count (Tricky Search and Destroy: two), not a full
+    // server's worth.
+    botAmount = getdvarint("bot_friends") + getdvarint("bot_enemies");
+    haveBots = 0;
 
     foreach (player in level.players) {
-        if (!isDefined(player.pers["isBot"]) || !player.pers["isBot"]) {
-            playerAmount++;
+        if (isDefined(player.pers["isBot"]) && player.pers["isBot"]) {
+            haveBots++;
         }
         wait 0.02;
     }
 
-    level thread doBots(botAmount-playerAmount);
+    level thread doBots(botAmount-haveBots);
 }
 
 kickBots()
@@ -4058,17 +4060,19 @@ monitorBots2()
     }
     wait 1;
 
-    botAmount = 17;
-    playerAmount = 0;
+    // The lobby's bot count (Tricky Search and Destroy: two), not a full
+    // server's worth.
+    botAmount = getdvarint("bot_friends") + getdvarint("bot_enemies");
+    haveBots = 0;
 
     foreach (player in level.players) {
-        if (!isDefined(player.pers["isBot"]) || !player.pers["isBot"]) {
-            playerAmount++;
+        if (isDefined(player.pers["isBot"]) && player.pers["isBot"]) {
+            haveBots++;
         }
         wait 0.02;
     }
 
-    level thread doBots(botAmount-playerAmount);
+    level thread doBots(botAmount-haveBots);
 }
 
 doBots(a)

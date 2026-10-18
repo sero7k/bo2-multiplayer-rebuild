@@ -37,6 +37,14 @@ pub(super) const ZM_GUEST_GUNS: &str = include_str!("scripts/zm_guest_guns.gsc")
 /// Our optional M.O.A.B. (`bo2mp/moab`, off unless `scr_moab 1`).
 const MOAB: &str = include_str!("scripts/moab.gsc");
 
+/// bo2mp: Bot Warfare's bot behaviour (INeedGames', see NOTICE).
+const BOT_WARFARE: &str = include_str!("scripts/bot_warfare.gsc");
+pub(super) const BOT_WARFARE_NAME: &str = "bo2mp/bot_warfare";
+
+fn bot_warfare_on() -> bool {
+    std::env::var("BO2MP_BOTWARFARE").map_or(true, |v| v.trim() != "0")
+}
+
 /// The M.O.A.B.'s two visions, in the IW games' film form: a white-hot,
 /// orange-lit flash, then a dim, desaturated, ash-brown aftermath. OUR
 /// values, after the look of Modern Warfare 2's `mpnuke` and
@@ -150,6 +158,11 @@ pub(super) fn engine_scripts() -> Result<Vec<ScriptObject>, String> {
         gsc_t6::compile("bo2mp/resurgence", super::br::SCRIPT)?,
     ];
     register_moab_visions();
+    // bo2mp: Bot Warfare's bot behaviour (every multiplayer match;
+    // BO2MP_BOTWARFARE=0 leaves Black Ops II's bots as they are).
+    if bot_warfare_on() {
+        out.push(gsc_t6::compile(BOT_WARFARE_NAME, BOT_WARFARE)?);
+    }
     // bo2mp: his trickshot script (Custom Games' TRICKSHOT MODE).
     super::trickshot::set_active(super::trickshot::enabled());
     if super::trickshot::active() {

@@ -21,6 +21,7 @@ use crate::frame::FrameWorld;
 use crate::world::ClientId;
 
 mod actors;
+mod bot_waypoints; // bo2mp: Bot Warfare's waypoints as path nodes
 mod asd;
 mod audio_triggers;
 mod autoplay;
@@ -1028,6 +1029,14 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
     // 60 units up, over low walls, fences and cars, and zombies took those
     // routes into them and stood there (M4 retest 1).
     let mut nodes = inst.path_nodes.clone();
+    // bo2mp: a map from another game has none: Bot Warfare's waypoints for
+    // it when there are some (else the engine's baked walk graph, later).
+    if nodes.is_empty()
+        && let Some((wps, game)) = bot_waypoints::path_nodes(&inst.map)
+    {
+        diag::info!(Sim, "bo2mp nav: {} Bot Warfare waypoints for {} ({game}'s)", wps.len(), inst.map);
+        nodes = wps;
+    }
     actors::drop_nodes_to_floor(world, &mut nodes);
     let node_objs = node_objects(&mut vm, &nodes);
     let baked = nav::Baked::new(&inst.path_tables, nodes.len());
@@ -1460,6 +1469,12 @@ pub(crate) fn start(world: &mut World) {
             // bo2mp: the optional M.O.A.B. (off unless scr_moab 1).
             calls.push(("bo2mp/moab".to_owned(), "main", false));
             calls.push(("bo2mp/resurgence".to_owned(), "main", false));
+            // bo2mp: Bot Warfare, as Plutonium runs it: `main` before the
+            // level loads, `init` once the game type has started.
+            if vm.program.scripts.iter().any(|s| s.name == mp::BOT_WARFARE_NAME) {
+                calls.insert(0, (mp::BOT_WARFARE_NAME.to_owned(), "main", false));
+                calls.push((mp::BOT_WARFARE_NAME.to_owned(), "init", false));
+            }
             // bo2mp: his trickshot script, as Plutonium runs a custom
             // script: `main` before the level loads, `init` once the game
             // type has started (TRICKSHOT MODE only).

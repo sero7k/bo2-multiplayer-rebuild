@@ -5834,6 +5834,7 @@ dependencies = [
  "gsc_t6",
  "hud_iw4",
  "math_iw4",
+ "miniz_oxide",
  "movement_iw4",
  "perf",
  "playerstate_iw4",
