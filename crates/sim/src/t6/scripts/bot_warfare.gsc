@@ -168,6 +168,8 @@ init()
     
     thread fixGamemodes();
     
+    thread init_spots();
+    
     thread onPlayerConnect();
     
     thread handleBots();
@@ -1080,6 +1082,7 @@ onBotSpawned()
         self thread watch_for_override_stuff();
         self thread watch_for_melee_override();
         self thread bot_watch_think_mw2();
+        self thread bot_spots_think();
         self BotNotifyBotEvent( "debug", "we spawned!" );
         
         waittillframeend;
@@ -2522,4 +2525,189 @@ do_replacefunc( a, b )
 do_disabledetouronce( a )
 {
     disabledetouronce( a );
+}
+
+// bo2mp: the spots Bot Warfare's waypoints mark on maps from other games
+// (their path nodes' script_noteworthy: camping spots, claymore and grenade
+// spots), used as its Modern Warfare bots use them.
+
+init_spots()
+{
+    level.bw_spots = [];
+    level.bw_spots[ "camp" ] = [];
+    level.bw_spots[ "claymore" ] = [];
+    level.bw_spots[ "grenade" ] = [];
+    
+    nodes = getallnodes();
+    
+    for ( i = 0; i < nodes.size; i++ )
+    {
+        kind = nodes[ i ].script_noteworthy;
+        
+        if ( isdefined( kind ) && isdefined( level.bw_spots[ kind ] ) )
+        {
+            level.bw_spots[ kind ][ level.bw_spots[ kind ].size ] = nodes[ i ];
+        }
+    }
+}
+
+spot_near( kind, dist )
+{
+    if ( !isdefined( level.bw_spots ) || !isdefined( level.bw_spots[ kind ] ) )
+    {
+        return undefined;
+    }
+    
+    near = [];
+    spots = level.bw_spots[ kind ];
+    
+    for ( i = 0; i < spots.size; i++ )
+    {
+        if ( distancesquared( spots[ i ].origin, self.origin ) < dist * dist )
+        {
+            near[ near.size ] = spots[ i ];
+        }
+    }
+    
+    return PickRandom( near );
+}
+
+spot_facing( spot, dist )
+{
+    return spot.origin + vectorscale( anglestoforward( spot.angles ), dist ) + ( 0, 0, 40 );
+}
+
+spot_lethal( kinds )
+{
+    for ( i = 0; i < kinds.size; i++ )
+    {
+        if ( self hasweapon( kinds[ i ] ) && self getammocount( kinds[ i ] ) > 0 )
+        {
+            return kinds[ i ];
+        }
+    }
+    
+    return undefined;
+}
+
+bot_spots_think()
+{
+    self endon( "disconnect" );
+    self endon( "death" );
+    level endon( "game_ended" );
+    
+    wait 0.5;
+    
+    if ( !isdefined( level.bw_spots ) || ( !level.bw_spots[ "camp" ].size && !level.bw_spots[ "claymore" ].size && !level.bw_spots[ "grenade" ].size ) )
+    {
+        return;
+    }
+    
+    for ( ;; )
+    {
+        wait randomintrange( 10, 25 );
+        
+        if ( self isremotecontrolling() || self maps\mp\bots\_bot_combat::bot_has_enemy() )
+        {
+            continue;
+        }
+        
+        roll = randomint( 100 );
+        
+        if ( roll < 25 )
+        {
+            self bot_use_lethal_spot( "grenade", array( "frag_grenade_mp", "sticky_grenade_mp", "hatchet_mp" ), 700 );
+        }
+        else if ( roll < 50 )
+        {
+            self bot_use_lethal_spot( "claymore", array( "claymore_mp", "bouncingbetty_mp" ), 64 );
+        }
+        else if ( roll < 80 )
+        {
+            self bot_camp_spot();
+        }
+    }
+}
+
+bot_go_to_spot( spot, name )
+{
+    self addgoal( spot.origin, 24, 2, name );
+    
+    for ( t = 0; t < 15; t += 0.5 )
+    {
+        if ( self atgoal( name ) )
+        {
+            return true;
+        }
+        
+        if ( self maps\mp\bots\_bot_combat::bot_has_enemy() )
+        {
+            break;
+        }
+        
+        wait 0.5;
+    }
+    
+    self cancelgoal( name );
+    return false;
+}
+
+bot_use_lethal_spot( kind, weapons, reach )
+{
+    weapon = self spot_lethal( weapons );
+    
+    if ( !isdefined( weapon ) )
+    {
+        return;
+    }
+    
+    spot = self spot_near( kind, 1500 );
+    
+    if ( !isdefined( spot ) || !self bot_go_to_spot( spot, "bw_" + kind ) )
+    {
+        return;
+    }
+    
+    target = spot_facing( spot, reach );
+    self lookat( target );
+    wait 0.5;
+    self throwgrenade( weapon, target );
+    wait 1;
+    self clearlookat();
+    self cancelgoal( "bw_" + kind );
+}
+
+bot_camp_spot()
+{
+    spot = self spot_near( "camp", 1500 );
+    
+    if ( !isdefined( spot ) || !self bot_go_to_spot( spot, "bw_camp" ) )
+    {
+        return;
+    }
+    
+    if ( spot.type == "Cover Prone" )
+    {
+        self setstance( "prone" );
+    }
+    else
+    {
+        self setstance( "crouch" );
+    }
+    
+    self lookat( spot_facing( spot, 512 ) );
+    
+    for ( t = randomintrange( 10, 25 ); t > 0; t -= 0.5 )
+    {
+        if ( self maps\mp\bots\_bot_combat::bot_has_enemy() )
+        {
+            break;
+        }
+        
+        wait 0.5;
+    }
+    
+    self clearlookat();
+    self setstance( "stand" );
+    self cancelgoal( "bw_camp" );
 }
