@@ -117,16 +117,9 @@ pub fn begin_weapon_change(
         return None;
     }
     hand.weapon_delay = 0;
-    // bo2mp: Black Ops II's weapon change touches none of these: the shot
-    // count and trigger latch carry over (so a gun raised with the trigger
-    // still down from the last shot waits for it to come up), and the
-    // "needs rechamber" mark stays with the gun put away.
-    if !crate::offhand::bo2_switch_rules() {
-        hand.weapon_restrict_kick_time = 0;
-        hand.shot_count = 0;
-        hand.burst_latch = false;
-        hand.rechamber_pending = false;
-    }
+    // The shot count and trigger latch carry over (so a gun raised with the
+    // trigger still down from the last shot waits for it to come up), and
+    // the "needs rechamber" mark stays with the gun put away.
 
     if hand.weapon == 0 {
         hand.weaponstate = if quick {
@@ -165,7 +158,7 @@ pub fn begin_weapon_change(
             &mut hand.weap_anim,
             if quick {
                 crate::weap_anim::weap_anim_event::QUICK_DROP
-            } else if empty && crate::offhand::bo2_switch_rules() {
+            } else if empty {
                 crate::weap_anim::weap_anim_event::EMPTY_DROP
             } else {
                 crate::weap_anim::weap_anim_event::DROP
@@ -206,25 +199,17 @@ pub fn finish_putaway_to_cmd(hand: &mut WeaponHandState, cmd: &WeaponCmd) {
 
     let quick = hand.weaponstate == WeaponState::DroppingQuick as i32;
     let alternate = hand.weaponstate == WeaponState::DroppingAltswitch as i32;
-    let bo2 = crate::offhand::bo2_switch_rules();
     hand.weapon = new_weapon;
     hand.weapon_delay = 0;
-    if bo2 {
-        // bo2mp: Black Ops II clears the shot count only on an alternate
-        // (select fire) raise with the trigger up. The "needs rechamber"
-        // mark belongs to the gun put away; the match keeps one per gun
-        // (`ClientMatchState::rechamber_weapons`) and loads the new gun's.
-        if alternate && cmd.buttons & playerstate_iw4::buttons::ATTACK == 0 {
-            hand.shot_count = 0;
-        }
-    } else {
+    // The shot count clears only on an alternate (select fire) raise with
+    // the trigger up. The "needs rechamber" mark belongs to the gun put
+    // away; the match keeps one per gun (`ClientMatchState::rechamber_weapons`)
+    // and loads the new gun's.
+    if alternate && cmd.buttons & playerstate_iw4::buttons::ATTACK == 0 {
         hand.shot_count = 0;
-        hand.burst_latch = false;
-        hand.rechamber_pending = false;
     }
-    // bo2mp: Black Ops II's raise order: empty raise, then quick, then the
-    // plain raise.
-    let empty_raise = bo2 && !alternate && cmd.switch_raise_empty;
+    // The raise order: empty raise, then quick, then the plain raise.
+    let empty_raise = !alternate && cmd.switch_raise_empty;
     hand.weaponstate = if alternate {
         WeaponState::RaisingAltswitch
     } else {

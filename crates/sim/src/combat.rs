@@ -288,11 +288,7 @@ pub(crate) fn advance_weapon_command(
                 shot_count: meta.weapon_shot_count,
                 burst_latch: meta.burst_latch,
                 // bo2mp: Black Ops II keeps the rechamber mark per gun.
-                rechamber_pending: if weapon_iw4::bo2_switch_rules() {
-                    meta.needs_rechamber(started_weapon)
-                } else {
-                    meta.rechamber_pending
-                },
+                rechamber_pending: meta.needs_rechamber(started_weapon),
                 delayed_rechamber: false,
                 weapon_restrict_kick_time: ps.weapon_restrict_kick_time,
                 quick_reload,
@@ -623,18 +619,16 @@ pub(crate) fn advance_weapon_command(
         meta.weapon_shot_count = hand0.shot_count;
         meta.burst_latch = hand0.burst_latch;
         meta.rechamber_pending = hand0.rechamber_pending;
-        if weapon_iw4::bo2_switch_rules() {
-            meta.rechamber_shot_count = wcmd.rechamber_shot_count;
-            // bo2mp: the mark belongs to the gun this command began with
-            // (a finished putaway leaves the old gun's mark in the hand);
-            // the next command loads the new gun's.
-            meta.set_needs_rechamber(started_weapon, hand0.rechamber_pending);
-            meta.rechamber_pending = if hand0.weapon == started_weapon {
-                hand0.rechamber_pending
-            } else {
-                meta.needs_rechamber(hand0.weapon)
-            };
-        }
+        meta.rechamber_shot_count = wcmd.rechamber_shot_count;
+        // bo2mp: the mark belongs to the gun this command began with (a
+        // finished putaway leaves the old gun's mark in the hand); the next
+        // command loads the new gun's.
+        meta.set_needs_rechamber(started_weapon, hand0.rechamber_pending);
+        meta.rechamber_pending = if hand0.weapon == started_weapon {
+            hand0.rechamber_pending
+        } else {
+            meta.needs_rechamber(hand0.weapon)
+        };
         meta.burst_latch_secondary = last_hand >= 1 && hands[1].burst_latch;
         meta.rechamber_pending_secondary = last_hand >= 1 && hands[1].rechamber_pending;
         if facts.dual_mag.is_some() && started_weapon != 0 {

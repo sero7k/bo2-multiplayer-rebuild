@@ -189,39 +189,6 @@ fn spend_offhand_inventory_round(cmd: &mut WeaponCmd, weapon: u32) {
     }
 }
 
-/// bo2mp: Black Ops II's switch rules (set while a Black Ops II match runs):
-/// an offhand started while the weapon is being put away finishes the
-/// switch under it (the "instaswap"; see [`weapon_enter_offhand`]).
-static BO2_SWITCH_RULES: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-
-pub fn set_bo2_switch_rules(on: bool) {
-    BO2_SWITCH_RULES.store(on, core::sync::atomic::Ordering::Relaxed);
-}
-
-pub fn bo2_switch_rules() -> bool {
-    #[cfg(test)]
-    if let Some(on) = TEST_RULES.with(core::cell::Cell::get) {
-        return on;
-    }
-    BO2_SWITCH_RULES.load(core::sync::atomic::Ordering::Relaxed)
-}
-
-#[cfg(test)]
-std::thread_local! {
-    /// A test's own rules, so tests running side by side do not share the
-    /// process-wide switch.
-    static TEST_RULES: core::cell::Cell<Option<bool>> = const { core::cell::Cell::new(None) };
-}
-
-/// Runs `f` with this thread's weapon rules set (tests only).
-#[cfg(test)]
-pub(crate) fn with_test_rules<R>(bo2: bool, f: impl FnOnce() -> R) -> R {
-    TEST_RULES.with(|c| c.set(Some(bo2)));
-    let out = f();
-    TEST_RULES.with(|c| c.set(None));
-    out
-}
-
 pub fn weapon_enter_offhand(hand: &mut WeaponHandState, cmd: &mut WeaponCmd) {
     let prior = hand.weaponstate;
     let putting_away = matches!(
@@ -238,7 +205,6 @@ pub fn weapon_enter_offhand(hand: &mut WeaponHandState, cmd: &mut WeaponCmd) {
     // back up and then play the whole switch.)
     let wanted = u32::from(cmd.cmd_weapon);
     if putting_away
-        && bo2_switch_rules()
         && wanted != 0
         && wanted != hand.weapon
         && cmd.cmd_weapon_owned
@@ -523,14 +489,7 @@ mod instaswap_tests {
     #[test]
     fn an_offhand_during_a_drop_finishes_the_switch_under_bo2_rules() {
         let cmd_for = |owned| WeaponCmd { cmd_weapon: 9, cmd_weapon_owned: owned, ..WeaponCmd::default() };
-        // Infinity Ward's rules: the old weapon stays in hand.
-        set_bo2_switch_rules(false);
-        let mut hand = dropping_hand();
-        weapon_enter_offhand(&mut hand, &mut cmd_for(true));
-        assert_eq!(hand.weapon, 5);
-        assert_eq!(hand.weaponstate, WeaponState::OffhandInit as i32);
-        // Black Ops II's: the new one is in hand under the offhand.
-        set_bo2_switch_rules(true);
+        // The new one is in hand under the offhand.
         let mut hand = dropping_hand();
         weapon_enter_offhand(&mut hand, &mut cmd_for(true));
         assert_eq!(hand.weapon, 9);
@@ -543,6 +502,5 @@ mod instaswap_tests {
         let mut hand = WeaponHandState { weapon: 5, weaponstate: WeaponState::Ready as i32, ..WeaponHandState::default() };
         weapon_enter_offhand(&mut hand, &mut cmd_for(true));
         assert_eq!(hand.weapon, 5);
-        set_bo2_switch_rules(false);
     }
 }

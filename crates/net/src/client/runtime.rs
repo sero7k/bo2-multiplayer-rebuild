@@ -1081,7 +1081,6 @@ pub fn sample_client_input(
             // toggle, knifing or in an offhand: a swap pressed right after
             // the toggle wins, and a toggle cannot interrupt a swap.
             if ps.action_slot_type.get(slot).copied() == Some(2)
-                && weapon_iw4::bo2_switch_rules()
                 && matches!(
                     weapon_iw4::WeaponState::from_i32(ps.weaponstate_primary),
                     Ok(weapon_iw4::WeaponState::RaisingAltswitch
