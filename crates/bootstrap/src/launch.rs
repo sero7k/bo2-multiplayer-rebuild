@@ -154,6 +154,7 @@ pub fn launch(
             run_frontend_t6mp(games, artifacts);
         }
         LaunchMode::CheckMaps => run_check_maps(&games, &artifacts),
+        LaunchMode::Pack(dir) => run_pack(&games, &dir),
         LaunchMode::CheckGhosts(zone) => run_check_ghosts(&games, &artifacts, zone.as_deref()),
         LaunchMode::CheckGuns => {
             let lines = assets::check_guest_guns();
@@ -269,6 +270,56 @@ fn run_check_maps(games: &asset_transport::GamesRoot, artifacts: &std::path::Pat
         Ok(()) => println!("report: {}", out.display()),
         Err(e) => println!("report not written ({}): {e}", out.display()),
     }
+}
+
+/// bo2mp `iw4l pack <folder>`: every multiplayer map from the other games
+/// read as a match reads it and its gameplay half written to
+/// `<folder>/<game>/<map>.iw4lmap`, one line each and a total; a dedicated
+/// server given the folder (`IW4L_SERVER_PACKS`) hosts them without their
+/// games installed. Black Ops II's own maps are not packed (the server reads
+/// them from Black Ops II, which it has for the rules).
+fn run_pack(games: &asset_transport::GamesRoot, dir: &std::path::Path) {
+    let mut maps: Vec<(String, String, PathBuf)> = asset_transport::list_mp_maps(games)
+        .into_iter()
+        .filter_map(|key| {
+            let (game, map) = server_pack::split_key(&key);
+            if game == "t6" {
+                return None;
+            }
+            let found = find_zone_file(games, &key).ok()?;
+            Some((game, map, found.path))
+        })
+        .collect();
+    maps.extend(asset_transport::list_legacy_mp_map_files(games));
+    maps.sort();
+    maps.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+    println!("server packs: {} maps into {}", maps.len(), dir.display());
+    let (mut ok, mut bad, mut total) = (0usize, 0usize, 0usize);
+    for (game, map, path) in maps {
+        let started = std::time::Instant::now();
+        let (g, m, at) = (game.clone(), map.clone(), path.clone());
+        let built = std::panic::catch_unwind(move || assets::build_map_pack(&g, &m, &at))
+            .unwrap_or_else(|_| Err("the reader panicked".to_owned()));
+        let line = match built.and_then(|pack| pack.write(&server_pack::pack_path(dir, &game, &map)).map(|n| (pack, n))) {
+            Ok((pack, bytes)) => {
+                ok += 1;
+                total += bytes;
+                let brushes = pack.collision.as_ref().map_or(0, |c| c.brushes.len());
+                format!(
+                    "{game}:{map:<24} OK {:.2} MB ({brushes} brushes, {} spawns) [{:.1}s]",
+                    bytes as f64 / 1_048_576.0,
+                    pack.spawns.len(),
+                    started.elapsed().as_secs_f32()
+                )
+            }
+            Err(e) => {
+                bad += 1;
+                format!("{game}:{map:<24} FAIL {e}")
+            }
+        };
+        println!("{line}");
+    }
+    println!("{ok} packed ({:.1} MB in all), {bad} failed", total as f64 / 1_048_576.0);
 }
 
 /// `iw4l check-ghosts [zone]`: see `audio::music::ghosts_check_report`;

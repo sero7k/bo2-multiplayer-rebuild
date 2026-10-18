@@ -122,3 +122,5 @@ pub fn guest_guns() -> bool {
 
 mod script_sources;
 pub use script_sources::{ScriptSources, ScriptTable, T6AnimFacts, T6ScriptSet};
+mod server_pack_io; // bo2mp: dedicated server map packs
+pub use server_pack_io::build_map_pack;

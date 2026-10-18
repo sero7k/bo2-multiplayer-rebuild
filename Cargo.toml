@@ -84,6 +84,7 @@ members = [
     "crates/render_material",
     "crates/render_scene",
     "crates/replay",
+    "crates/server_pack", # bo2mp: dedicated server map packs
     "crates/session",
     "crates/sim",
     "crates/trace_iw4",
@@ -199,6 +200,7 @@ render_fx = { path = "crates/render_fx" }
 render_gpu = { path = "crates/render_gpu" }
 render_material = { path = "crates/render_material" }
 render_scene = { path = "crates/render_scene" }
+server_pack = { path = "crates/server_pack" } # bo2mp
 session = { path = "crates/session" }
 replay = { path = "crates/replay" }
 sim = { path = "crates/sim" }

@@ -29,6 +29,7 @@ asset_game.workspace = true
 asset_material.workspace = true
 asset_transport.workspace = true
 assets.workspace = true
+server_pack.workspace = true # bo2mp: `iw4l pack`
 audio.workspace = true
 console.workspace = true
 diag.workspace = true

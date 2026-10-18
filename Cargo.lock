@@ -491,6 +491,7 @@ dependencies = [
  "png",
  "render_material",
  "serde_json",
+ "server_pack",
  "t4",
  "weapon_iw4",
  "xmodel_runtime",
@@ -2028,6 +2029,7 @@ dependencies = [
  "render_gpu",
  "replay",
  "serde_json",
+ "server_pack",
  "session",
  "sha2",
  "sim",
@@ -5749,6 +5751,15 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "server_pack"
+version = "0.1.0"
+dependencies = [
+ "asset_world",
+ "clipmap_iw4",
+ "lz4_flex",
 ]
 
 [[package]]
