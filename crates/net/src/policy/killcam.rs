@@ -16,6 +16,9 @@ pub(crate) fn play_script_seats(
             seats.clear(viewer);
         }
     }
+    // bo2mp: Black Ops II's final killcam slows on the killing shot
+    // (setslowmotion): the replay falls behind live time by what it takes.
+    let scale = sim::slow_motion_scale();
     for (viewer, seat) in scripted {
         let focus_client = ClientId(seat.spectator_client as u32);
         let mut focus = SeatFocus::hitscan(seat.spectator_client);
@@ -40,8 +43,9 @@ pub(crate) fn play_script_seats(
                 seat.length_ms
             );
         }
+        let lag = if seat.final_kill { seats.slow_lag_ms(*viewer, started_at_ms == now_ms, now_ms, scale) } else { 0 };
         let mut session = KillcamSession {
-            archivetime_ms: seat.archive_ms,
+            archivetime_ms: seat.archive_ms + lag,
             focus_client,
             focus,
             ends_at_ms: i32::MAX,

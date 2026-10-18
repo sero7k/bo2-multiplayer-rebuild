@@ -36,6 +36,9 @@ pub struct KillcamSession {
 #[derive(Resource, Clone, Debug, Default)]
 pub struct ActiveKillcams {
     sessions: HashMap<ClientId, KillcamSession>,
+    /// bo2mp: each viewer's final killcam held back by slow motion: how far
+    /// behind it has fallen (ms) and when it was last moved on.
+    slow: HashMap<ClientId, (f32, i32)>,
 }
 
 impl ActiveKillcams {
@@ -53,6 +56,20 @@ impl ActiveKillcams {
 
     pub fn clear(&mut self, viewer: ClientId) {
         self.sessions.remove(&viewer);
+        self.slow.remove(&viewer);
+    }
+
+    /// How far a viewer's replay has fallen behind under slow motion by
+    /// `now_ms`, at the game's time scale `scale` (a new replay starts level).
+    pub(crate) fn slow_lag_ms(&mut self, viewer: ClientId, fresh: bool, now_ms: i32, scale: f32) -> i32 {
+        let entry = self.slow.entry(viewer).or_insert((0.0, now_ms));
+        if fresh {
+            *entry = (0.0, now_ms);
+        }
+        let dt = (now_ms - entry.1).max(0) as f32;
+        entry.0 += (1.0 - scale.clamp(0.0, 1.0)) * dt;
+        entry.1 = now_ms;
+        entry.0 as i32
     }
 
     pub fn is_empty(&self) -> bool {

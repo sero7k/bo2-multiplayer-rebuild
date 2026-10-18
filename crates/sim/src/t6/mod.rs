@@ -58,6 +58,7 @@ mod natives_ent;
 mod highrise;
 mod natives_fx;
 mod natives_game;
+pub mod slowmo; // bo2mp: setslowmotion, read by the final killcam
 mod natives_mp;
 mod natives_player;
 mod nav;
@@ -885,6 +886,8 @@ pub(crate) fn install(world: &mut World, inst: T6Install) -> Result<(), String> 
             vm.dvars.insert("scr_moab".to_owned(), "1".to_owned());
             vm.dvars.insert("scr_moab_kills".to_owned(), moab.to_string());
         }
+        // A new match plays at normal speed.
+        slowmo::reset();
         // bo2mp: TRICKSHOT MODE (his script is linked only when on).
         let ts = if trickshot::enabled() { "1" } else { "0" };
         vm.dvars.insert("bo2mp_trickshot".to_owned(), ts.to_owned());

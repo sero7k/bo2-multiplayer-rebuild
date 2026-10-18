@@ -1143,7 +1143,6 @@ pub(super) fn bind(vm: &mut Vm<World>) {
         "uploadstats",
         "recordplayerstats",
         "resettimeout",
-        "setslowmotion",
         "objective_add",
         "objective_state",
         "objective_position",

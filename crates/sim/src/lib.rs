@@ -43,6 +43,7 @@ pub mod t6_ragdoll;
 pub use t6::stats::{public_match as local_match_public, ranked as local_match_ranked, set_local_class_set, set_local_match_public, set_local_match_ranked, set_local_stats_path}; // bo2mp lane C
 pub use t6::mp::set_moab_kills;
 pub use t6::trickshot::set_trickshot;
+pub use t6::slowmo::{reset as reset_slow_motion, scale as slow_motion_scale};
 pub use t6::CLIENT_COMMAND_MENU;
 pub use t6::br::{resurgence_on, resurgence_opening_aliases, set_jup_sound_lookup, set_resurgence, set_warzone_hud};
 pub use t6::foreign_zm::{is_foreign_zm_map, register_foreign_zm_map}; // bo2mp: Infinite Warfare's Zombies maps

@@ -19,6 +19,15 @@ pub(super) fn bind(vm: &mut Vm<World>) {
             vm.bind($name, true, $body);
         };
     }
+    f!("setslowmotion", |_, _, _, a| {
+        let num = |i: usize| match arg(a, i) {
+            Value::Int(n) => *n as f32,
+            Value::Float(f) => *f,
+            _ => 1.0,
+        };
+        super::slowmo::set(num(0), num(1), num(2));
+        Ok(Value::Undefined)
+    });
     // Nothing is restricted in a match of ours (Black Ops II's ranked
     // playlists' bans): every item a class names may be given.
     f!("isitemrestricted", |_, _, _, _| Ok(Value::Int(0)));
